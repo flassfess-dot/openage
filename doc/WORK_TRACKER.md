@@ -1051,3 +1051,13 @@ ext_unit_id.
 - Контрольный gate закрыт: `A-006 suite: 180 passed, 0 failed`; cache-only prototype `21 553 hits / 0 misses`, interface reference `9 / 0`; validation `0 errors / 181 source-owned warnings`.
 - Windows PCK пересобран: 224 248 568 байт, 2026-09-13 22:35:19, SHA-256 `01dc5318f706c96498fb6f9c2b5f123ab757f41cf6a1d196b9495ecadd7c0d22`. Packaged smoke-runs `campaign_pyrrhus_of_epirus` и `campaign_mithridates` завершились с кодом 0 и без runtime errors.
 - Следующая задача: продолжить независимый source UI-аудит. Как только original capture доступен, заполнить четыре сцены measurement gate и только после этого подключить доказанную композицию normal/hover/pressed/disabled и точные shell/text/minimap rectangles.
+
+### Прогресс (2026-09-13, I12-020L — adjacent source controls, фаза 2B-9b2b)
+
+- Точный manifest расширен ещё на 29 кадров из `data/Interfac.drs`: 50717…50719 по два 72×20, 50747…50750 по два 108×20 и 15 кадров 50721. Повторный импорт: `21 553 hits / 29 misses`; следующий прогон должен быть полностью cache-only на 21 582 assets.
+- В каждой узкой/широкой паре оба PNG hash различны. У 50721 все 15 hashes различны, а исходные размеры сохранены как 50×50, 50×51 и 3×3. Контактный просмотр показывает backplate/glyph структуру, но не используется как доказательство semantic state.
+- Жёсткий список четырёхкадровых controls заменён единым расширяемым `SOURCE_CANDIDATES`: source ID декларативно задаёт asset, frame count и нерешённый kind; общий loader возвращает textures и hashes, а control/status adapters запрещают неверный класс.
+- UI executable gate расширен сценой `text_button_and_glyph_composition`; для неё нужны observed backplate frame, glyph frame, interaction state, shell ID, crop и text baseline. Runtime-команды не получили недоказанную связь с этими ресурсами.
+- Расширенный `test_interface_source_controls.gd`, старый HUD skin, naval gate и реальная HUD-сцена проходят. Повторный импорт полностью cache-only: `21 582 hits / 0 misses`; validation `0 errors / 181 source-owned warnings`; полный regression gate повторно `A-006 suite: 180 passed, 0 failed`.
+- Готовый PCK `01dc5318f706c96498fb6f9c2b5f123ab757f41cf6a1d196b9495ecadd7c0d22` остаётся актуальным для видимого 2B-9b2a: новый 2B-9b2b добавляет только unresolved candidate assets и не меняет выбранную runtime-композицию.
+- Следующая задача: после восстановления Windows visual helper заполнить `text_button_and_glyph_composition` и остальные сцены gate; до этого можно расширять только доказуемый inventory/hash/capture tooling, не назначая значения глифов или состояние пары.

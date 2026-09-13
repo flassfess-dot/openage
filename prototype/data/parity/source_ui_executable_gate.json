@@ -48,6 +48,36 @@
       "semantic_composition_status": "original_capture_pending"
     },
     {
+      "id": "text_buttons_72x20",
+      "source_ids": [50717, 50718, 50719],
+      "source": "data/Interfac.drs",
+      "palette_id": 50500,
+      "frame_count": 2,
+      "dimensions": [72, 20],
+      "semantic_composition": {},
+      "semantic_composition_status": "original_capture_pending"
+    },
+    {
+      "id": "wide_text_buttons_108x20",
+      "source_ids": [50747, 50748, 50749, 50750],
+      "source": "data/Interfac.drs",
+      "palette_id": 50500,
+      "frame_count": 2,
+      "dimensions": [108, 20],
+      "semantic_composition": {},
+      "semantic_composition_status": "original_capture_pending"
+    },
+    {
+      "id": "command_glyphs_50721",
+      "source_ids": [50721],
+      "source": "data/Interfac.drs",
+      "palette_id": 50500,
+      "frame_count": 15,
+      "dimensions": [[50, 50], [50, 51], [3, 3]],
+      "semantic_composition": {},
+      "semantic_composition_status": "original_capture_pending"
+    },
+    {
       "id": "status_50x7",
       "source_ids": [50745],
       "source": "data/Interfac.drs",
@@ -86,6 +116,17 @@
       "purpose": "Establish the gameplay meaning and frame progression of source 50745.",
       "source_ids": [50745],
       "required_metrics": ["control_context", "semantic_role", "value_samples", "frame_mapping", "crop_rectangle"],
+      "modern_evidence": [
+        "res://scripts/interface_skin.gd",
+        "res://tests/unit/test_interface_source_controls.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "text_button_and_glyph_composition",
+      "purpose": "Map 72x20 and 108x20 two-frame backplates plus the 50721 glyph sheet to their executable controls and interactions.",
+      "source_ids": [50717, 50718, 50719, 50721, 50747, 50748, 50749, 50750],
+      "required_metrics": ["control_context", "shell_source_id", "backplate_frame", "glyph_frame", "interaction_state", "crop_rectangle", "text_baseline"],
       "modern_evidence": [
         "res://scripts/interface_skin.gd",
         "res://tests/unit/test_interface_source_controls.gd"

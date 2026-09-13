@@ -6,6 +6,8 @@ const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const MANIFEST_PATH := "res://data/parity/source_ui_executable_gate.json"
 const COMMAND_IDS := [50713, 50714, 50715, 50716]
 const COMPACT_IDS := [50725, 50726, 50727, 50728]
+const TEXT_IDS := [50717, 50718, 50719]
+const WIDE_TEXT_IDS := [50747, 50748, 50749, 50750]
 
 var failures: Array[String] = []
 
@@ -17,7 +19,7 @@ func _initialize() -> void:
 	assert_equal(String(manifest.get("status", "")), "capture_pending", "UI parity gate remains honest")
 	assert_true(not ParityGate.can_claim_parity(manifest), "unobserved source control states cannot claim parity")
 	var unresolved := ParityGate.unresolved_requirements(manifest)
-	for scene_id in ["command_button_state_order", "compact_button_state_order", "status_strip_semantics", "hud_shell_context_mapping"]:
+	for scene_id in ["command_button_state_order", "compact_button_state_order", "status_strip_semantics", "text_button_and_glyph_composition", "hud_shell_context_mapping"]:
 		assert_true(unresolved.has("original_capture:%s" % scene_id), "%s requires original capture" % scene_id)
 
 	var catalog := ResourceCatalog.new()
@@ -28,6 +30,24 @@ func _initialize() -> void:
 	for source_id in COMPACT_IDS:
 		assert_control_family(catalog, source_id, Vector2i(54, 31), false)
 		assert_inventory_role(catalog, source_id, "compact_control_family_candidate")
+	for source_id in TEXT_IDS:
+		assert_control_family(catalog, source_id, Vector2i(72, 20), false, 2)
+		assert_inventory_role(catalog, source_id, "text_button_backplate_candidate")
+	for source_id in WIDE_TEXT_IDS:
+		assert_control_family(catalog, source_id, Vector2i(108, 20), false, 2)
+		assert_inventory_role(catalog, source_id, "wide_text_button_backplate_candidate")
+	var glyphs: Dictionary = catalog.interface_skin.source_candidate(50721)
+	assert_equal(glyphs.get("kind", ""), "command_glyph_sheet", "50721 remains a role-gated glyph candidate")
+	var glyph_frames: Array = glyphs.get("frames", [])
+	assert_equal(glyph_frames.size(), 15, "every 50721 glyph candidate frame loads")
+	var glyph_dimensions: Dictionary = {}
+	for texture_value in glyph_frames:
+		var texture: Texture2D = texture_value
+		glyph_dimensions["%dx%d" % [texture.get_width(), texture.get_height()]] = true
+	var glyph_dimension_keys: Array = glyph_dimensions.keys()
+	glyph_dimension_keys.sort()
+	assert_equal(glyph_dimension_keys, ["3x3", "50x50", "50x51"], "50721 preserves all native glyph dimensions")
+	assert_inventory_role(catalog, 50721, "command_glyph_sheet_candidate")
 
 	var status: Dictionary = catalog.interface_skin.status_candidate()
 	assert_equal(status.get("semantic_role_status", ""), "original_capture_pending", "status meaning remains observation-gated")
@@ -56,14 +76,14 @@ func _initialize() -> void:
 	quit(1)
 
 
-func assert_control_family(catalog: ResourceCatalog, source_id: int, expected_dimensions: Vector2i, expect_identical_frames: bool) -> void:
+func assert_control_family(catalog: ResourceCatalog, source_id: int, expected_dimensions: Vector2i, expect_identical_frames: bool, expected_frame_count: int = 4) -> void:
 	var candidate: Dictionary = catalog.interface_skin.control_candidate(source_id)
 	assert_equal(candidate.get("semantic_composition_status", ""), "original_capture_pending", "%d semantics remain observation-gated" % source_id)
 	assert_true(candidate.get("semantic_composition", {}).is_empty(), "%d does not invent state composition" % source_id)
 	var frames: Array = candidate.get("frames", [])
 	var hashes: Array = candidate.get("frame_sha256", [])
-	assert_equal(frames.size(), 4, "%d imports every candidate frame" % source_id)
-	assert_equal(hashes.size(), 4, "%d records every decoded frame hash" % source_id)
+	assert_equal(frames.size(), expected_frame_count, "%d imports every candidate frame" % source_id)
+	assert_equal(hashes.size(), expected_frame_count, "%d records every decoded frame hash" % source_id)
 	assert_true(not String(hashes[0]).is_empty(), "%d hashes decoded source pixels" % source_id)
 	if expect_identical_frames:
 		for hash_value in hashes:
@@ -72,7 +92,7 @@ func assert_control_family(catalog: ResourceCatalog, source_id: int, expected_di
 		var unique_hashes: Dictionary = {}
 		for hash_value in hashes:
 			unique_hashes[String(hash_value)] = true
-		assert_equal(unique_hashes.size(), 4, "%d contains four distinct decoded compact-control frames" % source_id)
+		assert_equal(unique_hashes.size(), expected_frame_count, "%d contains distinct decoded candidate frames" % source_id)
 	for frame in range(frames.size()):
 		var texture: Texture2D = frames[frame]
 		assert_equal(Vector2i(texture.get_width(), texture.get_height()), expected_dimensions, "%d frame %d keeps native dimensions" % [source_id, frame])

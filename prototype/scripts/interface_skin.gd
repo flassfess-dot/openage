@@ -3,17 +3,25 @@ extends RefCounted
 
 const RoRInterfaceLayout := preload("res://scripts/interface_layout.gd")
 const INVENTORY_PATH := "res://assets/generated/interface-source-inventory.json"
-const CONTROL_CANDIDATE_ASSETS := {
-	50713: "hud_control_50713",
-	50714: "hud_control_50714",
-	50715: "hud_control_50715",
-	50716: "hud_control_50716",
-	50725: "hud_control_50725",
-	50726: "hud_control_50726",
-	50727: "hud_control_50727",
-	50728: "hud_control_50728",
+const SOURCE_CANDIDATES := {
+	50713: {"asset_name": "hud_control_50713", "frame_count": 4, "kind": "square_control_backplate"},
+	50714: {"asset_name": "hud_control_50714", "frame_count": 4, "kind": "square_control_backplate"},
+	50715: {"asset_name": "hud_control_50715", "frame_count": 4, "kind": "square_control_backplate"},
+	50716: {"asset_name": "hud_control_50716", "frame_count": 4, "kind": "square_control_backplate"},
+	50717: {"asset_name": "hud_control_50717", "frame_count": 2, "kind": "text_button_backplate"},
+	50718: {"asset_name": "hud_control_50718", "frame_count": 2, "kind": "text_button_backplate"},
+	50719: {"asset_name": "hud_control_50719", "frame_count": 2, "kind": "text_button_backplate"},
+	50721: {"asset_name": "hud_glyph_50721", "frame_count": 15, "kind": "command_glyph_sheet"},
+	50725: {"asset_name": "hud_control_50725", "frame_count": 4, "kind": "compact_control"},
+	50726: {"asset_name": "hud_control_50726", "frame_count": 4, "kind": "compact_control"},
+	50727: {"asset_name": "hud_control_50727", "frame_count": 4, "kind": "compact_control"},
+	50728: {"asset_name": "hud_control_50728", "frame_count": 4, "kind": "compact_control"},
+	50745: {"asset_name": "hud_status_50745", "frame_count": 26, "kind": "status_strip"},
+	50747: {"asset_name": "hud_control_50747", "frame_count": 2, "kind": "wide_text_button_backplate"},
+	50748: {"asset_name": "hud_control_50748", "frame_count": 2, "kind": "wide_text_button_backplate"},
+	50749: {"asset_name": "hud_control_50749", "frame_count": 2, "kind": "wide_text_button_backplate"},
+	50750: {"asset_name": "hud_control_50750", "frame_count": 2, "kind": "wide_text_button_backplate"},
 }
-const STATUS_CANDIDATE_ASSETS := {50745: "hud_status_50745"}
 
 var records_by_key: Dictionary = {}
 var inventory_by_key: Dictionary = {}
@@ -63,31 +71,29 @@ func hud_shell(source_width: int, style_index: int = 0) -> Dictionary:
 
 
 func control_candidate(source_id: int) -> Dictionary:
-	var asset_name := String(CONTROL_CANDIDATE_ASSETS.get(source_id, ""))
-	if asset_name.is_empty():
+	var candidate := source_candidate(source_id)
+	if candidate.is_empty() or String(candidate.get("kind", "")) in ["status_strip", "command_glyph_sheet"]:
 		return {}
-	var frames: Array[Texture2D] = []
-	for frame in range(4):
-		var candidate := texture(asset_name, frame)
-		if candidate == null:
-			return {}
-		frames.append(candidate)
-	return {
-		"source_id": source_id,
-		"asset_name": asset_name,
-		"frames": frames,
-		"frame_sha256": _frame_hashes(asset_name, 4),
-		"semantic_composition": {},
-		"semantic_composition_status": "original_capture_pending",
-	}
+	return candidate
 
 
 func status_candidate(source_id: int = 50745) -> Dictionary:
-	var asset_name := String(STATUS_CANDIDATE_ASSETS.get(source_id, ""))
-	if asset_name.is_empty():
+	var candidate := source_candidate(source_id)
+	if String(candidate.get("kind", "")) != "status_strip":
 		return {}
+	candidate["semantic_role"] = ""
+	candidate["semantic_role_status"] = "original_capture_pending"
+	return candidate
+
+
+func source_candidate(source_id: int) -> Dictionary:
+	var descriptor: Dictionary = SOURCE_CANDIDATES.get(source_id, {})
+	if descriptor.is_empty():
+		return {}
+	var asset_name := String(descriptor.get("asset_name", ""))
+	var frame_count := int(descriptor.get("frame_count", 0))
 	var frames: Array[Texture2D] = []
-	for frame in range(26):
+	for frame in range(frame_count):
 		var candidate := texture(asset_name, frame)
 		if candidate == null:
 			return {}
@@ -95,10 +101,11 @@ func status_candidate(source_id: int = 50745) -> Dictionary:
 	return {
 		"source_id": source_id,
 		"asset_name": asset_name,
+		"kind": String(descriptor.get("kind", "")),
 		"frames": frames,
-		"frame_sha256": _frame_hashes(asset_name, 26),
-		"semantic_role": "",
-		"semantic_role_status": "original_capture_pending",
+		"frame_sha256": _frame_hashes(asset_name, frame_count),
+		"semantic_composition": {},
+		"semantic_composition_status": "original_capture_pending",
 	}
 
 

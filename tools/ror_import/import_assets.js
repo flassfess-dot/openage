@@ -220,6 +220,15 @@ function classifyInterfaceSprite(id, metadata) {
   if (id >= 50725 && id <= 50728 && metadata.frameCount === 4 && metadata.width === 54 && metadata.height === 31) {
     return {role: "compact_control_family_candidate", confidence: "structural", basis: "four equal 54x31 frames; control role and executable composition require observation"};
   }
+  if (id >= 50717 && id <= 50719 && metadata.frameCount === 2 && metadata.width === 72 && metadata.height === 20) {
+    return {role: "text_button_backplate_candidate", confidence: "structural", basis: "two equal 72x20 frames; state and context require executable observation"};
+  }
+  if (id >= 50747 && id <= 50750 && metadata.frameCount === 2 && metadata.width === 108 && metadata.height === 20) {
+    return {role: "wide_text_button_backplate_candidate", confidence: "structural", basis: "two equal 108x20 frames; state and context require executable observation"};
+  }
+  if (id === 50721 && metadata.frameCount === 15 && metadata.maxWidth <= 50 && metadata.maxHeight <= 51) {
+    return {role: "command_glyph_sheet_candidate", confidence: "structural", basis: "15 small variable-size frames; glyph meaning and composition require executable observation"};
+  }
   if (id === 50745 && metadata.frameCount === 26 && metadata.width === 50 && metadata.height === 7) {
     return {role: "status_strip_family_candidate", confidence: "structural", basis: "26 equal 50x7 frames; health/progress role requires original executable observation"};
   }
@@ -240,6 +249,9 @@ function interfacePalettePolicy(classification) {
     "fixed_resolution_hud_shell",
     "square_control_backplate_candidate",
     "compact_control_family_candidate",
+    "text_button_backplate_candidate",
+    "wide_text_button_backplate_candidate",
+    "command_glyph_sheet_candidate",
     "status_strip_family_candidate",
     "cursor_button_state_or_decoration",
     "fixed_decoration_or_control",

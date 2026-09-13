@@ -11,6 +11,8 @@ The runtime may expose unresolved frames as candidates. It may not attach semant
 - `data/Interfac.drs` SHA-256 is `8a7f1b1f9009d4bc0262c7890935d69d62668c80751ec3b861345064a0e63d33`; in-game palette is explicitly `50500`.
 - IDs 50713…50716 each contain four 54×54 frames. Within each individual SLP all four decoded PNG hashes are identical. Therefore frame index cannot encode four distinct button states.
 - IDs 50725…50728 each contain four 54×31 frames. All four decoded hashes within each SLP are distinct, but this alone does not establish their control role or state meaning.
+- IDs 50717…50719 each contain two distinct 72×20 frames; IDs 50747…50750 each contain two distinct 108×20 frames. Their pixel structure is consistent with narrow and wide text-button backplates, but normal/pressed meaning and shell association remain capture-gated.
+- ID 50721 contains 15 distinct small glyph frames at 50×50, 50×51 and 3×3. Visual inspection identifies command-like glyphs, but runtime meaning and layering are deliberately not assigned without executable evidence.
 - ID 50745 contains 26 distinct 50×7 frames forming a green-to-red progression. It is provisionally used by the presentation layer for remaining health, with the old drawn bar retained as a missing-asset fallback. Exact executable role and threshold mapping remain capture-gated.
 - IDs 50733…50744 are the four two-frame HUD shell variants at 640, 800 and 1024 pixels. Their context/civilization mapping is still unknown.
 

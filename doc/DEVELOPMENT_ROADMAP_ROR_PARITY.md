@@ -437,6 +437,8 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 
 **Следующий шаг:** завершить 2B-9b2 после восстановления оригинального visual capture: измерить композицию control states, shell-context mapping и native rectangles; только затем заменить временные `StyleBoxFlat`. До этого продолжить независимый source UI-аудит без догадок и полный regression/build gate. После визуальной вертикали вернуться к evidence-gated AI; I13 по-прежнему выполняется после functional/parity ledger и использует 500 юнитов на игрока, 2/4/8 игроков, map ×4 area, stretch ×4 per side и минимум 30% p95 CPU/memory reserve.
 
+**Статус I12-020L, фаза 2B-9b2b:** независимый аудит расширен ещё на 29 source-кадров. 50717…50719 дают по два различных 72×20 backplate-кандидата, 50747…50750 — по два различных 108×20; 50721 содержит 15 уникальных glyph-кандидатов с тремя исходными размерами. Реестр `RoRInterfaceSkin` обобщён: один descriptor владеет source ID, именем asset, frame count, kind, textures и hashes, а специальные control/status views не дублируют загрузку. Measurement gate получил отдельную сцену совместной backplate/glyph композиции. Роль normal/pressed, соответствие стилю shell и значения glyph не назначены по внешнему виду. Контроль: cache-only `21 582 / 0`, validation `0 / 181`, полный suite повторно `180 passed / 0 failed`.
+
 Порядок волн:
 
 1. Законченный Stone Age: рабочий, ресурсы, базовые здания, один melee и один ranged юнит.
