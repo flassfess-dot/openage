@@ -1,0 +1,38 @@
+# Конвейер ресурсов Rise of Rome
+
+Проект читает только принадлежащую пользователю локальную установку Rise of Rome и не изменяет её. Импорт выполняется отдельно от запуска игры: ярлык вызывает готовые EXE/PCK и никогда не запускает конвертацию.
+
+## Поток данных
+
+```text
+data2/empires.dat + DRS + language DLL
+  -> полные source-каталоги objects/graphics/sounds/localization/terrain
+  -> декларативный runtime-archetypes.json
+  -> нормализованный runtime-catalog.json
+  -> RoRDataRepository
+  -> авторитетная симуляция
+```
+
+Каждый кэш хранит версию схемы, версию импортёра и хеши входов. При неизменных входах генераторы возвращают cache hit. `runtime-catalog.json` разделяет:
+
+- alias текущего игрового API (`villager`, `archer`);
+- стабильный internal ID (`ror.unit.villager`);
+- исходный unit ID RoR (`118`);
+- presentation ID (`unit.villager`).
+
+Новый тип первого среза добавляется в `tools/ror_import/runtime-archetypes.json`. Центральный цикл симуляции не должен получать ветку по имени типа; отличия задаются source record, компонентами, behavior tags и узкой стратегией.
+
+## Команды
+
+- `tools/import-assets.ps1` — явный импорт исходников и перестройка изменившихся кэшей.
+- `tools/validate-cache.ps1` — проверка ссылок, циклов, runtime ID и отчёт покрытия.
+- `tools/build-game.ps1` — тесты и экспорт готовой сборки.
+- `tools/run-game.ps1` — только запуск готовой сборки.
+
+## Текущий validation gate
+
+Отчёты находятся в `prototype/assets/generated/validation-report.json` и `doc/ror-modern/CACHE_VALIDATION_REPORT.md`.
+
+На 2026-09-12: 0 структурных errors и 181 warning. Warning не скрываются: это пробелы конкретной исходной установки (63 SLP, 33 WAV, 85 name/icon records), снабжённые классификацией влияния. Error зарезервирован для нарушенной ссылки, цикла зависимости или неконсистентного runtime-каталога.
+
+WSL и полный openage build для повседневной разработки не требуются.

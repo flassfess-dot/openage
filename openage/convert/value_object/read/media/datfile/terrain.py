@@ -276,10 +276,7 @@ class Terrain(GenieStructure):
             )
         else:  # game_version.edition.game_id == "ROR"
             data_format.append(
-                (READ_GEN, "borders", StorageType.ARRAY_INT, ArrayMember(
-                    "int16_t",
-                    32
-                ))
+                (READ_GEN, "borders", StorageType.ARRAY_INT, "int16_t[32]")
             )
 
         data_format.extend([

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "campaign_id": "rise_of_rome",
+  "campaign_filename": "Расцвет Рима.cpx",
+  "missions": [
+    {
+      "scenario_index": 0,
+      "match_id": "campaign_birth_of_rome",
+      "output_filename": "birth-of-rome.json",
+      "launcher_state": "published_vertical"
+    },
+    {
+      "scenario_index": 1,
+      "match_id": "campaign_pyrrhus_of_epirus",
+      "output_filename": "pyrrhus-of-epirus.json",
+      "launcher_state": "published_vertical"
+    },
+    {
+      "scenario_index": 2,
+      "match_id": "campaign_syracuse",
+      "output_filename": "syracuse.json",
+      "launcher_state": "published_vertical"
+    },
+    {
+      "scenario_index": 3,
+      "match_id": "campaign_metaurus",
+      "output_filename": "metaurus.json",
+      "launcher_state": "published_vertical"
+    },
+    {
+      "scenario_index": 4,
+      "match_id": "campaign_zama",
+      "output_filename": "zama.json",
+      "launcher_state": "published_vertical"
+    },
+    {
+      "scenario_index": 5,
+      "match_id": "campaign_mithridates",
+      "output_filename": "mithridates.json",
+      "launcher_state": "published_vertical"
+    }
+  ]
+}

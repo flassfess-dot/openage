@@ -1,0 +1,310 @@
+<div id="ror-formation-sim">
+  <h2>Построение отряда</h2>
+
+  <div class="viz-controls" aria-label="Параметры построения">
+    <label class="form-label" for="ror-formation-type">
+      Строй
+      <select class="form-select" id="ror-formation-type">
+        <option value="rectangle">Фаланга</option>
+        <option value="line">Линия</option>
+        <option value="column">Колонна</option>
+        <option value="staggered">Рассыпной</option>
+        <option value="wedge">Клин</option>
+      </select>
+    </label>
+
+    <label class="form-label" for="ror-member-count">
+      Бойцы: <span class="tabular-nums" id="ror-member-count-value">60</span>
+      <input class="form-range" id="ror-member-count" type="range" min="1" max="100" value="60">
+    </label>
+
+    <label class="form-label" for="ror-front-width">
+      Ширина: <span class="tabular-nums" id="ror-front-width-value">10</span>
+      <input class="form-range" id="ror-front-width" type="range" min="2" max="20" value="10">
+    </label>
+
+    <label class="form-label" for="ror-spacing">
+      Интервал: <span class="tabular-nums" id="ror-spacing-value">20</span>
+      <input class="form-range" id="ror-spacing" type="range" min="12" max="32" value="20">
+    </label>
+
+    <label class="form-label" for="ror-facing">
+      Направление: <span class="tabular-nums" id="ror-facing-value">0°</span>
+      <input class="form-range" id="ror-facing" type="range" min="0" max="355" step="5" value="0">
+    </label>
+  </div>
+
+  <div class="ror-formation-stage">
+    <svg id="ror-formation-svg" role="img" aria-label="Фаланга из 60 бойцов, 10 бойцов по фронту">
+      <title>Предварительный просмотр построения отряда</title>
+    </svg>
+  </div>
+
+  <div class="viz-row text-small" aria-live="polite">
+    <span id="ror-formation-summary">60 бойцов · 10 по фронту · 6 рядов</span>
+  </div>
+</div>
+
+<style>
+  #ror-formation-sim {
+    width: 100%;
+    color: var(--foreground);
+  }
+
+  #ror-formation-sim h2 {
+    margin-top: 0;
+  }
+
+  #ror-formation-sim .ror-formation-stage {
+    width: 100%;
+    margin-top: 12px;
+  }
+
+  #ror-formation-sim svg {
+    display: block;
+    width: 100%;
+    height: clamp(300px, 58vw, 440px);
+    color: var(--foreground);
+  }
+
+  #ror-formation-sim .ror-field {
+    fill: color-mix(in srgb, var(--muted) 22%, transparent);
+    stroke: var(--border);
+  }
+
+  #ror-formation-sim .ror-grid {
+    stroke: var(--border);
+    stroke-width: 1;
+    opacity: 0.42;
+  }
+
+  #ror-formation-sim .ror-unit {
+    fill: var(--viz-series-1);
+    opacity: 0.82;
+  }
+
+  #ror-formation-sim .ror-front-unit {
+    fill: var(--viz-series-2);
+  }
+
+  #ror-formation-sim .ror-anchor {
+    fill: var(--foreground);
+  }
+
+  #ror-formation-sim .ror-facing-line {
+    stroke: var(--viz-series-2);
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  #ror-formation-sim .ror-facing-tip {
+    fill: var(--viz-series-2);
+  }
+
+  #ror-formation-sim .ror-label {
+    fill: var(--muted-foreground);
+    font-size: 12px;
+  }
+</style>
+
+<script>
+(() => {
+  const root = document.getElementById("ror-formation-sim");
+  const svg = root.querySelector("#ror-formation-svg");
+  const stage = root.querySelector(".ror-formation-stage");
+  const typeInput = root.querySelector("#ror-formation-type");
+  const countInput = root.querySelector("#ror-member-count");
+  const widthInput = root.querySelector("#ror-front-width");
+  const spacingInput = root.querySelector("#ror-spacing");
+  const facingInput = root.querySelector("#ror-facing");
+  const countValue = root.querySelector("#ror-member-count-value");
+  const widthValue = root.querySelector("#ror-front-width-value");
+  const spacingValue = root.querySelector("#ror-spacing-value");
+  const facingValue = root.querySelector("#ror-facing-value");
+  const summary = root.querySelector("#ror-formation-summary");
+  const ns = "http://www.w3.org/2000/svg";
+
+  function makeSvg(name, attributes = {}) {
+    const node = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attributes)) {
+      node.setAttribute(key, String(value));
+    }
+    return node;
+  }
+
+  function rowWidths(type, count, frontWidth) {
+    if (type === "line") return [count];
+    if (type === "column") return Array.from({ length: count }, () => 1);
+
+    const widths = [];
+    let remaining = count;
+    if (type === "wedge") {
+      for (let width = 1; remaining > 0; width += 2) {
+        const rowWidth = Math.min(width, remaining);
+        widths.push(rowWidth);
+        remaining -= rowWidth;
+      }
+      return widths;
+    }
+
+    while (remaining > 0) {
+      const rowWidth = Math.min(frontWidth, remaining);
+      widths.push(rowWidth);
+      remaining -= rowWidth;
+    }
+    return widths;
+  }
+
+  function calculate(type, count, frontWidth, spacing, facing) {
+    const widths = rowWidths(type, count, frontWidth);
+    const points = [];
+
+    widths.forEach((width, row) => {
+      const forward = ((widths.length - 1) / 2 - row) * spacing;
+      const stagger = type === "staggered" && row % 2 === 1 ? spacing / 2 : 0;
+      for (let column = 0; column < width; column += 1) {
+        points.push({
+          row,
+          lateral: (column - (width - 1) / 2) * spacing + stagger,
+          forward
+        });
+      }
+    });
+
+    const minLateral = Math.min(...points.map(point => point.lateral));
+    const maxLateral = Math.max(...points.map(point => point.lateral));
+    const lateralCenter = (minLateral + maxLateral) / 2;
+    const angle = facing * Math.PI / 180;
+    const forwardVector = { x: Math.sin(angle), y: -Math.cos(angle) };
+    const rightVector = { x: Math.cos(angle), y: Math.sin(angle) };
+
+    return {
+      widths,
+      points: points.map(point => {
+        const lateral = point.lateral - lateralCenter;
+        return {
+          row: point.row,
+          x: rightVector.x * lateral + forwardVector.x * point.forward,
+          y: rightVector.y * lateral + forwardVector.y * point.forward
+        };
+      })
+    };
+  }
+
+  function draw() {
+    const type = typeInput.value;
+    const count = Number(countInput.value);
+    const frontWidth = Number(widthInput.value);
+    const spacing = Number(spacingInput.value);
+    const facing = Number(facingInput.value);
+    const layout = calculate(type, count, frontWidth, spacing, facing);
+    const width = Math.max(320, Math.round(stage.getBoundingClientRect().width));
+    const height = Math.max(300, Math.min(440, Math.round(width * 0.58)));
+    const padding = 46;
+    const center = { x: width / 2, y: height / 2 + 10 };
+
+    widthInput.disabled = type === "line" || type === "column" || type === "wedge";
+    countValue.textContent = String(count);
+    widthValue.textContent = widthInput.disabled ? "—" : String(frontWidth);
+    spacingValue.textContent = String(spacing);
+    facingValue.textContent = `${facing}°`;
+
+    const xs = layout.points.map(point => point.x);
+    const ys = layout.points.map(point => point.y);
+    const extentX = Math.max(1, Math.max(...xs) - Math.min(...xs));
+    const extentY = Math.max(1, Math.max(...ys) - Math.min(...ys));
+    const scale = Math.min(
+      1,
+      (width - padding * 2) / (extentX + spacing * 2),
+      (height - padding * 2) / (extentY + spacing * 2)
+    );
+    const radius = Math.max(3.5, Math.min(8, spacing * scale * 0.32));
+
+    svg.replaceChildren(svg.querySelector("title"));
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute(
+      "aria-label",
+      `${typeInput.options[typeInput.selectedIndex].text}: ${count} бойцов, ${layout.widths.length} рядов, направление ${facing} градусов`
+    );
+
+    svg.appendChild(makeSvg("rect", {
+      class: "ror-field",
+      x: 1,
+      y: 1,
+      width: width - 2,
+      height: height - 2,
+      rx: 8
+    }));
+
+    for (let x = center.x % 40; x < width; x += 40) {
+      svg.appendChild(makeSvg("line", {
+        class: "ror-grid",
+        x1: x,
+        y1: 0,
+        x2: x,
+        y2: height
+      }));
+    }
+    for (let y = center.y % 40; y < height; y += 40) {
+      svg.appendChild(makeSvg("line", {
+        class: "ror-grid",
+        x1: 0,
+        y1: y,
+        x2: width,
+        y2: y
+      }));
+    }
+
+    layout.points.forEach((point, index) => {
+      svg.appendChild(makeSvg("circle", {
+        class: point.row === 0 ? "ror-unit ror-front-unit" : "ror-unit",
+        cx: center.x + point.x * scale,
+        cy: center.y + point.y * scale,
+        r: radius,
+        "aria-hidden": "true"
+      }));
+    });
+
+    const angle = facing * Math.PI / 180;
+    const arrowLength = Math.max(42, Math.min(72, height * 0.18));
+    const arrowStart = {
+      x: center.x + Math.sin(angle) * (radius + 8),
+      y: center.y - Math.cos(angle) * (radius + 8)
+    };
+    const arrowEnd = {
+      x: center.x + Math.sin(angle) * arrowLength,
+      y: center.y - Math.cos(angle) * arrowLength
+    };
+    svg.appendChild(makeSvg("line", {
+      class: "ror-facing-line",
+      x1: arrowStart.x,
+      y1: arrowStart.y,
+      x2: arrowEnd.x,
+      y2: arrowEnd.y
+    }));
+    svg.appendChild(makeSvg("circle", {
+      class: "ror-facing-tip",
+      cx: arrowEnd.x,
+      cy: arrowEnd.y,
+      r: 5
+    }));
+    svg.appendChild(makeSvg("circle", {
+      class: "ror-anchor",
+      cx: center.x,
+      cy: center.y,
+      r: 3
+    }));
+
+    const widest = Math.max(...layout.widths);
+    summary.textContent = `${count} бойцов · ${widest} по фронту · ${layout.widths.length} рядов`;
+  }
+
+  [typeInput, countInput, widthInput, spacingInput, facingInput].forEach(control => {
+    control.addEventListener("input", draw);
+    control.addEventListener("change", draw);
+  });
+
+  new ResizeObserver(draw).observe(stage);
+  draw();
+})();
+</script>

@@ -346,7 +346,7 @@ class UnitObject(GenieStructure):
             (SKIP, "placement_mode", StorageType.ID_MEMBER, "int8_t"),
             (SKIP, "can_be_built_on", StorageType.BOOLEAN_MEMBER, "int8_t"),  # 1=no footprints
             # frame id of the icon slp (57029) to place on the creation button
-            (SKIP, "icon_id", StorageType.ID_MEMBER, "int16_t"),
+            (READ_GEN, "icon_id", StorageType.ID_MEMBER, "int16_t"),
             (SKIP, "hidden_in_editor", StorageType.BOOLEAN_MEMBER, "int8_t"),
             (SKIP, "old_portrait_icon_id", StorageType.ID_MEMBER, "int16_t"),
             # 0=unlocked by research, 1=insta-available
@@ -905,7 +905,7 @@ class LivingUnit(ProjectileUnit):
             # |----|----|----|----|----|
             # | 31 | 32 | 33 | 34 | 35 |
             # +------------------------+
-            (READ, "creation_button_id", StorageType.ID_MEMBER, "int8_t"),
+            (READ_GEN, "creation_button_id", StorageType.ID_MEMBER, "int8_t"),
         ]
 
         if game_version.edition.game_id not in ("ROR", "AOE1DE"):

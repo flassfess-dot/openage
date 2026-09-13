@@ -1,0 +1,756 @@
+{
+  "schema_version": 1,
+  "baseline_id": "ror_1_0a_default_vc",
+  "source_name": "DEFAULT.VC",
+  "source_entry_sha256": "ee2e709bce9538c0ef9a233fab842c03051ed2b6112de62955a52f77b2b8459b",
+  "source_archive_sha256": "5f18fd552a804bf6d92e52f41e6e68e62b64e716843f462a1e074c824195faed",
+  "status": "cataloged_partial_runtime",
+  "entries": [
+    {
+      "source_id": 0,
+      "value": 34,
+      "name": "SNPercentCivilianExplorers"
+    },
+    {
+      "source_id": 1,
+      "value": 0,
+      "name": "SNPercentCivilianBuilders"
+    },
+    {
+      "source_id": 2,
+      "value": 66,
+      "name": "SNPercentCivilianGatherers"
+    },
+    {
+      "source_id": 3,
+      "value": 2,
+      "name": "SNCapCivilianExplorers"
+    },
+    {
+      "source_id": 4,
+      "value": 1,
+      "name": "SNCapCivilianBuilders"
+    },
+    {
+      "source_id": 5,
+      "value": -1,
+      "name": "SNCapCivilianGatherers"
+    },
+    {
+      "source_id": 18,
+      "value": 4,
+      "name": "SNTotalNumberExplorers (GETTING PHASED OUT)"
+    },
+    {
+      "source_id": 35,
+      "value": 0,
+      "name": "SNMinimumCivilianExplorers"
+    },
+    {
+      "source_id": 23,
+      "value": 10,
+      "name": "SNArtifactReturnDistance (UNUSED AT THIS POINT)"
+    },
+    {
+      "source_id": 24,
+      "value": 75,
+      "name": "SNPercentVictoryClamp (UNUSED AT THIS POINT)"
+    },
+    {
+      "source_id": 29,
+      "value": 85,
+      "name": "SNMinimumPeaceLikeLevel (UNUSED AT THIS POINT)"
+    },
+    {
+      "source_id": 32,
+      "value": 100,
+      "name": "SNPercentExplorationRequired (TEMPORARILY UNUSED FOR SOLDIERS)"
+    },
+    {
+      "source_id": 34,
+      "value": 50,
+      "name": "SNZeroPriorityDistance"
+    },
+    {
+      "source_id": 40,
+      "value": 0,
+      "name": "SNGroupFillMethod"
+    },
+    {
+      "source_id": 75,
+      "value": 2,
+      "name": "SNGroupCommanderSelectionMethod"
+    },
+    {
+      "source_id": 76,
+      "value": 15,
+      "name": "SNConsecutiveIdleUnitLimit"
+    },
+    {
+      "source_id": 36,
+      "value": 2,
+      "name": "SNNumberAttackGroups"
+    },
+    {
+      "source_id": 16,
+      "value": 4,
+      "name": "SNMinimumAttackGroupSize"
+    },
+    {
+      "source_id": 26,
+      "value": 10,
+      "name": "SNMaximumAttackGroupSize"
+    },
+    {
+      "source_id": 37,
+      "value": 0,
+      "name": "SNAttackGroupMakeup (UNUSED AT THIS POINT)"
+    },
+    {
+      "source_id": 41,
+      "value": 4,
+      "name": "SNAttackGroupGatherSpacing"
+    },
+    {
+      "source_id": 30,
+      "value": 70,
+      "name": "SNPercentHealthRetreat"
+    },
+    {
+      "source_id": 31,
+      "value": 75,
+      "name": "SNPercentDeathRetreat"
+    },
+    {
+      "source_id": 91,
+      "value": 100,
+      "name": "SNPercentUnitHealthRetreat"
+    },
+    {
+      "source_id": 38,
+      "value": 0,
+      "name": "SNNumberDefendGroups"
+    },
+    {
+      "source_id": 25,
+      "value": 1,
+      "name": "SNMinimumDefendGroupSize"
+    },
+    {
+      "source_id": 28,
+      "value": 4,
+      "name": "SNMaximumDefendGroupSize"
+    },
+    {
+      "source_id": 39,
+      "value": 0,
+      "name": "SNDefendGroupMakeup (UNUSED AT THIS POINT)"
+    },
+    {
+      "source_id": 50,
+      "value": 0,
+      "name": "SNGoldDefendPriority"
+    },
+    {
+      "source_id": 51,
+      "value": 0,
+      "name": "SNStoneDefendPriority"
+    },
+    {
+      "source_id": 52,
+      "value": 0,
+      "name": "SNForageDefendPriority"
+    },
+    {
+      "source_id": 53,
+      "value": 0,
+      "name": "SNChokePointDefendPriority (UNUSED AT THIS POINT)"
+    },
+    {
+      "source_id": 54,
+      "value": 0,
+      "name": "SNRuinsDefendPriority"
+    },
+    {
+      "source_id": 55,
+      "value": 0,
+      "name": "SNArtifactDefendPriority"
+    },
+    {
+      "source_id": 56,
+      "value": 7,
+      "name": "SNTownDefendPriority"
+    },
+    {
+      "source_id": 57,
+      "value": 3,
+      "name": "SNDefenseDistance"
+    },
+    {
+      "source_id": 22,
+      "value": 12,
+      "name": "SNSentryDistance"
+    },
+    {
+      "source_id": 72,
+      "value": 2,
+      "name": "SNSentryDistanceVariation"
+    },
+    {
+      "source_id": 92,
+      "value": 5,
+      "name": "SNDefendOverlapDistance"
+    },
+    {
+      "source_id": 42,
+      "value": 0,
+      "name": "SNNumberExploreGroups"
+    },
+    {
+      "source_id": 43,
+      "value": 1,
+      "name": "SNMinimumExploreGroupSize"
+    },
+    {
+      "source_id": 44,
+      "value": 3,
+      "name": "SNMaximumExploreGroupSize"
+    },
+    {
+      "source_id": 45,
+      "value": 0,
+      "name": "SNExploreGroupMakeup (UNUSED AT THIS POINT)"
+    },
+    {
+      "source_id": 46,
+      "value": 30,
+      "name": "SNAttackSeparationTime"
+    },
+    {
+      "source_id": 47,
+      "value": 1,
+      "name": "SNAttackCoordination"
+    },
+    {
+      "source_id": 19,
+      "value": 50,
+      "name": "SNPercentEnemySightedResponse"
+    },
+    {
+      "source_id": 20,
+      "value": 50,
+      "name": "SNEnemySightedResponseDistance"
+    },
+    {
+      "source_id": 48,
+      "value": 30,
+      "name": "SNAttackResponseSeparationTime"
+    },
+    {
+      "source_id": 49,
+      "value": 3,
+      "name": "SNRetreatAfterTargetDestroyed"
+    },
+    {
+      "source_id": 71,
+      "value": 1,
+      "name": "SNLockAttackAndAttackResponse"
+    },
+    {
+      "source_id": 58,
+      "value": 2,
+      "name": "SNNumberBoatAttackGroups"
+    },
+    {
+      "source_id": 59,
+      "value": 1,
+      "name": "SNMinimumBoatAttackGroupSize"
+    },
+    {
+      "source_id": 60,
+      "value": 5,
+      "name": "SNMaximumBoatAttackGroupSize"
+    },
+    {
+      "source_id": 67,
+      "value": 0,
+      "name": "SNNumberBoatDefendGroups"
+    },
+    {
+      "source_id": 68,
+      "value": 0,
+      "name": "SNMinimumBoatDefendGroupSize"
+    },
+    {
+      "source_id": 69,
+      "value": 0,
+      "name": "SNMaximumBoatDefendGroupSize"
+    },
+    {
+      "source_id": 70,
+      "value": 0,
+      "name": "SNDockDefendPriority"
+    },
+    {
+      "source_id": 61,
+      "value": 1,
+      "name": "SNNumberBoatExploreGroups"
+    },
+    {
+      "source_id": 62,
+      "value": 1,
+      "name": "SNMinimumBoatExploreGroupSize"
+    },
+    {
+      "source_id": 63,
+      "value": 2,
+      "name": "SNMaximumBoatExploreGroupSize"
+    },
+    {
+      "source_id": 64,
+      "value": 0,
+      "name": "SNDesiredNumberTradeEscorts"
+    },
+    {
+      "source_id": 65,
+      "value": 0,
+      "name": "SNDesiredNumberFishEscorts"
+    },
+    {
+      "source_id": 66,
+      "value": 0,
+      "name": "SNDesiredNumberTransportEscorts"
+    },
+    {
+      "source_id": 73,
+      "value": 12,
+      "name": "SNMinimumTownSize"
+    },
+    {
+      "source_id": 74,
+      "value": 20,
+      "name": "SNMaximumTownSize"
+    },
+    {
+      "source_id": 86,
+      "value": 100,
+      "name": "SNStoragePitMaxDistance"
+    },
+    {
+      "source_id": 87,
+      "value": 100,
+      "name": "SNGranaryMaxDistance"
+    },
+    {
+      "source_id": 84,
+      "value": 2,
+      "name": "SNNumberWallGates"
+    },
+    {
+      "source_id": 85,
+      "value": 4,
+      "name": "SNSizeWallGates"
+    },
+    {
+      "source_id": 77,
+      "value": 4,
+      "name": "SNTargetEvaluationDistance"
+    },
+    {
+      "source_id": 78,
+      "value": 1,
+      "name": "SNTargetEvaluationHitpoints"
+    },
+    {
+      "source_id": 79,
+      "value": 1,
+      "name": "SNTargetEvaluationDamageCapability"
+    },
+    {
+      "source_id": 80,
+      "value": 0,
+      "name": "SNTargetEvaluationKills"
+    },
+    {
+      "source_id": 81,
+      "value": 0,
+      "name": "SNTargetEvaluationAllyProximity"
+    },
+    {
+      "source_id": 82,
+      "value": 0,
+      "name": "SNTargetEvaluationROF"
+    },
+    {
+      "source_id": 83,
+      "value": 1,
+      "name": "SNTargetEvaluationRandomness"
+    },
+    {
+      "source_id": 89,
+      "value": -100,
+      "name": "SNTargetEvaluationAttackAttempts"
+    },
+    {
+      "source_id": 90,
+      "value": 0,
+      "name": "SNTargetEvaluationRange"
+    },
+    {
+      "source_id": 122,
+      "value": 300,
+      "name": "SNTargetEvaluationContinent"
+    },
+    {
+      "source_id": 123,
+      "value": 200,
+      "name": "SNTargetEvaluationSiegeWeapon"
+    },
+    {
+      "source_id": 88,
+      "value": 2,
+      "name": "SNTacticalUpdateFrequency"
+    },
+    {
+      "source_id": 93,
+      "value": 1,
+      "name": "SNScaleMinimumAttackGroupSize"
+    },
+    {
+      "source_id": 94,
+      "value": 0,
+      "name": "SNScaleMaximumAttackGroupSize"
+    },
+    {
+      "source_id": 95,
+      "value": 0,
+      "name": "SNScalePercentHealthRetreat"
+    },
+    {
+      "source_id": 96,
+      "value": 0,
+      "name": "SNScalePercentDeathRetreat"
+    },
+    {
+      "source_id": 97,
+      "value": 0,
+      "name": "SNScalePercentUnitHealthRetreat"
+    },
+    {
+      "source_id": 98,
+      "value": 1,
+      "name": "SNAttackGroupSizeRandomness"
+    },
+    {
+      "source_id": 99,
+      "value": 10,
+      "name": "SNScalingFrequency"
+    },
+    {
+      "source_id": 100,
+      "value": 3,
+      "name": "SNMaximumGAIAAttackResponse"
+    },
+    {
+      "source_id": 101,
+      "value": 1,
+      "name": "SNBuildFrequency"
+    },
+    {
+      "source_id": 102,
+      "value": 15,
+      "name": "SNAttackSeparationTimeRandomness"
+    },
+    {
+      "source_id": 103,
+      "value": 0,
+      "name": "SNAttackIntelligence"
+    },
+    {
+      "source_id": 104,
+      "value": 0,
+      "name": "SNAttackDelay"
+    },
+    {
+      "source_id": 105,
+      "value": 0,
+      "name": "SNSaveScenarioInformation"
+    },
+    {
+      "source_id": 106,
+      "value": -1,
+      "name": "SNSpecialAttackType1"
+    },
+    {
+      "source_id": 107,
+      "value": -1,
+      "name": "SNSpecialAttackType2"
+    },
+    {
+      "source_id": 108,
+      "value": -1,
+      "name": "SNSpecialAttackType3"
+    },
+    {
+      "source_id": 109,
+      "value": 0,
+      "name": "SNSpecialAttackInfluence1"
+    },
+    {
+      "source_id": 110,
+      "value": 0,
+      "name": "SNSpecialAttackInfluence2"
+    },
+    {
+      "source_id": 111,
+      "value": 0,
+      "name": "SNSpecialAttackInfluence3"
+    },
+    {
+      "source_id": 112,
+      "value": 300,
+      "name": "SNMinimumWaterBodySizeForDock"
+    },
+    {
+      "source_id": 113,
+      "value": 0,
+      "name": "SNSkipAges"
+    },
+    {
+      "source_id": 114,
+      "value": 20,
+      "name": "SNNumberBuildAttemptsBeforeSkip"
+    },
+    {
+      "source_id": 115,
+      "value": 5,
+      "name": "SNMaxSkipsPerAttempt"
+    },
+    {
+      "source_id": 116,
+      "value": 10,
+      "name": "SNTrainingRebuilds"
+    },
+    {
+      "source_id": 117,
+      "value": 30,
+      "name": "SNFoodGathererPercentage"
+    },
+    {
+      "source_id": 118,
+      "value": 0,
+      "name": "SNGoldGathererPercentage"
+    },
+    {
+      "source_id": 119,
+      "value": 0,
+      "name": "SNStoneGathererPercentage"
+    },
+    {
+      "source_id": 120,
+      "value": 30,
+      "name": "SNWoodGathererPercentage"
+    },
+    {
+      "source_id": 121,
+      "value": 1,
+      "name": "SNDefendImportantGroupLeaders"
+    },
+    {
+      "source_id": 124,
+      "value": 0,
+      "name": "SNTributeAmount"
+    },
+    {
+      "source_id": 125,
+      "value": 0,
+      "name": "SNTributeChatFrequency"
+    },
+    {
+      "source_id": 126,
+      "value": 0,
+      "name": "SNTributeChatRandomness"
+    },
+    {
+      "source_id": 127,
+      "value": 0,
+      "name": "SNTributeTimeout"
+    },
+    {
+      "source_id": 128,
+      "value": 1,
+      "name": "SNTributePlayer"
+    },
+    {
+      "source_id": 129,
+      "value": 0,
+      "name": "SNTributeSuccessOutcome"
+    },
+    {
+      "source_id": 130,
+      "value": 0,
+      "name": "SNTributeFailureOutcome"
+    },
+    {
+      "source_id": 131,
+      "value": 3,
+      "name": "SNGroupLeaderDefenseDistance"
+    },
+    {
+      "source_id": 132,
+      "value": 0,
+      "name": "SNTributePersistence"
+    },
+    {
+      "source_id": 133,
+      "value": 0,
+      "name": "SNTributeRevokeOnAttack"
+    },
+    {
+      "source_id": 134,
+      "value": 0,
+      "name": "SNInitialAttackDelayType"
+    },
+    {
+      "source_id": 135,
+      "value": 1,
+      "name": "SNBlotExplorationMap"
+    },
+    {
+      "source_id": 136,
+      "value": 15,
+      "name": "SNBlotSize"
+    },
+    {
+      "source_id": 137,
+      "value": 0,
+      "name": "SNTownWallPattern"
+    },
+    {
+      "source_id": 138,
+      "value": 0,
+      "name": "SNInitialFood"
+    },
+    {
+      "source_id": 139,
+      "value": 0,
+      "name": "SNInitialGold"
+    },
+    {
+      "source_id": 140,
+      "value": 0,
+      "name": "SNInitialStone"
+    },
+    {
+      "source_id": 141,
+      "value": 0,
+      "name": "SNInitialWood"
+    },
+    {
+      "source_id": 142,
+      "value": 0,
+      "name": "SNIntelligentGathering"
+    },
+    {
+      "source_id": 143,
+      "value": 1,
+      "name": "SNTaskUngroupedSoldiers"
+    },
+    {
+      "source_id": 144,
+      "value": 200,
+      "name": "SNTargetEvaluationBoat"
+    },
+    {
+      "source_id": 145,
+      "value": 10,
+      "name": "SNNumberEnemyObjectsRequired"
+    },
+    {
+      "source_id": 146,
+      "value": 5,
+      "name": "SNNumberMaxSkipCycles"
+    },
+    {
+      "source_id": 147,
+      "value": 10,
+      "name": "SNMostNeededResourceLookAhead"
+    },
+    {
+      "source_id": 148,
+      "value": 15,
+      "name": "SNRetaskGatherAmount"
+    },
+    {
+      "source_id": 149,
+      "value": 30,
+      "name": "SNMaxRetaskGatherAmount"
+    },
+    {
+      "source_id": 150,
+      "value": 2,
+      "name": "SNMaxStoragePits"
+    },
+    {
+      "source_id": 151,
+      "value": 1,
+      "name": "SNMaxGranaries"
+    },
+    {
+      "source_id": 152,
+      "value": 0,
+      "name": "SNHouseOverage"
+    },
+    {
+      "source_id": 153,
+      "value": -1,
+      "name": "Unused"
+    },
+    {
+      "source_id": 154,
+      "value": -1,
+      "name": "Unused"
+    },
+    {
+      "source_id": 155,
+      "value": 5,
+      "name": "SNBuildPlanDivisions"
+    },
+    {
+      "source_id": 156,
+      "value": 0,
+      "name": "SNBuildPlanFoodGathererPercentage"
+    },
+    {
+      "source_id": 157,
+      "value": 0,
+      "name": "SNBuildPlanGoldGathererPercentage"
+    },
+    {
+      "source_id": 158,
+      "value": 0,
+      "name": "SNBuildPlanStoneGathererPercentage"
+    },
+    {
+      "source_id": 159,
+      "value": 0,
+      "name": "SNBuildPlanWoodGathererPercentage"
+    },
+    {
+      "source_id": 160,
+      "value": 40,
+      "name": "SNMaxBuildPlanGathererPercentage"
+    },
+    {
+      "source_id": 161,
+      "value": 1,
+      "name": "SNRequiredFirstBuilding"
+    },
+    {
+      "source_id": 162,
+      "value": 0,
+      "name": "SNUsePlayAttacking"
+    }
+  ]
+}
+

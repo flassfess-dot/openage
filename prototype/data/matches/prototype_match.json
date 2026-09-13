@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "prototype_skirmish",
+  "title": "Rise of Rome — прототип схватки",
+  "start_message": "Соберите ресурсы, создайте воинов и уничтожьте налётчиков",
+  "map": {
+    "size": [24, 24],
+    "seed": 41721,
+    "generator": {
+      "type": "coastal_land",
+      "water_border": {"left": 2, "top": 1, "right": 0, "bottom": 0, "shore_width": 1, "land_terrain_id": 0},
+      "naval_start": {"dock_footprint_radius_cells": 1, "dock_surface_terrain_ids": [1, 2, 4, 22]},
+      "hills": [
+        {"center": [18, 7], "radius": 4, "maximum_elevation": 2}
+      ],
+      "resource_clusters": [
+        {"kind": "berries", "center": [7.1, 10.3], "count": 3, "radius": 0.65, "amount": 150},
+        {"kind": "tree", "center": [16.5, 15.0], "count": 7, "radius": 1.8, "amount": 75},
+        {"kind": "stone_mine", "center": [6.2, 17.2], "count": 4, "radius": 1.0, "amount": 250},
+        {"kind": "gold_mine", "center": [19.2, 13.0], "count": 4, "radius": 1.0, "amount": 400},
+        {"kind": "deep_fish", "center": [0.8, 8.0], "count": 2, "radius": 0.45, "amount": 250, "placement_domain": "water"},
+        {"kind": "shore_fish", "center": [1.5, 15.0], "count": 2, "radius": 0.35, "amount": 250, "placement_domain": "shore_water"},
+        {"kind": "whale", "center": [0.8, 20.0], "count": 1, "radius": 0.2, "amount": 250, "placement_domain": "water"}
+      ]
+    }
+  },
+  "players": [
+    {"team": 1, "controller": "human", "civilization_id": 13, "start": [9.5, 14.0], "population_housing": 8, "starting_resources": {"food": 200, "wood": 200, "stone": 150, "gold": 0}},
+    {"team": 2, "controller": "ai", "civilization_id": 13, "start": [18.0, 7.5], "population_housing": 4, "starting_resources": {"food": 200, "wood": 200, "stone": 150, "gold": 0}, "ai": {"economic_interval_ticks": 20, "military_interval_ticks": 40, "formation": "RECTANGLE"}}
+  ],
+  "entities": [
+    {"category": "building", "team": 0, "kind": "town_center", "position": [12.0, 12.0]},
+    {"category": "unit", "team": 1, "kind": "villager", "position": [8.8, 13.0], "selected": true},
+    {"category": "unit", "team": 1, "kind": "villager", "position": [9.7, 13.2], "selected": true},
+    {"category": "unit", "team": 1, "kind": "villager", "position": [10.6, 13.4], "selected": true},
+    {"category": "unit", "team": 1, "kind": "villager", "position": [9.2, 14.0], "selected": true},
+    {"category": "unit", "team": 1, "kind": "villager", "position": [10.2, 14.2], "selected": true},
+    {"category": "unit", "team": 1, "kind": "archer", "position": [7.9, 14.4], "selected": true},
+    {"category": "unit", "team": 1, "kind": "archer", "position": [8.6, 15.0], "selected": true},
+    {"category": "unit", "team": 2, "kind": "clubman", "position": [17.2, 7.0]},
+    {"category": "unit", "team": 2, "kind": "clubman", "position": [18.0, 7.6]},
+    {"category": "unit", "team": 2, "kind": "clubman", "position": [18.8, 8.2]},
+    {"category": "unit", "team": 2, "kind": "archer", "position": [19.0, 6.7]}
+  ],
+  "alliances": [],
+  "victory_rules": [{"type": "conquest"}]
+}

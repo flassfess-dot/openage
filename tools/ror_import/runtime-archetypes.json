@@ -1,0 +1,1230 @@
+{
+  "format_version": 1,
+  "default_civilization_id": 13,
+  "archetypes": [
+    {
+      "alias": "villager",
+      "internal_id": "ror.unit.villager",
+      "source_unit_id": 83,
+      "presentation_id": "unit.villager",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "worker", "combatant"],
+      "runtime": {
+        "train_location_unit_id": 109,
+        "worker_resource_profiles": {
+          "0": {"role_name": "forage", "role_source_unit_id": 120, "idle_state": "forager_idle", "move_state": "forager_move", "work_state": "forager_work", "carry_state": "forager_carry", "death_state": "forager_death", "corpse_state": "forager_corpse"},
+          "1": {"role_name": "lumber", "role_source_unit_id": 123, "idle_state": "lumberjack_idle", "move_state": "lumberjack_move", "work_state": "lumberjack_work", "carry_state": "lumberjack_carry", "death_state": "lumberjack_death", "corpse_state": "lumberjack_corpse"},
+          "2": {"role_name": "stone_mine", "role_source_unit_id": 124, "idle_state": "stone_miner_idle", "move_state": "miner_move", "work_state": "miner_work", "carry_state": "stone_miner_carry", "death_state": "miner_death", "corpse_state": "miner_corpse"},
+          "3": {"role_name": "gold_mine", "role_source_unit_id": 251, "idle_state": "gold_miner_idle", "move_state": "miner_move", "work_state": "miner_work", "carry_state": "gold_miner_carry", "death_state": "miner_death", "corpse_state": "miner_corpse"}
+        },
+        "worker_task_profiles": {
+          "build": {
+            "role_name": "build",
+            "role_source_unit_id": 118,
+            "idle_state": "builder_idle",
+            "move_state": "builder_move",
+            "build_state": "builder_work",
+            "death_state": "builder_death",
+            "corpse_state": "builder_corpse"
+          },
+          "repair": {
+            "role_name": "repair",
+            "role_source_unit_id": 156,
+            "idle_state": "builder_idle",
+            "move_state": "builder_move",
+            "repair_state": "builder_work",
+            "death_state": "builder_death",
+            "corpse_state": "builder_corpse"
+          },
+          "fish": {
+            "role_name": "fish",
+            "role_source_unit_id": 119,
+            "idle_state": "fisherman_idle",
+            "move_state": "fisherman_move",
+            "work_state": "fisherman_work",
+            "carry_state": "fisherman_carry",
+            "death_state": "fisherman_death",
+            "corpse_state": "fisherman_corpse"
+          },
+          "farm": {
+            "role_name": "farm",
+            "role_source_unit_id": 259,
+            "idle_state": "farmer_idle",
+            "move_state": "farmer_move",
+            "work_state": "farmer_work",
+            "carry_state": "farmer_carry",
+            "death_state": "farmer_death",
+            "corpse_state": "farmer_corpse"
+          },
+          "hunt": {
+            "role_name": "hunt",
+            "role_source_unit_id": 122,
+            "idle_state": "hunter_idle",
+            "move_state": "hunter_move",
+            "attack_state": "hunter_attack",
+            "work_state": "hunter_work",
+            "carry_state": "hunter_carry",
+            "death_state": "hunter_death",
+            "corpse_state": "hunter_corpse"
+          }
+        },
+        "presentation_states": {
+          "idle": {"asset_name": "villager_idle", "enemy_asset_name": "enemy_villager_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "villager_move", "enemy_asset_name": "enemy_villager_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "villager_attack", "enemy_asset_name": "enemy_villager_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "villager_death", "enemy_asset_name": "enemy_villager_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "villager_corpse", "enemy_asset_name": "enemy_villager_corpse", "graphic_id": 160, "loop": false},
+          "builder_idle": {"asset_name": "builder_idle", "enemy_asset_name": "enemy_builder_idle", "graphic_id": 286, "loop": true},
+          "builder_move": {"asset_name": "builder_move", "enemy_asset_name": "enemy_builder_move", "graphic_id": 666, "loop": true},
+          "builder_work": {"asset_name": "builder_work", "enemy_asset_name": "enemy_builder_work", "graphic_id": 466, "loop": true},
+          "builder_death": {"asset_name": "builder_death", "enemy_asset_name": "enemy_builder_death", "graphic_id": 177, "loop": false},
+          "builder_corpse": {"asset_name": "builder_corpse", "enemy_asset_name": "enemy_builder_corpse", "graphic_id": 141, "loop": false},
+          "fisherman_idle": {"asset_name": "fisherman_idle", "enemy_asset_name": "enemy_fisherman_idle", "graphic_id": 299, "loop": true},
+          "fisherman_move": {"asset_name": "fisherman_move", "enemy_asset_name": "enemy_fisherman_move", "graphic_id": 680, "loop": true},
+          "fisherman_work": {"asset_name": "fisherman_work", "enemy_asset_name": "enemy_fisherman_work", "graphic_id": 469, "loop": true},
+          "fisherman_carry": {"asset_name": "fisherman_carry", "enemy_asset_name": "enemy_fisherman_carry", "graphic_id": 89, "loop": true},
+          "fisherman_death": {"asset_name": "fisherman_death", "enemy_asset_name": "enemy_fisherman_death", "graphic_id": 185, "loop": false},
+          "fisherman_corpse": {"asset_name": "fisherman_corpse", "enemy_asset_name": "enemy_fisherman_corpse", "graphic_id": 150, "loop": false},
+          "forager_idle": {"asset_name": "forager_idle", "enemy_asset_name": "enemy_forager_idle", "graphic_id": 300, "loop": true},
+          "forager_move": {"asset_name": "forager_move", "enemy_asset_name": "enemy_forager_move", "graphic_id": 681, "loop": true},
+          "forager_work": {"asset_name": "villager_work_food", "enemy_asset_name": "enemy_villager_work_food", "graphic_id": 470, "loop": true},
+          "forager_carry": {"asset_name": "villager_carry_food", "enemy_asset_name": "enemy_villager_carry_food", "graphic_id": 681, "loop": true},
+          "forager_death": {"asset_name": "forager_death", "enemy_asset_name": "enemy_forager_death", "graphic_id": 186, "loop": false},
+          "forager_corpse": {"asset_name": "forager_corpse", "enemy_asset_name": "enemy_forager_corpse", "graphic_id": 151, "loop": false},
+          "hunter_idle": {"asset_name": "hunter_idle", "enemy_asset_name": "enemy_hunter_idle", "graphic_id": 303, "loop": true},
+          "hunter_move": {"asset_name": "hunter_move", "enemy_asset_name": "enemy_hunter_move", "graphic_id": 685, "loop": true},
+          "hunter_attack": {"asset_name": "hunter_attack", "enemy_asset_name": "enemy_hunter_attack", "graphic_id": 471, "loop": false},
+          "hunter_work": {"asset_name": "hunter_work", "enemy_asset_name": "enemy_hunter_work", "graphic_id": 472, "loop": true},
+          "hunter_carry": {"asset_name": "hunter_carry", "enemy_asset_name": "enemy_hunter_carry", "graphic_id": 92, "loop": true},
+          "hunter_death": {"asset_name": "hunter_death", "enemy_asset_name": "enemy_hunter_death", "graphic_id": 189, "loop": false},
+          "hunter_corpse": {"asset_name": "hunter_corpse", "enemy_asset_name": "enemy_hunter_corpse", "graphic_id": 153, "loop": false},
+          "lumberjack_idle": {"asset_name": "lumberjack_idle", "enemy_asset_name": "enemy_lumberjack_idle", "graphic_id": 310, "loop": true},
+          "lumberjack_move": {"asset_name": "lumberjack_move", "enemy_asset_name": "enemy_lumberjack_move", "graphic_id": 692, "loop": true},
+          "lumberjack_work": {"asset_name": "villager_work_wood", "enemy_asset_name": "enemy_villager_work_wood", "graphic_id": 467, "loop": true},
+          "lumberjack_carry": {"asset_name": "villager_carry_wood", "enemy_asset_name": "enemy_villager_carry_wood", "graphic_id": 93, "loop": true},
+          "lumberjack_death": {"asset_name": "lumberjack_death", "enemy_asset_name": "enemy_lumberjack_death", "graphic_id": 194, "loop": false},
+          "lumberjack_corpse": {"asset_name": "lumberjack_corpse", "enemy_asset_name": "enemy_lumberjack_corpse", "graphic_id": 158, "loop": false},
+          "stone_miner_idle": {"asset_name": "miner_idle", "enemy_asset_name": "enemy_miner_idle", "graphic_id": 311, "loop": true},
+          "gold_miner_idle": {"asset_name": "miner_idle", "enemy_asset_name": "enemy_miner_idle", "graphic_id": 301, "loop": true},
+          "miner_move": {"asset_name": "miner_move", "enemy_asset_name": "enemy_miner_move", "graphic_id": 693, "loop": true},
+          "miner_work": {"asset_name": "villager_work_mine", "enemy_asset_name": "enemy_villager_work_mine", "graphic_id": 474, "loop": true},
+          "stone_miner_carry": {"asset_name": "villager_carry_stone", "enemy_asset_name": "enemy_villager_carry_stone", "graphic_id": 94, "loop": true},
+          "gold_miner_carry": {"asset_name": "villager_carry_gold", "enemy_asset_name": "enemy_villager_carry_gold", "graphic_id": 91, "loop": true},
+          "miner_death": {"asset_name": "miner_death", "enemy_asset_name": "enemy_miner_death", "graphic_id": 195, "loop": false},
+          "miner_corpse": {"asset_name": "miner_corpse", "enemy_asset_name": "enemy_miner_corpse", "graphic_id": 159, "loop": false},
+          "farmer_idle": {"asset_name": "farmer_idle", "enemy_asset_name": "enemy_farmer_idle", "graphic_id": 298, "loop": true},
+          "farmer_move": {"asset_name": "farmer_move", "enemy_asset_name": "enemy_farmer_move", "graphic_id": 679, "loop": true},
+          "farmer_work": {"asset_name": "farmer_work", "enemy_asset_name": "enemy_farmer_work", "graphic_id": 468, "loop": true},
+          "farmer_carry": {"asset_name": "farmer_carry", "enemy_asset_name": "enemy_farmer_carry", "graphic_id": 829, "loop": true},
+          "farmer_death": {"asset_name": "farmer_death", "enemy_asset_name": "enemy_farmer_death", "graphic_id": 184, "loop": false},
+          "farmer_corpse": {"asset_name": "farmer_corpse", "enemy_asset_name": "enemy_farmer_corpse", "graphic_id": 149, "loop": false}
+        },
+        "presentation_variants": {
+          "293": {
+            "attack": {"asset_name": "iron_villager_attack", "enemy_asset_name": "enemy_iron_villager_attack", "graphic_field": "attack", "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "clubman",
+      "internal_id": "ror.unit.clubman",
+      "source_unit_id": 73,
+      "presentation_id": "unit.clubman",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "clubman_idle", "enemy_asset_name": "enemy_clubman_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "clubman_move", "enemy_asset_name": "enemy_clubman_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "clubman_attack", "enemy_asset_name": "enemy_clubman_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "clubman_death", "enemy_asset_name": "enemy_clubman_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "clubman_corpse", "enemy_asset_name": "enemy_clubman_corpse", "graphic_id": 138, "loop": false}
+        },
+        "presentation_variants": {
+          "74": {
+            "idle": {"asset_name": "axeman_idle", "enemy_asset_name": "enemy_axeman_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "axeman_move", "enemy_asset_name": "enemy_axeman_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "axeman_attack", "enemy_asset_name": "enemy_axeman_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "axeman_death", "enemy_asset_name": "enemy_axeman_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "axeman_corpse", "enemy_asset_name": "enemy_axeman_corpse", "graphic_id": 163, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "swordsman",
+      "internal_id": "ror.unit.swordsman",
+      "source_unit_id": 75,
+      "presentation_id": "unit.swordsman",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "short_swordsman_idle", "enemy_asset_name": "enemy_short_swordsman_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "short_swordsman_move", "enemy_asset_name": "enemy_short_swordsman_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "short_swordsman_attack", "enemy_asset_name": "enemy_short_swordsman_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "short_swordsman_death", "enemy_asset_name": "enemy_short_swordsman_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "short_swordsman_corpse", "enemy_asset_name": "enemy_short_swordsman_corpse", "graphic_id": 139, "loop": false}
+        },
+        "presentation_variants": {
+          "76": {
+            "idle": {"asset_name": "broad_swordsman_idle", "enemy_asset_name": "enemy_broad_swordsman_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "broad_swordsman_move", "enemy_asset_name": "enemy_broad_swordsman_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "broad_swordsman_attack", "enemy_asset_name": "enemy_broad_swordsman_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "broad_swordsman_death", "enemy_asset_name": "enemy_broad_swordsman_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "broad_swordsman_corpse", "enemy_asset_name": "enemy_broad_swordsman_corpse", "graphic_id": 156, "loop": false}
+          },
+          "77": {
+            "idle": {"asset_name": "long_swordsman_idle", "enemy_asset_name": "enemy_long_swordsman_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "long_swordsman_move", "enemy_asset_name": "enemy_long_swordsman_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "long_swordsman_attack", "enemy_asset_name": "enemy_long_swordsman_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "long_swordsman_death", "enemy_asset_name": "enemy_long_swordsman_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "long_swordsman_corpse", "enemy_asset_name": "enemy_long_swordsman_corpse", "graphic_id": 154, "loop": false}
+          },
+          "282": {
+            "idle": {"asset_name": "long_swordsman_idle", "enemy_asset_name": "enemy_long_swordsman_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "long_swordsman_move", "enemy_asset_name": "enemy_long_swordsman_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "long_swordsman_attack", "enemy_asset_name": "enemy_long_swordsman_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "long_swordsman_death", "enemy_asset_name": "enemy_long_swordsman_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "long_swordsman_corpse", "enemy_asset_name": "enemy_long_swordsman_corpse", "graphic_id": 154, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "archer",
+      "internal_id": "ror.unit.bowman",
+      "source_unit_id": 4,
+      "presentation_id": "unit.bowman",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "ranged"],
+      "runtime": {
+        "production_replaced_by": "improved_bowman",
+        "presentation_states": {
+          "idle": {"asset_name": "archer_idle", "enemy_asset_name": "enemy_archer_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "archer_move", "enemy_asset_name": "enemy_archer_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "archer_attack", "enemy_asset_name": "enemy_archer_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "archer_death", "enemy_asset_name": "enemy_archer_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "archer_corpse", "enemy_asset_name": "enemy_archer_corpse", "graphic_id": 135, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "improved_bowman",
+      "internal_id": "ror.unit.improved_bowman",
+      "source_unit_id": 5,
+      "presentation_id": "unit.improved_bowman",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "ranged"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "improved_bowman_idle", "enemy_asset_name": "enemy_improved_bowman_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "improved_bowman_move", "enemy_asset_name": "enemy_improved_bowman_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "improved_bowman_attack", "enemy_asset_name": "enemy_improved_bowman_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "improved_bowman_death", "enemy_asset_name": "enemy_improved_bowman_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "improved_bowman_corpse", "enemy_asset_name": "enemy_improved_bowman_corpse", "graphic_id": 136, "loop": false}
+        },
+        "presentation_variants": {
+          "6": {
+            "idle": {"asset_name": "composite_bowman_idle", "enemy_asset_name": "enemy_composite_bowman_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "composite_bowman_move", "enemy_asset_name": "enemy_composite_bowman_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "composite_bowman_attack", "enemy_asset_name": "enemy_composite_bowman_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "composite_bowman_death", "enemy_asset_name": "enemy_composite_bowman_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "composite_bowman_corpse", "enemy_asset_name": "enemy_composite_bowman_corpse", "graphic_id": 137, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "slinger",
+      "internal_id": "ror.unit.slinger",
+      "source_unit_id": 347,
+      "presentation_id": "unit.slinger",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "ranged"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "slinger_idle", "enemy_asset_name": "enemy_slinger_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "slinger_move", "enemy_asset_name": "enemy_slinger_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "slinger_attack", "enemy_asset_name": "enemy_slinger_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "slinger_death", "enemy_asset_name": "enemy_slinger_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "slinger_corpse", "enemy_asset_name": "enemy_slinger_corpse", "graphic_id": 850, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "hoplite",
+      "internal_id": "ror.unit.hoplite",
+      "source_unit_id": 93,
+      "presentation_id": "unit.hoplite",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee", "academy_infantry"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "hoplite_idle", "enemy_asset_name": "enemy_hoplite_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "hoplite_move", "enemy_asset_name": "enemy_hoplite_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "hoplite_attack", "enemy_asset_name": "enemy_hoplite_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "hoplite_death", "enemy_asset_name": "enemy_hoplite_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "hoplite_corpse", "enemy_asset_name": "enemy_hoplite_corpse", "graphic_id": 161, "loop": false}
+        },
+        "presentation_variants": {
+          "94": {
+            "idle": {"asset_name": "phalanx_idle", "enemy_asset_name": "enemy_phalanx_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "phalanx_move", "enemy_asset_name": "enemy_phalanx_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "phalanx_attack", "enemy_asset_name": "enemy_phalanx_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "phalanx_death", "enemy_asset_name": "enemy_phalanx_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "phalanx_corpse", "enemy_asset_name": "enemy_phalanx_corpse", "graphic_id": 157, "loop": false}
+          },
+          "291": {
+            "idle": {"asset_name": "phalanx_idle", "enemy_asset_name": "enemy_phalanx_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "phalanx_move", "enemy_asset_name": "enemy_phalanx_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "phalanx_attack", "enemy_asset_name": "enemy_phalanx_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "phalanx_death", "enemy_asset_name": "enemy_phalanx_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "phalanx_corpse", "enemy_asset_name": "enemy_phalanx_corpse", "graphic_id": 157, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "scout",
+      "internal_id": "ror.unit.scout",
+      "source_unit_id": 299,
+      "presentation_id": "unit.scout",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee", "scout", "cavalry"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "scout_idle", "enemy_asset_name": "enemy_scout_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "scout_move", "enemy_asset_name": "enemy_scout_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "scout_attack", "enemy_asset_name": "enemy_scout_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "scout_death", "enemy_asset_name": "enemy_scout_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "scout_corpse", "enemy_asset_name": "enemy_scout_corpse", "graphic_id": 164, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "cavalry",
+      "internal_id": "ror.unit.cavalry",
+      "source_unit_id": 37,
+      "presentation_id": "unit.cavalry",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee", "cavalry"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "cavalry_idle", "enemy_asset_name": "enemy_cavalry_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "cavalry_move", "enemy_asset_name": "enemy_cavalry_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "cavalry_attack", "enemy_asset_name": "enemy_cavalry_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "cavalry_death", "enemy_asset_name": "enemy_cavalry_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "cavalry_corpse", "enemy_asset_name": "enemy_cavalry_corpse", "graphic_id": 155, "loop": false}
+        },
+        "presentation_variants": {
+          "38": {
+            "idle": {"asset_name": "heavy_cavalry_idle", "enemy_asset_name": "enemy_heavy_cavalry_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "heavy_cavalry_move", "enemy_asset_name": "enemy_heavy_cavalry_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "heavy_cavalry_attack", "enemy_asset_name": "enemy_heavy_cavalry_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "heavy_cavalry_death", "enemy_asset_name": "enemy_heavy_cavalry_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "heavy_cavalry_corpse", "enemy_asset_name": "enemy_heavy_cavalry_corpse", "graphic_id": 152, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "horse_archer",
+      "internal_id": "ror.unit.horse_archer",
+      "source_unit_id": 39,
+      "presentation_id": "unit.horse_archer",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "ranged", "cavalry"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "horse_archer_idle", "enemy_asset_name": "enemy_horse_archer_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "horse_archer_move", "enemy_asset_name": "enemy_horse_archer_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "horse_archer_attack", "enemy_asset_name": "enemy_horse_archer_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "horse_archer_death", "enemy_asset_name": "enemy_horse_archer_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "horse_archer_corpse", "enemy_asset_name": "enemy_horse_archer_corpse", "graphic_id": 134, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "war_elephant",
+      "internal_id": "ror.unit.war_elephant",
+      "source_unit_id": 46,
+      "presentation_id": "unit.war_elephant",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee", "cavalry", "elephant"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "war_elephant_idle", "enemy_asset_name": "enemy_war_elephant_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "war_elephant_move", "enemy_asset_name": "enemy_war_elephant_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "war_elephant_attack", "enemy_asset_name": "enemy_war_elephant_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "war_elephant_death", "enemy_asset_name": "enemy_war_elephant_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "war_elephant_corpse", "enemy_asset_name": "enemy_war_elephant_corpse", "graphic_id": 165, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "cataphract",
+      "internal_id": "ror.unit.cataphract",
+      "source_unit_id": 283,
+      "presentation_id": "unit.cataphract",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee", "cavalry"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "cataphract_idle", "enemy_asset_name": "enemy_cataphract_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "cataphract_move", "enemy_asset_name": "enemy_cataphract_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "cataphract_attack", "enemy_asset_name": "enemy_cataphract_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "cataphract_death", "enemy_asset_name": "enemy_cataphract_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "cataphract_corpse", "enemy_asset_name": "enemy_cataphract_corpse", "graphic_id": 152, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "elephant_archer",
+      "internal_id": "ror.unit.elephant_archer",
+      "source_unit_id": 25,
+      "presentation_id": "unit.elephant_archer",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "ranged", "cavalry", "elephant"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "elephant_archer_idle", "enemy_asset_name": "enemy_elephant_archer_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "elephant_archer_move", "enemy_asset_name": "enemy_elephant_archer_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "elephant_archer_attack", "enemy_asset_name": "enemy_elephant_archer_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "elephant_archer_death", "enemy_asset_name": "enemy_elephant_archer_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "elephant_archer_corpse", "enemy_asset_name": "enemy_elephant_archer_corpse", "graphic_id": 146, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "armored_elephant",
+      "internal_id": "ror.unit.armored_elephant",
+      "source_unit_id": 345,
+      "presentation_id": "unit.armored_elephant",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee", "cavalry", "elephant"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "armored_elephant_idle", "enemy_asset_name": "enemy_armored_elephant_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "armored_elephant_move", "enemy_asset_name": "enemy_armored_elephant_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "armored_elephant_attack", "enemy_asset_name": "enemy_armored_elephant_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "armored_elephant_death", "enemy_asset_name": "enemy_armored_elephant_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "armored_elephant_corpse", "enemy_asset_name": "enemy_armored_elephant_corpse", "graphic_id": 926, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "chariot",
+      "internal_id": "ror.unit.chariot",
+      "source_unit_id": 40,
+      "presentation_id": "unit.chariot",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee", "cavalry", "chariot"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "chariot_idle", "enemy_asset_name": "enemy_chariot_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "chariot_move", "enemy_asset_name": "enemy_chariot_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "chariot_attack", "enemy_asset_name": "enemy_chariot_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "chariot_death", "enemy_asset_name": "enemy_chariot_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "chariot_corpse", "enemy_asset_name": "enemy_chariot_corpse", "graphic_id": 144, "loop": false}
+        },
+        "presentation_variants": {
+          "339": {
+            "idle": {"asset_name": "scythe_chariot_idle", "enemy_asset_name": "enemy_scythe_chariot_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "scythe_chariot_move", "enemy_asset_name": "enemy_scythe_chariot_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "scythe_chariot_attack", "enemy_asset_name": "enemy_scythe_chariot_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "scythe_chariot_death", "enemy_asset_name": "enemy_scythe_chariot_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "scythe_chariot_corpse", "enemy_asset_name": "enemy_scythe_chariot_corpse", "graphic_id": 927, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "priest",
+      "internal_id": "ror.unit.priest",
+      "source_unit_id": 125,
+      "presentation_id": "unit.priest",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "converter", "healer", "religious"],
+      "runtime": {
+        "conversion": {
+          "base_success_chance": 0.3,
+          "minimum_chants": 3,
+          "maximum_chants": 100,
+          "building_range": 1.0,
+          "resistant_target_multiplier": 0.25
+        },
+		"healing": {
+		  "range": 4.0,
+		  "bonus_resource_id": 56
+		},
+        "presentation_states": {
+          "idle": {"asset_name": "priest_idle", "enemy_asset_name": "enemy_priest_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "priest_move", "enemy_asset_name": "enemy_priest_move", "graphic_field": "move", "loop": true},
+          "convert": {"asset_name": "priest_convert", "enemy_asset_name": "enemy_priest_convert", "graphic_id": 36, "loop": true},
+		  "heal": {"asset_name": "priest_convert", "enemy_asset_name": "enemy_priest_convert", "graphic_id": 816, "loop": true},
+          "death": {"asset_name": "priest_death", "enemy_asset_name": "enemy_priest_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "priest_corpse", "enemy_asset_name": "enemy_priest_corpse", "graphic_id": 162, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "fishing_boat",
+      "internal_id": "ror.unit.fishing_boat",
+      "source_unit_id": 13,
+      "presentation_id": "unit.fishing_boat",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "worker", "gatherer", "naval"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "fishing_boat_idle", "enemy_asset_name": "enemy_fishing_boat_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "fishing_boat_move", "enemy_asset_name": "enemy_fishing_boat_move", "graphic_field": "move", "loop": true},
+          "work": {"asset_name": "fishing_boat_work", "enemy_asset_name": "enemy_fishing_boat_work", "graphic_id": 43, "loop": true},
+          "death": {"asset_name": "fishing_boat_death", "enemy_asset_name": "enemy_fishing_boat_death", "graphic_field": "death", "loop": false}
+        },
+        "presentation_variants": {
+          "14": {
+            "idle": {"asset_name": "fishing_ship_idle", "enemy_asset_name": "enemy_fishing_ship_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "fishing_ship_move", "enemy_asset_name": "enemy_fishing_ship_move", "graphic_field": "move", "loop": true},
+            "work": {"asset_name": "fishing_ship_work", "enemy_asset_name": "enemy_fishing_ship_work", "graphic_id": 784, "loop": true},
+            "death": {"asset_name": "fishing_boat_death", "enemy_asset_name": "enemy_fishing_boat_death", "graphic_field": "death", "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "archimedes",
+      "internal_id": "ror.unit.hero_archimedes",
+      "source_unit_id": 382,
+      "presentation_id": "unit.hero_archimedes",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "hero", "scenario_special"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "archimedes_idle", "enemy_asset_name": "enemy_archimedes_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "archimedes_move", "enemy_asset_name": "enemy_archimedes_move", "graphic_field": "move", "loop": true},
+          "death": {"asset_name": "archimedes_death", "enemy_asset_name": "enemy_archimedes_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "archimedes_corpse", "enemy_asset_name": "enemy_archimedes_corpse", "graphic_id": 162, "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "trade_boat",
+      "internal_id": "ror.unit.trade_boat",
+      "source_unit_id": 15,
+      "presentation_id": "unit.trade_boat",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "naval", "trader"],
+      "runtime": {
+        "trade": {
+          "enabled": true,
+          "transaction_amount": 20,
+          "pool_initial": 0,
+          "pool_maximum": 100,
+          "pool_recovery_per_second": 1.0,
+          "default_input_resource_type_id": 1,
+          "allowed_input_resource_type_ids": [0, 1, 2],
+          "output_resource_type_id": 3,
+          "profit_policy": "ror_distance_calibration_pending_v1"
+        },
+        "presentation_states": {
+          "idle": {"asset_name": "trade_boat_idle", "enemy_asset_name": "enemy_trade_boat_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "trade_boat_move", "enemy_asset_name": "enemy_trade_boat_move", "graphic_field": "move", "loop": true},
+          "death": {"asset_name": "fishing_boat_death", "enemy_asset_name": "enemy_fishing_boat_death", "graphic_field": "death", "loop": false}
+        },
+        "presentation_variants": {
+          "16": {
+            "idle": {"asset_name": "merchant_ship_idle", "enemy_asset_name": "enemy_merchant_ship_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "merchant_ship_move", "enemy_asset_name": "enemy_merchant_ship_move", "graphic_field": "move", "loop": true}
+          }
+        }
+      }
+    },
+    {
+      "alias": "transport",
+      "internal_id": "ror.unit.transport",
+      "source_unit_id": 17,
+      "presentation_id": "unit.transport",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "naval", "transport"],
+      "runtime": {
+        "cargo": {"enabled": true, "allowed_domains": ["land"]},
+        "presentation_states": {
+            "idle": {"asset_name": "transport_hull", "enemy_asset_name": "enemy_transport_hull", "graphic_id": 51, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
+            "move": {"asset_name": "transport_hull", "enemy_asset_name": "enemy_transport_hull", "graphic_id": 51, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
+          "death": {"asset_name": "fishing_boat_death", "enemy_asset_name": "enemy_fishing_boat_death", "graphic_field": "death", "loop": false}
+        },
+        "presentation_variants": {
+          "18": {
+              "idle": {"asset_name": "heavy_transport_hull", "enemy_asset_name": "enemy_heavy_transport_hull", "graphic_id": 54, "loop": true, "composite_parts": [{"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": true}]},
+              "move": {"asset_name": "heavy_transport_hull", "enemy_asset_name": "enemy_heavy_transport_hull", "graphic_id": 54, "loop": true, "composite_parts": [{"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": true}]},
+            "death": {"asset_name": "heavy_transport_death", "enemy_asset_name": "enemy_heavy_transport_death", "graphic_field": "death", "loop": false}
+          }
+        }
+      }
+      },
+      {
+        "alias": "scout_ship",
+        "internal_id": "ror.unit.scout_ship",
+        "source_unit_id": 19,
+        "presentation_id": "unit.scout_ship",
+        "category": "unit",
+        "civilization_scope": "team",
+        "behavior_tags": ["mobile", "naval", "combatant", "ranged"],
+        "runtime": {
+          "projectile_impact": {"friendly_fire": false, "blast_falloff": "none", "impact_effect_graphic_id": -1},
+          "presentation_states": {
+            "idle": {"asset_name": "scout_ship_hull", "enemy_asset_name": "enemy_scout_ship_hull", "graphic_id": 57, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
+            "move": {"asset_name": "scout_ship_hull", "enemy_asset_name": "enemy_scout_ship_hull", "graphic_id": 57, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
+            "attack": {"asset_name": "scout_ship_hull", "enemy_asset_name": "enemy_scout_ship_hull", "graphic_id": 57, "audio_graphic_field": "attack", "loop": false, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": false}]},
+            "death": {"asset_name": "fishing_boat_death", "enemy_asset_name": "enemy_fishing_boat_death", "graphic_field": "death", "loop": false}
+          },
+          "presentation_variants": {
+            "20": {
+              "idle": {"asset_name": "war_galley_hull", "enemy_asset_name": "enemy_war_galley_hull", "graphic_id": 61, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
+              "move": {"asset_name": "war_galley_hull", "enemy_asset_name": "enemy_war_galley_hull", "graphic_id": 61, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
+              "attack": {"asset_name": "war_galley_hull", "enemy_asset_name": "enemy_war_galley_hull", "graphic_id": 61, "audio_graphic_field": "attack", "loop": false, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": false}]},
+              "death": {"asset_name": "heavy_transport_death", "enemy_asset_name": "enemy_heavy_transport_death", "graphic_field": "death", "loop": false}
+            },
+            "21": {
+              "idle": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "loop": true, "composite_parts": [{"asset_name": "trireme_oars", "enemy_asset_name": "enemy_trireme_oars", "graphic_id": 67, "loop": true}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": true}]},
+              "move": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "loop": true, "composite_parts": [{"asset_name": "trireme_oars", "enemy_asset_name": "enemy_trireme_oars", "graphic_id": 67, "loop": true}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": true}]},
+              "attack": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "audio_graphic_field": "attack", "loop": false, "composite_parts": [{"asset_name": "trireme_oars", "enemy_asset_name": "enemy_trireme_oars", "graphic_id": 67, "loop": false}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": false}]},
+              "death": {"asset_name": "trireme_death", "enemy_asset_name": "enemy_trireme_death", "graphic_field": "death", "loop": false}
+            }
+          }
+        }
+      },
+      {
+        "alias": "catapult_trireme",
+        "internal_id": "ror.unit.catapult_trireme",
+        "source_unit_id": 250,
+        "presentation_id": "unit.catapult_trireme",
+        "category": "unit",
+        "civilization_scope": "team",
+        "behavior_tags": ["mobile", "naval", "combatant", "ranged", "siege"],
+        "runtime": {
+          "projectile_impact": {"friendly_fire": true, "blast_falloff": "none", "impact_effect_graphic_id": 270},
+          "presentation_states": {
+            "idle": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "loop": true, "composite_parts": [{"asset_name": "catapult_trireme_weapon", "enemy_asset_name": "enemy_catapult_trireme_weapon", "graphic_id": 70, "loop": true}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": true}]},
+            "move": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "loop": true, "composite_parts": [{"asset_name": "catapult_trireme_weapon", "enemy_asset_name": "enemy_catapult_trireme_weapon", "graphic_id": 70, "loop": true}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": true}]},
+            "attack": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "audio_graphic_field": "attack", "loop": false, "composite_parts": [{"asset_name": "catapult_trireme_weapon", "enemy_asset_name": "enemy_catapult_trireme_weapon", "graphic_id": 70, "loop": false}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": false}]},
+            "death": {"asset_name": "trireme_death", "enemy_asset_name": "enemy_trireme_death", "graphic_field": "death", "loop": false}
+          },
+          "presentation_variants": {
+            "277": {
+              "idle": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "loop": true, "composite_parts": [{"asset_name": "catapult_trireme_weapon", "enemy_asset_name": "enemy_catapult_trireme_weapon", "graphic_id": 70, "loop": true}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": true}]},
+              "move": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "loop": true, "composite_parts": [{"asset_name": "catapult_trireme_weapon", "enemy_asset_name": "enemy_catapult_trireme_weapon", "graphic_id": 70, "loop": true}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": true}]},
+              "attack": {"asset_name": "trireme_hull", "enemy_asset_name": "enemy_trireme_hull", "graphic_id": 65, "audio_graphic_field": "attack", "loop": false, "composite_parts": [{"asset_name": "catapult_trireme_weapon", "enemy_asset_name": "enemy_catapult_trireme_weapon", "graphic_id": 70, "loop": false}, {"asset_name": "heavy_transport_sail", "enemy_asset_name": "enemy_heavy_transport_sail", "graphic_id": 46, "loop": false}]},
+              "death": {"asset_name": "trireme_death", "enemy_asset_name": "enemy_trireme_death", "graphic_field": "death", "loop": false}
+            }
+          }
+        }
+      },
+      {
+        "alias": "fire_galley",
+        "internal_id": "ror.unit.fire_galley",
+        "source_unit_id": 360,
+        "presentation_id": "unit.fire_galley",
+        "category": "unit",
+        "civilization_scope": "team",
+        "behavior_tags": ["mobile", "naval", "combatant", "melee"],
+        "runtime": {
+          "presentation_states": {
+            "idle": {"asset_name": "fire_galley_idle", "graphic_field": "idle", "loop": true, "composite_parts": [{"asset_name": "fire_galley_idle_fire", "graphic_id": 915, "loop": true}]},
+            "move": {"asset_name": "fire_galley_move", "graphic_field": "move", "loop": true, "composite_parts": [{"asset_name": "fire_galley_move_fire", "graphic_id": 916, "loop": true}]},
+            "attack": {"asset_name": "fire_galley_attack", "graphic_field": "attack", "loop": false, "composite_parts": [{"asset_name": "fire_galley_attack_fire", "graphic_id": 914, "loop": false}]},
+            "death": {"asset_name": "fire_galley_death", "enemy_asset_name": "enemy_fire_galley_death", "graphic_field": "death", "loop": false}
+          }
+        }
+      },
+      {
+        "alias": "stone_thrower",
+      "internal_id": "ror.unit.stone_thrower",
+      "source_unit_id": 35,
+      "presentation_id": "unit.stone_thrower",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "ranged", "siege"],
+      "runtime": {
+        "projectile_impact": {
+          "friendly_fire": true,
+          "blast_falloff": "none",
+          "impact_effect_graphic_id": 272
+        },
+        "presentation_states": {
+          "idle": {"asset_name": "stone_thrower_idle", "enemy_asset_name": "enemy_stone_thrower_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "stone_thrower_move", "enemy_asset_name": "enemy_stone_thrower_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "stone_thrower_attack", "enemy_asset_name": "enemy_stone_thrower_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "stone_thrower_death", "enemy_asset_name": "enemy_stone_thrower_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "stone_thrower_corpse", "enemy_asset_name": "enemy_stone_thrower_corpse", "graphic_id": 143, "loop": false}
+        },
+        "presentation_variants": {
+          "36": {
+            "idle": {"asset_name": "catapult_idle", "enemy_asset_name": "enemy_catapult_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "catapult_move", "enemy_asset_name": "enemy_catapult_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "catapult_attack", "enemy_asset_name": "enemy_catapult_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "catapult_death", "enemy_asset_name": "enemy_catapult_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "catapult_corpse", "enemy_asset_name": "enemy_catapult_corpse", "graphic_id": 142, "loop": false}
+          },
+          "280": {
+            "idle": {"asset_name": "catapult_idle", "enemy_asset_name": "enemy_catapult_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "catapult_move", "enemy_asset_name": "enemy_catapult_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "catapult_attack", "enemy_asset_name": "enemy_catapult_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "catapult_death", "enemy_asset_name": "enemy_catapult_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "catapult_corpse", "enemy_asset_name": "enemy_catapult_corpse", "graphic_id": 142, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "ballista",
+      "internal_id": "ror.unit.ballista",
+      "source_unit_id": 11,
+      "presentation_id": "unit.ballista",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "ranged", "siege"],
+      "runtime": {
+        "projectile_impact": {
+          "friendly_fire": false,
+          "blast_falloff": "none",
+          "impact_effect_graphic_id": 272
+        },
+        "presentation_states": {
+          "idle": {"asset_name": "ballista_idle", "enemy_asset_name": "enemy_ballista_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "ballista_move", "enemy_asset_name": "enemy_ballista_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "ballista_attack", "enemy_asset_name": "enemy_ballista_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "ballista_death", "enemy_asset_name": "enemy_ballista_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "ballista_corpse", "enemy_asset_name": "enemy_ballista_corpse", "graphic_id": 140, "loop": false}
+        },
+        "presentation_variants": {
+          "279": {
+            "idle": {"asset_name": "ballista_idle", "enemy_asset_name": "enemy_ballista_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "ballista_move", "enemy_asset_name": "enemy_ballista_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "ballista_attack", "enemy_asset_name": "enemy_ballista_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "ballista_death", "enemy_asset_name": "enemy_ballista_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "ballista_corpse", "enemy_asset_name": "enemy_ballista_corpse", "graphic_id": 140, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "gazelle",
+      "internal_id": "ror.huntable.gazelle",
+      "source_unit_id": 65,
+      "presentation_id": "unit.gazelle",
+      "category": "unit",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["mobile", "combatant", "huntable", "prey"],
+      "runtime": {
+        "worker_profile": "hunt",
+        "hunt_behavior": "flee",
+        "carcass_alias": "gazelle_carcass",
+        "harvest_amount": 150,
+        "presentation_states": {
+          "idle": {"asset_name": "gazelle_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "gazelle_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "gazelle_idle", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "gazelle_death", "graphic_field": "death", "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "elephant",
+      "internal_id": "ror.huntable.elephant",
+      "source_unit_id": 48,
+      "presentation_id": "unit.elephant",
+      "category": "unit",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["mobile", "combatant", "huntable", "dangerous_huntable"],
+      "runtime": {
+        "worker_profile": "hunt",
+        "hunt_behavior": "retaliate",
+        "carcass_alias": "elephant_carcass",
+        "harvest_amount": 300,
+        "presentation_states": {
+          "idle": {"asset_name": "elephant_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "elephant_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "elephant_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "elephant_death", "graphic_field": "death", "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "alligator",
+      "internal_id": "ror.wildlife.alligator",
+      "source_unit_id": 1,
+      "presentation_id": "unit.alligator",
+      "category": "unit",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["mobile", "combatant", "huntable", "predator"],
+      "runtime": {
+        "source_variant_unit_ids": [362],
+        "worker_profile": "hunt",
+        "hunt_behavior": "predator",
+        "aggression_range": 5.0,
+        "leash_range": 10.0,
+        "carcass_alias": "alligator_carcass",
+        "harvest_amount": 100,
+        "presentation_states": {
+          "idle": {"asset_name": "alligator_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "alligator_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "alligator_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "alligator_death", "graphic_field": "death", "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "lion",
+      "internal_id": "ror.wildlife.lion",
+      "source_unit_id": 126,
+      "presentation_id": "unit.lion",
+      "category": "unit",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["mobile", "combatant", "huntable", "predator"],
+      "runtime": {
+        "worker_profile": "hunt",
+        "hunt_behavior": "predator",
+        "aggression_range": 3.0,
+        "leash_range": 6.0,
+        "carcass_alias": "lion_carcass",
+        "harvest_amount": 100,
+        "presentation_states": {
+          "idle": {"asset_name": "lion_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "lion_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "lion_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "lion_death", "graphic_field": "death", "loop": false}
+        }
+      }
+    },
+    {
+      "alias": "dock",
+      "internal_id": "ror.building.dock",
+      "source_unit_id": 45,
+      "presentation_id": "building.dock",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "producer", "researcher", "drop_site", "naval"],
+      "runtime": {
+        "required_technology_id": 90,
+        "accepted_resource_type_ids": [0],
+        "placement": {
+          "domain": "water",
+          "terrain_restriction_id": 6,
+          "required_adjacent_domains": ["land", "water"]
+        }
+      }
+    },
+    {
+      "alias": "academy",
+      "internal_id": "ror.building.academy",
+      "source_unit_id": 0,
+      "presentation_id": "building.academy",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "producer", "researcher"]
+    },
+    {
+      "alias": "stable",
+      "internal_id": "ror.building.stable",
+      "source_unit_id": 101,
+      "presentation_id": "building.stable",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "producer", "researcher"]
+    },
+    {
+      "alias": "temple",
+      "internal_id": "ror.building.temple",
+      "source_unit_id": 104,
+      "presentation_id": "building.temple",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "producer", "researcher", "religious"]
+    },
+    {
+      "alias": "siege_workshop",
+      "internal_id": "ror.building.siege_workshop",
+      "source_unit_id": 49,
+      "presentation_id": "building.siege_workshop",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "producer", "researcher", "siege"]
+    },
+    {
+      "alias": "town_center",
+      "internal_id": "ror.building.town_center",
+      "source_unit_id": 109,
+      "presentation_id": "building.town_center",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "drop_site", "producer", "researcher"]
+    },
+    {
+      "alias": "barracks",
+      "internal_id": "ror.building.barracks",
+      "source_unit_id": 12,
+      "presentation_id": "building.barracks",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "producer", "researcher"]
+    },
+    {
+      "alias": "house",
+      "internal_id": "ror.building.house",
+      "source_unit_id": 70,
+      "presentation_id": "building.house",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "population_provider"]
+    },
+    {
+      "alias": "farm",
+      "internal_id": "ror.building.farm",
+      "source_unit_id": 50,
+      "presentation_id": "building.farm",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "harvestable", "passable"],
+      "runtime": {
+        "required_technology_id": 26,
+        "resource_type_id": 0,
+        "resource_amount_id": 36,
+        "worker_profile": "farm",
+        "approach_mode": "interior",
+        "max_gatherers": 1,
+        "auto_gather_on_complete": true,
+        "depleted_source_unit_id": 244,
+        "depleted_graphic_id": 148
+      }
+    },
+    {
+      "alias": "market",
+      "internal_id": "ror.building.market",
+      "source_unit_id": 84,
+      "presentation_id": "building.market",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "researcher"],
+      "runtime": {"required_technology_id": 94}
+    },
+    {
+      "alias": "government_center",
+      "internal_id": "ror.building.government_center",
+      "source_unit_id": 82,
+      "presentation_id": "building.government_center",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "researcher"],
+      "runtime": {"required_technology_id": 93}
+    },
+    {
+      "alias": "wall",
+      "internal_id": "ror.building.wall",
+      "source_unit_id": 72,
+      "presentation_id": "building.wall",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "defence", "wall"],
+      "runtime": {
+        "required_technology_id": 11,
+        "connectivity_group": "wall",
+        "connectivity_neighborhood": "cardinal",
+        "source_variant_unit_ids": [117, 155]
+      }
+    },
+    {
+      "alias": "tower",
+      "internal_id": "ror.building.tower",
+      "source_unit_id": 79,
+      "presentation_id": "building.tower",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "defence", "combatant", "ranged"],
+      "runtime": {
+        "required_technology_id": 16,
+        "combat_stance": "stand_ground",
+        "source_variant_unit_ids": [199, 278]
+      }
+    },
+    {
+      "alias": "mirror_tower",
+      "internal_id": "ror.building.mirror_tower",
+      "source_unit_id": 383,
+      "presentation_id": "building.mirror_tower",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "defence", "combatant", "ranged", "scenario_special"],
+      "runtime": {"combat_stance": "stand_ground"}
+    },
+    {
+      "alias": "wonder",
+      "internal_id": "ror.building.wonder",
+      "source_unit_id": 276,
+      "presentation_id": "building.wonder",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "victory_structure", "wonder"],
+      "runtime": {"required_technology_id": 116, "victory_objective_category": "wonder"}
+    },
+    {
+      "alias": "ruin",
+      "internal_id": "ror.objective.ruin",
+      "source_unit_id": 158,
+      "presentation_id": "objective.ruin",
+      "category": "objective",
+      "civilization_scope": "neutral",
+      "behavior_tags": ["static", "capturable", "victory_objective"],
+      "runtime": {"victory_objective_category": "ruin"}
+    },
+    {
+      "alias": "granary",
+      "internal_id": "ror.building.granary",
+      "source_unit_id": 68,
+      "presentation_id": "building.granary",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "drop_site", "researcher"],
+      "runtime": {"accepted_resource_type_ids": [0]}
+    },
+    {
+      "alias": "storage_pit",
+      "internal_id": "ror.building.storage_pit",
+      "source_unit_id": 103,
+      "presentation_id": "building.storage_pit",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "drop_site", "researcher"],
+      "runtime": {"accepted_resource_type_ids": [1, 2, 3]}
+    },
+    {
+      "alias": "archery_range",
+      "internal_id": "ror.building.archery_range",
+      "source_unit_id": 87,
+      "presentation_id": "building.archery_range",
+      "category": "building",
+      "civilization_scope": "team",
+      "behavior_tags": ["static", "producer", "researcher"]
+    },
+    {
+      "alias": "deep_fish",
+      "internal_id": "ror.resource.deep_fish",
+      "source_unit_id": 52,
+      "presentation_id": "resource.deep_fish",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "food", "fish", "water"],
+      "runtime": {
+        "resource_type_id": 0,
+        "visible_when_depleted": false,
+        "asset_name": "deep_fish",
+        "worker_profile": "fish",
+        "placement_domain": "water",
+        "placement_terrain_restriction_id": 3,
+        "allowed_gatherer_domains": ["water"],
+        "source_variant_unit_ids": [53]
+      }
+    },
+    {
+      "alias": "shore_fish",
+      "internal_id": "ror.resource.shore_fish",
+      "source_unit_id": 260,
+      "presentation_id": "resource.shore_fish",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "food", "fish", "shore"],
+      "runtime": {
+        "resource_type_id": 0,
+        "visible_when_depleted": false,
+        "asset_name": "shore_fish",
+        "worker_profile": "fish",
+        "placement_domain": "water",
+        "placement_terrain_restriction_id": 3,
+        "allowed_gatherer_domains": ["land", "water"],
+        "source_variant_unit_ids": [263]
+      }
+    },
+    {
+      "alias": "whale",
+      "internal_id": "ror.resource.whale",
+      "source_unit_id": 370,
+      "presentation_id": "resource.whale",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "food", "fish", "water"],
+      "runtime": {
+        "resource_type_id": 0,
+        "visible_when_depleted": false,
+        "asset_name": "whale",
+        "worker_profile": "fish",
+        "placement_domain": "water",
+        "placement_terrain_restriction_id": 3,
+        "allowed_gatherer_domains": ["water"],
+        "animated": true,
+        "source_variant_unit_ids": []
+      }
+    },
+    {
+      "alias": "tree",
+      "internal_id": "ror.resource.tree_oak",
+      "source_unit_id": 144,
+      "presentation_id": "resource.tree",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "wood"],
+      "runtime": {"resource_type_id": 1, "visible_when_depleted": true, "asset_name": "tree", "depleted_asset_name": "tree_stump"}
+    },
+    {
+      "alias": "berries",
+      "internal_id": "ror.resource.berry_bush",
+      "source_unit_id": 59,
+      "presentation_id": "resource.berries",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "food"],
+      "runtime": {"resource_type_id": 0, "visible_when_depleted": false, "asset_name": "berry_bush"}
+    },
+    {
+      "alias": "gold_mine",
+      "internal_id": "ror.resource.gold_mine",
+      "source_unit_id": 66,
+      "presentation_id": "resource.gold_mine",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "gold"],
+      "runtime": {"resource_type_id": 3, "visible_when_depleted": false, "asset_name": "gold_mine"}
+    },
+    {
+      "alias": "stone_mine",
+      "internal_id": "ror.resource.stone_mine",
+      "source_unit_id": 102,
+      "presentation_id": "resource.stone_mine",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "stone"],
+      "runtime": {"resource_type_id": 2, "visible_when_depleted": false, "asset_name": "stone_mine"}
+    },
+    {
+      "alias": "gazelle_carcass",
+      "internal_id": "ror.resource.gazelle_carcass",
+      "source_unit_id": 262,
+      "presentation_id": "resource.gazelle_carcass",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "food", "carcass"],
+      "runtime": {"resource_type_id": 0, "visible_when_depleted": false, "asset_name": "gazelle_carcass", "worker_profile": "hunt", "decay_rate": 0.3}
+    },
+    {
+      "alias": "elephant_carcass",
+      "internal_id": "ror.resource.elephant_carcass",
+      "source_unit_id": 335,
+      "presentation_id": "resource.elephant_carcass",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "food", "carcass"],
+      "runtime": {"resource_type_id": 0, "visible_when_depleted": false, "asset_name": "elephant_carcass", "worker_profile": "hunt", "decay_rate": 0.2}
+    },
+    {
+      "alias": "alligator_carcass",
+      "internal_id": "ror.resource.alligator_carcass",
+      "source_unit_id": 85,
+      "presentation_id": "resource.alligator_carcass",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "food", "carcass"],
+      "runtime": {"resource_type_id": 0, "visible_when_depleted": false, "asset_name": "alligator_carcass", "worker_profile": "hunt", "decay_rate": 1.0}
+    },
+    {
+      "alias": "lion_carcass",
+      "internal_id": "ror.resource.lion_carcass",
+      "source_unit_id": 369,
+      "presentation_id": "resource.lion_carcass",
+      "category": "resource",
+      "civilization_scope": "gaia",
+      "behavior_tags": ["static", "gatherable", "food", "carcass"],
+      "runtime": {"resource_type_id": 0, "visible_when_depleted": false, "asset_name": "lion_carcass", "worker_profile": "hunt", "decay_rate": 1.0}
+    },
+    {
+      "alias": "catapult_ship_projectile",
+      "internal_id": "ror.projectile.catapult_ship_projectile",
+      "source_unit_id": 368,
+      "presentation_id": "projectile.catapult_ship_projectile",
+      "category": "projectile",
+      "civilization_scope": "team",
+      "behavior_tags": ["projectile", "naval", "blast"],
+      "runtime": {"asset_name": "catapult_ship_projectile", "graphic_id": 368, "loop": true}
+    },
+    {
+      "alias": "arrow",
+      "internal_id": "ror.projectile.arrow",
+      "source_unit_id": 9,
+      "presentation_id": "projectile.arrow",
+      "category": "projectile",
+      "civilization_scope": "team",
+      "behavior_tags": ["projectile"],
+      "runtime": {"asset_name": "arrow", "graphic_id": 0, "loop": true}
+    },
+    {
+      "alias": "sling_stone",
+      "internal_id": "ror.projectile.sling_stone",
+      "source_unit_id": 361,
+      "presentation_id": "projectile.sling_stone",
+      "category": "projectile",
+      "civilization_scope": "team",
+      "behavior_tags": ["projectile"],
+      "runtime": {"asset_name": "sling_stone", "graphic_id": 901, "loop": true}
+    },
+    {
+      "alias": "hunter_spear",
+      "internal_id": "ror.projectile.hunter_spear",
+      "source_unit_id": 100,
+      "presentation_id": "projectile.hunter_spear",
+      "category": "projectile",
+      "civilization_scope": "team",
+      "behavior_tags": ["projectile"],
+      "runtime": {"asset_name": "hunter_spear", "graphic_id": 513, "loop": true}
+    },
+    {
+      "alias": "siege_rock",
+      "internal_id": "ror.projectile.siege_rock",
+      "source_unit_id": 34,
+      "presentation_id": "projectile.siege_rock",
+      "category": "projectile",
+      "civilization_scope": "team",
+      "behavior_tags": ["projectile", "siege", "blast"],
+      "runtime": {"asset_name": "siege_rock", "graphic_id": 96, "loop": true}
+    },
+    {
+      "alias": "ballista_bolt",
+      "internal_id": "ror.projectile.ballista_bolt",
+      "source_unit_id": 204,
+      "presentation_id": "projectile.ballista_bolt",
+      "category": "projectile",
+      "civilization_scope": "team",
+      "behavior_tags": ["projectile", "siege"],
+      "runtime": {"asset_name": "ballista_bolt", "graphic_id": 2, "loop": true}
+    }
+  ]
+}

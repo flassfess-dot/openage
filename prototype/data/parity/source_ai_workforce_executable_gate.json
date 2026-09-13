@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "gate_id": "I12-020L-WORKFORCE",
+  "status": "capture_pending",
+  "reference_build": {
+    "product": "Age of Empires, the Rise of Rome",
+    "product_version": "1.1",
+    "file_version": "00.01.6.1120",
+    "executable_name": "EMPIRESX.EXE",
+    "executable_sha256": "b5bc3050ee50cf1b548d21da0509bf5bbe8904eb766705084ab8a2fcdf6d8a9f",
+    "data_name": "data2/empires.dat",
+    "data_sha256": "d47c59d9ecaf5b83b467c647a69d28eced6a0dc5b2fa873e930c86136df5eb9d"
+  },
+  "strategic_numbers": [
+    {"source_id": 0, "name": "SNPercentCivilianExplorers", "campaign_values": [34]},
+    {"source_id": 1, "name": "SNPercentCivilianBuilders", "campaign_values": [34]},
+    {"source_id": 2, "name": "SNPercentCivilianGatherers", "campaign_values": [34]},
+    {"source_id": 3, "name": "SNCapCivilianExplorers", "campaign_values": [2]},
+    {"source_id": 4, "name": "SNCapCivilianBuilders", "campaign_values": [2]},
+    {"source_id": 5, "name": "SNCapCivilianGatherers", "campaign_values": [-1]}
+  ],
+  "capture_contract": {
+    "game_speed": "normal",
+    "difficulty_policy": "repeat at every supported campaign difficulty",
+    "seed_policy": "record every seed and repeat each boundary case at least five times",
+    "visibility": "all resources, build sites and observed workers remain visible and unchanged except for the isolated variable",
+    "isolation": "change only population size, one percentage/cap, or one worker lifecycle event per case",
+    "comparison_rule": "record actual role transitions and orders; do not infer rounding or redistribution from final resource totals"
+  },
+  "scenes": [
+    {
+      "id": "workforce_percentage_base_and_rounding",
+      "purpose": "Recover the population base, rounding method and treatment of percentages whose sum differs from 100.",
+      "source_unit_ids": [83, 118, 120, 123],
+      "required_metrics": ["seed", "difficulty", "civilian_count", "percentages", "initial_tasks", "assigned_explorer_ids", "assigned_builder_ids", "assigned_gatherer_ids", "unassigned_ids", "assignment_ticks"],
+      "modern_evidence": [
+        "res://scripts/source_campaign_ai_planner.gd",
+        "res://tests/unit/test_source_campaign_ai_planner.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "workforce_caps_after_percentages",
+      "purpose": "Determine whether capped surplus is redistributed and in which deterministic role order caps are applied.",
+      "source_unit_ids": [83, 118, 120, 123],
+      "required_metrics": ["seed", "civilian_count", "percentages", "caps", "uncapped_targets", "final_role_counts", "surplus_role", "assignment_ticks", "repetitions"],
+      "modern_evidence": [
+        "res://data/source_ai/default_vc.json",
+        "res://assets/generated/matches/mithridates.json"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "workforce_reservation_and_rebalance",
+      "purpose": "Recover when builders/explorers/gatherers may be retasked after commands, death, production, foundation completion and exploration changes.",
+      "source_unit_ids": [83, 118, 120, 123],
+      "required_metrics": ["seed", "event_type", "event_tick", "worker_ids", "tasks_before", "tasks_after", "reserved_worker_ids", "retask_tick", "role_counts_after", "repetitions"],
+      "modern_evidence": [
+        "res://scripts/ai_player.gd",
+        "res://scripts/source_ai_assignment_group.gd",
+        "res://tests/integration/test_source_campaign_ai_build_pipeline.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    }
+  ],
+  "source_owned_gaps": [],
+  "completion_rules": [
+    "Every scene has immutable original artifacts, executable and DAT hashes, and all required metrics.",
+    "Population boundary cases 1 through 12 and at least two larger populations are captured.",
+    "The accepted allocation policy predicts withheld percentage sums, cap combinations and event transitions.",
+    "The runtime planner has one serialized workforce owner and never issues two commands to one worker in a decision tick.",
+    "Explorer assignment groups and build/foundation reservations share the same authoritative roster.",
+    "The gate status changes to measured only after automated validation and campaign regression tests pass."
+  ]
+}

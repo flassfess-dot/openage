@@ -77,6 +77,14 @@ perf.data*
 
 # Virtual Environments
 /.venv/
+/.tools/
+/.tmp/
+/dist/
+/prototype/.godot/
+/prototype/assets/audio/
+/prototype/assets/generated/
+/prototype/qa/
+/tools/ror_import/scenario_converter/target/
 
 # macOS
 .DS_Store

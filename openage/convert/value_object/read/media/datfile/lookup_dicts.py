@@ -641,8 +641,10 @@ BLAST_DEFENSE_TYPES = {
     0: "UNIT_0",    # projectile, dead, fish, relic, tree, gate, towncenter
     1: "OTHER",     # 'other' things with multiple rotations
     2: "BUILDING",  # buildings, gates, walls, towncenter, fishtrap
-    3: "UNIT_3"     # boar, farm, fishingship, villager, tradecart, sheep, turkey,
+    3: "UNIT_3",    # boar, farm, fishingship, villager, tradecart, sheep, turkey,
                     # archers, junk, ships, monk, siege
+    # Rise of Rome 1.1 uses this value for additional unit records.
+    5: "ROR_1_1_UNKNOWN_5",
 }
 
 COMBAT_LEVELS = {

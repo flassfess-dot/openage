@@ -1,0 +1,68 @@
+# Контракт вертикальных волн контента
+
+Статус: рабочий контракт I12  
+Дата: 2026-09-12
+
+## Назначение
+
+RoR расширяется законченными вертикальными линиями, а не несвязанными объектами. Добавленный элемент считается интегрированным только тогда, когда исходная запись Rise of Rome проходит через нормализованные данные, авторитетную симуляцию, команды, presentation и автоматическое доказательство. Современная навигация, жизненный цикл формаций и задаваемое направление строя являются разрешёнными отличиями; характеристики и весь остальной контент берутся из оригинальных данных.
+
+## Источники истины
+
+- `prototype/assets/generated/objects-catalog.json` — объекты цивилизаций, технологии, effects, costs, producers и исходные graphics/sounds.
+- `prototype/assets/generated/graphics-catalog.json` — длительности, направления, кадры и graphic deltas.
+- `tools/ror_import/runtime-archetypes.json` — стабильные logical aliases, source identity, behavior tags и декларативные presentation profiles.
+- `tools/ror_import/prototype-selection.json` — единственный список ресурсов, которые экспортируются в постоянный локальный кэш.
+- `prototype/data/content_waves/stone_age.json` и `roman_all_ages.json` — заявленное покрытие и известные пробелы.
+
+Сгенерированные файлы не редактируются вручную. Изменение источников импорта выполняется один раз при разработке/сборке; обычный запуск с ярлыка использует готовый кэш.
+
+## Архитектурные владельцы
+
+1. `RoRDataRepository` разрешает alias, internal ID, source unit ID и цивилизационную запись.
+2. `SimulationWorld` и выделенные systems владеют состоянием, технологиями, производством, экономикой, боем, навигацией и формациями.
+3. `RoRUnitPresentationRegistry` выбирает анимацию по alias, фактическому source unit ID и team palette. Варианты улучшений задаются данными; кадры загружаются лениво при первом обращении.
+4. `RoRResourcePresentationRegistry` загружает только asset names ресурсных archetypes и обрабатывает истощение по runtime metadata.
+5. `RoRBuildingPresentationRegistry` разрешает архитектуру, строительство, damage, death и graphic deltas.
+6. HUD читает presentation snapshot и создаёт обычные команды; он не владеет правилами доступности или баланса.
+
+## Уровни заявления
+
+- `planned`: source IDs известны, реализация и доказательство отсутствуют.
+- `partial`: часть линии работает, но перечисленный scope закрыт не полностью.
+- `integrated`: каждый ID из `integrated_source_unit_ids` представлен runtime archetype либо source-aware variant, evidence-файл существует, а вертикальный тест проходит.
+- `parity`: дополнительно пройдены сравнение с эталоном RoR, необходимые визуальные/звуковые проверки и длительный сценарий. I12 пока не заявляет этот уровень.
+
+Матрица обязана перечислять неизвестное как gap, а не скрывать его. Тест матрицы должен падать, если заявлен integrated source ID без runtime-пути или если исчезло доказательство.
+
+## Порядок добавления линии юнитов
+
+1. Извлечь из Roman civilization record все source IDs линии, producer, costs, creation time, combat/geometry/sounds/graphics, dead-unit links и технологии unlock/upgrade.
+2. Записать линию в матрицу со статусом `planned` или `partial` до реализации.
+3. Создать один logical runtime archetype для линии. Базовый source ID задаётся в `source_unit_id`, последующие ступени — в `presentation_variants` по source ID.
+4. Добавить только фактически используемые idle/move/attack/death/corpse assets для player 1 и player 2 в selection manifest.
+5. Перегенерировать и провалидировать постоянный кэш. Ошибки недопустимы; предупреждения должны оставаться классифицированными исходными пробелами.
+6. Проверить обычный research/production pipeline: исходную блокировку, prerequisites, стоимость/время, unlock либо upgrade, изменение уже существующих сущностей и наследование будущими.
+7. Проверить source-derived характеристики и presentation каждого состояния, включая вражескую палитру и death/corpse lifecycle.
+8. Только после прохождения evidence изменить статус матрицы на `integrated`.
+
+Специальная ветка по имени нового юнита в центральном tick, input или renderer запрещена, если поведение выражается существующим system/tag/profile. Если обнаружена новая общая механика, сначала вводится её отдельный владелец и контрактный тест.
+
+## Порядок добавления ресурса или здания
+
+Для ресурса обязательны source identity, resource type, amount/capacity, footprint, gather/drop-off policy, depletion и presentation. Для здания обязательны source footprint/cost/time, placement, construction/repair, hidden technology connector, production/research, population/drop-site effects при наличии, damage/death и освобождение navigation footprint.
+
+## Текущий срез
+
+- Stone Age matrix не содержит скрытых gaps: береговая/глубоководная рыба, Fisherman 119, Dock 45 и Fishing Boat 13 имеют авторитетный runtime path и evidence.
+- Roman matrix: наземные unit/building линии, defences, Wonder, Priest actions и вся source-driven морская вертикаль интегрированы. Naval economy включает Whale 370; Trade/Transport — Dock-to-Dock lifecycle; combat 19 -> 20 -> 21/250 -> 277 имеет damage/death/impact, доступные source sounds, обе палитры/composite golden, mixed-domain AI и full-roster stress. Executable-level side-by-side и точная distance-to-gold формула остаются отдельными измеряемыми `PARITY` gaps.
+- Placement и navigation используют декларативные movement domain/source terrain restriction. Dock обязан иметь доступную воду для флота и сухопутный периметр для строителя. Deep Fish принимает только водного gatherer, Shore Fish — наземного Fisherman либо водного gatherer.
+- Составные корабли рендерятся общим unit-composite contract: hull, sail, oars и weapon layer выбираются из source graphics/deltas без корабельных веток в renderer.
+- Asset cache: 16563 выбранных элемента и 52 runtime archetype; unit/building/resource/projectile/effect/icon frames загружаются лениво. Manifest умеет явно выбирать `data`/`data2` при совпадающих SLP ID.
+- Gate: `138 passed, 0 failed`; cache validation — `0 errors, 181 warnings`; контрольный импорт дал `16563 cache hits, 0 misses`; Windows export и headless smoke-run успешны. I12-019G закрепила эталонную сборку и машинный measurement contract; морская вертикаль `INTEGRATED`, но её визуальный статус ещё не executable-level `PARITY`.
+
+## Ближайшая очередь
+
+1. Завершить I12-019G: заполнить side-by-side visual/audio observations и калибровку изолированной distance-to-gold policy по оригинальному executable.
+2. Сценарии/кампании.
+3. Финальные UI/audio/visual parity, golden и performance проходы.

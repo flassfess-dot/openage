@@ -1,0 +1,209 @@
+class_name RoRHUDControls
+extends Control
+
+const InterfaceLayout := preload("res://scripts/interface_layout.gd")
+
+signal formation_requested(formation_name: String)
+signal build_requested(building_kind: String)
+signal train_requested(unit_kind: String, building_id: int)
+signal research_requested(technology_id: int, building_id: int)
+signal cancel_production_requested(building_id: int, queue_index: int)
+signal trade_resource_requested(resource_type_id: int)
+
+const HUD_HEIGHT: float = InterfaceLayout.BOTTOM_HEIGHT
+const FORMATIONS := [
+	["LINE", "F5 LINE", "Line formation"],
+	["RECTANGLE", "F6 BLOCK", "Compact block formation"],
+	["COLUMN", "F7 COLUMN", "Narrow column formation"],
+	["WEDGE", "F8 WEDGE", "Wedge formation"],
+	["STAGGERED", "F9 STAGGER", "Staggered formation"],
+]
+
+var formation_buttons: Dictionary = {}
+var train_button: Button
+var train_buttons: Array[Button] = []
+var active_train_commands: Array = []
+var formation_group := ButtonGroup.new()
+var icon_registry
+var current_layout: Dictionary = {}
+
+
+func _init() -> void:
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	build_controls()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_RESIZED and not formation_buttons.is_empty():
+		current_layout = InterfaceLayout.for_viewport(size)
+		layout_controls()
+
+func build_controls() -> void:
+	for index in range(FORMATIONS.size()):
+		var definition: Array = FORMATIONS[index]
+		var formation_name: String = definition[0]
+		var button := Button.new()
+		button.text = definition[1]
+		button.tooltip_text = definition[2]
+		button.toggle_mode = true
+		button.button_group = formation_group
+		button.focus_mode = Control.FOCUS_NONE
+		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		apply_button_theme(button)
+		set_bottom_rect(button, Rect2(4, 4, 41, 31))
+		button.pressed.connect(_on_formation_pressed.bind(formation_name))
+		formation_buttons[formation_name] = button
+		add_child(button)
+
+	for index in range(18):
+		var button := Button.new()
+		button.visible = false
+		button.tooltip_text = "Команда производства"
+		button.focus_mode = Control.FOCUS_NONE
+		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		apply_button_theme(button)
+		button.pressed.connect(_on_action_pressed.bind(index))
+		train_buttons.append(button)
+		add_child(button)
+	train_button = train_buttons[0]
+
+
+func configure_icons(registry) -> void:
+	icon_registry = registry
+
+
+func set_layout(layout: Dictionary) -> void:
+	current_layout = layout.duplicate(true)
+	layout_controls()
+
+func set_state(formation_name: String, can_train: bool) -> void:
+	for key in formation_buttons:
+		formation_buttons[key].visible = true
+		formation_buttons[key].set_pressed_no_signal(key == formation_name)
+	train_button.visible = true
+	train_button.text = "[T] TRAIN CLUBMAN — 50 FOOD"
+	layout_controls()
+	train_button.disabled = not can_train
+
+
+func set_view_model(model: Dictionary) -> void:
+	var formation_commands: Dictionary = {}
+	active_train_commands.clear()
+	for command_value in model.get("commands", []):
+		var command: Dictionary = command_value
+		match String(command.get("type", "")):
+			"formation": formation_commands[String(command.get("id", ""))] = command
+			"build", "train", "research", "cancel_production", "trade_resource": active_train_commands.append(command)
+	for formation_name in formation_buttons:
+		var button: Button = formation_buttons[formation_name]
+		var command: Dictionary = formation_commands.get(formation_name, {})
+		button.visible = not command.is_empty()
+		if command.is_empty():
+			continue
+		button.text = "%s %s" % [String(command.get("hotkey", "")), String(command.get("label", formation_name)).to_upper()]
+		button.disabled = not bool(command.get("enabled", false))
+		button.set_pressed_no_signal(bool(command.get("active", false)))
+		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else String(command.get("label", formation_name))
+	for index in range(train_buttons.size()):
+		var button: Button = train_buttons[index]
+		button.visible = index < active_train_commands.size()
+		if not button.visible:
+			continue
+		var command: Dictionary = active_train_commands[index]
+		var cost_text := String(command.get("cost_text", ""))
+		var label := String(command.get("label", command.get("id", "")))
+		var icon: Texture2D = icon_registry.texture(String(command.get("icon_kind", "")), int(command.get("icon_id", -1))) if icon_registry != null else null
+		button.icon = icon
+		button.expand_icon = icon != null
+		button.text = "" if icon != null else label
+		button.disabled = not bool(command.get("enabled", false))
+		var description := "%s%s" % [label, " — %s" % cost_text if not cost_text.is_empty() else ""]
+		if float(command.get("duration", 0.0)) > 0.0:
+			description += " · %.0f сек." % float(command.get("duration", 0.0))
+		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else description
+	layout_controls()
+
+
+func layout_controls() -> void:
+	if current_layout.is_empty():
+		current_layout = InterfaceLayout.for_viewport(size)
+	var command_rect: Rect2 = current_layout.get("command", Rect2(4, size.y - HUD_HEIGHT + 4, 300, HUD_HEIGHT - 8))
+	var local_rect := Rect2(command_rect.position - Vector2(0, size.y - HUD_HEIGHT), command_rect.size)
+	var cell_size := Vector2(44, 34)
+	var columns := maxi(3, floori((local_rect.size.x - 8.0) / cell_size.x))
+	var slot := 0
+	for button in train_buttons:
+		if not button.visible:
+			continue
+		var column := slot % columns
+		var row := slot / columns
+		set_bottom_rect(button, Rect2(local_rect.position + Vector2(4 + column * cell_size.x, 4 + row * cell_size.y), Vector2(41, 31)))
+		slot += 1
+	for formation_name in formation_buttons:
+		var button: Button = formation_buttons[formation_name]
+		if not button.visible:
+			continue
+		var column := slot % columns
+		var row := slot / columns
+		set_bottom_rect(button, Rect2(local_rect.position + Vector2(4 + column * cell_size.x, 4 + row * cell_size.y), Vector2(41, 31)))
+		slot += 1
+
+func set_bottom_rect(control: Control, rectangle: Rect2) -> void:
+	control.anchor_left = 0.0
+	control.anchor_right = 0.0
+	control.anchor_top = 1.0
+	control.anchor_bottom = 1.0
+	control.offset_left = rectangle.position.x
+	control.offset_right = rectangle.end.x
+	control.offset_top = -HUD_HEIGHT + rectangle.position.y
+	control.offset_bottom = -HUD_HEIGHT + rectangle.end.y
+
+func apply_button_theme(button: Button) -> void:
+	button.add_theme_font_size_override("font_size", 12)
+	button.add_theme_color_override("font_color", Color("fff1bd"))
+	button.add_theme_color_override("font_hover_color", Color("ffffff"))
+	button.add_theme_color_override("font_pressed_color", Color("fff5c9"))
+	button.add_theme_color_override("font_disabled_color", Color("8c826d"))
+	button.add_theme_stylebox_override("normal", make_style(Color("725b37"), Color("d7bd7c")))
+	button.add_theme_stylebox_override("hover", make_style(Color("8a7044"), Color("f1d890")))
+	button.add_theme_stylebox_override("pressed", make_style(Color("9b7c42"), Color("fff1bd")))
+	button.add_theme_stylebox_override("disabled", make_style(Color("443b2d"), Color("746850")))
+
+func make_style(fill: Color, border: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = fill
+	style.border_color = border
+	style.set_border_width_all(1)
+	style.corner_radius_top_left = 2
+	style.corner_radius_top_right = 2
+	style.corner_radius_bottom_left = 2
+	style.corner_radius_bottom_right = 2
+	return style
+
+func _on_formation_pressed(formation_name: String) -> void:
+	formation_requested.emit(formation_name)
+
+
+func _on_action_pressed(index: int) -> void:
+	if index < 0 or index >= active_train_commands.size():
+		return
+	var command: Dictionary = active_train_commands[index]
+	match String(command.get("type", "")):
+		"build": build_requested.emit(String(command.get("id", "")))
+		"train": train_requested.emit(String(command.get("id", "")), int(command.get("building_id", -1)))
+		"research": research_requested.emit(int(command.get("technology_id", -1)), int(command.get("building_id", -1)))
+		"cancel_production": cancel_production_requested.emit(int(command.get("building_id", -1)), int(command.get("queue_index", 0)))
+		"trade_resource": trade_resource_requested.emit(int(command.get("resource_type_id", -1)))
+
+
+static func reason_text(reason: String) -> String:
+	return String({
+		"single_unit": "Для строя выберите несколько юнитов",
+		"battle_over": "Матч завершён",
+		"insufficient_resources": "Недостаточно ресурсов",
+		"population_cap": "Достигнут предел населения",
+		"queue_full": "Очередь заполнена",
+		"unit_unavailable": "Юнит ещё не открыт",
+		"building_unavailable": "Здание ещё не открыто",
+		"invalid_production_building": "Здание не может производить этот юнит",
+	}.get(reason, reason))

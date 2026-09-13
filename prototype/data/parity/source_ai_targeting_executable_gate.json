@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "gate_id": "I12-020L-TARGETING",
+  "status": "capture_pending",
+  "reference_build": {
+    "product": "Age of Empires, the Rise of Rome",
+    "product_version": "1.1",
+    "file_version": "00.01.6.1120",
+    "executable_name": "EMPIRESX.EXE",
+    "executable_sha256": "b5bc3050ee50cf1b548d21da0509bf5bbe8904eb766705084ab8a2fcdf6d8a9f",
+    "data_name": "data2/empires.dat",
+    "data_sha256": "d47c59d9ecaf5b83b467c647a69d28eced6a0dc5b2fa873e930c86136df5eb9d"
+  },
+  "capture_contract": {
+    "game_speed": "normal",
+    "difficulty": "moderate",
+    "seed_policy": "record every seed and repeat each case at least five times",
+    "visibility": "all candidate targets must be simultaneously visible to the observed AI player",
+    "isolation": "change one strategic-number multiplier or one candidate attribute at a time",
+    "comparison_rule": "record selected target identity and timings; do not infer a rating formula from names alone"
+  },
+  "strategic_numbers": [
+    {"source_id": 34, "name": "SNZeroPriorityDistance", "campaign_values": [50]},
+    {"source_id": 77, "name": "SNTargetEvaluationDistance", "campaign_values": [1]},
+    {"source_id": 78, "name": "SNTargetEvaluationHitpoints", "campaign_values": [1]},
+    {"source_id": 79, "name": "SNTargetEvaluationDamageCapability", "campaign_values": [10]},
+    {"source_id": 80, "name": "SNTargetEvaluationKills", "campaign_values": [0]},
+    {"source_id": 81, "name": "SNTargetEvaluationAllyProximity", "campaign_values": [0]},
+    {"source_id": 82, "name": "SNTargetEvaluationROF", "campaign_values": [0]},
+    {"source_id": 83, "name": "SNTargetEvaluationRandomness", "campaign_values": [0]},
+    {"source_id": 89, "name": "SNTargetEvaluationAttackAttempts", "campaign_values": [0]},
+    {"source_id": 90, "name": "SNTargetEvaluationRange", "campaign_values": [0]}
+  ],
+  "scenes": [
+    {
+      "id": "target_distance_hp_damage_sweep",
+      "purpose": "Recover rating direction, normalization and combination for the three non-zero campaign multipliers.",
+      "source_unit_ids": [73, 347, 37, 276],
+      "required_metrics": ["seed", "candidate_ids", "candidate_positions", "candidate_hp", "candidate_damage", "multiplier_values", "selected_target_id", "selection_tick"],
+      "modern_evidence": [
+        "res://scripts/source_campaign_ai_planner.gd",
+        "res://tests/unit/test_source_campaign_ai_planner.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "target_zero_weight_controls",
+      "purpose": "Prove whether zero multipliers remove kills, ally proximity, rate of fire, randomness, attack attempts and range from target choice.",
+      "source_unit_ids": [73, 347, 37, 276],
+      "required_metrics": ["seed", "candidate_ids", "kills", "allies_in_range", "rate_of_fire", "attack_attempts", "range", "selected_target_id", "repetitions"],
+      "modern_evidence": [
+        "res://scripts/source_campaign_ai_planner.gd",
+        "res://tests/unit/test_rise_of_rome_campaign_gap_matrix.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "zero_priority_distance_order_scope",
+      "purpose": "Determine which orders lose priority at the threshold, how distance is measured and what reactivates them.",
+      "source_unit_ids": [73, 347],
+      "required_metrics": ["seed", "order_type", "order_origin", "unit_position", "distance_tiles", "priority_before", "priority_after", "state_after", "reactivation_condition"],
+      "modern_evidence": [
+        "res://scripts/source_ai_attack_group.gd",
+        "res://scripts/source_ai_assignment_group.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    }
+  ],
+  "source_owned_gaps": [],
+  "completion_rules": [
+    "Every scene has immutable original artifacts, executable and DAT hashes, and all required metrics.",
+    "Each single-variable case has at least five repetitions and records its seed.",
+    "A formula is accepted only if it predicts withheld combinations and deterministic tie cases.",
+    "The runtime consumes only observer-visible snapshot fields and preserves canonical/replay determinism.",
+    "The gate status changes to measured only after automated validation and campaign regression tests pass."
+  ]
+}

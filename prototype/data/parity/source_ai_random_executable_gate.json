@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "gate_id": "I12-020L-RANDOM",
+  "status": "capture_pending",
+  "reference_build": {
+    "product": "Age of Empires, the Rise of Rome",
+    "product_version": "1.1",
+    "file_version": "00.01.6.1120",
+    "executable_name": "EMPIRESX.EXE",
+    "executable_sha256": "b5bc3050ee50cf1b548d21da0509bf5bbe8904eb766705084ab8a2fcdf6d8a9f",
+    "data_name": "data2/empires.dat",
+    "data_sha256": "d47c59d9ecaf5b83b467c647a69d28eced6a0dc5b2fa873e930c86136df5eb9d"
+  },
+  "cataloged_baseline": {
+    "path": "res://data/source_ai/default_vc.json",
+    "baseline_id": "ror_1_0a_default_vc",
+    "source_entry_sha256": "ee2e709bce9538c0ef9a233fab842c03051ed2b6112de62955a52f77b2b8459b",
+    "status": "cataloged_partial_runtime"
+  },
+  "capture_contract": {
+    "game_speed": "normal",
+    "difficulty_policy": "repeat the matrix at every supported difficulty",
+    "seed_policy": "record every observable seed input and run at least twenty fresh starts per case",
+    "isolation": "hold scenario, civilization, diplomacy, map and initial resources constant while changing one candidate set at a time",
+    "comparison_rule": "record selected rule/build behavior and early decisions; do not infer uniform random choice from the directive name"
+  },
+  "scenes": [
+    {
+      "id": "random_rule_directive_selection",
+      "purpose": "Determine the candidate rule set, selection moment, weighting and persistence of the RANDOM rule directive.",
+      "source_unit_ids": [73, 347],
+      "required_metrics": ["run_id", "difficulty", "civilization", "scenario_id", "candidate_rule_names", "initial_state_hash", "observed_rule_signature", "first_decision_tick", "repetitions"],
+      "modern_evidence": [
+        "res://assets/generated/matches/mithridates.json",
+        "res://data/source_ai/default_vc.json"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "random_build_list_resolution",
+      "purpose": "Determine whether Random selects a named build list, synthesizes one, or inherits the active DEFAULT profile.",
+      "source_unit_ids": [73, 109, 347],
+      "required_metrics": ["run_id", "difficulty", "civilization", "scenario_id", "candidate_build_lists", "initial_state_hash", "first_twenty_train_build_research_orders", "order_ticks", "resource_snapshots", "repetitions"],
+      "modern_evidence": [
+        "res://assets/generated/matches/birth-of-rome.json",
+        "res://assets/generated/matches/syracuse.json",
+        "res://assets/generated/matches/mithridates.json"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "random_restart_and_replay_stability",
+      "purpose": "Establish whether repeated starts, save/load and replay consume the same random stream and preserve the selected policy.",
+      "source_unit_ids": [73, 347],
+      "required_metrics": ["run_id", "restart_kind", "save_tick", "load_tick", "initial_state_hash", "decision_trace_hash", "selected_policy_signature", "divergence_tick", "repetitions"],
+      "modern_evidence": [
+        "res://scripts/replay_system.gd",
+        "res://tests/unit/test_deterministic_replay.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    }
+  ],
+  "source_owned_gaps": [],
+  "completion_rules": [
+    "Every scene has immutable original artifacts, executable and DAT hashes, and all required metrics.",
+    "Every matrix case has at least twenty fresh starts and records the full controlled setup.",
+    "A Random policy is accepted only if it predicts a withheld scenario and every deterministic tie/restart case.",
+    "Runtime selection is seeded, serialized in canonical state and independent of presentation frame rate.",
+    "DEFAULT inheritance and Random resolution receive separate runtime statuses until both are independently proven.",
+    "The gate status changes to measured only after automated validation and campaign regression tests pass."
+  ]
+}

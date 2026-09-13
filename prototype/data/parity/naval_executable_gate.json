@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "gate_id": "I12-019G",
+  "status": "capture_pending",
+  "reference_build": {
+    "product": "Age of Empires, the Rise of Rome",
+    "product_version": "1.1",
+    "file_version": "00.01.6.1120",
+    "executable_name": "EMPIRESX.EXE",
+    "executable_sha256": "b5bc3050ee50cf1b548d21da0509bf5bbe8904eb766705084ab8a2fcdf6d8a9f",
+    "data_name": "data2/empires.dat",
+    "data_sha256": "d47c59d9ecaf5b83b467c647a69d28eced6a0dc5b2fa873e930c86136df5eb9d"
+  },
+  "capture_contract": {
+    "observer_player": 1,
+    "game_speed": "normal",
+    "pixel_sampling": "nearest-neighbour at native sprite scale",
+    "time_origin": "first authoritative state transition visible in the capture",
+    "comparison_rule": "record observations; do not copy legacy navigation, collision or formation behaviour"
+  },
+  "scenes": [
+    {
+      "id": "naval_direction_composite_palette",
+      "purpose": "Compare direction, frame order, composite placement and both player palettes.",
+      "source_unit_ids": [13, 14, 15, 16, 17, 18, 19, 20, 21, 250, 277],
+      "states": ["idle", "move"],
+      "required_metrics": ["direction_mapping", "frame_order", "frame_duration_ms", "hotspot", "composite_layer_order", "player_palette_rgba"],
+      "modern_evidence": [
+        "res://qa/golden/naval-presentations.png",
+        "res://tests/golden/test_naval_presentation_golden.gd",
+        "res://tests/unit/test_unit_presentation_registry.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "naval_attack_release_audio",
+      "purpose": "Compare action facing, attack timing, projectile release and attack sound onset.",
+      "source_unit_ids": [19, 20, 21, 250, 277],
+      "states": ["attack"],
+      "required_metrics": ["action_facing", "attack_clip_start_ms", "projectile_release_ms", "recover_end_ms", "attack_sound_start_ms"],
+      "modern_evidence": [
+        "res://tests/integration/test_naval_combat_pipeline.gd",
+        "res://tests/unit/test_presentation_audio_router.gd",
+        "res://tests/scenarios/test_full_roster_naval_stress.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "naval_damage_death_impact",
+      "purpose": "Compare DAT damage thresholds, death replacement, impact lifetime and event audio.",
+      "source_unit_ids": [13, 14, 15, 16, 17, 18, 19, 20, 21, 250, 277],
+      "states": ["damaged", "death", "impact"],
+      "required_metrics": ["damage_thresholds", "damage_layer_offset", "death_clip_start_ms", "death_duration_ms", "impact_start_ms", "impact_duration_ms", "event_sound_start_ms"],
+      "modern_evidence": [
+        "res://tests/unit/test_naval_presentation_effects.gd",
+        "res://tests/unit/test_presentation_audio_event_router.gd",
+        "res://tests/golden/test_naval_presentation_golden.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    }
+  ],
+  "trade_profit": {
+    "status": "measurement_pending",
+    "policy_id": "ror_distance_calibration_pending_v1",
+    "required_map_count": 3,
+    "distance_samples": ["minimum_legal", "quarter_diagonal", "half_diagonal", "maximum_legal"],
+    "required_fields": ["map_width_tiles", "map_height_tiles", "home_x", "home_y", "target_x", "target_y", "euclidean_distance_tiles", "observed_gold", "repetitions"],
+    "observations": [],
+    "modern_evidence": [
+      "res://scripts/trade_profit_policy.gd",
+      "res://tests/integration/test_naval_trade_pipeline.gd"
+    ]
+  },
+  "source_owned_gaps": [
+    {
+      "id": "sound_138_missing_resource",
+      "description": "The source sound record has resource_id = -1; no replacement WAV may be invented.",
+      "accepted": true
+    }
+  ],
+  "completion_rules": [
+    "Every scene has an immutable original artifact hash and all required metrics.",
+    "Trade observations cover at least three recorded map dimensions and all required distances.",
+    "Any tolerated delta is documented as a deliberate modern-engine difference.",
+    "The gate status changes to measured only after automated validation passes."
+  ]
+}
