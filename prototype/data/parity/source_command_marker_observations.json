@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "gate_id": "I3-I10-command-marker",
+  "status": "geometry_measured_timing_pending",
+  "reference_build": {
+    "product": "Age of Empires, the Rise of Rome",
+    "product_version": "1.1",
+    "runtime_patch": "UPatch widescreen",
+    "civilization": "Sumerian",
+    "capture_resolution": [1680, 1050]
+  },
+  "observations": [
+    {
+      "source_file_sha256": "7588003d9eb6f5e41ed3f10f63737bc3284500be692622f31591e1f7aa2df39e",
+      "phase": "contracted",
+      "bright_red_bounds": [27, 20],
+      "occlusion": "partially obscured by cursor and vegetation"
+    },
+    {
+      "source_file_sha256": "2582534a4fcd97aec82268e35713534dc388c3ec97ae0c785eaa715f0b387b95",
+      "phase": "wide",
+      "bright_red_rectangle": [540, 630, 45, 28],
+      "bright_red_pixels": 414,
+      "dominant_marker_rgb": [[255, 1, 1], [130, 28, 0]],
+      "occlusion": "centre and lower-right partly obscured by cursor"
+    }
+  ],
+  "verified_contract": {
+    "composition": "four cardinal arrows converge on the accepted world target",
+    "layer": "above world and fog, below the operating-system cursor",
+    "colour": "fixed bright red with dark lower-right shadow",
+    "camera_behaviour": "world anchored and screen-space sized",
+    "event_rule": "shown only after authoritative command acceptance"
+  },
+  "pending_measurements": [
+    "exact source asset identity",
+    "frame count and frame duration from a high-frame-rate capture",
+    "whether the final phase disappears directly or blinks once"
+  ]
+}

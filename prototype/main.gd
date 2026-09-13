@@ -11,6 +11,7 @@ const Diagnostics := preload("res://scripts/diagnostics.gd")
 const InputAdapter := preload("res://scripts/input_adapter.gd")
 const PickingService := preload("res://scripts/picking_service.gd")
 const CommandFeedbackRouter := preload("res://scripts/command_feedback_router.gd")
+const CommandMarkerPresentation := preload("res://scripts/command_marker_presentation.gd")
 const InteractionCursor := preload("res://scripts/interaction_cursor.gd")
 const PlayerControlState := preload("res://scripts/player_control_state.gd")
 const ControlGroups := preload("res://scripts/control_groups.gd")
@@ -61,8 +62,7 @@ var input_adapter := InputAdapter.new()
 var picking_service := PickingService.new()
 var selection_preview_ids: Array[int] = []
 var command_feedback_router := CommandFeedbackRouter.new()
-var command_marker_position := Vector2.ZERO
-var command_marker_time: float = 0.0
+var command_marker_presentation := CommandMarkerPresentation.new()
 var interaction_highlight_id: int = -1
 var interaction_cursor_semantic := "default"
 var control_groups := ControlGroups.new()
@@ -252,7 +252,7 @@ func reset_game() -> void:
 	presentation_effect_timeline.reset()
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
-	command_marker_time = 0.0
+	command_marker_presentation.reset()
 	interaction_highlight_id = -1
 	interaction_cursor_semantic = "default"
 	units.clear()
@@ -293,8 +293,7 @@ func _process(delta: float) -> void:
 	update_units(delta)
 	if message_time > 0.0:
 		message_time -= delta
-	if command_marker_time > 0.0:
-		command_marker_time -= delta
+	command_marker_presentation.advance(delta)
 	queue_redraw()
 
 func update_camera(delta: float) -> void:
@@ -353,8 +352,7 @@ func process_presentation_events() -> void:
 			if not sound_name.is_empty():
 				play_sfx(sound_name)
 			if feedback["marker"] is Vector2:
-				command_marker_position = feedback["marker"]
-				command_marker_time = 0.75
+				command_marker_presentation.trigger(feedback["marker"])
 		message_time = 1.8
 	presentation_effect_timeline.consume(new_events, Callable(self, "presentation_effect_visible"))
 	_sync_effect_snapshot()
@@ -1038,15 +1036,22 @@ func draw_world_objects() -> void:
 
 
 func draw_command_marker() -> void:
-	if command_marker_time <= 0.0:
+	var marker := command_marker_presentation.snapshot()
+	if marker.is_empty():
 		return
-	var center := world_to_screen(command_marker_position)
-	var progress := clampf(command_marker_time / 0.75, 0.0, 1.0)
-	var radius := (8.0 + (1.0 - progress) * 10.0) * view_zoom
-	var color := Color(0.95, 0.82, 0.25, 0.35 + 0.65 * progress)
-	draw_arc(center, radius, 0.0, TAU, 24, color, 2.0)
-	draw_line(center + Vector2(-radius * 0.45, 0), center + Vector2(radius * 0.45, 0), color, 1.5)
-	draw_line(center + Vector2(0, -radius * 0.45), center + Vector2(0, radius * 0.45), color, 1.5)
+	var center := PixelScaling.snap_screen(world_to_screen(marker["world_position"]))
+	var half_extent: Vector2 = marker["half_extent"]
+	var directions := [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]
+	for direction in directions:
+		var outer_extent := half_extent.x if not is_zero_approx(direction.x) else half_extent.y
+		var local_points := CommandMarkerPresentation.arrow_polygon(direction, outer_extent)
+		var shadow_points := PackedVector2Array()
+		var bright_points := PackedVector2Array()
+		for point in local_points:
+			shadow_points.append(PixelScaling.snap_screen(center + point + marker["shadow_offset"]))
+			bright_points.append(PixelScaling.snap_screen(center + point))
+		draw_colored_polygon(shadow_points, marker["shadow_color"])
+		draw_colored_polygon(bright_points, marker["bright_color"])
 
 
 func draw_fog_overlay() -> void:
