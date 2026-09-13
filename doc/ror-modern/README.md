@@ -37,4 +37,4 @@ data2/empires.dat + DRS + language DLL
 
 WSL и полный openage build для повседневной разработки не требуются.
 
-Отдельные проверочные контракты: `VISUAL_PARITY_CONTRACT.md` задаёт границу визуального соответствия, а `SOURCE_UI_EXECUTABLE_MEASUREMENT.md` — обязательный порядок доказательства исходных HUD-контролов и их состояний.
+Отдельные проверочные контракты: `VISUAL_PARITY_CONTRACT.md` задаёт границу визуального соответствия, `SOURCE_UI_EXECUTABLE_MEASUREMENT.md` — обязательный порядок доказательства исходных HUD-контролов и их состояний, а `ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md` — исполнимую I13-замену высотного fog renderer с dirty-chunk/performance gates.

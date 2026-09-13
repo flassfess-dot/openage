@@ -481,6 +481,7 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
    - Chunk streaming вводить только для карт существенно крупнее RoR и выгружать лишь presentation/cache chunks; авторитетные terrain, scenario и entity state не зависят от камеры.
    - Переносить измеренные CPU-hotspots в GDExtension/C++/Rust только после профиля и regression benchmark.
    - Зафиксировать ворота производительности: обычный матч RoR, 500 населения на каждого из 2/4/8 игроков, обязательную карту ×4 по площади и stretch-карту ×4 по каждой стороне. Для каждого хранить simulation tick и render frame `p50/p95/max`, wall-clock duration, число/длительность запросов пути, AI/perception cost, snapshot cost, allocations, draw calls, RAM и VRAM.
+   - `I13-FOW-01` является первым целевым presentation-кандидатом после baseline: устранить высотные клинья fog не дополнительными row-вершинами, а revisioned delta, общим world/minimap cache, отдельными cell triangles и retained chunk masks. Camera pan не вызывает полного scan/rebuild; source slope footprint и painter order подтверждаются golden/original capture. Полный исполнимый план: `doc/ror-modern/ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md`.
    - После достижения плавности оставить не менее 30% измеренного бюджета `p95` по CPU и памяти на будущие игровые системы. Если резерв не достигнут, gate считается пройденным функционально, но не готовым к расширению.
    - Не переносить эту оптимизацию раньше функционального соответствия, кроме минимальных исправлений, необходимых для воспроизводимых проверок и профилирования.
 6. Провести длительные AI-матчи и replay-проверки.
@@ -502,6 +503,7 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 | Строй подавляет боевое поведение | I6 + I7 | Engagement и жизненный цикл группы |
 | Юниты перекрываются в бою | I4 + I6 | Reservation, footprint и contact positions |
 | Швы и графические артефакты | I9 | Целостный render pipeline |
+| Длинные тёмные клинья fog вокруг возвышенности | I9 gap + I13-FOW-01 | Terrain-aligned fog geometry, depth order и dirty-chunk presentation |
 | Слабая обратная связь UI | I3 + I10 | Результат команды и presentation |
 
 Исправление раньше владеющей итерации допустимо только при блокировке диагностики или следующего контракта. Тогда оно должно быть минимальным и иметь тест.

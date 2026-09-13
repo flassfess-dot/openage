@@ -51,9 +51,9 @@ Fog has three simulation states:
 - `EXPLORED`: remembered terrain may be shown through a stable translucent overlay, while non-persistent hidden entities remain absent from the presentation snapshot;
 - `VISIBLE`: no fog overlay.
 
-World fog geometry must conform to every terrain cell boundary along a merged row run. A four-corner quad is insufficient when intermediate terrain vertices have different elevation and can expose seams. Projected fog vertices use the same pixel snapping policy as terrain.
+World fog geometry must conform to each terrain cell and to the actual source slope footprint, use the same elevation vertices and pixel policy as terrain, and participate in a compatible isometric depth order. A merged multi-cell row contour is not a parity primitive: retaining intermediate vertices does not guarantee a simple triangulable polygon and can produce long dark wedges around hills. The current row-run renderer is therefore an `INTEGRATED` fallback only.
 
-Fog row merging and viewport clipping are presentation optimizations only. They must cover each non-visible cell exactly once, never cover a visible cell and never change visibility state. The minimap uses the same run set and state colours. Map-edge background is a separate layer and may not substitute for unknown fog.
+Presentation batching must cover each non-visible cell exactly once, never cover a visible cell and never change visibility state. The final I13 path uses revisioned deltas, a shared world/minimap presentation cache, individual cell triangles batched as retained visible chunks, and nearest-sampled compact state masks. No-op visibility and camera movement must not scan or rebuild the full fog map. Map-edge background is a separate layer and may not substitute for unknown fog. See `ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md`.
 
 Machine evidence: `prototype/tests/unit/test_viewport_culling.gd`, `prototype/tests/unit/test_fog_of_war.gd` and `prototype/tests/unit/test_simulation_snapshot.gd`.
 
@@ -88,7 +88,7 @@ Phase 2B-9b2 machine evidence corrects the earlier four-frame assumption. Each 5
 - Generated files are written only when their bytes change. Cache-version changes alone must not invalidate byte-identical PNGs.
 - The current one-file-per-frame layout is accepted for functional parity but is an explicit I13 import/startup debt.
 - I13 must benchmark source-frame atlases or packed frame pages, bounded parallel import and grouped render buckets. Any packing scheme must preserve per-frame hotspot, direction, mirror, semantic player colour, animation timing and isometric sort key.
-- Fog snapshots use compact byte storage. Further fog optimization must be profile-driven and deterministic.
+- Fog authoritative state uses compact byte storage. I13 must remove ordinary full-map snapshot copies, unconditional revision changes and per-frame row-polygon submission through deterministic deltas and bounded retained chunks; exact gates are defined in `ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md`.
 
 ## 7. Status boundary
 
