@@ -455,6 +455,10 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 
 **Следующий ускоренный пакет I12-020M:** построить общий manifest/gap-аудит всех 14 доступных кампаний и 95 миссий, не импортируя их вручную по одной. После машинной матрицы выбрать первую целую кампанию с минимальным набором общих object/condition/asset gaps и закрывать их одним content package; launcher получает миссии только после воспроизводимых исходов.
 
+**Статус ускоренного пакета I12-020M:** полный portfolio manifest и gap matrix построены для 14/14 кампаний и 95/95 миссий за один четырёхпоточный проход. Матрица связана SHA-256 с source catalog, manifest и runtime catalog. Итог: 10 launcher-ready, 85 blocked, 0 parity-ready; `Расцвет Рима` остаётся единственной полностью mechanically-ready кампанией. Четыре миссии с менее чем двумя активными source slots сохраняются как измеренные `runtime_normalization` blockers вместо остановки всей партии. Общие gaps теперь агрегируются по campaign/mission/object/condition/asset/AI capability. Из ещё не опубликованных целых кампаний детерминированно выбрана `First Punic War` (3 миссии, score `[3,48,4,3]`). Изолированный `test_source_campaign_portfolio.gd` проходит.
+
+**Следующий ускоренный пакет I12-020N:** закрыть `First Punic War` как одну вертикаль: три отсутствующих source object type (Guard Tower 69, Tree Stump 131, Artifact 159), семь exact graphics, legacy `DestroyMultiple`/`BringToArea`, два AI normalization gap, постоянные matches и воспроизводимые исходы. До нулевого launcher gate ни одна из трёх миссий не появляется в launcher; pixel/UI measurement остаётся отдельным неблокирующим evidence stream.
+
 Порядок волн:
 
 1. Законченный Stone Age: рабочий, ресурсы, базовые здания, один melee и один ranged юнит.

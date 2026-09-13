@@ -1,0 +1,940 @@
+{
+  "schema_version": 1,
+  "generator_version": "campaign-portfolio-manifest-1",
+  "source_catalog_sha256": "20683940cee06091174e45cbfab3075b4c45349de515db3d88cee94ae01f5e2a",
+  "source_catalog_cache_key": "503d563c4df9d249e72e596c0cad57fab905435ca0a349b57669361271080ca3",
+  "summary": {
+    "campaign_count": 14,
+    "mission_count": 95
+  },
+  "campaigns": [
+    {
+      "campaign_index": 0,
+      "portfolio_id": "source_campaign_00",
+      "source_path": "campaign/1 По праву сильнейшего.cpx",
+      "filename": "1 По праву сильнейшего.cpx",
+      "name": "1 По праву сильнейшего",
+      "extension": ".cpx",
+      "sha256": "b5cb78bf2b4a25278e5da8cdc0c088ae50baaa13d2687133ffd4b8b643df9102",
+      "mission_count": 8,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c00_m00",
+          "name": "1 Земля хеттов",
+          "filename": "1 Земля хеттов.scx",
+          "sha256": "eeaa340e2b52f1f426e0ff83dc727b7a6808d69350bc15d468cf36f2f70a3b87",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c00_m01",
+          "name": "2 Гибель династии",
+          "filename": "2 Гибель династии.scx",
+          "sha256": "a8d77a364f5238d6a8665da48ef96dc905486a61fcb7219832ab42585a38dfd9",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c00_m02",
+          "name": "3 Век захвата",
+          "filename": "3 Век захвата.scx",
+          "sha256": "b93ed60ccd40d1348ca37f356b0996a0c8ac1ad22a8864d7dfa8217884f4fe6c",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c00_m03",
+          "name": "4 Знатность",
+          "filename": "4 Знатность.scx",
+          "sha256": "c4b0ac0e7a47d58d3f7f3a0ac3ac97332bd3dd5237f95dae7066f2dfa8c09457",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c00_m04",
+          "name": "5 Смерть Тутанхамона",
+          "filename": "5 Смерть Тутанхамона.scx",
+          "sha256": "b0688c346e8ae12bb777cb59d62edfd241f242d402cf1288e422956b8c363f77",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c00_m05",
+          "name": "6 Жажда знаний",
+          "filename": "6 Жажда знаний.scx",
+          "sha256": "611c1ce8952d8c609adfb9719c2dc7bb92f941184a6ca60f950013d28cc6ce17",
+          "active_player_count": 7
+        },
+        {
+          "scenario_index": 6,
+          "audit_match_id": "audit_c00_m06",
+          "name": "7 Гибель Миттани",
+          "filename": "7 Гибель Миттани.scx",
+          "sha256": "84aafa1d569d3855021cf0ba2ea404f5ac77fbf8dc14266bf981a6d13559244d",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 7,
+          "audit_match_id": "audit_c00_m07",
+          "name": "8 Война есть война",
+          "filename": "8 Война есть война.scx",
+          "sha256": "3f8ca324171597c9fb36c89f87a950ea7b971d0ba9ccae4b6c9a10f826c87783",
+          "active_player_count": 4
+        }
+      ]
+    },
+    {
+      "campaign_index": 1,
+      "portfolio_id": "source_campaign_01",
+      "source_path": "campaign/2 На гребне удачи.cpx",
+      "filename": "2 На гребне удачи.cpx",
+      "name": "2 На гребне удачи",
+      "extension": ".cpx",
+      "sha256": "8c34345a9966405bfbfc1d109f80beb8f2446fa1a3da055f2bad648e49f222da",
+      "mission_count": 8,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c01_m00",
+          "name": "1 Освобождение",
+          "filename": "1 Освобождение.scx",
+          "sha256": "2c250db5b7f72951dcfaba59a291dc390023f3299e89e55d60565741031c16f6",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c01_m01",
+          "name": "2 Автономия",
+          "filename": "2 Автономия.scx",
+          "sha256": "6699dffcf9362200a6e7fb9dcc9aa07cc08159cadc433ef47aae006cb16aced8",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c01_m02",
+          "name": "3 Превосходство на море",
+          "filename": "3 Превосходство на море.scx",
+          "sha256": "23061fb67b38ff54178cae19882874346ae76191135509829fe2e57dcbae0ba5",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c01_m03",
+          "name": "4 Борьба за землю",
+          "filename": "4 Борьба за землю.scx",
+          "sha256": "9d8327e557e84b62da7803a23ac78c246a8fa100d32c13a8e4c52d6ff879127f",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c01_m04",
+          "name": "5 Торговля",
+          "filename": "5 Торговля.scx",
+          "sha256": "d73dda598730b4d14c329b3c6f40a2fcae9665cfddfd64b7fbb95f77e2aead5c",
+          "active_player_count": 7
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c01_m05",
+          "name": "6 Битва за Иберию",
+          "filename": "6 Битва за Иберию.scx",
+          "sha256": "1417663fd6c3f6301bfc85f0c3c50e54ee4be91763bad6ee399747fb737a0ef7",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 6,
+          "audit_match_id": "audit_c01_m06",
+          "name": "7 Новая надежда",
+          "filename": "7 Новая надежда.scx",
+          "sha256": "52af94488e2fa1c63910a1dc40f46e91970984747350ed5f2031a920a4624948",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 7,
+          "audit_match_id": "audit_c01_m07",
+          "name": "8 Поход Ганнибала",
+          "filename": "8 Поход Ганнибала.scx",
+          "sha256": "eea95ae5164f03ea14cdd1fb7ff5322d6152e6594593312583da8dc549460bf8",
+          "active_player_count": 8
+        }
+      ]
+    },
+    {
+      "campaign_index": 2,
+      "portfolio_id": "source_campaign_02",
+      "source_path": "campaign/3 Железный кулак Ашура.cpx",
+      "filename": "3 Железный кулак Ашура.cpx",
+      "name": "3 Железный кулак Ашура",
+      "extension": ".cpx",
+      "sha256": "8f7dbe5fd622c7cf1abff5801c6322367561a7d9da3d769eef9a7f3df0e3b417",
+      "mission_count": 8,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c02_m00",
+          "name": "1 Бог войны",
+          "filename": "1 Бог войны.scx",
+          "sha256": "d7ed2fbb6af1127fb03b29f1f061867eb8c3cdf28d4b8fac37dd553ed159cb15",
+          "active_player_count": 5
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c02_m01",
+          "name": "2 Из пепла",
+          "filename": "2 Из пепла.scx",
+          "sha256": "431f812a494606d166ce8a4e3591da8d24986bafc79995d10d2ff2079f4fd8f6",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c02_m02",
+          "name": "3 Век завоеваний",
+          "filename": "3 Век завоеваний.scx",
+          "sha256": "3f0365723cad999277abe769c836a1a401b4353699452bf6ec5ad74a7c905edb",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c02_m03",
+          "name": "4 Новая ассирийская империя",
+          "filename": "4 Новая ассирийская империя.scx",
+          "sha256": "5c3f94ed81a41c373169c9e016294c640344db2fe709bc5d57bdcc3813d0cb1d",
+          "active_player_count": 6
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c02_m04",
+          "name": "5 Бунт",
+          "filename": "5 Бунт.scx",
+          "sha256": "71a81bb3b6e432918f7e0624665ef779da513dcff070cfcfeb97fe15ba042bf4",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c02_m05",
+          "name": "6 Дворец в Ниневии",
+          "filename": "6 Дворец в Ниневии.scx",
+          "sha256": "5f3d560626ad592bf4abece9253802d5a7617f5c7f10fabcab3d4c2e4f27f7de",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 6,
+          "audit_match_id": "audit_c02_m06",
+          "name": "7 Джихад",
+          "filename": "7 Джихад.scx",
+          "sha256": "8e9f28b4b3e57de1bc7c3fa21a6018a7c06a7bb3c7a564fd9b24b84ba89885fe",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 7,
+          "audit_match_id": "audit_c02_m07",
+          "name": "8 Сровнять с землей",
+          "filename": "8 Сровнять с землей.scx",
+          "sha256": "0d237702c0c9bb2cfede4ca8a2668dea51844cbe6ee03ee7d510894fd30d5940",
+          "active_player_count": 2
+        }
+      ]
+    },
+    {
+      "campaign_index": 3,
+      "portfolio_id": "source_campaign_03",
+      "source_path": "campaign/4 Упадок династии.cpx",
+      "filename": "4 Упадок династии.cpx",
+      "name": "4 Упадок династии",
+      "extension": ".cpx",
+      "sha256": "18865cb685c87d3efc97ebbc51bbef3100ea1527e25f136350213406345a2ba6",
+      "mission_count": 8,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c03_m00",
+          "name": "1 Долины рек",
+          "filename": "1 Долины рек.scx",
+          "sha256": "7a52fa047a43950a77b457d2b4a9155ef54b1737d940cdd61e342579526504ae",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c03_m01",
+          "name": "2 Сын Небес",
+          "filename": "2 Сын Небес.scx",
+          "sha256": "28dfc7c806b3bde55f708bd2a593c90831a8ced1f3c7ca4f5f4f963d4f9b090d",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c03_m02",
+          "name": "3 Схватка принцев",
+          "filename": "3 Схватка принцев.scx",
+          "sha256": "cbdf71f03e405b5e43a890e282754bf7f1f29c6ab3836f604fc5962b8e4f1e80",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c03_m03",
+          "name": "4 Большая охота",
+          "filename": "4 Большая охота.scx",
+          "sha256": "f8db30e8f3b3387eec5ae98b796706d5010a7660bfe77c53ad2a4751be494c37",
+          "active_player_count": 8
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c03_m04",
+          "name": "5 Богатый город",
+          "filename": "5 Богатый город.scx",
+          "sha256": "b81fe5f99f335bf9e39d8f866ba726492e8665f585065f1678e163eae9013aad",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c03_m05",
+          "name": "6 Гробница Ву-Кван-Цюна",
+          "filename": "6 Гробница Ву-Кван-Цюна.scx",
+          "sha256": "d194f844f57a59f6ded854e1ad011bddbc57346e96b0c3b4fdf1783cf2f5e585",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 6,
+          "audit_match_id": "audit_c03_m06",
+          "name": "7 Кости Дракона",
+          "filename": "7 Кости Дракона.scx",
+          "sha256": "acaf48d7060f0c4082612984ac4c590514dce4ccec2805110f453f281e91a1fd",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 7,
+          "audit_match_id": "audit_c03_m07",
+          "name": "8 Превосходство",
+          "filename": "8 Превосходство.scx",
+          "sha256": "b65b783d09017845d59858a2cd39c9744251afecfaf202adad76e796e0e12275",
+          "active_player_count": 4
+        }
+      ]
+    },
+    {
+      "campaign_index": 4,
+      "portfolio_id": "source_campaign_04",
+      "source_path": "campaign/First Punic War.cpx",
+      "filename": "First Punic War.cpx",
+      "name": "First Punic War",
+      "extension": ".cpx",
+      "sha256": "8d65cd16248320988090fbf16bd31cb2dfde46dd80a1bbf93191cace82f0fad2",
+      "mission_count": 3,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c04_m00",
+          "name": "Struggle for Sicily (Learning Scenario)",
+          "filename": "Struggle for Sicily (Learning Scenario).scx",
+          "sha256": "2169b7079b153f367bef639a8c01bdd2f0e47c20acbc1ea9fafd1a0f71fdc1ef",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c04_m01",
+          "name": "Battle of Mylae",
+          "filename": "Battle of Mylae.scx",
+          "sha256": "2afc1dd8c110b150dc94c6a164e51be50b1707ca327a20b5b93702e77eaad6ad",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c04_m02",
+          "name": "Battle of Tunes",
+          "filename": "Battle of Tunes.scx",
+          "sha256": "3cbbccf951c75e6fa0a66e8be30c2757abfca68d7577c05786c81cb49165e830",
+          "active_player_count": 4
+        }
+      ]
+    },
+    {
+      "campaign_index": 5,
+      "portfolio_id": "source_campaign_05",
+      "source_path": "campaign/Reign of the Hittites.cpn",
+      "filename": "Reign of the Hittites.cpn",
+      "name": "Reign of the Hittites",
+      "extension": ".cpn",
+      "sha256": "9ac79247cb736f9a0afc389516aa17340eb94c52a8d2d360f45f8229a48a666f",
+      "mission_count": 5,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c05_m00",
+          "name": "Homelands",
+          "filename": "Homelands.scn",
+          "sha256": "da4217aab0b1663240170175d75451292376c47db22b23a404f6979ecee03290",
+          "active_player_count": 1
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c05_m01",
+          "name": "Growing Pains",
+          "filename": "Growing Pains.scn",
+          "sha256": "ce1e5ee1c6ad5788b72b3404110b9b034216cca8dcdbc24ccfe4fb4abbee7593",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c05_m02",
+          "name": "Opening Moves",
+          "filename": "Opening Moves.scn",
+          "sha256": "932f377afa11bad63d42aa1868c1e5c07eb8cdb079b4d0a0932bd66ffd614e0c",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c05_m03",
+          "name": "Fall of the Mitanni",
+          "filename": "Fall of the Mitanni.scn",
+          "sha256": "43d941146435e8b64cd482e10dfdd7201d3f557637a40c6e1a7a68b5c0cb41c0",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c05_m04",
+          "name": "Battle of Kadesh",
+          "filename": "Battle of Kadesh.scn",
+          "sha256": "6c283e70dd1e56d38ee27c68d0c5f0e2cbe6255d871c85e1b6437f4d907e7546",
+          "active_player_count": 3
+        }
+      ]
+    },
+    {
+      "campaign_index": 6,
+      "portfolio_id": "source_campaign_06",
+      "source_path": "campaign/Враги Рима.cpx",
+      "filename": "Враги Рима.cpx",
+      "name": "Враги Рима",
+      "extension": ".cpx",
+      "sha256": "05334b939a4c20d120701378a532f48906e31e09bd47e3508d0d0a181a453494",
+      "mission_count": 4,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c06_m00",
+          "name": "Переход через Альпы",
+          "filename": "Crossing the Alps.scx",
+          "sha256": "730c951f024e85856380967d05403aabbb5eba7d04d4cbe15d8125dbb4f8bb90",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c06_m01",
+          "name": "Третья Греческая Война",
+          "filename": "Third Greek War.scx",
+          "sha256": "e00132f825985009d4ac7bd3bb38574624a19c0ff180596eb30838a03d0fdda8",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c06_m02",
+          "name": "Спартак",
+          "filename": "Spartacus.scx",
+          "sha256": "2a7f469885a702f359a1a68e66c511054a47201befc17f5ab0ae1456fd7f56fc",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c06_m03",
+          "name": "Оденат против персов",
+          "filename": "Odenathus vs Persians.scx",
+          "sha256": "48722fa2da3f448ba95bcfe3a2dbd10ca544d2dc5fb7644dc4eb25f4c6f1a178",
+          "active_player_count": 2
+        }
+      ]
+    },
+    {
+      "campaign_index": 7,
+      "portfolio_id": "source_campaign_07",
+      "source_path": "campaign/Голоса Вавилона.cpn",
+      "filename": "Голоса Вавилона.cpn",
+      "name": "Голоса Вавилона",
+      "extension": ".cpn",
+      "sha256": "692156fedf2c2e070cbf59e465c989fd71dbee77c24a4653fbc941bb81880e14",
+      "mission_count": 8,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c07_m00",
+          "name": "Святой человек",
+          "filename": "Holy Man.scn",
+          "sha256": "fef4082a63a2452f55329d75bbfa18b4bef2bf1662bb42261b27317f5c1fa9e2",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c07_m01",
+          "name": "Долина Тигра",
+          "filename": "Tigiris Valley.scn",
+          "sha256": "6fa71584ba3f0b74e200691e345f8454f9fba6a777e1af797884d6cd1cac0074",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c07_m02",
+          "name": "Потеря",
+          "filename": "Lost.scn",
+          "sha256": "ecb978a3fbe0df0957d4547072cfa0b34a8ef9c5afabd47e851ef1e9fe794944",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c07_m03",
+          "name": "Я должен вернуться",
+          "filename": "I Shall Return.scn",
+          "sha256": "8239c34765481dbe061e781398bec8125759e64cec914e43fe643d9b45b586ff",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c07_m04",
+          "name": "Большая охота",
+          "filename": "The Great Hunt.scn",
+          "sha256": "5d980e759e5f61ce2ce5da1a944475be6852e4651d892944f00969eceda24dfa",
+          "active_player_count": 8
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c07_m05",
+          "name": "Караван",
+          "filename": "The Caravan.scn",
+          "sha256": "8cfe78466324093886f1aae90e731c3f3cc37979ee9bba582049df281b405615",
+          "active_player_count": 5
+        },
+        {
+          "scenario_index": 6,
+          "audit_match_id": "audit_c07_m06",
+          "name": "Повелитель Евфрата",
+          "filename": "Lord of the Euphrates.scn",
+          "sha256": "71eb200daaea298441a13a0c7b04f1377bac42876fa3660d6fd9cff852a6596b",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 7,
+          "audit_match_id": "audit_c07_m07",
+          "name": "Ниневия",
+          "filename": "Nineveh.scn",
+          "sha256": "e27852a5af47061851528bca255671d8731b5fbbcc047b10d2eb3ddc15386f9c",
+          "active_player_count": 7
+        }
+      ]
+    },
+    {
+      "campaign_index": 8,
+      "portfolio_id": "source_campaign_08",
+      "source_path": "campaign/Да здравствует Цезарь.cpx",
+      "filename": "Да здравствует Цезарь.cpx",
+      "name": "Да здравствует Цезарь",
+      "extension": ".cpx",
+      "sha256": "c244645497967e2dc5c4cc063bcc3f432008d4783e1ea9eeae2e56bf341f3344",
+      "mission_count": 4,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c08_m00",
+          "name": "Цезарь и пираты",
+          "filename": "Caesar vs Pirates.scx",
+          "sha256": "f6e10b40cfcbcd84b99871c8dd685f249744581e9ab44263f0d9df56476c0031",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c08_m01",
+          "name": "Британия",
+          "filename": "Britain.scx",
+          "sha256": "57d422ac6c9b31676a4ad116092047f8d29b32b360e767c255708ac0ee8a7397",
+          "active_player_count": 5
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c08_m02",
+          "name": "Алезия",
+          "filename": "Alesia.scx",
+          "sha256": "79dcd3598f8b86ce06e3f36bdb4e425b700db7bd10e49ea22cc7e35be72f60c5",
+          "active_player_count": 5
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c08_m03",
+          "name": "Цезарь и Помпей",
+          "filename": "Caesar vs Pompey.scx",
+          "sha256": "b75d1a318bb8371ec430f59d295b2e4699e32752e977b86a1cfa70f8d8dd0f71",
+          "active_player_count": 3
+        }
+      ]
+    },
+    {
+      "campaign_index": 9,
+      "portfolio_id": "source_campaign_09",
+      "source_path": "campaign/Империя Восходящего Солнца Ямато.cpn",
+      "filename": "Империя Восходящего Солнца Ямато.cpn",
+      "name": "Империя Восходящего Солнца Ямато",
+      "extension": ".cpn",
+      "sha256": "9a60b218ab3dc6e5e1c35af2bfc9fe4eb5b7fd56204266453fd7fb6a7389ea21",
+      "mission_count": 8,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c09_m00",
+          "name": "Наемные убийцы",
+          "filename": "The Assassins.scn",
+          "sha256": "9b76d1c3ef613cebc1a826179eaea01d406e90fb1ff04671f4d17a0e11372fb7",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c09_m01",
+          "name": "Нападение на остров",
+          "filename": "Island Hopping.scn",
+          "sha256": "8e3f6e6532e166a5b7eeec424d816f4beb5ce5168986b827d5d771e3051414e8",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c09_m02",
+          "name": "Захват",
+          "filename": "Capture.scn",
+          "sha256": "d4c1610c8a14769e687a12780f7078931daa8f864600134432f1d442e1975ad6",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c09_m03",
+          "name": "Горный Храм",
+          "filename": "Mountain Temple.scn",
+          "sha256": "2e22e1c12f5ef535789b872f286a1c1d1a05f06a893087e34bf483531c7b2718",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c09_m04",
+          "name": "Каньон Смерти",
+          "filename": "The Canyon of Death.scn",
+          "sha256": "3aac034a665dc4f5ae66d6d4a71b9db14dc19fae81864f5033b4dcd02547ab27",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c09_m05",
+          "name": "Притеснение",
+          "filename": "Oppression.scn",
+          "sha256": "92432dd65a3b42b9af9004a22f2300b07889cc0c56ed3e70ce551983b10f2762",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 6,
+          "audit_match_id": "audit_c09_m06",
+          "name": "Друг в опасности",
+          "filename": "A Friend in Need.scn",
+          "sha256": "5685b0e692a5187a61f138433ff8a6bd6eb3dea16db84521c9e06f79ae84cd09",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 7,
+          "audit_match_id": "audit_c09_m07",
+          "name": "Восстание Кюсю",
+          "filename": "Kyushu Revolts.scn",
+          "sha256": "f4a96ae7d9f3147ffd25b8c905e9929dbd881e9d865c21c95835a67035940e5e",
+          "active_player_count": 2
+        }
+      ]
+    },
+    {
+      "campaign_index": 10,
+      "portfolio_id": "source_campaign_10",
+      "source_path": "campaign/Обучающая кампания 'Расцвет Египта'.cpn",
+      "filename": "Обучающая кампания 'Расцвет Египта'.cpn",
+      "name": "Обучающая кампания 'Расцвет Египта'",
+      "extension": ".cpn",
+      "sha256": "fafa75fb68585eb3281f6a159450b3f528958c2b6d7f8c52af993046dbefcbd8",
+      "mission_count": 12,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c10_m00",
+          "name": "Охота",
+          "filename": "Hunting.scn",
+          "sha256": "37e37e78c73bff02602be3d37705547064b5f34b48d104b5732cd2d5a673e148",
+          "active_player_count": 1
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c10_m01",
+          "name": "Заготовка продовольствия",
+          "filename": "Foraging.scn",
+          "sha256": "d2b8ad1618a8e6bdbc0cd03b7f96da0bf4f17dd16bbcb25fc7280056d70b361a",
+          "active_player_count": 1
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c10_m02",
+          "name": "Открытия",
+          "filename": "Discoveries.scn",
+          "sha256": "1bd2e5d323aaa8558da97b99ad9693502535cf15376922ed9e9a16d0ad0a0e42",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c10_m03",
+          "name": "На заре новой эпохи",
+          "filename": "Dawn of a New Age.scn",
+          "sha256": "955028e9188999b9b65c5e5a2dfd6d63f7cdeca1a308090ad7923901b979bebb",
+          "active_player_count": 1
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c10_m04",
+          "name": "Стычка",
+          "filename": "Skirmish.scn",
+          "sha256": "9ae75fd7092db5c85964963897c2877e7866638a463d12487647d03a96a651a6",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c10_m05",
+          "name": "Сельское хозяйство",
+          "filename": "Farming.scn",
+          "sha256": "fe23afef4a98c72d2c6545f14f7cf9fbebba2d05957be52c1ba1e22eba8f517f",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 6,
+          "audit_match_id": "audit_c10_m06",
+          "name": "Торговля",
+          "filename": "Trade.scn",
+          "sha256": "1e435d4372d0afcafa7596c9e76cf0a6bb82c2f4d6368d8029f3f20910fc958e",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 7,
+          "audit_match_id": "audit_c10_m07",
+          "name": "Поход",
+          "filename": "Crusade.scn",
+          "sha256": "e4837c63212b9d1d002847d8143a29ec31829e85ee1bccc7a219ba03fc9e6707",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 8,
+          "audit_match_id": "audit_c10_m08",
+          "name": "Речной форпост",
+          "filename": "River Outpost.scn",
+          "sha256": "42865e13fb713c8c1b0d077b213e75b5d47c00c7c1de0d41791a85a048dce3af",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 9,
+          "audit_match_id": "audit_c10_m09",
+          "name": "Морское сражение",
+          "filename": "Naval Battle.scn",
+          "sha256": "9dc6d8b006c280eabbfcbff9bfb1e5ac23957770fd7d1bcfd55d06293029cb6e",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 10,
+          "audit_match_id": "audit_c10_m10",
+          "name": "Чудо Света",
+          "filename": "A Wonder of the World.scn",
+          "sha256": "0ecf09102424d1c2dde57c673c07ec44118b7c22d66deac591579fe8f42e6c3d",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 11,
+          "audit_match_id": "audit_c10_m11",
+          "name": "Осада в Ханаане",
+          "filename": "Siege In Canaan.scn",
+          "sha256": "56438a6deea24aa7f7c88d6c529834c6e5e2bbd654b09bf04d22fba5426a6dda",
+          "active_player_count": 2
+        }
+      ]
+    },
+    {
+      "campaign_index": 11,
+      "portfolio_id": "source_campaign_11",
+      "source_path": "campaign/Расцвет Рима.cpx",
+      "filename": "Расцвет Рима.cpx",
+      "name": "Расцвет Рима",
+      "extension": ".cpx",
+      "sha256": "7b6d3630bb6a11c7ac68fd1f066299f61e07a998c25fe5c78b5dc3d3f47e181d",
+      "mission_count": 6,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c11_m00",
+          "name": "Восхождение Рима",
+          "filename": "Birth of Rome.scx",
+          "sha256": "a3b62d8873333020712606d34497a48e87a0e868b129d56a7714567dc82bd8d5",
+          "active_player_count": 7
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c11_m01",
+          "name": "Пирр Эпирский",
+          "filename": "Pyrrhus of Epirus.scx",
+          "sha256": "d9151fd732dbef66309f4adf82d9f03c3857d30adcd5407bc475348b3ea3589c",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c11_m02",
+          "name": "Сиракузцы",
+          "filename": "Syracuse.scx",
+          "sha256": "6bd851d23687b52f74e32bb6875e18a9011eb3a1bb91ec85944a91d445ea5d9e",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c11_m03",
+          "name": "Метавр",
+          "filename": "Metaurus.scx",
+          "sha256": "e269b3a5049190707304f6a7062d0f751a77e860c0474a1b3a7658d483554378",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c11_m04",
+          "name": "Зама",
+          "filename": "Zama.scx",
+          "sha256": "cf488c93e3c00a95937691eb1e69d7a1d7a2512a09dcacf340fa2a4140aecf84",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c11_m05",
+          "name": "Митридат",
+          "filename": "Mithridates.scx",
+          "sha256": "f7d63a19bc0ff81103c0fbf583c359bff1af09018f1f0a06a4a6036eff93b590",
+          "active_player_count": 5
+        }
+      ]
+    },
+    {
+      "campaign_index": 12,
+      "portfolio_id": "source_campaign_12",
+      "source_path": "campaign/Римский Мир.cpx",
+      "filename": "Римский Мир.cpx",
+      "name": "Римский Мир",
+      "extension": ".cpx",
+      "sha256": "56ed43cb37287a6fb11049f5a00e5dad17b5a5bc2c034da99efb41df23403213",
+      "mission_count": 5,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c12_m00",
+          "name": "Акциум",
+          "filename": "Actium.scx",
+          "sha256": "0a41bdddf63864405fa5fd7a7b9df1e42cb97ad9f3b915f3b8cf8fbfe2ba0ff6",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c12_m01",
+          "name": "Год четырех императоров",
+          "filename": "Year of the Four Emperors.scx",
+          "sha256": "0fa70c479975710061983dc013c88b13367dca9c613f88414b91830a6878500e",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c12_m02",
+          "name": "Ктесифон",
+          "filename": "Ctesiphon.scx",
+          "sha256": "a526649496c28a5abc9ead3f7f4b3e8abe64b01759a2a454bb321b07bd0997e4",
+          "active_player_count": 5
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c12_m03",
+          "name": "Царица Зенобия",
+          "filename": "Queen Zenobia.scx",
+          "sha256": "e37695088b27126598a9fe4de09c7c23ccae7c8b162cd8a431fc90ea2a4326c2",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c12_m04",
+          "name": "Нашествие гуннов",
+          "filename": "Coming of the Huns.scx",
+          "sha256": "96584f6ba5bf0cf093612d4abdbfecfdce58590295bcf00cf96965016751c5da",
+          "active_player_count": 5
+        }
+      ]
+    },
+    {
+      "campaign_index": 13,
+      "portfolio_id": "source_campaign_13",
+      "source_path": "campaign/Слава Греции.cpn",
+      "filename": "Слава Греции.cpn",
+      "name": "Слава Греции",
+      "extension": ".cpn",
+      "sha256": "ff40a55a49d8b9dcec24a5bbbe81b55d804e52317fb283eaa2f6f18c43e5da6e",
+      "mission_count": 8,
+      "missions": [
+        {
+          "scenario_index": 0,
+          "audit_match_id": "audit_c13_m00",
+          "name": "Захват земли",
+          "filename": "Land Grab.scn",
+          "sha256": "45a45879912a8d575192a858f1ff6bd573dbacff83206d852629957dfd750d67",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 1,
+          "audit_match_id": "audit_c13_m01",
+          "name": "Крепость",
+          "filename": "Citadel.scn",
+          "sha256": "d2073e8eed03978303580615e6538264fe9de29023305d2cabeba1092897cc69",
+          "active_player_count": 2
+        },
+        {
+          "scenario_index": 2,
+          "audit_match_id": "audit_c13_m02",
+          "name": "Ионийская экспансия",
+          "filename": "Ionian Expansion.scn",
+          "sha256": "1267424cd92599772c89c342748438a1b46a817850062c5a16725471243a5f55",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 3,
+          "audit_match_id": "audit_c13_m03",
+          "name": "Троянская война",
+          "filename": "Trojan War.scn",
+          "sha256": "5c7310f654162391596b4adf7f030fd41f3096fb138e4a7730a713deebf46b48",
+          "active_player_count": 3
+        },
+        {
+          "scenario_index": 4,
+          "audit_match_id": "audit_c13_m04",
+          "name": "Я вернусь",
+          "filename": "I'll Be Back.scn",
+          "sha256": "a7bc64b1a40e0ba5ed1563db1b6156de1aa8fecf49dc0518778d179c1f0835a8",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 5,
+          "audit_match_id": "audit_c13_m05",
+          "name": "Осада Афин",
+          "filename": "Siege of Athens.scn",
+          "sha256": "19376ebedcf50c7cb3f940a0a884123f0b8d9ddb55b42c8a907c6595f0e61332",
+          "active_player_count": 4
+        },
+        {
+          "scenario_index": 6,
+          "audit_match_id": "audit_c13_m06",
+          "name": "Поход Ксенофонта",
+          "filename": "Xenophon's March.scn",
+          "sha256": "5ea706734a235b3df688704253295112173098c5ca42cd04c934369a37a5b70f",
+          "active_player_count": 5
+        },
+        {
+          "scenario_index": 7,
+          "audit_match_id": "audit_c13_m07",
+          "name": "Чудо Света",
+          "filename": "Wonder.scn",
+          "sha256": "75aeeac029da9645b0a82df17eed75c01dac771dab583a34b60e5dfc31e5ea0e",
+          "active_player_count": 4
+        }
+      ]
+    }
+  ]
+}

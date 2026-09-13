@@ -1088,3 +1088,13 @@ ext_unit_id.
 - `source_ai_scenario_runtime_ledger.json` одновременно сохраняет pending strategic numbers/directives. Пустой первый план профиля с `source_random_default_pending` не маскируется и не заменяется generic AI.
 - Доказательства: ручной генератор полного ledger и `test_source_ai_scenario_runtime_ledger.gd`, который повторно строит все шесть миров и сравнивает стабильную проекцию с baseline. Изолированный gate проходит. Runtime сцена не зависит от новых файлов; предыдущий полный suite `181/0`, PCK и smoke остаются действительными без повторного много минутного export.
 - Следующий пакет I12-020M: общий manifest/gap-аудит всех 14 доступных кампаний и 95 миссий, затем выбор кампании с минимальными общими blockers и её пакетное закрытие.
+
+### Прогресс (2026-09-14, ускоренный пакет I12-020M — campaign portfolio audit)
+
+- Из validated `scenario-catalog.json` автоматически построен постоянный `source_campaign_portfolio.json`: 14 кампаний, 95 миссий, уникальные campaign/scenario SHA-256 и стабильные audit IDs. Ручной список отсутствует.
+- Новый четырёхпоточный auditor использует тот же Rust extractor и `build_scenario_match.py`, что отдельный импорт. Полный проход занимает около минуты на текущей машине и выдаёт компактную матрицу по campaign/mission/object/condition/asset/AI capability.
+- Ошибка одной миссии больше не уничтожает результаты партии. `Homelands`, `Охота`, `Заготовка продовольствия` и `На заре новой эпохи` имеют менее двух активных source slots; они записаны как `import_failure_gap` на этапе `runtime_normalization` с переносимой причиной.
+- Baseline: 14/14 кампаний, 95/95 миссий, 10 launcher-ready, 85 blocked, 0 parity-ready. В десять mechanically-ready входят шесть миссий `Расцвета Рима` и четыре миссии других кампаний; они не публикуются без campaign package и outcome evidence.
+- Следующей целой кампанией выбран `First Punic War`: 3 blocked missions, 48 суммарных blocking records, 4 parity records. Общий пакет содержит object IDs 69 Guard Tower (4 экземпляра), 131 Tree Stump (25), 159 Artifact (2); legacy commands 3/4; assets `graphic_323_p1`, `graphic_323_p2`, `graphic_572`, `graphic_833`, `graphic_928`…`930`; два AI normalization gaps.
+- `test_source_campaign_portfolio.gd` проверяет source/runtime freshness, глобальную уникальность, 95-миссионное покрытие, четыре устойчивых import blocker и выбор следующей кампании. Изолированный gate проходит.
+- Следующий пакет I12-020N: закрыть общие gaps всей `First Punic War`, импортировать три fixed-source matches и доказать bootstrap/win/loss перед публикацией.
