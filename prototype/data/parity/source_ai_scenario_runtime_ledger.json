@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "status": "integrated_runtime_probe",
+  "tick": 1,
+  "mission_count": 6,
+  "known_parity_gaps": [
+    "source workforce",
+    "source targeting",
+    "DEFAULT inheritance",
+    "Random",
+    "strategic numbers 71/72/76"
+  ],
+  "missions": [
+    {
+      "match_id": "campaign_birth_of_rome",
+      "source_sha256": "a3b62d8873333020712606d34497a48e87a0e868b129d56a7714567dc82bd8d5",
+      "profile_count": 6,
+      "issued_command_count": 29,
+      "accepted_command_count": 29,
+      "rejected_command_count": 0,
+      "rejection_reasons": {},
+      "command_type_counts": {"gather": 24, "train": 5},
+      "profiles": [
+        {"team": 2, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71], "pending_rule_directives": [], "command_type_counts": {"gather": 5, "train": 1}, "command_count": 6},
+        {"team": 3, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"gather": 5, "train": 1}, "command_count": 6},
+        {"team": 4, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"gather": 6, "train": 1}, "command_count": 7},
+        {"team": 5, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"gather": 4, "train": 1}, "command_count": 5},
+        {"team": 6, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"gather": 4, "train": 1}, "command_count": 5},
+        {"team": 7, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "source_random_default_pending", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {}, "command_count": 0}
+      ]
+    },
+    {
+      "match_id": "campaign_pyrrhus_of_epirus",
+      "source_sha256": "d9151fd732dbef66309f4adf82d9f03c3857d30adcd5407bc475348b3ea3589c",
+      "profile_count": 1,
+      "issued_command_count": 12,
+      "accepted_command_count": 12,
+      "rejected_command_count": 0,
+      "rejection_reasons": {},
+      "command_type_counts": {"gather": 12},
+      "profiles": [
+        {"team": 2, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"gather": 12}, "command_count": 12}
+      ]
+    },
+    {
+      "match_id": "campaign_syracuse",
+      "source_sha256": "6bd851d23687b52f74e32bb6875e18a9011eb3a1bb91ec85944a91d445ea5d9e",
+      "profile_count": 3,
+      "issued_command_count": 7,
+      "accepted_command_count": 7,
+      "rejected_command_count": 0,
+      "rejection_reasons": {},
+      "command_type_counts": {"gather": 6, "train": 1},
+      "profiles": [
+        {"team": 2, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [], "pending_rule_directives": ["DEFAULT"], "command_type_counts": {"gather": 4, "train": 1}, "command_count": 5},
+        {"team": 3, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [2, 3, 4, 5, 34, 71], "pending_rule_directives": ["DEFAULT"], "command_type_counts": {"gather": 2}, "command_count": 2},
+        {"team": 4, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "source_random_default_pending", "pending_strategic_number_ids": [2, 3, 4, 5, 34, 71], "pending_rule_directives": ["DEFAULT"], "command_type_counts": {}, "command_count": 0}
+      ]
+    },
+    {
+      "match_id": "campaign_metaurus",
+      "source_sha256": "e269b3a5049190707304f6a7062d0f751a77e860c0474a1b3a7658d483554378",
+      "profile_count": 2,
+      "issued_command_count": 17,
+      "accepted_command_count": 17,
+      "rejected_command_count": 0,
+      "rejection_reasons": {},
+      "command_type_counts": {"build": 2, "gather": 15},
+      "profiles": [
+        {"team": 2, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"build": 1, "gather": 6}, "command_count": 7},
+        {"team": 3, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"build": 1, "gather": 9}, "command_count": 10}
+      ]
+    },
+    {
+      "match_id": "campaign_zama",
+      "source_sha256": "cf488c93e3c00a95937691eb1e69d7a1d7a2512a09dcacf340fa2a4140aecf84",
+      "profile_count": 1,
+      "issued_command_count": 15,
+      "accepted_command_count": 15,
+      "rejected_command_count": 0,
+      "rejection_reasons": {},
+      "command_type_counts": {"build": 1, "gather": 14},
+      "profiles": [
+        {"team": 2, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"build": 1, "gather": 14}, "command_count": 15}
+      ]
+    },
+    {
+      "match_id": "campaign_mithridates",
+      "source_sha256": "f7d63a19bc0ff81103c0fbf583c359bff1af09018f1f0a06a4a6036eff93b590",
+      "profile_count": 4,
+      "issued_command_count": 44,
+      "accepted_command_count": 44,
+      "rejected_command_count": 0,
+      "rejection_reasons": {},
+      "command_type_counts": {"attack": 1, "attack_move": 1, "build": 1, "gather": 40, "move": 1},
+      "profiles": [
+        {"team": 2, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [], "pending_rule_directives": ["RANDOM"], "command_type_counts": {"gather": 15}, "command_count": 15},
+        {"team": 3, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [], "pending_rule_directives": ["RANDOM"], "command_type_counts": {"gather": 11}, "command_count": 11},
+        {"team": 4, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "normalized", "pending_strategic_number_ids": [71, 72], "pending_rule_directives": [], "command_type_counts": {"build": 1, "gather": 14}, "command_count": 15},
+        {"team": 5, "profile": "source_campaign_v1", "normalization_status": "partial", "build_order_status": "source_random_default_pending", "pending_strategic_number_ids": [0, 1, 2, 3, 4, 5, 34, 71, 72, 76, 77, 78, 79, 80, 81, 82, 83, 89, 90], "pending_rule_directives": ["DEFAULT"], "command_type_counts": {"attack": 1, "attack_move": 1, "move": 1}, "command_count": 3}
+      ]
+    }
+  ]
+}

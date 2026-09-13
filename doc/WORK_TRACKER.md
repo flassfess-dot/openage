@@ -1079,3 +1079,12 @@ ext_unit_id.
 - Тестовый runner пишет каждый дочерний журнал в `prototype/qa/test-logs` и не считает единственную известную внешнюю ошибку Windows root certificate store ошибкой игры. Все остальные `ERROR` и `SCRIPT ERROR` остаются блокирующими.
 - Доказательства: `test_command_marker_presentation.gd`, прежний `test_pointer_command_feedback.gd`, `test_main_hud_scene.gd`; полный gate `181 passed / 0 failed`. Windows PCK: 224 352 000 байт, SHA-256 `dec74b1c40ecfa1fd3f4ae3c3d61bfd49b37bfcaa59956c8907298c262416de7`; автономный `prototype_skirmish` packaged smoke-run — exit 0 без повторной конвертации.
 - Следующий пакет: воспроизводимый AI-vs-scenario ledger опубликованных миссий и расширение campaign manifest только через нулевые object/condition/asset gates. Накопившиеся UI/executable measurements выполняются одной серией; evidence-gated AI параметры остаются неизменными до первичного доказательства.
+
+### Прогресс (2026-09-14, ускоренный пакет I12-020L/2C-1 — AI scenario runtime ledger)
+
+- Создан общий `RoRSourceAiScenarioLedger`: он не повторяет AI-правила, а запускает каждый реальный профиль на fog-safe snapshot соответствующей fixed-source миссии, передаёт все приказы общему controller и читает authoritative accepted/rejected results после наступления запланированного fixed tick.
+- Первая версия аудита обнаружила ошибку собственной временной границы: результаты читались на tick 0 для команд tick 1 и ложно выглядели как `missing_result`. Проверка исправлена на штатный `advance_frame`; игровые правила не менялись.
+- Постоянный baseline содержит все 6 опубликованных миссий, 17 source AI профилей и source SHA-256. На первом решении выпущены 124 команды: gather 111, train 6, build 4, attack/attack-move/move по 1. Все 124 команды приняты, отклонённых нет.
+- `source_ai_scenario_runtime_ledger.json` одновременно сохраняет pending strategic numbers/directives. Пустой первый план профиля с `source_random_default_pending` не маскируется и не заменяется generic AI.
+- Доказательства: ручной генератор полного ledger и `test_source_ai_scenario_runtime_ledger.gd`, который повторно строит все шесть миров и сравнивает стабильную проекцию с baseline. Изолированный gate проходит. Runtime сцена не зависит от новых файлов; предыдущий полный suite `181/0`, PCK и smoke остаются действительными без повторного много минутного export.
+- Следующий пакет I12-020M: общий manifest/gap-аудит всех 14 доступных кампаний и 95 миссий, затем выбор кампании с минимальными общими blockers и её пакетное закрытие.
