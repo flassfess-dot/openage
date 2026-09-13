@@ -81,6 +81,8 @@ The formation controls are part of the single normal UI. They should reuse the c
 
 Current `INTEGRATED` evidence (phase 2B-9b1): all three installed interface archives are inventoried without flattening duplicate IDs; runtime assets carry an exact archive path and explicit palette. Source HUD family 50733…50744 provides native 20px top and 126px bottom frames at 640/800/1024. These frames are composed without pixel stretching, and wide layouts preserve the source left/right regions while repeating only the neutral centre. The first source variant is a temporary integrated default; mapping the four variants to original executable contexts and source button-state order remains required before `PARITY`.
 
+Phase 2B-9b2 machine evidence corrects the earlier four-frame assumption. Each 50713…50716 SLP contains four byte-identical decoded 54×54 frames, so those indices cannot be mapped bijectively to normal/hover/pressed/disabled. Each 50725…50728 SLP has four distinct decoded 54×31 frames, but their roles and composition remain executable-observation work. Source 50745 has 26 distinct 50×7 green-to-red frames and is provisionally used for presentation-only health bars with a missing-asset fallback. `source_ui_executable_gate.json` pins the executable, DAT and interface archive hashes and keeps all semantics, shell-context mapping and rectangle/text calibration pending. See `SOURCE_UI_EXECUTABLE_MEASUREMENT.md`.
+
 ## 6. Import and performance hygiene
 
 - Generated files are written only when their bytes change. Cache-version changes alone must not invalidate byte-identical PNGs.

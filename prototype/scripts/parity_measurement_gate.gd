@@ -32,8 +32,9 @@ static func validation_issues(manifest: Dictionary) -> Array[String]:
 		elif seen_scene_ids.has(scene_id):
 			issues.append("duplicate scene id: %s" % scene_id)
 		seen_scene_ids[scene_id] = true
-		if scene.get("source_unit_ids", []).is_empty():
-			issues.append("%s must name source_unit_ids" % scene_id)
+		var source_ids: Array = scene.get("source_ids", scene.get("source_unit_ids", []))
+		if source_ids.is_empty():
+			issues.append("%s must name source_ids or source_unit_ids" % scene_id)
 		if scene.get("required_metrics", []).is_empty():
 			issues.append("%s must name required_metrics" % scene_id)
 		for evidence_value in scene.get("modern_evidence", []):

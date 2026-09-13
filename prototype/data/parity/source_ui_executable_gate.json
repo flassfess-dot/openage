@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "gate_id": "I12-020L-2B-9b2",
+  "status": "capture_pending",
+  "reference_build": {
+    "product": "Age of Empires, the Rise of Rome",
+    "product_version": "1.1",
+    "file_version": "00.01.6.1120",
+    "executable_name": "EMPIRESX.EXE",
+    "executable_sha256": "b5bc3050ee50cf1b548d21da0509bf5bbe8904eb766705084ab8a2fcdf6d8a9f",
+    "data_name": "data2/empires.dat",
+    "data_sha256": "d47c59d9ecaf5b83b467c647a69d28eced6a0dc5b2fa873e930c86136df5eb9d",
+    "interface_archive": "data/Interfac.drs",
+    "interface_archive_sha256": "8a7f1b1f9009d4bc0262c7890935d69d62668c80751ec3b861345064a0e63d33"
+  },
+  "capture_contract": {
+    "native_resolutions": [[640, 480], [800, 600], [1024, 768]],
+    "render_scale": 1,
+    "pixel_sampling": "nearest-neighbour at native sprite scale",
+    "required_repetitions": 2,
+    "cursor_rule": "capture the same control with the pointer outside, over, held and after release",
+    "disabled_rule": "capture the same control when source command legality disables it",
+    "comparison_rule": "map observed executable pixels to source frames; never infer semantic states from frame index alone"
+  },
+  "candidate_families": [
+    {
+      "id": "command_54x54",
+      "source_ids": [50713, 50714, 50715, 50716],
+      "source": "data/Interfac.drs",
+      "palette_id": 50500,
+      "frame_count": 4,
+      "dimensions": [54, 54],
+      "decoded_pixel_identity_groups": [[0, 1, 2, 3]],
+      "interaction_states_to_observe": ["normal", "hover", "pressed", "disabled"],
+      "semantic_composition": {},
+      "semantic_composition_status": "original_capture_pending"
+    },
+    {
+      "id": "compact_54x31",
+      "source_ids": [50725, 50726, 50727, 50728],
+      "source": "data/Interfac.drs",
+      "palette_id": 50500,
+      "frame_count": 4,
+      "dimensions": [54, 31],
+      "decoded_pixel_identity_groups": [[0], [1], [2], [3]],
+      "interaction_states_to_observe": ["normal", "hover", "pressed", "disabled"],
+      "semantic_composition": {},
+      "semantic_composition_status": "original_capture_pending"
+    },
+    {
+      "id": "status_50x7",
+      "source_ids": [50745],
+      "source": "data/Interfac.drs",
+      "palette_id": 50500,
+      "frame_count": 26,
+      "dimensions": [50, 7],
+      "semantic_role": "",
+      "semantic_role_status": "original_capture_pending"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "command_button_state_order",
+      "purpose": "Establish the semantic frame order and source-style relationship of the 54x54 families.",
+      "source_ids": [50713, 50714, 50715, 50716],
+      "required_metrics": ["control_context", "shell_source_id", "normal_frame", "hover_frame", "pressed_frame", "disabled_frame", "crop_rectangle", "text_baseline"],
+      "modern_evidence": [
+        "res://scripts/interface_skin.gd",
+        "res://tests/unit/test_interface_source_controls.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "compact_button_state_order",
+      "purpose": "Establish whether each 54x31 family is used for top, minimap or another compact control and map its states.",
+      "source_ids": [50725, 50726, 50727, 50728],
+      "required_metrics": ["control_context", "shell_source_id", "normal_frame", "hover_frame", "pressed_frame", "disabled_frame", "crop_rectangle", "text_baseline"],
+      "modern_evidence": [
+        "res://scripts/interface_skin.gd",
+        "res://tests/unit/test_interface_source_controls.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "status_strip_semantics",
+      "purpose": "Establish the gameplay meaning and frame progression of source 50745.",
+      "source_ids": [50745],
+      "required_metrics": ["control_context", "semantic_role", "value_samples", "frame_mapping", "crop_rectangle"],
+      "modern_evidence": [
+        "res://scripts/interface_skin.gd",
+        "res://tests/unit/test_interface_source_controls.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "hud_shell_context_mapping",
+      "purpose": "Map all four source shell variants to their executable civilization or context instead of guessing from colour.",
+      "source_ids": [50733, 50734, 50735, 50736, 50737, 50738, 50739, 50740, 50741, 50742, 50743, 50744],
+      "required_metrics": ["native_resolution", "source_shell_id", "civilization_id", "selection_context", "command_rectangle", "selection_rectangle", "minimap_rectangle", "text_baselines"],
+      "modern_evidence": [
+        "res://scripts/interface_layout.gd",
+        "res://tests/unit/test_interface_layout.gd",
+        "res://tests/integration/test_main_hud_scene.gd"
+      ],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    }
+  ],
+  "source_owned_gaps": [],
+  "completion_rules": [
+    "Every source family is captured twice in the original executable with matching pixel hashes.",
+    "Every observed interaction state has a measured source composition; a state may combine backplate, glyph and tint and is not assumed to be one SLP frame.",
+    "Every shell variant is mapped to an observed executable context at every supported native resolution.",
+    "Command, selection, minimap and text rectangles are measured from immutable native-resolution crops.",
+    "Runtime source styles are enabled only after their matching family observation passes validation.",
+    "The gate status changes to measured only after automated validation passes."
+  ]
+}

@@ -83,6 +83,7 @@ var terrain_border_textures := {}
 var tree_texture: Texture2D
 var berry_texture: Texture2D
 var interface_panel_texture: Texture2D
+var health_status_frames: Array[Texture2D] = []
 var unit_textures := {}
 var gamespec_data: Dictionary = {}
 var audio_player: AudioStreamPlayer
@@ -128,6 +129,9 @@ func _ready() -> void:
 	tree_texture = resource_catalog.tree_texture
 	berry_texture = resource_catalog.berry_texture
 	interface_panel_texture = resource_catalog.interface_panel_texture
+	var status_candidate: Dictionary = resource_catalog.interface_skin.status_candidate()
+	for texture_value in status_candidate.get("frames", []):
+		health_status_frames.append(texture_value)
 	unit_textures = resource_catalog.unit_textures
 
 	simulation_world = SimulationWorld.new(map_size)
@@ -1141,10 +1145,16 @@ func draw_unit_health(item: Dictionary) -> void:
 	var unit: Dictionary = item["data"]
 	var screen := PixelScaling.snap_screen(world_to_screen(item["world_anchor"]))
 	var hotspot: Vector2 = item["hotspot"]
+	var ratio: float = clampf(float(unit["hp"]) / maxf(1.0, float(unit["max_hp"])), 0.0, 1.0)
+	if not health_status_frames.is_empty():
+		var frame_index := resource_catalog.interface_skin.status_frame_index(ratio, health_status_frames.size())
+		var texture := health_status_frames[frame_index]
+		var bar_pos := PixelScaling.snap_screen(Vector2(screen.x - texture.get_width() * 0.5, screen.y - hotspot.y * view_zoom - 9.0))
+		draw_texture(texture, bar_pos)
+		return
 	var bar_width := 29.0 * view_zoom
 	var bar_pos := Vector2(screen.x - bar_width * 0.5, screen.y - hotspot.y * view_zoom - 8.0)
 	draw_rect(Rect2(bar_pos, Vector2(bar_width, 4.0)), Color(0.06, 0.08, 0.08, 0.9), true)
-	var ratio: float = maxf(0.0, unit["hp"] / unit["max_hp"])
 	draw_rect(Rect2(bar_pos + Vector2(1, 1), Vector2((bar_width - 2) * ratio, 2.0)), Color("62df78") if unit["team"] == PLAYER_TEAM else Color("ed5a4f"), true)
 
 func draw_anchored_texture(texture: Texture2D, name: String, frame: int, anchor: Vector2, scale: float, mirrored: bool = false, opacity: float = 1.0, provided_hotspot: Variant = null) -> void:

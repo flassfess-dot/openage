@@ -214,6 +214,15 @@ function classifyInterfaceSprite(id, metadata) {
   if (id >= 50733 && id <= 50744 && metadata.frameCount === 2 && [640, 800, 1024].includes(metadata.width)) {
     return {role: "fixed_resolution_hud_shell", confidence: "source-reviewed", basis: "two-frame top/bottom HUD shell at a supported source resolution"};
   }
+  if (id >= 50713 && id <= 50716 && metadata.frameCount === 4 && metadata.width === 54 && metadata.height === 54) {
+    return {role: "square_control_backplate_candidate", confidence: "structural", basis: "four equal 54x54 frames; semantic role and executable composition require observation"};
+  }
+  if (id >= 50725 && id <= 50728 && metadata.frameCount === 4 && metadata.width === 54 && metadata.height === 31) {
+    return {role: "compact_control_family_candidate", confidence: "structural", basis: "four equal 54x31 frames; control role and executable composition require observation"};
+  }
+  if (id === 50745 && metadata.frameCount === 26 && metadata.width === 50 && metadata.height === 7) {
+    return {role: "status_strip_family_candidate", confidence: "structural", basis: "26 equal 50x7 frames; health/progress role requires original executable observation"};
+  }
   if (metadata.frameCount > 1 && metadata.maxWidth <= 128 && metadata.maxHeight <= 128) {
     return {role: "cursor_button_state_or_decoration", confidence: "structural", basis: "small multi-frame interface sprite"};
   }
@@ -229,6 +238,9 @@ function interfacePalettePolicy(classification) {
     "command_technology_object_icon_sheet",
     "progress_status_strip",
     "fixed_resolution_hud_shell",
+    "square_control_backplate_candidate",
+    "compact_control_family_candidate",
+    "status_strip_family_candidate",
     "cursor_button_state_or_decoration",
     "fixed_decoration_or_control",
   ]);
@@ -790,6 +802,7 @@ if (selectionPath) {
         writeFileIfChanged(path.join(outputDir, filename), source);
         cacheMisses += 1;
       }
+      asset.fileSha256 = sha256(path.join(outputDir, filename));
       exported.push(asset);
       cacheEntries[filename] = {key, components, asset};
       continue;
@@ -828,6 +841,7 @@ if (selectionPath) {
         asset = {name: item.name, file: filename, archive: item.archive, source: requestedSource, id: item.id, frame, frameCount: decoded.frameCount, width: decoded.width, height: decoded.height, hotspot: [decoded.hotspotX, decoded.hotspotY], paletteId: decoded.paletteId, semanticPixels: decoded.semanticPixels};
         cacheMisses += 1;
       }
+      asset.fileSha256 = sha256(path.join(outputDir, filename));
       exported.push(asset);
       cacheEntries[filename] = {key, components, asset};
     }
