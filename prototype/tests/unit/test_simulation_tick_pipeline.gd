@@ -34,7 +34,7 @@ func test_pipeline_executes_registered_order() -> void:
 func test_world_exposes_stable_tick_order() -> void:
 	var world = SimulationWorld.new(Vector2i(24, 24))
 	assert_equal(world.tick_system_order(), [
-		"capture_previous_positions", "ai_distress", "trade_goods", "unit_orders", "static_combat", "death_lifecycle", "resource_lifecycle", "production", "projectiles",
+		"capture_previous_positions", "ai_distress", "trade_goods", "unit_orders", "capturable_objectives", "static_combat", "death_lifecycle", "resource_lifecycle", "production", "projectiles",
 		"victory", "purge", "spatial_index", "fog", "component_sync",
 	], "active world tick order")
 	assert_equal(world.tick_system_order(true), [

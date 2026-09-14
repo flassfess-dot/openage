@@ -21,6 +21,10 @@ $manifestBuilder = Join-Path $PSScriptRoot "build_campaign_portfolio_manifest.py
 $matchBuilder = Join-Path $PSScriptRoot "build_scenario_match.py"
 $matrixBuilder = Join-Path $PSScriptRoot "build_campaign_portfolio_gap_matrix.py"
 $auditor = Join-Path $PSScriptRoot "audit_campaign_portfolio.py"
+$publishedManifests = @(
+    (Join-Path $repositoryRoot "prototype\data\campaigns\rise_of_rome.json"),
+    (Join-Path $repositoryRoot "prototype\data\campaigns\first_punic_war.json")
+)
 if (-not $Output) {
     $Output = Join-Path $repositoryRoot "prototype\data\content_waves\source_campaign_portfolio.json"
 }
@@ -49,6 +53,8 @@ if ($LASTEXITCODE -ne 0) {
     --converter $converter `
     --match-builder $matchBuilder `
     --matrix-builder $matrixBuilder `
+    --published-manifest $publishedManifests[0] `
+    --published-manifest $publishedManifests[1] `
     --output $Output `
     --workers $Workers
 if ($LASTEXITCODE -ne 0) {

@@ -15,7 +15,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ObjectCatalog,
     [Parameter(Mandatory = $true)]
-    [string]$Output
+    [string]$Output,
+    [string]$PythonExecutable
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,8 +58,14 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Raw campaign scenario conversion failed with exit code $LASTEXITCODE"
     }
-    $pythonArguments = @(
-        "-3", $builder,
+    $pythonCommand = "py"
+    $pythonPrefix = @("-3")
+    if ($PythonExecutable) {
+        $pythonCommand = (Resolve-Path -LiteralPath $PythonExecutable).Path
+        $pythonPrefix = @()
+    }
+    $pythonArguments = @($pythonPrefix) + @(
+        $builder,
         "--raw", $temporary.FullName,
         "--catalog", $ScenarioCatalog,
         "--archetypes", $archetypes,
@@ -66,7 +73,7 @@ try {
         "--match-id", $MatchId,
         "--output", $Output
     )
-    & py @pythonArguments
+    & $pythonCommand @pythonArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Campaign match conversion failed with exit code $LASTEXITCODE"
     }

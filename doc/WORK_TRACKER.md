@@ -1098,3 +1098,13 @@ ext_unit_id.
 - Следующей целой кампанией выбран `First Punic War`: 3 blocked missions, 48 суммарных blocking records, 4 parity records. Общий пакет содержит object IDs 69 Guard Tower (4 экземпляра), 131 Tree Stump (25), 159 Artifact (2); legacy commands 3/4; assets `graphic_323_p1`, `graphic_323_p2`, `graphic_572`, `graphic_833`, `graphic_928`…`930`; два AI normalization gaps.
 - `test_source_campaign_portfolio.gd` проверяет source/runtime freshness, глобальную уникальность, 95-миссионное покрытие, четыре устойчивых import blocker и выбор следующей кампании. Изолированный gate проходит.
 - Следующий пакет I12-020N: закрыть общие gaps всей `First Punic War`, импортировать три fixed-source matches и доказать bootstrap/win/loss перед публикацией.
+
+### Прогресс (2026-09-14, ускоренный пакет I12-020N — First Punic War vertical)
+
+- Общие source IDs закрыты без сценарных веток: Guard Tower 69 использует defence archetype, Tree Stump 131 — source presentation override, Artifact 159 — мобильную capturable-unit модель со связанным logical victory objective.
+- Artifact захватывается ближайшим допустимым юнитом на fixed tick, меняет нейтральную/свою/вражескую presentation palette, может быть перехвачен противником и исключён из боевых целей. Правый клик по нему выдаёт обычный приказ подхода.
+- Legacy conditions 3 `DestroyMultiple` и 4 `BringToArea` нормализованы по точным scenario object IDs; все три миссии имеют bootstrap/source-win/local-defeat evidence.
+- Импортированы graphics 323 player variants, 572, 833, 928 и 929. Graphic 930 с отсутствующим source SLP 799 использует задокументированный `tree` fallback; 3/75/194 экземпляра остаются parity gaps.
+- `first_punic_war.json` публикует три постоянных match; launcher содержит 10 миссий. Общий manifest-конвертер пересобирает обе опубликованные кампании при одноразовом импорте, а обычный запуск не конвертирует ресурсы.
+- Portfolio переаудирован после новых общих возможностей: 17 mechanically ready, 78 blocked, 0 parity-ready. Published manifests исключают `Расцвет Рима` и `First Punic War` из ranking. Следующий пакет — `Reign of the Hittites`, score `[3,4,5,5]`.
+- Boundary suite выявил и закрыл регрессию neutral-prefix у wildlife, два устаревших cache/matrix счётчика и запретил победу уже вышедшего участника. Итоговый gate: `186 passed / 0 failed`; cache validation `0 errors / 181 source-owned warnings`. Windows PCK: `246 916 672` байт, SHA-256 `01fdb59a4da2601f942e5a2cd97f3b62f03ed25bb6c38c46d3e816874c04149b`; автономный packaged smoke `campaign_battle_of_mylae` завершён с кодом 0 без runtime/script errors и без конвертации ресурсов.

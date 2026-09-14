@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "campaign_id": "first_punic_war",
+  "campaign_filename": "First Punic War.cpx",
+  "missions": [
+    {
+      "scenario_index": 0,
+      "match_id": "campaign_struggle_for_sicily",
+      "output_filename": "struggle-for-sicily.json",
+      "launcher_state": "published_vertical"
+    },
+    {
+      "scenario_index": 1,
+      "match_id": "campaign_battle_of_mylae",
+      "output_filename": "battle-of-mylae.json",
+      "launcher_state": "published_vertical"
+    },
+    {
+      "scenario_index": 2,
+      "match_id": "campaign_battle_of_tunes",
+      "output_filename": "battle-of-tunes.json",
+      "launcher_state": "published_vertical"
+    }
+  ]
+}

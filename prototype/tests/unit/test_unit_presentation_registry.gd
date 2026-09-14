@@ -12,6 +12,7 @@ func _initialize() -> void:
 	verify_lazy_loading(catalog)
 	verify_default_and_enemy(catalog)
 	verify_axeman_upgrade(catalog)
+	verify_artifact_ownership(catalog)
 	verify_naval_composites(catalog)
 	if failures.is_empty():
 		print("I12-003 unit presentation variants tests passed")
@@ -55,6 +56,17 @@ func verify_axeman_upgrade(catalog) -> void:
 	assert_equal(future.get("source_unit_id"), 74, "persistent upgrade applies to future line members")
 	var enemy_axeman := unit_stub(74, 2)
 	assert_equal(catalog.unit_frame_info(enemy_axeman, "death").get("asset_name"), "enemy_axeman_death", "upgraded enemy uses recolored death sequence")
+
+
+func verify_artifact_ownership(catalog) -> void:
+	var neutral := {"kind": "artifact", "source_unit_id": 159, "team": 0, "facing": 0, "anim": 0.0}
+	var owned := neutral.duplicate(true)
+	owned["team"] = 1
+	var enemy := neutral.duplicate(true)
+	enemy["team"] = 2
+	assert_equal(catalog.unit_frame_info(neutral, "idle").get("asset_name"), "artifact_neutral", "neutral artifact uses source neutral palette")
+	assert_equal(catalog.unit_frame_info(owned, "idle").get("asset_name"), "artifact_owned", "captured artifact uses local player palette")
+	assert_equal(catalog.unit_frame_info(enemy, "idle").get("asset_name"), "enemy_artifact_owned", "enemy artifact uses enemy player palette")
 
 
 func verify_naval_composites(catalog) -> void:

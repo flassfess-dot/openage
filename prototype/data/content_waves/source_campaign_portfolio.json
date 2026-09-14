@@ -1,37 +1,41 @@
 {
   "schema_version": 1,
-  "auditor_version": "campaign-portfolio-gap-matrix-1",
+  "auditor_version": "campaign-portfolio-gap-matrix-2",
   "manifest_sha256": "0b1f0d47184be660b1fd8336e99a3f2ac790e45e0f848b4762b1ae84ce265956",
   "source_catalog_cache_key": "503d563c4df9d249e72e596c0cad57fab905435ca0a349b57669361271080ca3",
-  "runtime_catalog_cache_key": "ede294474e84a79559b1eb4539caa2ea6c9f33b38458678ffca121915449d4b5",
+  "runtime_catalog_cache_key": "fc8ded7860c462e446ade5a7ad14f1bd074eabbbe5c142518c3e1bb8379c0afd",
+  "published_campaign_filenames": [
+    "first punic war.cpx",
+    "расцвет рима.cpx"
+  ],
   "summary": {
     "campaign_count": 14,
     "mission_count": 95,
-    "launcher_ready_mission_count": 10,
-    "blocked_mission_count": 85,
+    "launcher_ready_mission_count": 17,
+    "blocked_mission_count": 78,
     "parity_ready_mission_count": 0,
     "common_gap_campaign_counts": {
-      "ai_normalization_gap": 7,
+      "ai_normalization_gap": 3,
       "ai_semantics_gap": 14,
-      "asset_gap": 13,
-      "condition_gap": 13,
+      "asset_gap": 12,
+      "condition_gap": 12,
       "import_failure_gap": 2,
-      "object_gap": 13,
-      "source_settings_gap": 8
+      "object_gap": 11,
+      "source_asset_fallback_gap": 3,
+      "source_settings_gap": 6
     },
-    "recommended_next_campaign_id": "source_campaign_04"
+    "recommended_next_campaign_id": "source_campaign_05"
   },
   "ranked_unpublished_campaign_ids": [
-    "source_campaign_04",
     "source_campaign_05",
+    "source_campaign_12",
     "source_campaign_08",
     "source_campaign_06",
-    "source_campaign_12",
     "source_campaign_01",
-    "source_campaign_03",
-    "source_campaign_02",
     "source_campaign_00",
+    "source_campaign_03",
     "source_campaign_13",
+    "source_campaign_02",
     "source_campaign_09",
     "source_campaign_07",
     "source_campaign_10"
@@ -45,32 +49,31 @@
       "extension": ".cpx",
       "sha256": "b5cb78bf2b4a25278e5da8cdc0c088ae50baaa13d2687133ffd4b8b643df9102",
       "mission_count": 8,
-      "launcher_ready_mission_count": 0,
-      "blocked_mission_count": 8,
+      "launcher_ready_mission_count": 2,
+      "blocked_mission_count": 6,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 81,
+      "blocking_gap_total": 69,
       "parity_gap_total": 20,
       "gap_mission_counts": {
         "ai_semantics_gap": 8,
-        "asset_gap": 7,
+        "asset_gap": 3,
         "condition_gap": 4,
         "object_gap": 5
       },
       "object_gap_reasons": {
-        "archetype_missing": 44
+        "archetype_missing": 41
       },
       "unsupported_source_object_counts": {
         "41": 29,
         "60": 2,
         "89": 6,
         "90": 2,
-        "108": 2,
-        "159": 3
+        "108": 2
       },
       "unsupported_condition_command_counts": {
         "0": 5,
         "1": 1,
-        "4": 4,
+        "4": 1,
         "100": 2
       },
       "ai_capability_gap_profile_counts": {
@@ -83,7 +86,6 @@
       },
       "missing_runtime_aliases": [],
       "missing_asset_names": [
-        "graphic_323_p1",
         "graphic_525",
         "graphic_541",
         "graphic_542",
@@ -98,12 +100,11 @@
         "graphic_560",
         "graphic_561",
         "graphic_612",
-        "graphic_618",
-        "graphic_833"
+        "graphic_618"
       ],
       "selection_score": [
-        8,
-        81,
+        6,
+        69,
         20,
         8
       ],
@@ -130,17 +131,17 @@
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 1
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 2,
+          "blocking_gap_total": 1,
           "parity_gap_total": 3,
           "gap_ids": [
             "condition_gap",
-            "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {},
@@ -397,9 +398,7 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_833"
-          ],
+          "missing_asset_names": [],
           "launcher_ready": false,
           "parity_ready": false
         },
@@ -425,13 +424,14 @@
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 15
+            "asset_gap_count": 14
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 17,
+          "blocking_gap_total": 16,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -539,8 +539,7 @@
             "graphic_559",
             "graphic_560",
             "graphic_561",
-            "graphic_612",
-            "graphic_833"
+            "graphic_612"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -567,16 +566,16 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 1
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 1,
+          "blocking_gap_total": 0,
           "parity_gap_total": 2,
           "gap_ids": [
-            "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {},
@@ -720,10 +719,8 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_833"
-          ],
-          "launcher_ready": false,
+          "missing_asset_names": [],
+          "launcher_ready": true,
           "parity_ready": false
         },
         {
@@ -752,7 +749,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 5,
           "parity_gap_total": 2,
@@ -1095,13 +1093,14 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 4
+            "asset_gap_count": 3
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 13,
+          "blocking_gap_total": 12,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -1257,8 +1256,7 @@
           "missing_asset_names": [
             "graphic_557",
             "graphic_560",
-            "graphic_618",
-            "graphic_833"
+            "graphic_618"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -1276,31 +1274,31 @@
             144
           ],
           "source_object_count": 4402,
-          "runtime_entity_count": 3945,
+          "runtime_entity_count": 3948,
           "presentation_object_count": 448,
           "source_ai_profile_count": 6,
-          "normalized_condition_count": 2,
+          "normalized_condition_count": 5,
           "blocking_gaps": {
-            "object_gap_count": 9,
-            "condition_gap_count": 8,
+            "object_gap_count": 6,
+            "condition_gap_count": 5,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 1
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 6,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 18,
+          "blocking_gap_total": 11,
           "parity_gap_total": 6,
           "gap_ids": [
             "object_gap",
             "condition_gap",
-            "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 9
+            "archetype_missing": 6
           },
           "object_gaps": [
             {
@@ -1317,11 +1315,6 @@
               "reason": "archetype_missing",
               "source_unit_id": 108,
               "count": 1
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 3
             }
           ],
           "unsupported_conditions": [
@@ -1440,78 +1433,6 @@
                 "object_type": 0,
                 "player_id": -1,
                 "source_object": 4965,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 5,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  54.0,
-                  102.0,
-                  58.0,
-                  106.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 4970,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 6,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  54.0,
-                  102.0,
-                  58.0,
-                  106.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 5320,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 7,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  54.0,
-                  102.0,
-                  58.0,
-                  106.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 4979,
                 "state": 0,
                 "target_object": -1,
                 "victory_group": 1
@@ -2146,9 +2067,7 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_323_p1"
-          ],
+          "missing_asset_names": [],
           "launcher_ready": false,
           "parity_ready": false
         },
@@ -2174,16 +2093,16 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 1
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 1,
+          "blocking_gap_total": 0,
           "parity_gap_total": 2,
           "gap_ids": [
-            "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {},
@@ -2433,10 +2352,8 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_833"
-          ],
-          "launcher_ready": false,
+          "missing_asset_names": [],
+          "launcher_ready": true,
           "parity_ready": false
         },
         {
@@ -2465,7 +2382,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 24,
           "parity_gap_total": 3,
@@ -2833,27 +2751,24 @@
       "launcher_ready_mission_count": 2,
       "blocked_mission_count": 6,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 46,
+      "blocking_gap_total": 32,
       "parity_gap_total": 25,
       "gap_mission_counts": {
         "ai_semantics_gap": 8,
         "asset_gap": 2,
-        "condition_gap": 5,
+        "condition_gap": 4,
         "object_gap": 3
       },
       "object_gap_reasons": {
-        "archetype_missing": 28
+        "archetype_missing": 22
       },
       "unsupported_source_object_counts": {
         "41": 9,
         "60": 10,
-        "69": 6,
         "89": 3
       },
       "unsupported_condition_command_counts": {
         "1": 2,
-        "3": 4,
-        "4": 3,
         "6": 2,
         "100": 2
       },
@@ -2868,7 +2783,6 @@
       },
       "missing_runtime_aliases": [],
       "missing_asset_names": [
-        "graphic_323_p1",
         "graphic_522",
         "graphic_523",
         "graphic_538",
@@ -2876,7 +2790,7 @@
       ],
       "selection_score": [
         6,
-        46,
+        32,
         25,
         8
       ],
@@ -2894,12 +2808,12 @@
             120
           ],
           "source_object_count": 1680,
-          "runtime_entity_count": 1221,
+          "runtime_entity_count": 1227,
           "presentation_object_count": 448,
           "source_ai_profile_count": 2,
           "normalized_condition_count": 6,
           "blocking_gaps": {
-            "object_gap_count": 11,
+            "object_gap_count": 5,
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -2907,9 +2821,10 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 12,
+          "blocking_gap_total": 6,
           "parity_gap_total": 2,
           "gap_ids": [
             "object_gap",
@@ -2917,18 +2832,13 @@
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 11
+            "archetype_missing": 5
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 41,
               "count": 5
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 6
             }
           ],
           "unsupported_conditions": [
@@ -3200,7 +3110,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 2,
@@ -3453,7 +3364,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 1,
           "parity_gap_total": 2,
@@ -3732,7 +3644,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 3,
           "parity_gap_total": 2,
@@ -3905,19 +3818,20 @@
           "runtime_entity_count": 3616,
           "presentation_object_count": 411,
           "source_ai_profile_count": 6,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 4,
           "blocking_gaps": {
             "object_gap_count": 0,
-            "condition_gap_count": 6,
+            "condition_gap_count": 2,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
             "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 6,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 6,
+          "blocking_gap_total": 2,
           "parity_gap_total": 6,
           "gap_ids": [
             "condition_gap",
@@ -3968,102 +3882,6 @@
                 "number": 3,
                 "object_type": 0,
                 "player_id": -1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 4,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 109,
-                "player_id": 2,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 5,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 109,
-                "player_id": 3,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 6,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 109,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 7,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 109,
-                "player_id": 1,
                 "source_object": -1,
                 "state": 0,
                 "target_object": -1,
@@ -4684,7 +4502,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 2,
@@ -4858,13 +4677,14 @@
             "condition_gap_count": 2,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 2
+            "asset_gap_count": 1
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 6,
+          "blocking_gap_total": 5,
           "parity_gap_total": 2,
           "gap_ids": [
             "object_gap",
@@ -5177,7 +4997,6 @@
           ],
           "missing_runtime_aliases": [],
           "missing_asset_names": [
-            "graphic_323_p1",
             "graphic_538"
           ],
           "launcher_ready": false,
@@ -5199,23 +5018,23 @@
           "runtime_entity_count": 3530,
           "presentation_object_count": 663,
           "source_ai_profile_count": 7,
-          "normalized_condition_count": 7,
+          "normalized_condition_count": 10,
           "blocking_gaps": {
             "object_gap_count": 15,
-            "condition_gap_count": 3,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
             "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 7,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 18,
+          "blocking_gap_total": 15,
           "parity_gap_total": 7,
           "gap_ids": [
             "object_gap",
-            "condition_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
@@ -5238,80 +5057,7 @@
               "count": 1
             }
           ],
-          "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  126.0,
-                  108.0,
-                  143.0,
-                  143.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 6854,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 1,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  126.0,
-                  108.0,
-                  143.0,
-                  143.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 8466,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 2,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  126.0,
-                  108.0,
-                  143.0,
-                  143.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 6832,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -6013,21 +5759,20 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 8,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 79,
+      "blocking_gap_total": 73,
       "parity_gap_total": 18,
       "gap_mission_counts": {
         "ai_semantics_gap": 8,
-        "asset_gap": 5,
-        "condition_gap": 6,
+        "asset_gap": 4,
+        "condition_gap": 5,
         "object_gap": 5
       },
       "object_gap_reasons": {
-        "archetype_missing": 41
+        "archetype_missing": 40
       },
       "unsupported_source_object_counts": {
         "41": 6,
         "60": 6,
-        "69": 1,
         "89": 19,
         "90": 5,
         "281": 4
@@ -6035,7 +5780,6 @@
       "unsupported_condition_command_counts": {
         "0": 6,
         "1": 4,
-        "4": 1,
         "6": 3,
         "100": 5
       },
@@ -6050,12 +5794,10 @@
       },
       "missing_runtime_aliases": [],
       "missing_asset_names": [
-        "graphic_323_p1",
         "graphic_538",
         "graphic_557",
         "graphic_560",
         "graphic_569",
-        "graphic_572",
         "graphic_584",
         "graphic_605",
         "graphic_612",
@@ -6063,12 +5805,11 @@
         "graphic_616",
         "graphic_618",
         "graphic_621",
-        "graphic_622",
-        "graphic_833"
+        "graphic_622"
       ],
       "selection_score": [
         8,
-        79,
+        73,
         18,
         8
       ],
@@ -6099,7 +5840,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 4,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 2,
           "parity_gap_total": 4,
@@ -6343,23 +6085,23 @@
           "runtime_entity_count": 3375,
           "presentation_object_count": 491,
           "source_ai_profile_count": 3,
-          "normalized_condition_count": 3,
+          "normalized_condition_count": 4,
           "blocking_gaps": {
             "object_gap_count": 2,
-            "condition_gap_count": 1,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 2
+            "asset_gap_count": 1
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 5,
+          "blocking_gap_total": 3,
           "parity_gap_total": 3,
           "gap_ids": [
             "object_gap",
-            "condition_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
@@ -6373,32 +6115,7 @@
               "count": 2
             }
           ],
-          "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  129.0,
-                  132.0,
-                  132.0,
-                  134.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 3868,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -6732,7 +6449,6 @@
           ],
           "missing_runtime_aliases": [],
           "missing_asset_names": [
-            "graphic_323_p1",
             "graphic_605"
           ],
           "launcher_ready": false,
@@ -6764,7 +6480,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 4,
           "parity_gap_total": 2,
@@ -7102,12 +6819,12 @@
             144
           ],
           "source_object_count": 5013,
-          "runtime_entity_count": 4638,
+          "runtime_entity_count": 4639,
           "presentation_object_count": 348,
           "source_ai_profile_count": 5,
           "normalized_condition_count": 4,
           "blocking_gaps": {
-            "object_gap_count": 27,
+            "object_gap_count": 26,
             "condition_gap_count": 8,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -7115,9 +6832,10 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 5,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 36,
+          "blocking_gap_total": 35,
           "parity_gap_total": 5,
           "gap_ids": [
             "object_gap",
@@ -7126,18 +6844,13 @@
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 27
+            "archetype_missing": 26
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 60,
               "count": 6
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 1
             },
             {
               "reason": "archetype_missing",
@@ -8013,7 +7726,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 2,
           "parity_gap_total": 1,
@@ -8224,17 +7938,17 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 1
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 5,
+          "blocking_gap_total": 4,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
-            "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
@@ -8303,9 +8017,7 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_323_p1"
-          ],
+          "missing_asset_names": [],
           "launcher_ready": false,
           "parity_ready": false
         },
@@ -8331,13 +8043,14 @@
             "condition_gap_count": 2,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 11
+            "asset_gap_count": 9
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 14,
+          "blocking_gap_total": 12,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -8533,15 +8246,13 @@
           "missing_asset_names": [
             "graphic_538",
             "graphic_569",
-            "graphic_572",
             "graphic_584",
             "graphic_612",
             "graphic_615",
             "graphic_616",
             "graphic_618",
             "graphic_621",
-            "graphic_622",
-            "graphic_833"
+            "graphic_622"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -8572,7 +8283,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 11,
           "parity_gap_total": 1,
@@ -8744,28 +8456,27 @@
       "launcher_ready_mission_count": 1,
       "blocked_mission_count": 7,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 57,
-      "parity_gap_total": 22,
+      "blocking_gap_total": 53,
+      "parity_gap_total": 21,
       "gap_mission_counts": {
         "ai_semantics_gap": 8,
         "asset_gap": 4,
         "condition_gap": 7,
         "object_gap": 3,
-        "source_settings_gap": 2
+        "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 6
+        "archetype_missing": 5
       },
       "unsupported_source_object_counts": {
         "89": 3,
         "108": 1,
-        "159": 1,
         "228": 1
       },
       "unsupported_condition_command_counts": {
         "0": 1,
         "1": 7,
-        "3": 2,
+        "3": 1,
         "4": 1,
         "6": 2,
         "7": 1,
@@ -8794,13 +8505,12 @@
         "graphic_605",
         "graphic_606",
         "graphic_621",
-        "graphic_622",
-        "graphic_833"
+        "graphic_622"
       ],
       "selection_score": [
         7,
-        57,
-        22,
+        53,
+        21,
         8
       ],
       "missions": [
@@ -8830,7 +8540,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 2,
           "parity_gap_total": 1,
@@ -9045,7 +8756,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 1,
@@ -9210,7 +8922,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 3,
           "parity_gap_total": 3,
@@ -9550,7 +9263,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 7,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 11,
           "parity_gap_total": 7,
@@ -10483,22 +10197,23 @@
             144
           ],
           "source_object_count": 4804,
-          "runtime_entity_count": 4430,
+          "runtime_entity_count": 4431,
           "presentation_object_count": 371,
           "source_ai_profile_count": 1,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 3,
+            "object_gap_count": 2,
             "condition_gap_count": 6,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 3
+            "asset_gap_count": 2
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 1,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 12,
+          "blocking_gap_total": 10,
           "parity_gap_total": 2,
           "gap_ids": [
             "object_gap",
@@ -10508,18 +10223,13 @@
             "source_settings_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 3
+            "archetype_missing": 2
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 89,
               "count": 2
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
             }
           ],
           "unsupported_conditions": [
@@ -10795,8 +10505,7 @@
           "missing_runtime_aliases": [],
           "missing_asset_names": [
             "graphic_584",
-            "graphic_605",
-            "graphic_833"
+            "graphic_605"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -10827,7 +10536,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 4,
           "parity_gap_total": 3,
@@ -11114,26 +10824,26 @@
           "runtime_entity_count": 5773,
           "presentation_object_count": 421,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 1,
           "blocking_gaps": {
             "object_gap_count": 2,
-            "condition_gap_count": 3,
+            "condition_gap_count": 2,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 8
+            "asset_gap_count": 7
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 13,
-          "parity_gap_total": 2,
+          "blocking_gap_total": 11,
+          "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
             "condition_gap",
             "asset_gap",
-            "ai_semantics_gap",
-            "source_settings_gap"
+            "ai_semantics_gap"
           ],
           "object_gap_reasons": {
             "archetype_missing": 2
@@ -11170,30 +10880,6 @@
                 "object_type": 0,
                 "player_id": -1,
                 "source_object": 7325,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 2,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 40,
-                "player_id": 1,
-                "source_object": -1,
                 "state": 0,
                 "target_object": -1,
                 "victory_group": 1
@@ -11387,8 +11073,7 @@
             "graphic_604",
             "graphic_605",
             "graphic_606",
-            "graphic_622",
-            "graphic_833"
+            "graphic_622"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -11419,7 +11104,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 12,
           "parity_gap_total": 3,
@@ -11854,30 +11540,18 @@
       "extension": ".cpx",
       "sha256": "8d65cd16248320988090fbf16bd31cb2dfde46dd80a1bbf93191cace82f0fad2",
       "mission_count": 3,
-      "launcher_ready_mission_count": 0,
-      "blocked_mission_count": 3,
+      "launcher_ready_mission_count": 3,
+      "blocked_mission_count": 0,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 48,
-      "parity_gap_total": 4,
+      "blocking_gap_total": 0,
+      "parity_gap_total": 277,
       "gap_mission_counts": {
-        "ai_normalization_gap": 2,
         "ai_semantics_gap": 3,
-        "asset_gap": 3,
-        "condition_gap": 2,
-        "object_gap": 3
+        "source_asset_fallback_gap": 3
       },
-      "object_gap_reasons": {
-        "archetype_missing": 31
-      },
-      "unsupported_source_object_counts": {
-        "69": 4,
-        "131": 25,
-        "159": 2
-      },
-      "unsupported_condition_command_counts": {
-        "3": 2,
-        "4": 2
-      },
+      "object_gap_reasons": {},
+      "unsupported_source_object_counts": {},
+      "unsupported_condition_command_counts": {},
       "ai_capability_gap_profile_counts": {
         "combat_control": 2,
         "economy": 1,
@@ -11886,19 +11560,11 @@
         "unclassified": 3
       },
       "missing_runtime_aliases": [],
-      "missing_asset_names": [
-        "graphic_323_p1",
-        "graphic_323_p2",
-        "graphic_572",
-        "graphic_833",
-        "graphic_928",
-        "graphic_929",
-        "graphic_930"
-      ],
+      "missing_asset_names": [],
       "selection_score": [
-        3,
-        48,
-        4,
+        0,
+        0,
+        277,
         3
       ],
       "missions": [
@@ -11916,88 +11582,30 @@
           ],
           "source_object_count": 3388,
           "runtime_entity_count": 2688,
-          "presentation_object_count": 675,
+          "presentation_object_count": 700,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 25,
-            "condition_gap_count": 2,
+            "object_gap_count": 0,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 3
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 3
           },
-          "blocking_gap_total": 30,
-          "parity_gap_total": 1,
+          "blocking_gap_total": 0,
+          "parity_gap_total": 4,
           "gap_ids": [
-            "object_gap",
-            "condition_gap",
-            "asset_gap",
-            "ai_semantics_gap"
+            "ai_semantics_gap",
+            "source_asset_fallback_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 25
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 131,
-              "count": 25
-            }
-          ],
-          "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 3,
-                "object_type": 347,
-                "player_id": 2,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 1,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 6,
-                "object_type": 74,
-                "player_id": 2,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -12093,12 +11701,8 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_572",
-            "graphic_833",
-            "graphic_930"
-          ],
-          "launcher_ready": false,
+          "missing_asset_names": [],
+          "launcher_ready": true,
           "parity_ready": false
         },
         {
@@ -12114,90 +11718,31 @@
             120
           ],
           "source_object_count": 2605,
-          "runtime_entity_count": 1816,
+          "runtime_entity_count": 1818,
           "presentation_object_count": 785,
           "source_ai_profile_count": 2,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 2,
-            "condition_gap_count": 2,
+            "object_gap_count": 0,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
-            "asset_gap_count": 3
+            "ai_normalization_gap_count": 0,
+            "asset_gap_count": 0
           },
           "parity_gaps": {
-            "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "ai_semantics_gap_count": 2,
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 75
           },
-          "blocking_gap_total": 8,
-          "parity_gap_total": 1,
+          "blocking_gap_total": 0,
+          "parity_gap_total": 77,
           "gap_ids": [
-            "object_gap",
-            "condition_gap",
-            "ai_normalization_gap",
-            "asset_gap",
-            "ai_semantics_gap"
+            "ai_semantics_gap",
+            "source_asset_fallback_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 2
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 2
-            }
-          ],
-          "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  39.0,
-                  29.0,
-                  53.0,
-                  45.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 6477,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 1,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  40.0,
-                  27.0,
-                  52.0,
-                  45.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 6476,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -12260,7 +11805,7 @@
             {
               "team": 3,
               "normalization_status": "partial",
-              "runtime_enabled": false,
+              "runtime_enabled": true,
               "build_order_status": "normalized",
               "pending_rule_directives": [
                 "RANDOM"
@@ -12272,12 +11817,8 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_323_p1",
-            "graphic_572",
-            "graphic_930"
-          ],
-          "launcher_ready": false,
+          "missing_asset_names": [],
+          "launcher_ready": true,
           "parity_ready": false
         },
         {
@@ -12293,39 +11834,30 @@
             200
           ],
           "source_object_count": 8894,
-          "runtime_entity_count": 6868,
+          "runtime_entity_count": 6872,
           "presentation_object_count": 2017,
           "source_ai_profile_count": 3,
           "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 4,
+            "object_gap_count": 0,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
-            "asset_gap_count": 5
+            "ai_normalization_gap_count": 0,
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 194
           },
-          "blocking_gap_total": 10,
-          "parity_gap_total": 2,
+          "blocking_gap_total": 0,
+          "parity_gap_total": 196,
           "gap_ids": [
-            "object_gap",
-            "ai_normalization_gap",
-            "asset_gap",
-            "ai_semantics_gap"
+            "ai_semantics_gap",
+            "source_asset_fallback_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 4
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 4
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
@@ -12407,28 +11939,11 @@
                   "documented_noop_ids": []
                 }
               }
-            },
-            {
-              "team": 4,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_323_p2",
-            "graphic_572",
-            "graphic_928",
-            "graphic_929",
-            "graphic_930"
-          ],
-          "launcher_ready": false,
+          "missing_asset_names": [],
+          "launcher_ready": true,
           "parity_ready": false
         }
       ]
@@ -12441,29 +11956,21 @@
       "extension": ".cpn",
       "sha256": "9ac79247cb736f9a0afc389516aa17340eb94c52a8d2d360f45f8229a48a666f",
       "mission_count": 5,
-      "launcher_ready_mission_count": 1,
-      "blocked_mission_count": 4,
+      "launcher_ready_mission_count": 2,
+      "blocked_mission_count": 3,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 8,
-      "parity_gap_total": 6,
+      "blocking_gap_total": 4,
+      "parity_gap_total": 5,
       "gap_mission_counts": {
-        "ai_normalization_gap": 1,
         "ai_semantics_gap": 4,
-        "asset_gap": 2,
+        "asset_gap": 1,
         "condition_gap": 2,
-        "import_failure_gap": 1,
-        "object_gap": 1,
-        "source_settings_gap": 1
+        "import_failure_gap": 1
       },
-      "object_gap_reasons": {
-        "archetype_missing": 1
-      },
-      "unsupported_source_object_counts": {
-        "159": 1
-      },
+      "object_gap_reasons": {},
+      "unsupported_source_object_counts": {},
       "unsupported_condition_command_counts": {
-        "0": 2,
-        "4": 1
+        "0": 2
       },
       "ai_capability_gap_profile_counts": {
         "combat_control": 4,
@@ -12473,13 +11980,12 @@
       },
       "missing_runtime_aliases": [],
       "missing_asset_names": [
-        "graphic_323_p2",
         "graphic_602"
       ],
       "selection_score": [
+        3,
         4,
-        8,
-        6,
+        5,
         5
       ],
       "missions": [
@@ -12510,7 +12016,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 1,
           "parity_gap_total": 0,
@@ -12559,17 +12066,17 @@
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 1
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 2,
+          "blocking_gap_total": 1,
           "parity_gap_total": 1,
           "gap_ids": [
             "condition_gap",
-            "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {},
@@ -12662,9 +12169,7 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_323_p2"
-          ],
+          "missing_asset_names": [],
           "launcher_ready": false,
           "parity_ready": false
         },
@@ -12689,17 +12194,17 @@
             "object_gap_count": 0,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
+            "ai_normalization_gap_count": 0,
             "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 1,
+          "blocking_gap_total": 0,
           "parity_gap_total": 1,
           "gap_ids": [
-            "ai_normalization_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {},
@@ -12805,22 +12310,11 @@
                   "documented_noop_ids": []
                 }
               }
-            },
-            {
-              "team": 3,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
             }
           ],
           "missing_runtime_aliases": [],
           "missing_asset_names": [],
-          "launcher_ready": false,
+          "launcher_ready": true,
           "parity_ready": false
         },
         {
@@ -12836,65 +12330,32 @@
             120
           ],
           "source_object_count": 2467,
-          "runtime_entity_count": 1649,
+          "runtime_entity_count": 1650,
           "presentation_object_count": 817,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 1,
-            "condition_gap_count": 2,
+            "object_gap_count": 0,
+            "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
             "asset_gap_count": 1
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 4,
-          "parity_gap_total": 2,
+          "blocking_gap_total": 2,
+          "parity_gap_total": 1,
           "gap_ids": [
-            "object_gap",
             "condition_gap",
             "asset_gap",
-            "ai_semantics_gap",
-            "source_settings_gap"
+            "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 1
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  1.0,
-                  96.0,
-                  49.0,
-                  119.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 3246,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
             {
               "team": 1,
               "condition_index": 1,
@@ -13036,7 +12497,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 2,
@@ -13194,22 +12656,20 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 4,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 122,
-      "parity_gap_total": 9,
+      "blocking_gap_total": 105,
+      "parity_gap_total": 8,
       "gap_mission_counts": {
         "ai_normalization_gap": 1,
         "ai_semantics_gap": 4,
-        "asset_gap": 2,
+        "asset_gap": 1,
         "condition_gap": 1,
-        "object_gap": 4,
-        "source_settings_gap": 1
+        "object_gap": 4
       },
       "object_gap_reasons": {
-        "archetype_missing": 109
+        "archetype_missing": 99
       },
       "unsupported_source_object_counts": {
         "10": 1,
-        "69": 10,
         "89": 1,
         "115": 69,
         "281": 25,
@@ -13217,7 +12677,7 @@
         "384": 2
       },
       "unsupported_condition_command_counts": {
-        "4": 3
+        "4": 1
       },
       "ai_capability_gap_profile_counts": {
         "build_order": 1,
@@ -13230,19 +12690,15 @@
       },
       "missing_runtime_aliases": [],
       "missing_asset_names": [
-        "graphic_323_p1",
-        "graphic_323_p2",
         "graphic_542",
         "graphic_568",
         "graphic_569",
-        "graphic_570",
-        "graphic_572",
-        "graphic_833"
+        "graphic_570"
       ],
       "selection_score": [
         4,
-        122,
-        9,
+        105,
+        8,
         4
       ],
       "missions": [
@@ -13259,43 +12715,38 @@
             200
           ],
           "source_object_count": 13063,
-          "runtime_entity_count": 9141,
+          "runtime_entity_count": 9151,
           "presentation_object_count": 3909,
           "source_ai_profile_count": 3,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 13,
-            "condition_gap_count": 3,
+            "object_gap_count": 3,
+            "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 7
+            "asset_gap_count": 4
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 23,
-          "parity_gap_total": 4,
+          "blocking_gap_total": 8,
+          "parity_gap_total": 3,
           "gap_ids": [
             "object_gap",
             "condition_gap",
             "asset_gap",
-            "ai_semantics_gap",
-            "source_settings_gap"
+            "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 13
+            "archetype_missing": 3
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 10,
               "count": 1
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 10
             },
             {
               "reason": "archetype_missing",
@@ -13328,54 +12779,6 @@
                 "object_type": 0,
                 "player_id": -1,
                 "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 1,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  183.0,
-                  19.0,
-                  199.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 6081,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 2,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  182.0,
-                  17.0,
-                  199.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 6082,
                 "state": 0,
                 "target_object": -1,
                 "victory_group": 1
@@ -13609,13 +13012,10 @@
           ],
           "missing_runtime_aliases": [],
           "missing_asset_names": [
-            "graphic_323_p1",
             "graphic_542",
             "graphic_568",
             "graphic_569",
-            "graphic_570",
-            "graphic_572",
-            "graphic_833"
+            "graphic_570"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -13646,7 +13046,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 82,
           "parity_gap_total": 3,
@@ -13864,7 +13265,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 13,
           "parity_gap_total": 1,
@@ -14016,17 +13418,17 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 2
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 4,
+          "blocking_gap_total": 2,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
-            "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
@@ -14124,10 +13526,7 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_323_p2",
-            "graphic_572"
-          ],
+          "missing_asset_names": [],
           "launcher_ready": false,
           "parity_ready": false
         }
@@ -14144,34 +13543,29 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 8,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 192,
-      "parity_gap_total": 24,
+      "blocking_gap_total": 105,
+      "parity_gap_total": 22,
       "gap_mission_counts": {
-        "ai_normalization_gap": 3,
         "ai_semantics_gap": 8,
         "asset_gap": 7,
-        "condition_gap": 4,
-        "object_gap": 5,
-        "source_settings_gap": 3
+        "condition_gap": 3,
+        "object_gap": 4,
+        "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 129
+        "archetype_missing": 60
       },
       "unsupported_source_object_counts": {
         "41": 5,
         "62": 1,
-        "69": 50,
         "89": 13,
         "90": 2,
         "115": 1,
-        "130": 38,
-        "131": 15,
-        "159": 4
+        "130": 38
       },
       "unsupported_condition_command_counts": {
         "0": 3,
-        "3": 5,
-        "4": 3
+        "3": 1
       },
       "ai_capability_gap_profile_counts": {
         "combat_control": 20,
@@ -14183,8 +13577,6 @@
       },
       "missing_runtime_aliases": [],
       "missing_asset_names": [
-        "graphic_323_p1",
-        "graphic_323_p2",
         "graphic_323_p4",
         "graphic_323_p5",
         "graphic_538",
@@ -14199,7 +13591,6 @@
         "graphic_569",
         "graphic_570",
         "graphic_571",
-        "graphic_572",
         "graphic_602",
         "graphic_604",
         "graphic_612",
@@ -14209,8 +13600,8 @@
       ],
       "selection_score": [
         8,
-        192,
-        24,
+        105,
+        22,
         8
       ],
       "missions": [
@@ -14236,13 +13627,14 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 9
+            "asset_gap_count": 8
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 9,
+          "blocking_gap_total": 8,
           "parity_gap_total": 2,
           "gap_ids": [
             "asset_gap",
@@ -14447,7 +13839,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_602",
             "graphic_604",
             "graphic_618"
@@ -14468,90 +13859,32 @@
             120
           ],
           "source_object_count": 1600,
-          "runtime_entity_count": 1481,
+          "runtime_entity_count": 1483,
           "presentation_object_count": 117,
           "source_ai_profile_count": 3,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 2,
-            "condition_gap_count": 4,
+            "object_gap_count": 0,
+            "condition_gap_count": 2,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
-            "asset_gap_count": 2
+            "ai_normalization_gap_count": 0,
+            "asset_gap_count": 1
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 9,
-          "parity_gap_total": 3,
+          "blocking_gap_total": 3,
+          "parity_gap_total": 2,
           "gap_ids": [
-            "object_gap",
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap",
-            "ai_semantics_gap",
-            "source_settings_gap"
+            "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 2
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 2
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  93.0,
-                  0.0,
-                  119.0,
-                  87.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 1735,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 1,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  93.0,
-                  0.0,
-                  119.0,
-                  88.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 227,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
             {
               "team": 1,
               "condition_index": 2,
@@ -14636,17 +13969,6 @@
             "legacy_disabled_node_count": 0
           },
           "ai_gaps": [
-            {
-              "team": 2,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            },
             {
               "team": 3,
               "normalization_status": "partial",
@@ -14826,7 +14148,6 @@
           ],
           "missing_runtime_aliases": [],
           "missing_asset_names": [
-            "graphic_323_p2",
             "graphic_602"
           ],
           "launcher_ready": false,
@@ -14853,17 +14174,17 @@
             "object_gap_count": 0,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 2,
-            "asset_gap_count": 6
+            "ai_normalization_gap_count": 0,
+            "asset_gap_count": 5
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 8,
+          "blocking_gap_total": 5,
           "parity_gap_total": 1,
           "gap_ids": [
-            "ai_normalization_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
@@ -14905,28 +14226,6 @@
             "legacy_disabled_node_count": 0
           },
           "ai_gaps": [
-            {
-              "team": 2,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            },
-            {
-              "team": 3,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            },
             {
               "team": 4,
               "normalization_status": "partial",
@@ -15022,7 +14321,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_602"
           ],
           "launcher_ready": false,
@@ -15050,13 +14348,14 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 8
+            "asset_gap_count": 7
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 10,
+          "blocking_gap_total": 9,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -15210,7 +14509,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_618",
             "graphic_624"
           ],
@@ -15230,12 +14528,12 @@
             144
           ],
           "source_object_count": 5843,
-          "runtime_entity_count": 3121,
+          "runtime_entity_count": 3125,
           "presentation_object_count": 2711,
           "source_ai_profile_count": 7,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 11,
+            "object_gap_count": 7,
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -15243,9 +14541,10 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 7,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 1,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 12,
+          "blocking_gap_total": 8,
           "parity_gap_total": 8,
           "gap_ids": [
             "object_gap",
@@ -15254,14 +14553,9 @@
             "source_settings_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 11
+            "archetype_missing": 7
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 3
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 89,
@@ -15271,11 +14565,6 @@
               "reason": "archetype_missing",
               "source_unit_id": 90,
               "count": 2
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
             }
           ],
           "unsupported_conditions": [
@@ -15750,39 +15039,33 @@
             120
           ],
           "source_object_count": 2824,
-          "runtime_entity_count": 1921,
-          "presentation_object_count": 835,
+          "runtime_entity_count": 1928,
+          "presentation_object_count": 850,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 5,
           "blocking_gaps": {
-            "object_gap_count": 68,
-            "condition_gap_count": 5,
+            "object_gap_count": 46,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
             "asset_gap_count": 7
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 80,
-          "parity_gap_total": 2,
+          "blocking_gap_total": 53,
+          "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
-            "condition_gap",
             "asset_gap",
-            "ai_semantics_gap",
-            "source_settings_gap"
+            "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 68
+            "archetype_missing": 46
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 6
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 89,
@@ -15797,140 +15080,9 @@
               "reason": "archetype_missing",
               "source_unit_id": 130,
               "count": 38
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 131,
-              "count": 15
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
             }
           ],
-          "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  71.0,
-                  5.0,
-                  78.0,
-                  11.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 815,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 2,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 5,
-                "object_type": 6,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 3,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 5,
-                "object_type": 6,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 4,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 5,
-                "object_type": 6,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 5,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 5,
-                "object_type": 6,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -16046,13 +15198,14 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 7
+            "asset_gap_count": 6
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 7,
+          "blocking_gap_total": 6,
           "parity_gap_total": 2,
           "gap_ids": [
             "asset_gap",
@@ -16198,7 +15351,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_618"
           ],
           "launcher_ready": false,
@@ -16217,43 +15369,38 @@
             120
           ],
           "source_object_count": 4060,
-          "runtime_entity_count": 3240,
+          "runtime_entity_count": 3281,
           "presentation_object_count": 774,
           "source_ai_profile_count": 6,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 46,
+            "object_gap_count": 5,
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
-            "asset_gap_count": 9
+            "ai_normalization_gap_count": 0,
+            "asset_gap_count": 7
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 5,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 57,
+          "blocking_gap_total": 13,
           "parity_gap_total": 5,
           "gap_ids": [
             "object_gap",
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 46
+            "archetype_missing": 5
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 41,
               "count": 5
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 41
             }
           ],
           "unsupported_conditions": [
@@ -16837,23 +15984,10 @@
                   "documented_noop_ids": []
                 }
               }
-            },
-            {
-              "team": 7,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
             }
           ],
           "missing_runtime_aliases": [],
           "missing_asset_names": [
-            "graphic_323_p1",
-            "graphic_323_p2",
             "graphic_557",
             "graphic_558",
             "graphic_559",
@@ -16878,21 +16012,21 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 4,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 97,
-      "parity_gap_total": 14,
+      "blocking_gap_total": 67,
+      "parity_gap_total": 41,
       "gap_mission_counts": {
         "ai_semantics_gap": 4,
         "asset_gap": 4,
         "condition_gap": 4,
         "object_gap": 4,
+        "source_asset_fallback_gap": 1,
         "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 50
+        "archetype_missing": 24
       },
       "unsupported_source_object_counts": {
         "41": 13,
-        "69": 26,
         "89": 2,
         "281": 4,
         "376": 4,
@@ -16928,18 +16062,15 @@
         "graphic_568",
         "graphic_569",
         "graphic_570",
-        "graphic_572",
         "graphic_583",
         "graphic_584",
         "graphic_604",
-        "graphic_622",
-        "graphic_833",
-        "graphic_930"
+        "graphic_622"
       ],
       "selection_score": [
         4,
-        97,
-        14,
+        67,
+        41,
         4
       ],
       "missions": [
@@ -16956,38 +16087,35 @@
             200
           ],
           "source_object_count": 8192,
-          "runtime_entity_count": 5128,
+          "runtime_entity_count": 5136,
           "presentation_object_count": 3053,
           "source_ai_profile_count": 3,
           "normalized_condition_count": 8,
           "blocking_gaps": {
-            "object_gap_count": 9,
+            "object_gap_count": 1,
             "condition_gap_count": 3,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 8
+            "asset_gap_count": 5
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 27
           },
-          "blocking_gap_total": 20,
-          "parity_gap_total": 3,
+          "blocking_gap_total": 9,
+          "parity_gap_total": 30,
           "gap_ids": [
             "object_gap",
             "condition_gap",
             "asset_gap",
-            "ai_semantics_gap"
+            "ai_semantics_gap",
+            "source_asset_fallback_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 9
+            "archetype_missing": 1
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 8
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 376,
@@ -17250,11 +16378,8 @@
             "graphic_549",
             "graphic_568",
             "graphic_570",
-            "graphic_572",
             "graphic_604",
-            "graphic_622",
-            "graphic_833",
-            "graphic_930"
+            "graphic_622"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -17272,22 +16397,23 @@
             144
           ],
           "source_object_count": 4781,
-          "runtime_entity_count": 4003,
+          "runtime_entity_count": 4021,
           "presentation_object_count": 733,
           "source_ai_profile_count": 4,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 32,
+            "object_gap_count": 14,
             "condition_gap_count": 9,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 8
+            "asset_gap_count": 7
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 4,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 1,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 49,
+          "blocking_gap_total": 30,
           "parity_gap_total": 5,
           "gap_ids": [
             "object_gap",
@@ -17297,18 +16423,13 @@
             "source_settings_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 32
+            "archetype_missing": 14
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 41,
               "count": 13
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 18
             },
             {
               "reason": "archetype_missing",
@@ -17843,8 +16964,7 @@
             "graphic_549",
             "graphic_550",
             "graphic_569",
-            "graphic_583",
-            "graphic_833"
+            "graphic_583"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -17875,7 +16995,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 4,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 16,
           "parity_gap_total": 4,
@@ -18354,7 +17475,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 12,
           "parity_gap_total": 2,
@@ -18585,35 +17707,32 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 8,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 147,
-      "parity_gap_total": 15,
+      "blocking_gap_total": 97,
+      "parity_gap_total": 13,
       "gap_mission_counts": {
-        "ai_normalization_gap": 2,
+        "ai_normalization_gap": 1,
         "ai_semantics_gap": 8,
         "asset_gap": 8,
-        "condition_gap": 4,
-        "object_gap": 7,
-        "source_settings_gap": 3
+        "condition_gap": 3,
+        "object_gap": 6,
+        "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 101
+        "archetype_missing": 59
       },
       "unsupported_source_object_counts": {
         "41": 5,
         "58": 2,
         "63": 1,
-        "69": 34,
         "89": 38,
         "90": 8,
         "110": 2,
-        "159": 8,
         "228": 3
       },
       "unsupported_condition_command_counts": {
         "0": 6,
         "2": 1,
-        "3": 3,
-        "4": 1
+        "3": 1
       },
       "ai_capability_gap_profile_counts": {
         "combat_control": 11,
@@ -18633,7 +17752,6 @@
         "graphic_569",
         "graphic_570",
         "graphic_571",
-        "graphic_572",
         "graphic_583",
         "graphic_602",
         "graphic_606",
@@ -18642,8 +17760,8 @@
       ],
       "selection_score": [
         8,
-        147,
-        15,
+        97,
+        13,
         8
       ],
       "missions": [
@@ -18660,32 +17778,32 @@
             120
           ],
           "source_object_count": 2164,
-          "runtime_entity_count": 1839,
+          "runtime_entity_count": 1845,
           "presentation_object_count": 292,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 33,
-            "condition_gap_count": 4,
+            "object_gap_count": 27,
+            "condition_gap_count": 2,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
             "asset_gap_count": 2
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 39,
-          "parity_gap_total": 2,
+          "blocking_gap_total": 31,
+          "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
             "condition_gap",
             "asset_gap",
-            "ai_semantics_gap",
-            "source_settings_gap"
+            "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 33
+            "archetype_missing": 27
           },
           "object_gaps": [
             {
@@ -18697,11 +17815,6 @@
               "reason": "archetype_missing",
               "source_unit_id": 63,
               "count": 1
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 6
             },
             {
               "reason": "archetype_missing",
@@ -18741,30 +17854,6 @@
             },
             {
               "team": 2,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 3,
-                "object_type": 76,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 2,
               "condition_index": 1,
               "command": 3,
               "command_name": "destroy_multiple",
@@ -18780,30 +17869,6 @@
                 "count": 0,
                 "number": 1,
                 "object_type": 58,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 2,
-              "condition_index": 2,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 37,
                 "player_id": 1,
                 "source_object": -1,
                 "state": 0,
@@ -18913,22 +17978,23 @@
             96
           ],
           "source_object_count": 824,
-          "runtime_entity_count": 549,
+          "runtime_entity_count": 556,
           "presentation_object_count": 264,
           "source_ai_profile_count": 1,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 11,
+            "object_gap_count": 4,
             "condition_gap_count": 5,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 7
+            "asset_gap_count": 6
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 23,
+          "blocking_gap_total": 15,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -18937,17 +18003,12 @@
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 11
+            "archetype_missing": 4
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 58,
-              "count": 1
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
               "count": 1
             },
             {
@@ -18959,11 +18020,6 @@
               "reason": "archetype_missing",
               "source_unit_id": 90,
               "count": 2
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 6
             }
           ],
           "unsupported_conditions": [
@@ -19231,7 +18287,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_583",
             "graphic_618"
           ],
@@ -19251,49 +18306,39 @@
             120
           ],
           "source_object_count": 2132,
-          "runtime_entity_count": 1400,
+          "runtime_entity_count": 1407,
           "presentation_object_count": 722,
           "source_ai_profile_count": 3,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 10,
+            "object_gap_count": 3,
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
+            "ai_normalization_gap_count": 0,
             "asset_gap_count": 1
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 1,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 13,
+          "blocking_gap_total": 5,
           "parity_gap_total": 3,
           "gap_ids": [
             "object_gap",
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap",
             "ai_semantics_gap",
             "source_settings_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 10
+            "archetype_missing": 3
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 6
-            },
-            {
-              "reason": "archetype_missing",
               "source_unit_id": 90,
               "count": 3
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
             }
           ],
           "unsupported_conditions": [
@@ -19357,17 +18402,6 @@
             "legacy_disabled_node_count": 0
           },
           "ai_gaps": [
-            {
-              "team": 2,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            },
             {
               "team": 3,
               "normalization_status": "partial",
@@ -19565,12 +18599,12 @@
             96
           ],
           "source_object_count": 1530,
-          "runtime_entity_count": 1082,
+          "runtime_entity_count": 1097,
           "presentation_object_count": 433,
           "source_ai_profile_count": 3,
           "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 15,
+            "object_gap_count": 0,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -19578,25 +18612,17 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 20,
+          "blocking_gap_total": 5,
           "parity_gap_total": 3,
           "gap_ids": [
-            "object_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 15
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 15
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
@@ -19960,76 +18986,40 @@
             96
           ],
           "source_object_count": 1428,
-          "runtime_entity_count": 1067,
+          "runtime_entity_count": 1070,
           "presentation_object_count": 347,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 14,
-            "condition_gap_count": 1,
+            "object_gap_count": 11,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 7
+            "asset_gap_count": 6
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 22,
-          "parity_gap_total": 2,
+          "blocking_gap_total": 17,
+          "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
-            "condition_gap",
             "asset_gap",
-            "ai_semantics_gap",
-            "source_settings_gap"
+            "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 14
+            "archetype_missing": 11
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 2
-            },
-            {
-              "reason": "archetype_missing",
               "source_unit_id": 89,
               "count": 11
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
             }
           ],
-          "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  32.0,
-                  7.0,
-                  46.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 845,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -20174,7 +19164,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_612"
           ],
           "launcher_ready": false,
@@ -20193,12 +19182,12 @@
             120
           ],
           "source_object_count": 2015,
-          "runtime_entity_count": 1526,
+          "runtime_entity_count": 1530,
           "presentation_object_count": 476,
           "source_ai_profile_count": 2,
           "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 13,
+            "object_gap_count": 9,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -20206,9 +19195,10 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 14,
+          "blocking_gap_total": 10,
           "parity_gap_total": 2,
           "gap_ids": [
             "object_gap",
@@ -20216,14 +19206,9 @@
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 13
+            "archetype_missing": 9
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 4
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 89,
@@ -20467,13 +19452,14 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 1,
-            "asset_gap_count": 4
+            "asset_gap_count": 3
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 5,
+          "blocking_gap_total": 4,
           "parity_gap_total": 1,
           "gap_ids": [
             "ai_normalization_gap",
@@ -20549,7 +19535,6 @@
           "missing_asset_names": [
             "graphic_568",
             "graphic_571",
-            "graphic_572",
             "graphic_602"
           ],
           "launcher_ready": false,
@@ -20577,13 +19562,14 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 6
+            "asset_gap_count": 5
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 11,
+          "blocking_gap_total": 10,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -20731,7 +19717,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_602"
           ],
           "launcher_ready": false,
@@ -20750,31 +19735,28 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 12,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 82,
-      "parity_gap_total": 5,
+      "blocking_gap_total": 68,
+      "parity_gap_total": 3,
       "gap_mission_counts": {
-        "ai_normalization_gap": 7,
+        "ai_normalization_gap": 4,
         "ai_semantics_gap": 2,
         "asset_gap": 9,
-        "condition_gap": 7,
+        "condition_gap": 6,
         "import_failure_gap": 3,
-        "object_gap": 4,
-        "source_settings_gap": 3
+        "object_gap": 3,
+        "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 8
+        "archetype_missing": 7
       },
       "unsupported_source_object_counts": {
         "10": 5,
-        "116": 2,
-        "159": 1
+        "116": 2
       },
       "unsupported_condition_command_counts": {
         "0": 3,
         "1": 1,
-        "4": 2,
         "6": 7,
-        "8": 1,
         "100": 1
       },
       "ai_capability_gap_profile_counts": {
@@ -20792,7 +19774,6 @@
         "graphic_569",
         "graphic_570",
         "graphic_571",
-        "graphic_572",
         "graphic_602",
         "graphic_612",
         "graphic_616",
@@ -20800,8 +19781,8 @@
       ],
       "selection_score": [
         12,
-        82,
-        5,
+        68,
+        3,
         12
       ],
       "missions": [
@@ -20832,7 +19813,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 1,
           "parity_gap_total": 0,
@@ -20886,7 +19868,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 1,
           "parity_gap_total": 0,
@@ -20939,7 +19922,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 14,
           "parity_gap_total": 0,
@@ -21118,7 +20102,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 1,
           "parity_gap_total": 0,
@@ -21167,13 +20152,14 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 6
+            "asset_gap_count": 5
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 6,
+          "blocking_gap_total": 5,
           "parity_gap_total": 1,
           "gap_ids": [
             "asset_gap",
@@ -21268,7 +20254,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_602"
           ],
           "launcher_ready": false,
@@ -21295,18 +20280,18 @@
             "object_gap_count": 0,
             "condition_gap_count": 3,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
+            "ai_normalization_gap_count": 0,
             "asset_gap_count": 4
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 1,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 8,
+          "blocking_gap_total": 7,
           "parity_gap_total": 1,
           "gap_ids": [
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap",
             "source_settings_gap"
           ],
@@ -21420,19 +20405,7 @@
             "disabled_technology_count": 0,
             "legacy_disabled_node_count": 2
           },
-          "ai_gaps": [
-            {
-              "team": 2,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            }
-          ],
+          "ai_gaps": [],
           "missing_runtime_aliases": [],
           "missing_asset_names": [
             "graphic_538",
@@ -21465,13 +20438,14 @@
             "condition_gap_count": 3,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 3,
-            "asset_gap_count": 8
+            "asset_gap_count": 7
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 14,
+          "blocking_gap_total": 13,
           "parity_gap_total": 0,
           "gap_ids": [
             "condition_gap",
@@ -21631,7 +20605,6 @@
             "graphic_568",
             "graphic_569",
             "graphic_571",
-            "graphic_572",
             "graphic_618"
           ],
           "launcher_ready": false,
@@ -21653,26 +20626,26 @@
           "runtime_entity_count": 837,
           "presentation_object_count": 284,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 1,
           "blocking_gaps": {
             "object_gap_count": 1,
-            "condition_gap_count": 2,
+            "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 1,
-            "asset_gap_count": 5
+            "asset_gap_count": 4
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 9,
-          "parity_gap_total": 1,
+          "blocking_gap_total": 7,
+          "parity_gap_total": 0,
           "gap_ids": [
             "object_gap",
             "condition_gap",
             "ai_normalization_gap",
-            "asset_gap",
-            "source_settings_gap"
+            "asset_gap"
           ],
           "object_gap_reasons": {
             "archetype_missing": 1
@@ -21685,30 +20658,6 @@
             }
           ],
           "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  45.0,
-                  29.0,
-                  71.0,
-                  71.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 1093,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
             {
               "team": 1,
               "condition_index": 1,
@@ -21786,7 +20735,6 @@
             "graphic_522",
             "graphic_525",
             "graphic_538",
-            "graphic_572",
             "graphic_602"
           ],
           "launcher_ready": false,
@@ -21808,53 +20756,28 @@
           "runtime_entity_count": 1175,
           "presentation_object_count": 154,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 1,
+          "normalized_condition_count": 2,
           "blocking_gaps": {
             "object_gap_count": 0,
-            "condition_gap_count": 1,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 1,
             "asset_gap_count": 4
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 6,
+          "blocking_gap_total": 5,
           "parity_gap_total": 0,
           "gap_ids": [
-            "condition_gap",
             "ai_normalization_gap",
             "asset_gap"
           ],
           "object_gap_reasons": {},
           "object_gaps": [],
-          "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 8,
-              "command_name": "create_in_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  22.0,
-                  39.0,
-                  58.0,
-                  69.0
-                ],
-                "command": 8,
-                "count": 0,
-                "number": 2,
-                "object_type": 69,
-                "player_id": -1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -21925,65 +20848,31 @@
             72
           ],
           "source_object_count": 502,
-          "runtime_entity_count": 430,
+          "runtime_entity_count": 431,
           "presentation_object_count": 71,
           "source_ai_profile_count": 1,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 1,
-            "condition_gap_count": 2,
+            "object_gap_count": 0,
+            "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
-            "asset_gap_count": 4
+            "ai_normalization_gap_count": 0,
+            "asset_gap_count": 3
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 8,
-          "parity_gap_total": 1,
+          "blocking_gap_total": 4,
+          "parity_gap_total": 0,
           "gap_ids": [
-            "object_gap",
             "condition_gap",
-            "ai_normalization_gap",
-            "asset_gap",
-            "source_settings_gap"
+            "asset_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 1
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 0,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  30.0,
-                  21.0,
-                  71.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 689,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
             {
               "team": 1,
               "condition_index": 1,
@@ -22043,24 +20932,11 @@
             "disabled_technology_count": 0,
             "legacy_disabled_node_count": 0
           },
-          "ai_gaps": [
-            {
-              "team": 2,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            }
-          ],
+          "ai_gaps": [],
           "missing_runtime_aliases": [],
           "missing_asset_names": [
             "graphic_568",
             "graphic_569",
-            "graphic_572",
             "graphic_602"
           ],
           "launcher_ready": false,
@@ -22087,18 +20963,18 @@
             "object_gap_count": 0,
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 3,
+            "ai_normalization_gap_count": 0,
             "asset_gap_count": 3
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 0,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 7,
+          "blocking_gap_total": 4,
           "parity_gap_total": 0,
           "gap_ids": [
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap"
           ],
           "object_gap_reasons": {},
@@ -22163,41 +21039,7 @@
             "disabled_technology_count": 0,
             "legacy_disabled_node_count": 0
           },
-          "ai_gaps": [
-            {
-              "team": 2,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            },
-            {
-              "team": 3,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            },
-            {
-              "team": 4,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            }
-          ],
+          "ai_gaps": [],
           "missing_runtime_aliases": [],
           "missing_asset_names": [
             "graphic_538",
@@ -22229,13 +21071,14 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 6
+            "asset_gap_count": 5
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 7,
+          "blocking_gap_total": 6,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -22339,7 +21182,6 @@
             "graphic_568",
             "graphic_569",
             "graphic_571",
-            "graphic_572",
             "graphic_602"
           ],
           "launcher_ready": false,
@@ -22409,7 +21251,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 6,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 6,
@@ -22745,7 +21588,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 1,
@@ -22869,7 +21713,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 3,
@@ -23045,7 +21890,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 2,
@@ -23216,7 +22062,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 1,
@@ -23340,7 +22187,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 4,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 0,
           "parity_gap_total": 4,
@@ -23562,32 +22410,29 @@
       "extension": ".cpx",
       "sha256": "56ed43cb37287a6fb11049f5a00e5dad17b5a5bc2c034da99efb41df23403213",
       "mission_count": 5,
-      "launcher_ready_mission_count": 0,
-      "blocked_mission_count": 5,
+      "launcher_ready_mission_count": 1,
+      "blocked_mission_count": 4,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 79,
-      "parity_gap_total": 17,
+      "blocking_gap_total": 48,
+      "parity_gap_total": 96,
       "gap_mission_counts": {
         "ai_semantics_gap": 5,
-        "asset_gap": 3,
-        "condition_gap": 3,
-        "object_gap": 4
+        "asset_gap": 2,
+        "condition_gap": 1,
+        "object_gap": 4,
+        "source_asset_fallback_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 45
+        "archetype_missing": 24
       },
       "unsupported_source_object_counts": {
-        "69": 18,
         "89": 14,
         "90": 1,
-        "159": 3,
         "281": 8,
         "377": 1
       },
       "unsupported_condition_command_counts": {
-        "2": 1,
-        "3": 3,
-        "4": 3
+        "2": 1
       },
       "ai_capability_gap_profile_counts": {
         "build_order": 1,
@@ -23618,15 +22463,12 @@
         "graphic_561",
         "graphic_562",
         "graphic_569",
-        "graphic_572",
-        "graphic_624",
-        "graphic_833",
-        "graphic_930"
+        "graphic_624"
       ],
       "selection_score": [
-        5,
-        79,
-        17,
+        4,
+        48,
+        96,
         5
       ],
       "missions": [
@@ -23652,19 +22494,21 @@
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 11
+            "asset_gap_count": 9
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 79
           },
-          "blocking_gap_total": 13,
-          "parity_gap_total": 3,
+          "blocking_gap_total": 11,
+          "parity_gap_total": 82,
           "gap_ids": [
             "object_gap",
             "condition_gap",
             "asset_gap",
-            "ai_semantics_gap"
+            "ai_semantics_gap",
+            "source_asset_fallback_gap"
           ],
           "object_gap_reasons": {
             "archetype_missing": 1
@@ -23946,9 +22790,7 @@
             "graphic_546",
             "graphic_549",
             "graphic_569",
-            "graphic_572",
-            "graphic_624",
-            "graphic_930"
+            "graphic_624"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -23975,16 +22817,16 @@
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 1
+            "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 1,
+          "blocking_gap_total": 0,
           "parity_gap_total": 3,
           "gap_ids": [
-            "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {},
@@ -24175,10 +23017,8 @@
             }
           ],
           "missing_runtime_aliases": [],
-          "missing_asset_names": [
-            "graphic_572"
-          ],
-          "launcher_ready": false,
+          "missing_asset_names": [],
+          "launcher_ready": true,
           "parity_ready": false
         },
         {
@@ -24194,123 +23034,40 @@
             144
           ],
           "source_object_count": 4022,
-          "runtime_entity_count": 2434,
+          "runtime_entity_count": 2455,
           "presentation_object_count": 1556,
           "source_ai_profile_count": 4,
-          "normalized_condition_count": 3,
+          "normalized_condition_count": 6,
           "blocking_gaps": {
-            "object_gap_count": 32,
-            "condition_gap_count": 3,
+            "object_gap_count": 11,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
-            "asset_gap_count": 15
+            "asset_gap_count": 14
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 4,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 50,
+          "blocking_gap_total": 25,
           "parity_gap_total": 4,
           "gap_ids": [
             "object_gap",
-            "condition_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 32
+            "archetype_missing": 11
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 18
-            },
-            {
-              "reason": "archetype_missing",
               "source_unit_id": 89,
               "count": 11
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 3
             }
           ],
-          "unsupported_conditions": [
-            {
-              "team": 1,
-              "condition_index": 2,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  132.0,
-                  109.0,
-                  143.0,
-                  123.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 5539,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 3,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  132.0,
-                  112.0,
-                  142.0,
-                  123.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 4673,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 4,
-              "command": 4,
-              "command_name": "bring_to_area",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  132.0,
-                  109.0,
-                  143.0,
-                  123.0
-                ],
-                "command": 4,
-                "count": 0,
-                "number": 0,
-                "object_type": 0,
-                "player_id": -1,
-                "source_object": 4686,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -24581,8 +23338,7 @@
             "graphic_559",
             "graphic_560",
             "graphic_561",
-            "graphic_562",
-            "graphic_833"
+            "graphic_562"
           ],
           "launcher_ready": false,
           "parity_ready": false
@@ -24603,23 +23359,23 @@
           "runtime_entity_count": 4751,
           "presentation_object_count": 1690,
           "source_ai_profile_count": 3,
-          "normalized_condition_count": 1,
+          "normalized_condition_count": 4,
           "blocking_gaps": {
             "object_gap_count": 1,
-            "condition_gap_count": 3,
+            "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
             "asset_gap_count": 0
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 4,
+          "blocking_gap_total": 1,
           "parity_gap_total": 3,
           "gap_ids": [
             "object_gap",
-            "condition_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
@@ -24632,80 +23388,7 @@
               "count": 1
             }
           ],
-          "unsupported_conditions": [
-            {
-              "team": 2,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 109,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 3,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 109,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 4,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 109,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            }
-          ],
+          "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
             "effect_count": 0,
@@ -24914,7 +23597,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 4,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 11,
           "parity_gap_total": 4,
@@ -25179,26 +23863,23 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 8,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 94,
-      "parity_gap_total": 18,
+      "blocking_gap_total": 47,
+      "parity_gap_total": 17,
       "gap_mission_counts": {
-        "ai_normalization_gap": 4,
         "ai_semantics_gap": 8,
         "asset_gap": 7,
         "condition_gap": 8,
-        "object_gap": 5,
-        "source_settings_gap": 2
+        "object_gap": 4,
+        "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 53
+        "archetype_missing": 14
       },
       "unsupported_source_object_counts": {
         "62": 1,
         "63": 1,
-        "69": 32,
         "89": 7,
         "110": 1,
-        "159": 7,
         "227": 1,
         "229": 1,
         "233": 1,
@@ -25208,7 +23889,7 @@
         "0": 7,
         "1": 2,
         "2": 1,
-        "3": 3,
+        "3": 1,
         "5": 1,
         "6": 3,
         "9": 1
@@ -25228,7 +23909,6 @@
         "graphic_569",
         "graphic_570",
         "graphic_571",
-        "graphic_572",
         "graphic_602",
         "graphic_604",
         "graphic_606",
@@ -25237,8 +23917,8 @@
       ],
       "selection_score": [
         8,
-        94,
-        18,
+        47,
+        17,
         8
       ],
       "missions": [
@@ -25263,18 +23943,18 @@
             "object_gap_count": 0,
             "condition_gap_count": 2,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 2,
+            "ai_normalization_gap_count": 0,
             "asset_gap_count": 3
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 7,
+          "blocking_gap_total": 5,
           "parity_gap_total": 1,
           "gap_ids": [
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
@@ -25452,28 +24132,6 @@
                   "documented_noop_ids": []
                 }
               }
-            },
-            {
-              "team": 3,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            },
-            {
-              "team": 4,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
             }
           ],
           "missing_runtime_aliases": [],
@@ -25511,7 +24169,8 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
           "blocking_gap_total": 3,
           "parity_gap_total": 1,
@@ -25707,18 +24366,18 @@
             "object_gap_count": 0,
             "condition_gap_count": 3,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
+            "ai_normalization_gap_count": 0,
             "asset_gap_count": 1
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 5,
+          "blocking_gap_total": 4,
           "parity_gap_total": 1,
           "gap_ids": [
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
@@ -25880,17 +24539,6 @@
                   "documented_noop_ids": []
                 }
               }
-            },
-            {
-              "team": 3,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
             }
           ],
           "missing_runtime_aliases": [],
@@ -25913,32 +24561,32 @@
             96
           ],
           "source_object_count": 1263,
-          "runtime_entity_count": 976,
+          "runtime_entity_count": 977,
           "presentation_object_count": 280,
           "source_ai_profile_count": 2,
           "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 7,
+            "object_gap_count": 6,
             "condition_gap_count": 2,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
-            "asset_gap_count": 9
+            "ai_normalization_gap_count": 0,
+            "asset_gap_count": 8
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 1,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 19,
+          "blocking_gap_total": 16,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 7
+            "archetype_missing": 6
           },
           "object_gaps": [
             {
@@ -25950,11 +24598,6 @@
               "reason": "archetype_missing",
               "source_unit_id": 89,
               "count": 4
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
             },
             {
               "reason": "archetype_missing",
@@ -26081,17 +24724,6 @@
                   "documented_noop_ids": []
                 }
               }
-            },
-            {
-              "team": 3,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
             }
           ],
           "missing_runtime_aliases": [],
@@ -26101,7 +24733,6 @@
             "graphic_569",
             "graphic_570",
             "graphic_571",
-            "graphic_572",
             "graphic_602",
             "graphic_612",
             "graphic_615"
@@ -26122,12 +24753,12 @@
             144
           ],
           "source_object_count": 5286,
-          "runtime_entity_count": 4967,
+          "runtime_entity_count": 4972,
           "presentation_object_count": 313,
           "source_ai_profile_count": 3,
           "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 6,
+            "object_gap_count": 1,
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -26135,9 +24766,10 @@
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 1,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 7,
+          "blocking_gap_total": 2,
           "parity_gap_total": 4,
           "gap_ids": [
             "object_gap",
@@ -26146,22 +24778,12 @@
             "source_settings_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 6
+            "archetype_missing": 1
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 4
-            },
-            {
-              "reason": "archetype_missing",
               "source_unit_id": 110,
-              "count": 1
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
               "count": 1
             }
           ],
@@ -26566,44 +25188,34 @@
             144
           ],
           "source_object_count": 1247,
-          "runtime_entity_count": 865,
+          "runtime_entity_count": 878,
           "presentation_object_count": 366,
           "source_ai_profile_count": 3,
           "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 16,
+            "object_gap_count": 3,
             "condition_gap_count": 4,
             "trigger_semantics_gap_count": 0,
-            "ai_normalization_gap_count": 1,
+            "ai_normalization_gap_count": 0,
             "asset_gap_count": 2
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 2,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 23,
+          "blocking_gap_total": 9,
           "parity_gap_total": 2,
           "gap_ids": [
             "object_gap",
             "condition_gap",
-            "ai_normalization_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 16
+            "archetype_missing": 3
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 9
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 4
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 227,
@@ -26842,17 +25454,6 @@
               }
             },
             {
-              "team": 3,
-              "normalization_status": "integrated",
-              "runtime_enabled": false,
-              "build_order_status": "normalized",
-              "pending_rule_directives": [],
-              "unsupported_rule_line_count": 0,
-              "unsupported_build_line_count": 0,
-              "unclassified_strategic_number_ids": [],
-              "strategic_capabilities": {}
-            },
-            {
               "team": 4,
               "normalization_status": "partial",
               "runtime_enabled": true,
@@ -26918,32 +25519,32 @@
             144
           ],
           "source_object_count": 4949,
-          "runtime_entity_count": 4320,
+          "runtime_entity_count": 4331,
           "presentation_object_count": 614,
           "source_ai_profile_count": 4,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 15,
-            "condition_gap_count": 2,
+            "object_gap_count": 4,
+            "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
             "asset_gap_count": 1
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 4,
-            "source_settings_gap_count": 1
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 18,
-          "parity_gap_total": 5,
+          "blocking_gap_total": 6,
+          "parity_gap_total": 4,
           "gap_ids": [
             "object_gap",
             "condition_gap",
             "asset_gap",
-            "ai_semantics_gap",
-            "source_settings_gap"
+            "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 15
+            "archetype_missing": 4
           },
           "object_gaps": [
             {
@@ -26953,18 +25554,8 @@
             },
             {
               "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 10
-            },
-            {
-              "reason": "archetype_missing",
               "source_unit_id": 89,
               "count": 3
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 159,
-              "count": 1
             }
           ],
           "unsupported_conditions": [
@@ -26989,30 +25580,6 @@
                 "source_object": 5981,
                 "state": 0,
                 "target_object": 1058,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 5,
-              "condition_index": 0,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 4,
-                "object_type": 83,
-                "player_id": 1,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
                 "victory_group": 1
               }
             }
@@ -27249,39 +25816,31 @@
             144
           ],
           "source_object_count": 3180,
-          "runtime_entity_count": 2559,
+          "runtime_entity_count": 2568,
           "presentation_object_count": 612,
           "source_ai_profile_count": 3,
-          "normalized_condition_count": 0,
+          "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 9,
-            "condition_gap_count": 2,
+            "object_gap_count": 0,
+            "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
             "asset_gap_count": 1
           },
           "parity_gaps": {
             "ai_semantics_gap_count": 3,
-            "source_settings_gap_count": 0
+            "source_settings_gap_count": 0,
+            "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 12,
+          "blocking_gap_total": 2,
           "parity_gap_total": 3,
           "gap_ids": [
-            "object_gap",
             "condition_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 9
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 69,
-              "count": 9
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [
             {
               "team": 1,
@@ -27301,30 +25860,6 @@
                 "number": 1,
                 "object_type": 276,
                 "player_id": 3,
-                "source_object": -1,
-                "state": 0,
-                "target_object": -1,
-                "victory_group": 1
-              }
-            },
-            {
-              "team": 1,
-              "condition_index": 1,
-              "command": 3,
-              "command_name": "destroy_multiple",
-              "source": {
-                "ally_flag": 0,
-                "area": [
-                  0.0,
-                  0.0,
-                  0.0,
-                  0.0
-                ],
-                "command": 3,
-                "count": 0,
-                "number": 1,
-                "object_type": 276,
-                "player_id": 2,
                 "source_object": -1,
                 "state": 0,
                 "target_object": -1,

@@ -210,7 +210,7 @@ static func _normalize_player_source_ai(player: Dictionary, team: int, map_size:
 	var contract: Dictionary = contract_value
 	if int(contract.get("schema_version", 0)) != 1:
 		errors.append("source_ai_schema_unsupported:%d" % team)
-	if String(contract.get("status", "")) not in ["normalized", "partial"]:
+	if String(contract.get("status", "")) not in ["normalized", "partial", "integrated"]:
 		errors.append("source_ai_status_invalid:%d" % team)
 
 	for number_value in contract.get("strategic_numbers", []):

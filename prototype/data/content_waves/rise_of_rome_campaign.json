@@ -6,7 +6,7 @@
   "campaign_name": "Расцвет Рима",
   "campaign_sha256": "7b6d3630bb6a11c7ac68fd1f066299f61e07a998c25fe5c78b5dc3d3f47e181d",
   "manifest_sha256": "bbce57ca3d1019fdbd26b47f8cb95be3f74220923272ed23630c6f1da6d5d8a8",
-  "runtime_catalog_cache_key": "ede294474e84a79559b1eb4539caa2ea6c9f33b38458678ffca121915449d4b5",
+  "runtime_catalog_cache_key": "fc8ded7860c462e446ade5a7ad14f1bd074eabbbe5c142518c3e1bb8379c0afd",
   "gate_contract": {
     "launcher_required_zero_gaps": [
       "objects",
@@ -17,7 +17,8 @@
     ],
     "parity_additional_zero_gaps": [
       "ai_semantics",
-      "source_settings"
+      "source_settings",
+      "source_asset_fallbacks"
     ],
     "publication_rule": "A mission enters the launcher only after launcher_ready and reproducible win/loss evidence."
   },
@@ -65,7 +66,8 @@
       },
       "parity_gaps": {
         "ai_semantics_gap_count": 6,
-        "source_settings_gap_count": 0
+        "source_settings_gap_count": 0,
+        "source_asset_fallback_gap_count": 0
       },
       "object_gap_reasons": {},
       "object_gaps": [],
@@ -988,7 +990,8 @@
       },
       "parity_gaps": {
         "ai_semantics_gap_count": 1,
-        "source_settings_gap_count": 0
+        "source_settings_gap_count": 0,
+        "source_asset_fallback_gap_count": 0
       },
       "object_gap_reasons": {},
       "object_gaps": [],
@@ -1594,7 +1597,8 @@
       },
       "parity_gaps": {
         "ai_semantics_gap_count": 3,
-        "source_settings_gap_count": 0
+        "source_settings_gap_count": 0,
+        "source_asset_fallback_gap_count": 0
       },
       "object_gap_reasons": {},
       "object_gaps": [],
@@ -2459,7 +2463,8 @@
       },
       "parity_gaps": {
         "ai_semantics_gap_count": 2,
-        "source_settings_gap_count": 0
+        "source_settings_gap_count": 0,
+        "source_asset_fallback_gap_count": 0
       },
       "object_gap_reasons": {},
       "object_gaps": [],
@@ -3116,7 +3121,8 @@
       },
       "parity_gaps": {
         "ai_semantics_gap_count": 1,
-        "source_settings_gap_count": 0
+        "source_settings_gap_count": 0,
+        "source_asset_fallback_gap_count": 0
       },
       "object_gap_reasons": {},
       "object_gaps": [],
@@ -3703,7 +3709,8 @@
       },
       "parity_gaps": {
         "ai_semantics_gap_count": 4,
-        "source_settings_gap_count": 0
+        "source_settings_gap_count": 0,
+        "source_asset_fallback_gap_count": 0
       },
       "object_gap_reasons": {},
       "object_gaps": [],

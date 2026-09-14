@@ -28,7 +28,7 @@ func test_validation_report_contract() -> void:
 	assert_equal(report.get("inputs", {}).get("graphics"), 941, "all graphics validated")
 	assert_equal(report.get("inputs", {}).get("sounds"), 234, "all logical sounds validated")
 	assert_equal(report.get("inputs", {}).get("languages"), 10, "all languages included")
-	assert_equal(report.get("inputs", {}).get("runtime_archetypes"), 65, "all runtime archetypes, including the Syracuse roster, are validated")
+	assert_equal(report.get("inputs", {}).get("runtime_archetypes"), 66, "all runtime archetypes, including the published campaign roster, are validated")
 	var required_categories := [
 		"missing_slp",
 		"missing_audio",

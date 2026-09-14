@@ -42,7 +42,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			if preview_ids.has(int(resource["id"])):
 				drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, resource["pos"], world_to_screen.call(resource["pos"]).y, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0)), Color("d6bc63"), 1.0, 1))
 	for objective in source_objectives:
-		if not bool(objective.get("active", true)):
+		if not bool(objective.get("active", true)) or bool(objective.get("logical_only", false)):
 			continue
 		if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, objective, true):
 			continue

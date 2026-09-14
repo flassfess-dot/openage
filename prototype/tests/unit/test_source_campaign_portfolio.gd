@@ -23,10 +23,11 @@ func _initialize() -> void:
 	assert_equal(int(manifest.get("summary", {}).get("mission_count", -1)), 95, "manifest covers every installed campaign mission")
 	assert_equal(int(matrix.get("summary", {}).get("campaign_count", -1)), 14, "matrix audits every campaign")
 	assert_equal(int(matrix.get("summary", {}).get("mission_count", -1)), 95, "matrix audits every campaign mission")
-	assert_equal(int(matrix.get("summary", {}).get("launcher_ready_mission_count", -1)), 10, "portfolio baseline keeps exact launcher-ready count")
-	assert_equal(int(matrix.get("summary", {}).get("blocked_mission_count", -1)), 85, "portfolio baseline keeps exact blocked count")
+	assert_equal(int(matrix.get("summary", {}).get("launcher_ready_mission_count", -1)), 17, "portfolio baseline includes both published verticals and newly shared capabilities")
+	assert_equal(int(matrix.get("summary", {}).get("blocked_mission_count", -1)), 78, "portfolio baseline keeps exact blocked count")
 	assert_equal(int(matrix.get("summary", {}).get("parity_ready_mission_count", -1)), 0, "portfolio does not overclaim parity")
-	assert_equal(String(matrix.get("summary", {}).get("recommended_next_campaign_id", "")), "source_campaign_04", "lowest-scope unpublished campaign is selected deterministically")
+	assert_equal(matrix.get("published_campaign_filenames", []), ["first punic war.cpx", "расцвет рима.cpx"], "published campaign manifests drive ranking exclusions")
+	assert_equal(String(matrix.get("summary", {}).get("recommended_next_campaign_id", "")), "source_campaign_05", "lowest-scope unpublished campaign is selected deterministically")
 
 	var matrix_by_id: Dictionary = {}
 	for campaign_value in matrix.get("campaigns", []):
@@ -73,12 +74,17 @@ func _initialize() -> void:
 	assert_equal(int(rise_of_rome.get("blocking_gap_total", -1)), 0, "portfolio audit agrees with the dedicated Rise of Rome gate")
 	assert_equal(int(rise_of_rome.get("parity_gap_total", -1)), 17, "all source AI profiles remain explicit parity gaps")
 
-	var next_campaign: Dictionary = matrix_by_id.get("source_campaign_04", {})
-	assert_equal(String(next_campaign.get("name", "")), "First Punic War", "next content package keeps source identity")
-	assert_equal(int(next_campaign.get("mission_count", -1)), 3, "next package is a complete three-mission campaign")
-	assert_equal(next_campaign.get("selection_score", []), [3.0, 48.0, 4.0, 3.0], "campaign selection score remains evidence-driven")
-	assert_equal(next_campaign.get("unsupported_source_object_counts", {}).keys(), ["69", "131", "159"], "next package exposes its three common missing object types")
-	assert_equal(next_campaign.get("unsupported_condition_command_counts", {}).keys(), ["3", "4"], "next package exposes shared destroy-multiple and bring-to-area conditions")
+	var first_punic_war: Dictionary = matrix_by_id.get("source_campaign_04", {})
+	assert_equal(int(first_punic_war.get("launcher_ready_mission_count", -1)), 3, "First Punic War vertical is fully launchable")
+	assert_equal(int(first_punic_war.get("blocking_gap_total", -1)), 0, "First Punic War has no publication blockers")
+	assert_true(not matrix.get("ranked_unpublished_campaign_ids", []).has("source_campaign_04"), "published First Punic War is excluded from package ranking")
+
+	var next_campaign: Dictionary = matrix_by_id.get("source_campaign_05", {})
+	assert_equal(String(next_campaign.get("name", "")), "Reign of the Hittites", "next content package keeps source identity")
+	assert_equal(int(next_campaign.get("mission_count", -1)), 5, "next package is a complete five-mission campaign")
+	assert_equal(next_campaign.get("selection_score", []), [3.0, 4.0, 5.0, 5.0], "campaign selection score remains evidence-driven")
+	assert_equal(next_campaign.get("unsupported_condition_command_counts", {}).keys(), ["0"], "next package exposes its shared capture condition")
+	assert_equal(next_campaign.get("missing_asset_names", []), ["graphic_602"], "next package exposes its only missing graphic")
 
 	var import_failure_count := 0
 	for campaign_value in matrix.get("campaigns", []):

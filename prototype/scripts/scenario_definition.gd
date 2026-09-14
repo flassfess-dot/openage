@@ -86,8 +86,37 @@ static func _normalize_condition(condition: Dictionary, known_teams: Dictionary,
 			var target_team := int(condition.get("target_team", 0))
 			if target_team > 0 and not known_teams.has(target_team):
 				errors.append("scenario_condition_target_unknown:%s" % condition_id)
+		"destroy_count":
+			var target_team := int(condition.get("target_team", 0))
+			if not known_teams.has(target_team):
+				errors.append("scenario_condition_target_unknown:%s" % condition_id)
+			if int(condition.get("target_source_unit_id", -1)) < 0:
+				errors.append("scenario_condition_target_object_invalid:%s" % condition_id)
+			var target_ids: Array = condition.get("target_scenario_object_ids", [])
+			var required_count := int(condition.get("required_count", 0))
+			if required_count <= 0 or target_ids.size() < required_count:
+				errors.append("scenario_condition_count_invalid:%s" % condition_id)
+			if target_ids.any(func(value): return int(value) < 0):
+				errors.append("scenario_condition_target_object_invalid:%s" % condition_id)
+		"bring_object_to_area":
+			if int(condition.get("target_scenario_object_id", -1)) < 0:
+				errors.append("scenario_condition_target_object_invalid:%s" % condition_id)
+			_normalize_area(condition, map_size, condition_id, errors)
 		_:
 			errors.append("scenario_condition_type_unsupported:%s" % condition_id)
+
+
+static func _normalize_area(condition: Dictionary, map_size: Vector2i, condition_id: String, errors: Array[String]) -> void:
+	var area_values: Array = condition.get("area", [])
+	if area_values.size() != 4:
+		errors.append("scenario_condition_area_required:%s" % condition_id)
+		return
+	var area := [float(area_values[0]), float(area_values[1]), float(area_values[2]), float(area_values[3])]
+	if area[0] > area[2] or area[1] > area[3]:
+		errors.append("scenario_condition_area_inverted:%s" % condition_id)
+	if area[0] < 0.0 or area[1] < 0.0 or area[2] > map_size.x or area[3] > map_size.y:
+		errors.append("scenario_condition_area_out_of_bounds:%s" % condition_id)
+	condition["area"] = area
 
 
 static func _register_id(value: String, label: String, seen_ids: Dictionary, errors: Array[String]) -> void:

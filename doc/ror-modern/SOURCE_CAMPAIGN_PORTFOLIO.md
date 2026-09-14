@@ -25,15 +25,16 @@ powershell -ExecutionPolicy Bypass -File tools/ror_import/audit_campaign_portfol
 
 ## Gate
 
-`launcher_ready` требует нулевые gaps по импорту, объектам, legacy conditions, trigger semantics, AI normalization и assets. `parity_ready` дополнительно требует нулевые source AI semantics и source settings gaps. Даже `launcher_ready` в portfolio означает только механический preflight: публикация всё равно требует постоянный match и воспроизводимые bootstrap/source-win/local-defeat tests.
+`launcher_ready` требует нулевые gaps по импорту, объектам, legacy conditions, trigger semantics, AI normalization и assets. `parity_ready` дополнительно требует нулевые source AI semantics, source settings и source-asset fallback gaps. Даже `launcher_ready` в portfolio означает только механический preflight: публикация всё равно требует постоянный match и воспроизводимые bootstrap/source-win/local-defeat tests.
 
 Baseline 2026-09-14:
 
 - 14 кампаний, 95 миссий;
-- 10 mechanically launcher-ready, 85 blocked;
+- 17 mechanically launcher-ready, 78 blocked;
 - 0 parity-ready;
 - 4 `runtime_normalization` blockers из-за менее двух активных source player slots;
 - `Расцвет Рима`: 6/6 launcher-ready, 0 blocking gaps, 17 явных AI parity gaps.
+- `First Punic War`: 3/3 launcher-ready, 0 blocking gaps; опубликована и исключена из дальнейшего ранжирования manifest-driven правилом.
 
 ## Выбор следующего пакета
 
@@ -44,11 +45,12 @@ Baseline 2026-09-14:
 3. сумма parity records;
 4. число миссий.
 
-Первой выбрана `First Punic War`, score `[3, 48, 4, 3]`. Её общий системный пакет:
+Завершённая `First Punic War` больше не участвует в списке кандидатов. Следующей выбрана `Reign of the Hittites`, score `[3, 4, 5, 5]`. Её общий системный пакет:
 
-- source object IDs 69 Guard Tower, 131 Tree Stump, 159 Artifact;
-- legacy victory commands 3 `DestroyMultiple` и 4 `BringToArea`;
-- graphics 323 (player 1/2), 572, 833, 928, 929, 930;
-- два AI normalization gaps и остающиеся evidence-gated AI semantics.
+- общий single-participant bootstrap для учебной миссии `Homelands`, а не сценарное исключение;
+- legacy victory command 0 `Capture` по точному scenario object ID;
+- source graphic 602;
+- постоянные матчи и воспроизводимые исходы для всех пяти миссий;
+- остающиеся evidence-gated AI semantics без догадок о скрытых формулах.
 
-Следующий этап не импортирует эти миссии как три несвязанных прототипа. Сначала закрываются общие object/condition/asset/AI owners, затем создаются все три fixed-source matches и только после воспроизводимых исходов кампания публикуется целиком.
+Следующий этап не импортирует миссии как пять несвязанных прототипов. Сначала закрываются общие bootstrap/condition/asset owners, затем создаются все пять fixed-source matches и только после воспроизводимых исходов кампания публикуется целиком.

@@ -34,7 +34,8 @@ func verify_worker_presentations(catalog) -> void:
 
 
 func verify_presentation(catalog) -> void:
-	assert_equal(catalog.resource_presentations.frames_by_asset.size(), 12, "resource registry loads every declared resource-owned asset including predator carcasses")
+	assert_equal(catalog.resource_presentations.frames_by_asset.size(), 14, "resource registry loads every declared resource-owned asset including predator carcasses and source forest variants")
+	assert_true(catalog.resource_presentations.frames_by_asset.has("graphic_928") and catalog.resource_presentations.frames_by_asset.has("graphic_929"), "First Punic forest variants participate in the shared resource registry")
 	var world = configured_world(catalog)
 	var tree: Dictionary = world.add_resource("tree", Vector2(5.0, 5.0), 1)
 	var tree_frame: Dictionary = catalog.resource_frame_info(tree)

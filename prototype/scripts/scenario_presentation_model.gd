@@ -83,6 +83,13 @@ func _condition_label(condition: Dictionary, count: int, match_definition: Dicti
 			if locale == "ru":
 				return "Уничтожьте: %s (%d)" % [name, count] if count > 1 else "Уничтожьте: %s" % name
 			return "Destroy: %s (%d)" % [name, count] if count > 1 else "Destroy: %s" % name
+		"destroy_count":
+			var name := _source_object_name(int(condition.get("target_source_unit_id", -1)), match_definition, observer_team, locale)
+			var required := int(condition.get("required_count", count))
+			return "Уничтожьте: %s (%d)" % [name, required] if locale == "ru" else "Destroy: %s (%d)" % [name, required]
+		"bring_object_to_area":
+			var name := _source_object_name(int(condition.get("target_source_unit_id", -1)), match_definition, observer_team, locale)
+			return "Доставьте «%s» в отмеченную область" % name if locale == "ru" else "Bring %s to the marked area" % name
 	return "Выполните условие сценария" if locale == "ru" else "Complete the scenario objective"
 
 

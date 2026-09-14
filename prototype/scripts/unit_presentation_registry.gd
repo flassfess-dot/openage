@@ -42,6 +42,8 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 			continue
 		_register_team(alias, alias, 1, archetype, state_specs)
 		_register_team(alias, "enemy_%s" % alias, 2, archetype, state_specs)
+		if state_specs.values().any(func(state): return not String(state.get("neutral_asset_name", "")).is_empty()):
+			_register_team(alias, "neutral_%s" % alias, 0, archetype, state_specs)
 		var variants: Dictionary = archetype.get("runtime", {}).get("presentation_variants", {})
 		for source_id_value in variants:
 			var source_id := int(source_id_value)
@@ -100,7 +102,11 @@ func ensure_loaded(texture_key: String) -> void:
 
 func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -> Dictionary:
 	var alias := String(unit.get("kind", ""))
-	var prefix := alias if int(unit.get("team", 1)) == 1 else "enemy_%s" % alias
+	var owner_team := int(unit.get("team", 1))
+	var prefix := alias if owner_team == 1 else "enemy_%s" % alias
+	var neutral_prefix := "neutral_%s" % alias
+	if owner_team <= 0 and definitions.has(neutral_prefix):
+		prefix = neutral_prefix
 	var source_id := int(unit.get("source_unit_id", -1))
 	var variant_key := "%s#%d" % [prefix, source_id]
 	var texture_key := variant_key if definitions.has(variant_key) else prefix
@@ -173,7 +179,7 @@ func _load_team(alias: String, texture_key: String, team: int, archetype: Dictio
 		var state := String(state_value)
 		var state_spec: Dictionary = state_specs[state]
 		var base_asset_name := String(state_spec.get("asset_name", ""))
-		var asset_name := String(state_spec.get("enemy_asset_name", base_asset_name)) if team == 2 else base_asset_name
+		var asset_name := String(state_spec.get("neutral_asset_name", base_asset_name)) if team <= 0 else String(state_spec.get("enemy_asset_name", base_asset_name)) if team == 2 else base_asset_name
 		var frame_records: Array = records_by_name.get(asset_name, [])
 		if frame_records.is_empty() and team == 2:
 			asset_name = base_asset_name
@@ -194,7 +200,7 @@ func _load_team(alias: String, texture_key: String, team: int, archetype: Dictio
 			hotspots.append(hotspot)
 		if frames.is_empty():
 			continue
-		var graphic_id := int(state_spec.get("graphic_id", -1))
+		var graphic_id := int(state_spec.get("neutral_graphic_id", state_spec.get("graphic_id", -1))) if team <= 0 else int(state_spec.get("graphic_id", -1))
 		if graphic_id < 0:
 			graphic_id = _source_graphic_id(archetype, String(state_spec.get("graphic_field", state)), team, source_unit_id)
 		var graphic_spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})

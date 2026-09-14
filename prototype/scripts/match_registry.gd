@@ -51,6 +51,27 @@ const MATCHES := [
 		"path": "res://assets/generated/matches/mithridates.json",
 		"kind": "campaign",
 	},
+	{
+		"id": "campaign_struggle_for_sicily",
+		"title": "Борьба за Сицилию",
+		"subtitle": "Первая миссия кампании «Первая Пуническая война» — учебная высадка на Сицилии",
+		"path": "res://assets/generated/matches/struggle-for-sicily.json",
+		"kind": "campaign",
+	},
+	{
+		"id": "campaign_battle_of_mylae",
+		"title": "Битва при Милах",
+		"subtitle": "Вторая миссия кампании «Первая Пуническая война» — захват и доставка двух артефактов",
+		"path": "res://assets/generated/matches/battle-of-mylae.json",
+		"kind": "campaign",
+	},
+	{
+		"id": "campaign_battle_of_tunes",
+		"title": "Битва при Тунете",
+		"subtitle": "Третья миссия кампании «Первая Пуническая война» — уничтожение карфагенского Чуда",
+		"path": "res://assets/generated/matches/battle-of-tunes.json",
+		"kind": "campaign",
+	},
 ]
 
 

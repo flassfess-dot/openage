@@ -10,6 +10,9 @@ func _initialize() -> void:
 	test_valid_contract()
 	test_invalid_contract()
 	test_destroy_object_lifecycle()
+	test_destroy_count_lifecycle()
+	test_bring_object_to_area_lifecycle()
+	test_inactive_participant_cannot_complete()
 	test_create_unit_in_area_lifecycle()
 	if failures.is_empty():
 		print("I12-020C ScenarioDefinition contract tests passed")
@@ -113,6 +116,63 @@ func test_create_unit_in_area_lifecycle() -> void:
 	var completed := system.update({"units": [first, second], "buildings": [], "resource_nodes": [], "objectives": [], "player_states": {}})
 	assert_true(bool(completed.get("result", {}).get("over", false)), "qualifying units complete create-in-area conditions")
 	assert_equal(int(completed.get("result", {}).get("winner_team", -1)), 1, "unit area condition awards the declared participant")
+
+
+func test_destroy_count_lifecycle() -> void:
+	var system := ScenarioSystem.new()
+	system.configure({
+		"schema_version": 1,
+		"participants": [{"team": 1, "completion_mode": "any", "groups": [{
+			"id": "destroy_slingers",
+			"mode": "all",
+			"conditions": [{"id": "destroy_three", "type": "destroy_count", "target_team": 2, "target_source_unit_id": 347, "target_scenario_object_ids": [10, 11, 12], "required_count": 3}],
+		}]}],
+	})
+	var targets := [
+		{"scenario_object_id": 10, "team": 2, "hp": 35.0},
+		{"scenario_object_id": 11, "team": 2, "hp": 0.0},
+		{"scenario_object_id": 12, "team": 2, "hp": 35.0},
+	]
+	var active := system.update({"units": targets, "buildings": [], "resource_nodes": [], "objectives": [], "player_states": {}})
+	assert_true(not bool(active.get("result", {}).get("over", false)), "a living source target keeps DestroyMultiple active")
+	assert_equal(int(system.canonical_state().get("condition_states", {}).get("destroy_three", {}).get("current", -1)), 1, "destroy-count reports source-owned progress")
+	targets[0]["hp"] = 0.0
+	targets[2]["hp"] = 0.0
+	var completed := system.update({"units": targets, "buildings": [], "resource_nodes": [], "objectives": [], "player_states": {}})
+	assert_true(bool(completed.get("result", {}).get("over", false)), "destroying the declared source object set completes DestroyMultiple")
+
+
+func test_bring_object_to_area_lifecycle() -> void:
+	var system := ScenarioSystem.new()
+	system.configure({
+		"schema_version": 1,
+		"participants": [{"team": 1, "completion_mode": "any", "groups": [{
+			"id": "bring_artifact",
+			"mode": "all",
+			"conditions": [{"id": "artifact_area", "type": "bring_object_to_area", "target_scenario_object_id": 6477, "target_source_unit_id": 159, "area": [39.0, 29.0, 53.0, 45.0]}],
+		}]}],
+	})
+	var artifact := {"scenario_object_id": 6477, "team": 1, "hp": 1.0, "pos": Vector2(116.0, 85.0)}
+	var active := system.update({"units": [artifact], "buildings": [], "resource_nodes": [], "objectives": [], "player_states": {}})
+	assert_true(not bool(active.get("result", {}).get("over", false)), "artifact outside its source area keeps BringToArea active")
+	artifact["pos"] = Vector2(45.0, 35.0)
+	var completed := system.update({"units": [artifact], "buildings": [], "resource_nodes": [], "objectives": [], "player_states": {}})
+	assert_true(bool(completed.get("result", {}).get("over", false)), "the exact source artifact inside its area completes BringToArea")
+
+
+func test_inactive_participant_cannot_complete() -> void:
+	var system := ScenarioSystem.new()
+	system.configure({
+		"schema_version": 1,
+		"participants": [{"team": 1, "completion_mode": "any", "groups": [{
+			"id": "already_satisfied",
+			"mode": "all",
+			"conditions": [{"id": "empty_target_set", "type": "destroy_count", "target_team": 2, "target_source_unit_id": 347, "target_scenario_object_ids": [10], "required_count": 1}],
+		}]}],
+	})
+	var update := system.update({"units": [], "buildings": [], "resource_nodes": [], "objectives": [], "player_states": {1: {"status": "resigned"}}})
+	assert_true(not bool(update.get("result", {}).get("over", false)), "a resigned participant cannot win through an already-satisfied scenario condition")
+	assert_true(not update.get("events", []).any(func(event): return String(event.get("type", "")) == "scenario_completed"), "inactive participant emits no scenario completion event")
 
 
 func assert_true(value: bool, context: String) -> void:

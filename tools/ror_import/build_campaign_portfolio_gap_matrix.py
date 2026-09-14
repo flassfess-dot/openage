@@ -20,7 +20,7 @@ from build_campaign_gap_matrix import (
 
 
 SCHEMA_VERSION = 1
-AUDITOR_VERSION = "campaign-portfolio-gap-matrix-1"
+AUDITOR_VERSION = "campaign-portfolio-gap-matrix-2"
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,8 +30,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runtime-catalog", type=Path, required=True)
     parser.add_argument("--assets-root", type=Path, required=True)
     parser.add_argument("--matches-directory", type=Path, required=True)
+    parser.add_argument(
+        "--published-manifest",
+        type=Path,
+        action="append",
+        default=[],
+        help="Campaign manifest whose source campaign must be excluded from next-package ranking.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
+
+
+def published_campaign_filenames(manifest_paths: list[Path]) -> set[str]:
+    filenames: set[str] = set()
+    for path in manifest_paths:
+        manifest = read_json(path)
+        filename = str(manifest.get("campaign_filename", "")).strip()
+        if not filename:
+            raise CampaignAuditError(
+                f"published campaign manifest has no campaign_filename: {path}"
+            )
+        filenames.add(filename.casefold())
+    return filenames
 
 
 def source_campaign_by_filename(
@@ -150,6 +170,7 @@ def compact_failed_mission(
     parity = {
         "ai_semantics_gap_count": 0,
         "source_settings_gap_count": 0,
+        "source_asset_fallback_gap_count": 0,
     }
     return {
         "scenario_index": int(declaration.get("scenario_index", -1)),
@@ -272,6 +293,7 @@ def main() -> int:
     manifest = read_json(args.manifest)
     catalog = read_json(args.catalog)
     runtime_catalog = read_json(args.runtime_catalog)
+    published_filenames = published_campaign_filenames(args.published_manifest)
     if str(manifest.get("source_catalog_sha256", "")) != sha256_file(args.catalog):
         raise CampaignAuditError("portfolio manifest is stale for the source catalog")
     available_assets = available_asset_names(args.assets_root)
@@ -312,7 +334,7 @@ def main() -> int:
         (
             campaign
             for campaign in campaigns
-            if str(campaign.get("filename", "")).casefold() != "расцвет рима.cpx"
+            if str(campaign.get("filename", "")).casefold() not in published_filenames
         ),
         key=lambda campaign: tuple(campaign["selection_score"]),
     )
@@ -326,6 +348,7 @@ def main() -> int:
         "manifest_sha256": sha256_file(args.manifest),
         "source_catalog_cache_key": str(catalog.get("cache", {}).get("key", "")),
         "runtime_catalog_cache_key": str(runtime_catalog.get("cache", {}).get("key", "")),
+        "published_campaign_filenames": sorted(published_filenames),
         "summary": {
             "campaign_count": len(campaigns),
             "mission_count": mission_count,

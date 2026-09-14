@@ -473,6 +473,7 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		"animation_events_fired": {},
 		"population_cost": int(production.get("population_cost", 0)),
 		"population_released": false,
+		"victory_objective_id": -1,
 		"source_unit_id": int(source.get("unit_id", stats.get("unit_id", -1))),
 		"unit_lineage": [int(source.get("unit_id", stats.get("unit_id", -1)))],
 		"display_graphic_id": int(source.get("graphics", {}).get("idle", -1)),
@@ -489,6 +490,7 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	apply_archetype_identity(unit, kind)
 	configure_unit_combat_awareness(unit)
 	units.append(unit)
+	register_unit_victory_objective(unit)
 	apply_technology_state_to_entity(unit, team)
 	economy_system.add_population(team, int(unit["population_cost"]))
 	spatial_index.insert(unit, position, unit["footprint_radius"], "unit")
@@ -845,6 +847,59 @@ func register_building_victory_objective(building: Dictionary) -> void:
 	building["victory_objective_id"] = int(objective["id"])
 
 
+func register_unit_victory_objective(unit: Dictionary) -> void:
+	var metadata := data_repository.runtime_metadata(String(unit.get("kind", "")))
+	var category := String(metadata.get("victory_objective_category", ""))
+	if category.is_empty() or int(unit.get("victory_objective_id", -1)) >= 0:
+		return
+	var objective := add_victory_object(category, Vector2(unit.get("pos", Vector2.ZERO)), int(unit.get("team", 0)), true)
+	objective["source_entity_id"] = int(unit.get("id", -1))
+	objective["logical_only"] = true
+	unit["victory_objective_id"] = int(objective["id"])
+
+
+func sync_unit_victory_objective(unit: Dictionary) -> void:
+	var objective_id := int(unit.get("victory_objective_id", -1))
+	if objective_id < 0:
+		return
+	for objective in victory_objectives:
+		if int(objective.get("id", -1)) == objective_id:
+			objective["team"] = int(unit.get("team", 0))
+			objective["completed"] = float(unit.get("hp", 0.0)) > 0.0
+			objective["active"] = float(unit.get("hp", 0.0)) > 0.0 and not bool(unit.get("removed", false))
+			objective["pos"] = Vector2(unit.get("pos", Vector2.ZERO))
+			return
+
+
+func update_capturable_objectives() -> void:
+	for objective_unit_value in units:
+		var objective_unit: Dictionary = objective_unit_value
+		if not entity_has_behavior_tag(objective_unit, "capturable") or float(objective_unit.get("hp", 0.0)) <= 0.0:
+			continue
+		var capture_radius := maxf(0.0, float(data_repository.runtime_metadata(String(objective_unit.get("kind", ""))).get("capture_radius", 1.0)))
+		var candidates: Array = []
+		for candidate_value in units:
+			var candidate: Dictionary = candidate_value
+			if int(candidate.get("id", -1)) == int(objective_unit.get("id", -1)) or int(candidate.get("team", 0)) <= 0:
+				continue
+			if float(candidate.get("hp", 0.0)) <= 0.0 or entity_has_behavior_tag(candidate, "capturable"):
+				continue
+			var distance := Vector2(candidate.get("pos", Vector2.ZERO)).distance_to(Vector2(objective_unit.get("pos", Vector2.ZERO)))
+			if distance <= capture_radius + 0.0001:
+				candidates.append({"unit": candidate, "distance": distance})
+		candidates.sort_custom(func(left, right):
+			if not is_equal_approx(float(left["distance"]), float(right["distance"])):
+				return float(left["distance"]) < float(right["distance"])
+			return int(left["unit"].get("id", -1)) < int(right["unit"].get("id", -1))
+		)
+		if not candidates.is_empty():
+			var new_team := int(candidates[0]["unit"].get("team", 0))
+			var old_team := int(objective_unit.get("team", 0))
+			if new_team != old_team and (old_team <= 0 or not are_teams_allied(old_team, new_team)):
+				transfer_entity_ownership(objective_unit, new_team, -1, "proximity_capture", true)
+		sync_unit_victory_objective(objective_unit)
+
+
 func sync_building_victory_objective(building: Dictionary) -> void:
 	var objective_id := int(building.get("victory_objective_id", -1))
 	if objective_id < 0:
@@ -910,6 +965,7 @@ func _configure_tick_pipeline() -> void:
 	tick_pipeline.add_active("ai_distress", Callable(ai_distress_system, "advance"))
 	tick_pipeline.add_active("trade_goods", Callable(trade_system, "advance_goods"))
 	tick_pipeline.add_active("unit_orders", Callable(self, "_tick_unit_orders"))
+	tick_pipeline.add_active("capturable_objectives", Callable(self, "_tick_capturable_objectives"))
 	tick_pipeline.add_active("static_combat", Callable(self, "_tick_static_combat"))
 	tick_pipeline.add_active("death_lifecycle", Callable(self, "_tick_death_lifecycle"))
 	tick_pipeline.add_active("resource_lifecycle", Callable(self, "_tick_resource_lifecycle"))
@@ -951,6 +1007,10 @@ func _tick_capture_previous_positions(_context: Dictionary) -> void:
 
 func _tick_unit_orders(context: Dictionary) -> void:
 	update_units(float(context["delta"]), int(context["player_team"]), int(context["enemy_team"]))
+
+
+func _tick_capturable_objectives(_context: Dictionary) -> void:
+	update_capturable_objectives()
 
 
 func _tick_static_combat(context: Dictionary) -> void:
@@ -1624,7 +1684,7 @@ func find_unit(id: int) -> Variant:
 
 func find_combat_target(id: int) -> Variant:
 	var unit = find_unit(id)
-	if unit != null:
+	if unit != null and not entity_has_behavior_tag(unit, "noncombat_target"):
 		return unit
 	return find_building(id)
 
@@ -1632,7 +1692,7 @@ func find_combat_target(id: int) -> Variant:
 func get_combat_targets() -> Array:
 	var result: Array = []
 	for unit in units:
-		if float(unit.get("hp", 0.0)) > 0.0:
+		if float(unit.get("hp", 0.0)) > 0.0 and not entity_has_behavior_tag(unit, "noncombat_target"):
 			result.append(unit)
 	for building in buildings:
 		if float(building.get("hp", 0.0)) > 0.0:
@@ -3066,11 +3126,11 @@ func get_trade_goods(team: int) -> float:
 	return trade_system.trade_goods(team)
 
 
-func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: int = -1) -> bool:
+func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: int = -1, ownership_reason: String = "conversion", allow_neutral_owner: bool = false) -> bool:
 	if entity == null or new_team <= 0 or float(entity.get("hp", 0.0)) <= 0.0:
 		return false
 	var old_team := int(entity.get("team", 0))
-	if old_team <= 0 or are_teams_allied(old_team, new_team):
+	if (old_team <= 0 and not allow_neutral_owner) or (old_team > 0 and are_teams_allied(old_team, new_team)):
 		return false
 	var entity_id := int(entity.get("id", -1))
 	var is_building := find_building(entity_id) != null
@@ -3084,19 +3144,22 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 			production_system.cancel(entity_id, 0)
 		deactivate_population_support(entity)
 	else:
-		halt_unit(entity, "converted")
-		if not bool(entity.get("population_released", false)):
+		halt_unit(entity, "converted" if ownership_reason == "conversion" else ownership_reason)
+		if old_team > 0 and not bool(entity.get("population_released", false)):
 			var population_cost := int(entity.get("population_cost", 0))
 			economy_system.add_population(old_team, -population_cost)
-			economy_system.add_population(new_team, population_cost)
+		if not bool(entity.get("population_released", false)):
+			economy_system.add_population(new_team, int(entity.get("population_cost", 0)))
 	player_registry.ensure(new_team, int(civilization_by_team.get(new_team, 13)))
 	entity["team"] = new_team
 	entity["selected"] = false
-	entity["conversion_origin_team"] = int(entity.get("conversion_origin_team", old_team))
-	var owner_history: Array = entity.get("conversion_owner_history", [old_team]).duplicate()
+	var owner_history: Array = entity.get("owner_history", [old_team]).duplicate()
 	owner_history.append(new_team)
-	entity["conversion_owner_history"] = owner_history
-	entity["technology_locked"] = true
+	entity["owner_history"] = owner_history
+	if ownership_reason == "conversion":
+		entity["conversion_origin_team"] = int(entity.get("conversion_origin_team", old_team))
+		entity["conversion_owner_history"] = owner_history.duplicate()
+		entity["technology_locked"] = true
 	var ownership: Dictionary = entity.get("components", {}).get("ownership", {})
 	ownership["player_id"] = new_team
 	ownership["team_id"] = new_team
@@ -3106,6 +3169,8 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 		activate_population_support(entity)
 		sync_building_victory_objective(entity)
 		refresh_building_connectivity()
+	else:
+		sync_unit_victory_objective(entity)
 	EntityComponents.sync_dynamic(entity)
 	update_fog_of_war()
 	_emit_domain_event("ownership_changed", {
@@ -3113,7 +3178,8 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 		"old_team": old_team,
 		"new_team": new_team,
 		"converter_id": converter_id,
-		"technology_locked": true,
+		"ownership_reason": ownership_reason,
+		"technology_locked": bool(entity.get("technology_locked", false)),
 	})
 	return true
 

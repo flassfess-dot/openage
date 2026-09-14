@@ -459,6 +459,10 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 
 **Следующий ускоренный пакет I12-020N:** закрыть `First Punic War` как одну вертикаль: три отсутствующих source object type (Guard Tower 69, Tree Stump 131, Artifact 159), семь exact graphics, legacy `DestroyMultiple`/`BringToArea`, два AI normalization gap, постоянные matches и воспроизводимые исходы. До нулевого launcher gate ни одна из трёх миссий не появляется в launcher; pixel/UI measurement остаётся отдельным неблокирующим evidence stream.
 
+**Статус ускоренного пакета I12-020N:** `First Punic War` опубликована целиком на уровне `INTEGRATED`: 3/3 missions launcher-ready, 0 blocking gaps. Общий artifact capture lifecycle синхронизирует мобильную сущность и logical victory objective, поддерживает захват/перехват и не делает Artifact боевой целью. `DestroyMultiple`/`BringToArea`, Guard Tower 69, Tree Stump 131 и source graphics закрыты общими data-driven владельцами. Graphic 930 остаётся честным fallback gap из-за отсутствующего source SLP 799. Полный portfolio после переаудита: 17/95 mechanically ready, 78 blocked, 0 parity-ready; опубликованные manifests исключаются из ranking. Gate `186/0`, cache `0/181`; PCK `246 916 672` байт, SHA-256 `01fdb59a4da2601f942e5a2cd97f3b62f03ed25bb6c38c46d3e816874c04149b`; packaged Mylae smoke — exit 0.
+
+**Следующий ускоренный пакет I12-020O:** `Reign of the Hittites` (5 missions, score `[3,4,5,5]`). Общие blockers: single-participant bootstrap, capture condition command 0 и graphic 602. После общих owners — пять постоянных matches и воспроизводимые исходы; публикация только всей кампанией при нулевом launcher gate.
+
 Порядок волн:
 
 1. Законченный Stone Age: рабочий, ресурсы, базовые здания, один melee и один ranged юнит.

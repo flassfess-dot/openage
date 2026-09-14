@@ -52,7 +52,7 @@ func test_generated_cache_contract() -> void:
 		assert_true(gamespec_components.has(required), "gamespec includes %s" % required)
 	assert_true(gamespec_components["importerVersion"] != asset_cache["entries"].values()[0]["components"]["importerVersion"], "gamespec and asset invalidation are independent")
 	assert_equal(runtime_catalog.get("format_version"), 1, "runtime catalog schema")
-	assert_equal(runtime_catalog.get("archetype_count"), 65, "runtime archetype count includes the exact Syracuse roster and source wildlife")
+	assert_equal(runtime_catalog.get("archetype_count"), 66, "runtime archetype count includes the published campaign roster, source wildlife and Artifact")
 	assert_equal(String(runtime_catalog.get("cache", {}).get("key", "")).length(), 64, "runtime catalog cache key")
 	var runtime_components: Dictionary = runtime_catalog.get("cache", {}).get("components", {})
 	for required in ["sourceSha256", "importerVersion", "schemaVersion", "palette", "gameVersion"]:

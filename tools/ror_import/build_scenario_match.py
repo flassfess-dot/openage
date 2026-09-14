@@ -15,7 +15,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
-IMPORTER_VERSION = "scenario-match-34"
+IMPORTER_VERSION = "scenario-match-35"
 SUPPORTED_RUNTIME_CATEGORIES = {"unit", "building", "resource", "objective"}
 VICTORY_COMMAND_NAMES = {
     0: "capture",
@@ -131,6 +131,22 @@ PRESENTATION_ENVIRONMENT_CATEGORIES = {
     "terrain_feature",
     "presentation_scenery",
     "ambient_actor",
+}
+SOURCE_PRESENTATION_ENVIRONMENT_OVERRIDES = {
+    # Tree Stump is a source presentation object, not a fresh wood resource.
+    # Its DAT graphic 600 resolves to the already imported DRS 623 asset.
+    131: {
+        "runtime_alias": "tree_stump",
+        "owner_category": "presentation_scenery",
+        "asset_name": "tree_stump",
+        "presentation_layer": "scenery",
+    },
+}
+SOURCE_GRAPHIC_ASSET_FALLBACKS = {
+    # DAT graphic 930 names SLP 799, which is absent from the installed RoR
+    # archives. Preserve that request in the evidence ledger while rendering
+    # the semantically equivalent standard tree instead of a missing texture.
+    930: ("tree", "source_slp_unavailable"),
 }
 GAIA_OWNER_CONTRACTS = {
     "forest_resource": ("forest_field", "static_resource_nodes"),
@@ -859,13 +875,23 @@ def build_players(
         if player["controller"] == "ai":
             source_ai = normalize_source_ai(source, objects, team, mappings)
             player["source_ai"] = source_ai
+            source_random_fallback = (
+                str(source_ai.get("rule_name", "")).casefold() == "random"
+                and str(source_ai.get("build_list_name", "")).casefold() == "empty"
+            )
             source_profile_ready = (
-                source_ai["status"] in {"normalized", "partial"}
+                source_ai["status"] in {"normalized", "partial", "integrated"}
                 and bool(source_ai["strategic_numbers"] or source_ai["build_order"])
             )
             player["ai"] = {
-                "enabled": source_profile_ready,
-                "profile": "source_campaign_v1" if source_profile_ready else "source_campaign_pending",
+                "enabled": source_profile_ready or source_random_fallback,
+                "profile": (
+                    "source_campaign_v1"
+                    if source_profile_ready
+                    else "source_random_fallback"
+                    if source_random_fallback
+                    else "source_campaign_pending"
+                ),
                 "economic_interval_ticks": 20,
                 "military_interval_ticks": int(
                     source_ai["runtime_support"]["tactical_update_interval_ticks"]
@@ -902,6 +928,42 @@ def runtime_entities(
         state = int(source.get("state", 0))
         archetype = mappings.get(source_id)
         source_record = object_catalog.get(source_id, {})
+
+        environment_override = SOURCE_PRESENTATION_ENVIRONMENT_OVERRIDES.get(source_id)
+        if (
+            environment_override is not None
+            and int(source.get("owner_slot", -1)) == 0
+            and position_in_bounds(source.get("position", []), width, height)
+        ):
+            position = source["position"]
+            graphic_id = int(source_record.get("graphics", {}).get("idle", -1))
+            owner_category = str(environment_override["owner_category"])
+            owner_system, _strategy = GAIA_OWNER_CONTRACTS[owner_category]
+            source["runtime_status"] = "presentation_environment"
+            source["runtime_alias"] = str(environment_override["runtime_alias"])
+            source["runtime_category"] = "presentation"
+            source["runtime_owner_system"] = owner_system
+            source["owner_contract_category"] = owner_category
+            presentation_environment.append(
+                {
+                    "id": -200000 - len(presentation_environment),
+                    "kind": owner_category,
+                    "presentation_subtype": str(environment_override["runtime_alias"]),
+                    "position": [float(position[0]), float(position[1])],
+                    "source_unit_id": source_id,
+                    "scenario_object_id": int(source.get("scenario_object_id", -1)),
+                    "source_state": state,
+                    "source_angle": float(source.get("angle", 0.0)),
+                    "source_elevation": float(position[2]) if len(position) >= 3 else 0.0,
+                    "source_frame": int(source.get("frame", -1)),
+                    "graphic_id": graphic_id,
+                    "asset_name": str(environment_override["asset_name"]),
+                    "presentation_layer": str(environment_override["presentation_layer"]),
+                    "animated": False,
+                }
+            )
+            source_entities.append(source)
+            continue
 
         # Scenario flags and Flare objects are service-layer data in this mission,
         # not autonomous simulation entities. Preserve their source identity while
@@ -1026,6 +1088,9 @@ def runtime_entities(
             position = source["position"]
             idle_graphic_id = int(source_record.get("graphics", {}).get("idle", -1))
             depleted_graphic_id = int(source_record.get("graphics", {}).get("death", -1))
+            requested_asset_name = f"graphic_{idle_graphic_id}"
+            fallback = SOURCE_GRAPHIC_ASSET_FALLBACKS.get(idle_graphic_id)
+            runtime_asset_name = str(fallback[0]) if fallback else requested_asset_name
             source["runtime_status"] = "mapped"
             source["runtime_alias"] = "tree"
             source["runtime_category"] = "resource"
@@ -1045,7 +1110,9 @@ def runtime_entities(
                     "source_elevation": float(position[2]) if len(position) >= 3 else 0.0,
                     "source_frame": int(source.get("frame", -1)),
                     "source_graphic_id": idle_graphic_id,
-                    "source_graphic_asset_name": f"graphic_{idle_graphic_id}",
+                    "source_graphic_asset_name": runtime_asset_name,
+                    "source_requested_graphic_asset_name": requested_asset_name,
+                    "source_asset_fallback_reason": str(fallback[1]) if fallback else "",
                     "source_depleted_graphic_id": depleted_graphic_id,
                     "source_depleted_asset_name": f"graphic_{depleted_graphic_id}",
                     "static_field_node": True,
@@ -1171,6 +1238,44 @@ def normalize_scenario_definition(
                         "source_unit_id": source_unit_id,
                         "kind": str(archetype.get("alias", "")),
                         "required_count": max(1, int(raw_condition.get("number", 1))),
+                        "area": area,
+                    }
+            elif command == 3:
+                target_team = source_player_team(
+                    int(raw_condition.get("player_id", -1)), owner_team
+                )
+                target_source_unit_id = int(raw_condition.get("object_type", -1))
+                required_count = max(1, int(raw_condition.get("number", 1)))
+                target_ids = sorted(
+                    int(value.get("scenario_object_id", -1))
+                    for value in source_entities
+                    if value.get("runtime_status") == "mapped"
+                    and int(value.get("owner_slot", -1)) == target_team
+                    and int(value.get("source_unit_id", -1))
+                    == target_source_unit_id
+                    and int(value.get("scenario_object_id", -1)) >= 0
+                )
+                if target_source_unit_id >= 0 and len(target_ids) >= required_count:
+                    normalized = {
+                        **common,
+                        "type": "destroy_count",
+                        "target_team": target_team,
+                        "target_source_unit_id": target_source_unit_id,
+                        "target_scenario_object_ids": target_ids,
+                        "required_count": required_count,
+                    }
+            elif command == 4:
+                source_object_id = int(raw_condition.get("source_object", -1))
+                source_object = mapped_objects.get(source_object_id)
+                area = [float(value) for value in raw_condition.get("area", [])]
+                if source_object is not None and len(area) == 4:
+                    normalized = {
+                        **common,
+                        "type": "bring_object_to_area",
+                        "target_scenario_object_id": source_object_id,
+                        "target_source_unit_id": int(
+                            source_object.get("source_unit_id", -1)
+                        ),
                         "area": area,
                     }
             elif command == 2:
@@ -1481,6 +1586,18 @@ def main() -> int:
             "source_ai_marker_count": sum(1 for value in source_entities if value.get("runtime_status") == "source_ai_marker"),
             "gaia_classifications": gaia_classifications,
             "objects": gaps,
+            "source_asset_fallback_count": sum(
+                1
+                for entity in entities
+                if str(entity.get("source_asset_fallback_reason", ""))
+                or str(
+                    mappings.get(int(entity.get("source_unit_id", -1)), {})
+                    .get("runtime", {})
+                    .get("presentation_variants", {})
+                    .get(str(int(entity.get("source_unit_id", -1))), {})
+                    .get("fallback_reason", "")
+                )
+            ),
             "neutral_diplomacy_pair_count": neutral_pairs,
             "unsupported_legacy_victory_condition_count": len(
                 unsupported_scenario_conditions

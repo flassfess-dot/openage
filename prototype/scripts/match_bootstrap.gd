@@ -91,6 +91,6 @@ static func _apply_source_identity(world, runtime_entity: Dictionary, source_ent
 			world.apply_unit_upgrade_to_entity(runtime_entity, source_unit_id)
 		runtime_entity["source_unit_id"] = source_unit_id
 		runtime_entity.get("components", {}).get("identity", {})["source_unit_id"] = source_unit_id
-	for key in ["scenario_object_id", "source_state", "source_angle", "source_elevation", "source_frame", "source_graphic_id", "source_graphic_asset_name", "source_depleted_graphic_id", "source_depleted_asset_name", "static_field_node", "graphic_id", "asset_name"]:
+	for key in ["scenario_object_id", "source_state", "source_angle", "source_elevation", "source_frame", "source_graphic_id", "source_graphic_asset_name", "source_requested_graphic_asset_name", "source_asset_fallback_reason", "source_depleted_graphic_id", "source_depleted_asset_name", "static_field_node", "graphic_id", "asset_name"]:
 		if source_entity.has(key):
 			runtime_entity[key] = source_entity[key]

@@ -27,6 +27,9 @@ func update(context: Dictionary) -> Dictionary:
 	for participant_value in participants:
 		var participant: Dictionary = participant_value
 		var team := int(participant.get("team", 0))
+		var participant_status := String(context.get("player_states", {}).get(team, {}).get("status", "active"))
+		if participant_status != "active":
+			continue
 		var group_results: Array[bool] = []
 		for group_value in participant.get("groups", []):
 			var group: Dictionary = group_value
@@ -125,6 +128,38 @@ func _evaluate_condition(condition: Dictionary, context: Dictionary) -> Dictiona
 						alive = alive and int(entity.get("amount", 0)) > 0
 					return {"achieved": not alive, "current": 1 if alive else 0, "required": 0}
 			return {"achieved": true, "current": 0, "required": 0}
+		"destroy_count":
+			var target_ids: Array = condition.get("target_scenario_object_ids", [])
+			var alive_ids: Dictionary = {}
+			for collection_name in ["units", "buildings", "resource_nodes", "objectives"]:
+				for entity in context.get(collection_name, []):
+					var scenario_id := int(entity.get("scenario_object_id", -1))
+					if not target_ids.has(scenario_id):
+						continue
+					var alive := bool(entity.get("active", true))
+					if entity.has("hp"):
+						alive = alive and float(entity.get("hp", 0.0)) > 0.0
+					elif entity.has("amount"):
+						alive = alive and int(entity.get("amount", 0)) > 0
+					if alive:
+						alive_ids[scenario_id] = true
+			var destroyed := target_ids.size() - alive_ids.size()
+			var required := int(condition.get("required_count", 1))
+			return {"achieved": destroyed >= required, "current": destroyed, "required": required}
+		"bring_object_to_area":
+			var target_id := int(condition.get("target_scenario_object_id", -1))
+			var area: Array = condition.get("area", [])
+			for collection_name in ["units", "buildings", "resource_nodes", "objectives"]:
+				for entity in context.get(collection_name, []):
+					if int(entity.get("scenario_object_id", -1)) != target_id:
+						continue
+					var alive := bool(entity.get("active", true))
+					if entity.has("hp"):
+						alive = alive and float(entity.get("hp", 0.0)) > 0.0
+					var position: Vector2 = entity.get("pos", Vector2.ZERO)
+					var inside := alive and _position_in_area(position, area)
+					return {"achieved": inside, "current": 1 if inside else 0, "required": 1}
+			return {"achieved": false, "current": 0, "required": 1}
 	return {"achieved": false, "current": 0, "required": 1}
 
 
@@ -151,9 +186,13 @@ func _count_collection_in_area(condition: Dictionary, entities: Array, require_c
 		elif String(entity.get("kind", "")) != kind:
 			continue
 		var position: Vector2 = entity.get("pos", Vector2.ZERO)
-		if position.x >= float(area[0]) and position.y >= float(area[1]) and position.x <= float(area[2]) and position.y <= float(area[3]):
+		if _position_in_area(position, area):
 			count += 1
 	return count
+
+
+func _position_in_area(position: Vector2, area: Array) -> bool:
+	return area.size() == 4 and position.x >= float(area[0]) and position.y >= float(area[1]) and position.x <= float(area[2]) and position.y <= float(area[3])
 
 
 func _combine(values: Array[bool], mode: String) -> bool:

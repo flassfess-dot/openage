@@ -96,11 +96,21 @@ def archetype_asset_names(
     names: set[str] = set()
     for alias in sorted(aliases - set(missing_aliases)):
         runtime = archetypes[alias].get("runtime", {})
+        for key in ("asset_name", "depleted_asset_name"):
+            if runtime.get(key):
+                names.add(str(runtime[key]))
         state_groups = [runtime.get("presentation_states", {})]
         state_groups.extend(runtime.get("presentation_variants", {}).values())
         for states in state_groups:
-            for state in states.values():
-                for key in ("asset_name", "enemy_asset_name"):
+            if not isinstance(states, dict):
+                continue
+            specs = (
+                [states]
+                if any(key in states for key in ("asset_name", "depleted_asset_name"))
+                else [value for value in states.values() if isinstance(value, dict)]
+            )
+            for state in specs:
+                for key in ("asset_name", "enemy_asset_name", "neutral_asset_name", "depleted_asset_name"):
                     if state.get(key):
                         names.add(str(state[key]))
     return names, missing_aliases
@@ -153,6 +163,9 @@ def summarize_mission(
     parity = {
         "ai_semantics_gap_count": partial_ai,
         "source_settings_gap_count": settings_pending,
+        "source_asset_fallback_gap_count": int(
+            gaps.get("source_asset_fallback_count", 0)
+        ),
     }
     gap_ids: list[str] = []
     for key, count in {**blocking, **parity}.items():
@@ -320,7 +333,11 @@ def main() -> int:
                 "ai_normalization",
                 "assets",
             ],
-            "parity_additional_zero_gaps": ["ai_semantics", "source_settings"],
+            "parity_additional_zero_gaps": [
+                "ai_semantics",
+                "source_settings",
+                "source_asset_fallbacks",
+            ],
             "publication_rule": "A mission enters the launcher only after launcher_ready and reproducible win/loss evidence.",
         },
         "summary": {

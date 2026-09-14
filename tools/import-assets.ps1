@@ -109,14 +109,6 @@ Invoke-ExternalStep "scenario and campaign catalog" $python @(
     "--game-version", $GameVersion,
     "--output", (Join-Path $generatedRoot "scenario-catalog.json")
 )
-Invoke-ExternalStep "Birth of Rome campaign match" "powershell" @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass",
-    "-File", (Join-Path $importerRoot "convert_birth_of_rome.ps1"),
-    "-GamePath", $gameRoot,
-    "-ScenarioCatalog", (Join-Path $generatedRoot "scenario-catalog.json"),
-    "-ObjectCatalog", (Join-Path $generatedRoot "objects-catalog.json"),
-    "-Output", (Join-Path $generatedRoot "matches\birth-of-rome.json")
-)
 Invoke-ExternalStep "normalized runtime catalog" $python @(
     "-3", (Join-Path $importerRoot "build_runtime_catalog.py"),
     "--manifest", (Join-Path $importerRoot "runtime-archetypes.json"),
@@ -126,6 +118,17 @@ Invoke-ExternalStep "normalized runtime catalog" $python @(
     "--localization", (Join-Path $generatedRoot "localization-catalog.json"),
     "--output", (Join-Path $generatedRoot "runtime-catalog.json")
 )
+foreach ($campaignManifest in @("rise_of_rome.json", "first_punic_war.json")) {
+    Invoke-ExternalStep "published campaign matches: $campaignManifest" "powershell" @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", (Join-Path $importerRoot "convert_campaign_manifest.ps1"),
+        "-GamePath", $gameRoot,
+        "-Manifest", (Join-Path $repositoryRoot "prototype\data\campaigns\$campaignManifest"),
+        "-ScenarioCatalog", (Join-Path $generatedRoot "scenario-catalog.json"),
+        "-ObjectCatalog", (Join-Path $generatedRoot "objects-catalog.json"),
+        "-OutputDirectory", (Join-Path $generatedRoot "matches")
+    )
+}
 
 $musicSource = Join-Path $gameRoot "sound\xmusic1.mp3"
 if (Test-Path -LiteralPath $musicSource) {

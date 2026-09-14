@@ -9,6 +9,7 @@ var military := [{"id": 2, "kind": "clubman"}]
 
 func _initialize() -> void:
 	test_attack_and_move()
+	test_artifact_approach()
 	test_worker_actions()
 	test_priest_conversion()
 	test_priest_healing()
@@ -34,6 +35,12 @@ func test_attack_and_move() -> void:
 	assert_equal(ContextResolver.resolve(military, resource, ground, 1), {"type": "unsupported", "reason": "no_worker_selected", "message": "Для сбора ресурса выберите работника"}, "military gets explicit resource rejection")
 	var enemy_building := {"entity_type": "building", "id": 9, "team": 2}
 	assert_equal(ContextResolver.resolve(military, enemy_building, ground, 1), {"type": "attack", "target_id": 9}, "enemy building resolves through the common attack command")
+
+
+func test_artifact_approach() -> void:
+	var ground := Vector2(6.0, 7.0)
+	var artifact := {"entity_type": "unit", "id": 12, "team": 0, "pos": Vector2(8.0, 9.0), "behavior_tags": ["capturable", "noncombat_target"]}
+	assert_equal(ContextResolver.resolve(military, artifact, ground, 1), {"type": "move", "target": Vector2(8.0, 9.0)}, "right click approaches a neutral artifact instead of attacking it")
 
 
 func test_worker_actions() -> void:

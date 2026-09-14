@@ -966,7 +966,7 @@
       "runtime": {
         "required_technology_id": 16,
         "combat_stance": "stand_ground",
-        "source_variant_unit_ids": [199, 278]
+        "source_variant_unit_ids": [69, 199, 278]
       }
     },
     {
@@ -988,6 +988,25 @@
       "civilization_scope": "team",
       "behavior_tags": ["static", "victory_structure", "wonder"],
       "runtime": {"required_technology_id": 116, "victory_objective_category": "wonder"}
+    },
+    {
+      "alias": "artifact",
+      "internal_id": "ror.unit.artifact",
+      "source_unit_id": 159,
+      "presentation_id": "unit.artifact",
+      "category": "unit",
+      "civilization_scope": "neutral",
+      "behavior_tags": ["mobile", "capturable", "victory_objective", "noncombat_target", "scenario_special"],
+      "runtime": {
+        "victory_objective_category": "artifact",
+        "capture_radius": 1.25,
+        "presentation_states": {
+          "idle": {"asset_name": "artifact_owned", "enemy_asset_name": "enemy_artifact_owned", "neutral_asset_name": "artifact_neutral", "neutral_graphic_id": 12, "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "artifact_owned", "enemy_asset_name": "enemy_artifact_owned", "neutral_asset_name": "artifact_neutral", "neutral_graphic_id": 12, "graphic_field": "move", "loop": true},
+          "death": {"asset_name": "artifact_owned", "enemy_asset_name": "enemy_artifact_owned", "neutral_asset_name": "artifact_neutral", "neutral_graphic_id": 12, "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "artifact_owned", "enemy_asset_name": "enemy_artifact_owned", "neutral_asset_name": "artifact_neutral", "neutral_graphic_id": 12, "graphic_field": "death", "loop": false}
+        }
+      }
     },
     {
       "alias": "ruin",
@@ -1094,7 +1113,17 @@
       "category": "resource",
       "civilization_scope": "gaia",
       "behavior_tags": ["static", "gatherable", "wood"],
-      "runtime": {"resource_type_id": 1, "visible_when_depleted": true, "asset_name": "tree", "depleted_asset_name": "tree_stump"}
+      "runtime": {
+        "resource_type_id": 1,
+        "visible_when_depleted": true,
+        "asset_name": "tree",
+        "depleted_asset_name": "tree_stump",
+        "presentation_variants": {
+          "391": {"asset_name": "graphic_928"},
+          "392": {"asset_name": "graphic_929"},
+          "393": {"asset_name": "tree", "source_requested_asset_name": "graphic_930", "fallback_reason": "source_slp_unavailable"}
+        }
+      }
     },
     {
       "alias": "berries",

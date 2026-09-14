@@ -10,6 +10,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_original_resource_contract()
 	test_source_forest_presentation()
+	test_source_forest_variants_and_fallback()
 	test_footprints_and_overlap_resolution()
 	test_depletion_and_navigation_release()
 
@@ -55,6 +56,17 @@ func test_source_forest_presentation() -> void:
 	var depleted_frame: Dictionary = catalog.resource_frame_info(source_tree)
 	assert_equal(depleted_frame.get("asset_name"), "graphic_634", "depleted forest node uses its source death/stump sequence")
 	assert_equal(depleted_frame.get("frame_index"), 4, "depleted forest node settles on the final source stump frame")
+
+
+func test_source_forest_variants_and_fallback() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	var first_variant := {"id": 7101, "kind": "tree", "source_unit_id": 391, "amount": 75}
+	var second_variant := {"id": 7102, "kind": "tree", "source_unit_id": 392, "amount": 75}
+	var unavailable_source := {"id": 7103, "kind": "tree", "source_unit_id": 393, "amount": 75}
+	assert_equal(catalog.resource_frame_info(first_variant).get("asset_name"), "graphic_928", "first Punic tree variant resolves its source asset")
+	assert_equal(catalog.resource_frame_info(second_variant).get("asset_name"), "graphic_929", "second Punic tree variant resolves its source asset")
+	assert_equal(catalog.resource_frame_info(unavailable_source).get("asset_name"), "tree", "missing source SLP uses the declared semantic tree fallback")
 
 
 func test_footprints_and_overlap_resolution() -> void:

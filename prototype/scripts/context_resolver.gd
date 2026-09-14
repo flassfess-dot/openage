@@ -26,6 +26,8 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 				entity_type = "unit"
 		match entity_type:
 			"unit":
+				if "capturable" in clicked_entity.get("behavior_tags", []):
+					return {"type": "move", "target": clicked_entity.get("pos", ground_target)}
 				if int(clicked_entity.get("team", player_team)) != player_team:
 					if only_converters:
 						return {"type": "convert", "target_id": int(clicked_entity["id"])}

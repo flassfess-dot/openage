@@ -30,6 +30,9 @@ $requiredGeneratedFiles = @(
     "matches\metaurus.json",
     "matches\zama.json",
     "matches\mithridates.json",
+    "matches\struggle-for-sicily.json",
+    "matches\battle-of-mylae.json",
+    "matches\battle-of-tunes.json",
     "validation-report.json"
 )
 foreach ($file in $requiredGeneratedFiles) {

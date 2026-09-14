@@ -26,6 +26,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--converter", type=Path, required=True)
     parser.add_argument("--match-builder", type=Path, required=True)
     parser.add_argument("--matrix-builder", type=Path, required=True)
+    parser.add_argument(
+        "--published-manifest",
+        type=Path,
+        action="append",
+        default=[],
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=4)
     return parser.parse_args()
@@ -209,6 +215,10 @@ def main() -> int:
     converter_path = require_file(args.converter, "scenario converter")
     match_builder_path = require_file(args.match_builder, "match builder")
     matrix_builder_path = require_file(args.matrix_builder, "matrix builder")
+    published_manifest_paths = [
+        require_file(path, "published campaign manifest")
+        for path in args.published_manifest
+    ]
     assets_root = args.assets_root.resolve(strict=True)
     manifest = read_json(manifest_path)
     jobs: list[tuple[int, Path, dict[str, Any]]] = []
@@ -244,23 +254,28 @@ def main() -> int:
                 completed_count += 1
                 print(f"portfolio {completed_count}/{len(jobs)}: {label}", flush=True)
 
+        matrix_arguments = [
+            sys.executable,
+            str(matrix_builder_path),
+            "--manifest",
+            str(manifest_path),
+            "--catalog",
+            str(catalog_path),
+            "--runtime-catalog",
+            str(runtime_catalog_path),
+            "--assets-root",
+            str(assets_root),
+            "--matches-directory",
+            str(temporary_root),
+            "--output",
+            str(args.output.resolve()),
+        ]
+        for published_manifest_path in published_manifest_paths:
+            matrix_arguments.extend(
+                ["--published-manifest", str(published_manifest_path)]
+            )
         run_checked(
-            [
-                sys.executable,
-                str(matrix_builder_path),
-                "--manifest",
-                str(manifest_path),
-                "--catalog",
-                str(catalog_path),
-                "--runtime-catalog",
-                str(runtime_catalog_path),
-                "--assets-root",
-                str(assets_root),
-                "--matches-directory",
-                str(temporary_root),
-                "--output",
-                str(args.output.resolve()),
-            ],
+            matrix_arguments,
             "portfolio matrix aggregation",
         )
     print(f"portfolio audit complete: {args.output.resolve()}")
