@@ -1,4 +1,6 @@
-# I12-020L — Source UI executable measurement
+# E2/I12-020L — Source UI executable measurement
+
+Status: `ACTIVE EVIDENCE GATE` for E2. The 2026-09-14 project capture is accepted as defect evidence for wrong layout/resolution adaptation/health presentation, but it is not evidence of how the original executable maps unresolved source frames.
 
 ## Purpose
 
@@ -28,6 +30,11 @@ Every exported frame records a SHA-256 digest in `assets.json`, so equality and 
 6. Measure command, selection, minimap rectangles and text baselines at every native resolution.
 7. Change the gate to `measured` only when all scenes validate and every remaining delta is an explicit approved modern difference.
 
-## Current boundary
+## Current E2 priority and boundary
 
-The stage is `INTEGRATED`, not `PARITY`. Automated Windows capture is currently unavailable because the Computer Use helper exits with `trusted Node process exited unexpectedly`; no inferred replacement observation is accepted.
+1. Establish exact top strip, bottom strip, world viewport, command area, selection/status area and minimap rectangles for native 640×480, 800×600 and 1024×768.
+2. Validate the resulting responsive rules at representative 16:9 and ultrawide sizes without treating those sizes as new source layouts.
+3. Verify health numerically (`current/max`) and visually at boundary values before assigning 50745 thresholds.
+4. Capture no-selection, unit, multi-selection, building, queue, disabled command and damaged-object states.
+
+The presentation pipeline is `INTEGRATED`, not `PARITY`. If automated Windows capture is unavailable, deterministic implementation work based on already measured source frame geometry continues; only claims about original state semantics remain capture-gated. User-provided lossless RoR captures are valid evidence when their resolution, state and provenance are recorded. `FolkertVanVerseveld/aoe` may be consulted as a secondary implementation/resource-layout reference, but it is neither the runtime dependency nor authority for executable behavior, palette semantics or gameplay rules.

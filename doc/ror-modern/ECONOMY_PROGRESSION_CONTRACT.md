@@ -66,4 +66,4 @@ command -> worker/production task -> fixed tick -> domain events -> snapshot/UI/
 - L2 Stone Age: `test_stone_age_economy_loop.gd` физически собирает недостающую древесину, строит Barracks и производит первый Clubman.
 - L2 Tool Age: `test_tool_age_progression.gd` строит Barracks/Granary, исследует Tool Age, строит Archery Range и производит смешанный отряд.
 
-`INTEGRATED` не означает `PARITY`: полный tech tree/content, точная таблица build availability, UI всех команд и численная калибровка длительного матча остаются I10/I12.
+`INTEGRATED` не означает `PARITY`: общие economy/production rules и UI-команды повторно проходят E3, полный tech tree и цивилизационный content — E4, а численная калибровка длительного skirmish-матча — E5/E6. Кампании E7 не используются для обхода этих ворот.

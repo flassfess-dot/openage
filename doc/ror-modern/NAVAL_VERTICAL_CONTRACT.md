@@ -60,6 +60,8 @@
 
 ## Следующие срезы в обязательном порядке
 
+Они относятся к E3/E4 executable/content calibration и не требуют раннего возвращения к сценариям или кампаниям.
+
 1. Заполнить созданный `naval_executable_gate.json`: снять side-by-side кадры и тайминги оригинальной RoR на трёх фиксированных сценах для проверки source-driven golden, attack/death/impact audio timing и ориентации.
 2. Заполнить trade observations оригинального executable на фиксированных картах/дистанциях и заменить только `RoRTradeProfitPolicy`, не меняя lifecycle.
 

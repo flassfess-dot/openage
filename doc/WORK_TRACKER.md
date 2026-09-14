@@ -1,5 +1,7 @@
 # Рабочий трекер по планам `doc/DEVELOPMENT_PLAN.md` и `doc/DEVELOPMENT_ROADMAP_ROR_PARITY.md`
 
+> Текущую очередь определяет последнее датированное перепланирование в конце файла: `2026-09-14, core-first rebaseline`. Старые формулировки «следующий пакет» сохранены только как журнал выполненной работы и не являются поручением агенту.
+
 ## Этап 3. P — инвентаризация
 
 - Статус: `проверено`.
@@ -814,7 +816,7 @@ ext_unit_id.
 - `RoRMatchBootstrap` и `SimulationWorld` получили bulk-load transaction. Добавление 623 runtime entities больше не запускает полный fog/navigation/connectivity rebuild после каждого объекта; итоговый rebuild выполняется один раз. Scenario resources сохраняют исходные координаты без процедурного nearest-placement.
 - Динамический spatial index больше не перестраивает navigation grid каждый tick; лес имеет инкрементный cell-count index; component sync не сканирует неизменяемые сущности. Новые здания сразу регистрируются в spatial index — это сохраняет blast/combat semantics до первого тика и закрыто осадным regression test.
 - Player presentation snapshot исключает AI-only navigation/build-site payload. Fog использует world signature, revision и точные viewport runs. Статический terrain рисуется retained canvas только при изменении камеры/viewport/terrain revision. Combat awareness выбирает цели spatial query и кэширует неизменившийся world signature без изменения немедленной реакции.
-- На контрольной headless-машине холодный bootstrap снижен примерно с 16,4 до 1,4–1,5 секунды, полный bootstrap test — с ~24,3 до ~8,5–9,2 секунды, 10 принудительных render frames — с ~2474 до ~506 мс. Десять fixed ticks плюс лёгкие player snapshots занимают ~723 мс, десять активных кадров — ~1804 мс. Это измеренное устранение блокеров; общая маршрутная оптимизация формаций остаётся в I13 по принятому контракту.
+- На контрольной headless-машине холодный bootstrap снижен примерно с 16,4 до 1,4–1,5 секунды, полный bootstrap test — с ~24,3 до ~8,5–9,2 секунды, 10 принудительных render frames — с ~2474 до ~506 мс. Десять fixed ticks плюс лёгкие player snapshots занимают ~723 мс, десять активных кадров — ~1804 мс. Это измеренное устранение блокеров; rebaseline 2026-09-14 относит общую маршрутную оптимизацию формаций к E6.
 - Generic skirmish AI отключён для шести campaign players. В match сохраняется `enabled: false`, профиль `source_campaign_pending` и gap `source_ai_player_count_pending: 6`; выдуманный mass attack больше не маскируется под поведение оригинальной миссии.
 - Gap-аудит после D: все боевые units/buildings активных игроков сопоставлены. Не хватает 12 человеческих `Single Pole Flag` DAT 330 и 25 вражеских `Flare` DAT 112. Ещё 14 263 gaps принадлежат Gaia: варианты леса, мелководье, утёсы, камни, птицы, звери и другое окружение; им требуется классификация по системному владельцу.
 - Доказательства: `test_match_registry.gd`, `test_launcher_scene.gd`, `test_scenario_presentation_model.gd`, `test_imported_campaign_full_bootstrap.gd`, `test_imported_campaign_main_scene.gd`, `test_viewport_culling.gd`, `test_siege_workshop_pipeline.gd`; полный gate — `A-006 suite: 149 passed, 0 failed`.
@@ -1062,14 +1064,14 @@ ext_unit_id.
 - Готовый PCK `01dc5318f706c96498fb6f9c2b5f123ab757f41cf6a1d196b9495ecadd7c0d22` остаётся актуальным для видимого 2B-9b2a: новый 2B-9b2b добавляет только unresolved candidate assets и не меняет выбранную runtime-композицию.
 - Следующая задача: после восстановления Windows visual helper заполнить `text_button_and_glyph_composition` и остальные сцены gate; до этого можно расширять только доказуемый inventory/hash/capture tooling, не назначая значения глифов или состояние пары.
 
-### Планирование (2026-09-13, I13-FOW-01 — elevation-aware fog)
+### Историческое планирование (2026-09-13, I13-FOW-01 — rephased в E1/E6)
 
 - Пользовательский кадр зарегистрировал отдельный visual gap: длинные тёмные клинья/полосы вокруг возвышенности. Проверка кода отделила его от gameplay line-of-sight: текущий world fog объединяет строку клеток в один потенциально вогнутый контур и рисует его общим проходом после мира, поэтому сохранение промежуточных elevation-вершин не гарантирует корректную триангуляцию или depth overlap.
 - Одновременно выявлен performance debt: `FogOfWar.update()` полностью переводит visible cells и всегда повышает revision, presentation snapshot копирует весь `PackedByteArray`, `fog_runs()` повторно сканирует карту, а основной CanvasItem отправляет полигоны каждый кадр.
-- Для I13 закреплён `I13-FOW-01`: разреженный per-player fog delta, общий world/minimap presentation cache, отдельные cell triangles, bounded retained chunks и nearest `R8` masks с нулевым rebuild/upload при no-op. Terrain/elevation изменяет только затронутые чанки; camera pan меняет transform/culling, но не авторитетное состояние.
+- Первоначально пакет был закреплён за I13; rebaseline 2026-09-14 разделил его: корректные cell triangles, slope/depth/map-edge выполняются в E1, а разреженный per-player fog delta, общий world/minimap cache, bounded retained chunks и nearest `R8` masks — в E6.
 - Универсальные «юбки» вокруг холмов запрещены. Fog должен использовать фактический source slope footprint и совместимый painter order; edge quads добавляются только если original/golden evidence докажет боковые грани. Изменение обзора по высоте остаётся отдельным gameplay-решением.
 - Исполнимые этапы A…H, golden-матрица, telemetry и 2/4/8-player large-map gates сохранены в `doc/ror-modern/ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md`; краткие зависимости добавлены в основной план, roadmap и visual parity contract.
-- Реализация намеренно остаётся в I13 после baseline-профиля, если дефект не блокирует source capture. Текущая очередь I12 не переставлена: следующий шаг по-прежнему evidence-first source UI capture/measurement, затем оставшиеся parity-вертикали и только потом системная оптимизация.
+- Эта последняя строка исходного решения отменена rebaseline 2026-09-14: видимый дефект блокирует E1 и исправляется сейчас; только performance backend остаётся после baseline-профиля в E6.
 
 ### Прогресс (2026-09-14, ускоренный пакет I3/I10 — command feedback)
 
@@ -1108,3 +1110,13 @@ ext_unit_id.
 - `first_punic_war.json` публикует три постоянных match; launcher содержит 10 миссий. Общий manifest-конвертер пересобирает обе опубликованные кампании при одноразовом импорте, а обычный запуск не конвертирует ресурсы.
 - Portfolio переаудирован после новых общих возможностей: 17 mechanically ready, 78 blocked, 0 parity-ready. Published manifests исключают `Расцвет Рима` и `First Punic War` из ranking. Следующий пакет — `Reign of the Hittites`, score `[3,4,5,5]`.
 - Boundary suite выявил и закрыл регрессию neutral-prefix у wildlife, два устаревших cache/matrix счётчика и запретил победу уже вышедшего участника. Итоговый gate: `186 passed / 0 failed`; cache validation `0 errors / 181 source-owned warnings`. Windows PCK: `246 916 672` байт, SHA-256 `01fdb59a4da2601f942e5a2cd97f3b62f03ed25bb6c38c46d3e816874c04149b`; автономный packaged smoke `campaign_battle_of_mylae` завершён с кодом 0 без runtime/script errors и без конвертации ресурсов.
+
+### Перепланирование (2026-09-14, core-first rebaseline)
+
+- Пользовательская проверка последней сборки отозвала прежний visual/HUD acceptance: layout не соответствует исходным разрешениям и позициям RoR, health presentation неверна, нижний правый map/fog edge содержит цветной артефакт. Один golden 1280×720 больше не считается достаточным доказательством.
+- Расширение кампаний остановлено после `Rise of Rome` и `First Punic War`. I12-020O `Reign of the Hittites` сохранён первым кандидатом campaign backlog, но отложен до завершения core, всех цивилизаций, skirmish/random maps/AI и performance hardening.
+- Новая обязательная очередь: E1 visual/runtime core -> E2 adaptive source HUD -> E3 gameplay core -> E4 all civilizations -> E5 skirmish/random maps/AI -> E6 500-per-player/large-map optimization -> E7 scenarios/campaigns -> E8 final parity/release.
+- Asset workflow теперь явно append-only/incremental: запрашиваются только отсутствующие или устаревшие ресурсы и их зависимости; byte-identical outputs не переписываются. Полная перепаковка разрешена только при несовместимом schema/decoder/palette изменении или явном clean rebuild.
+- Test workflow: внутри итерации — изменённая подсистема плюс прямые потребители; на границе пакета — короткий smoke; полный suite/cache validation/Windows export — один раз в конце этапа либо после сквозного изменения tick/command/snapshot/data contract.
+- `FolkertVanVerseveld/aoe` добавлен как вторичный reference для HUD/resource/presentation исследования, без включения его движка или реконструированной игровой логики в runtime.
+- Следующий пакет: E1/E2 visual-core baseline и recovery — матрица разрешений, SLP player palette/alpha/composite, fog/map edge/depth, затем source-native responsive HUD и корректное здоровье.

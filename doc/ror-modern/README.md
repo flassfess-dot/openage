@@ -24,7 +24,7 @@ data2/empires.dat + DRS + language DLL
 
 ## Команды
 
-- `tools/import-assets.ps1` — явный импорт исходников и перестройка изменившихся кэшей.
+- `tools/import-assets.ps1` — явный инкрементальный импорт: добавляет отсутствующие/устаревшие ресурсы и не переписывает byte-identical результаты; полный clean rebuild нужен только при несовместимом формате/декодере.
 - `tools/validate-cache.ps1` — проверка ссылок, циклов, runtime ID и отчёт покрытия.
 - `tools/build-game.ps1` — тесты и экспорт готовой сборки.
 - `tools/run-game.ps1` — только запуск готовой сборки.
@@ -33,8 +33,14 @@ data2/empires.dat + DRS + language DLL
 
 Отчёты находятся в `prototype/assets/generated/validation-report.json` и `doc/ror-modern/CACHE_VALIDATION_REPORT.md`.
 
+## Актуальный порядок и проверки
+
+Core-first очередь закреплена в `doc/DEVELOPMENT_ROADMAP_ROR_PARITY.md`: visual/runtime core -> adaptive HUD -> gameplay core -> все цивилизации -> skirmish/random maps/AI -> performance -> scenarios/campaigns -> release. Исторические campaign next-step записи не являются активными.
+
+Внутри итерации запускается только impact-набор изменённой подсистемы и её прямых потребителей. Пакет завершается коротким smoke; полный suite, cache validation и Windows export выполняются один раз на границе крупного этапа, кроме сквозных изменений simulation/data contract.
+
 На 2026-09-12: 0 структурных errors и 181 warning. Warning не скрываются: это пробелы конкретной исходной установки (63 SLP, 33 WAV, 85 name/icon records), снабжённые классификацией влияния. Error зарезервирован для нарушенной ссылки, цикла зависимости или неконсистентного runtime-каталога.
 
 WSL и полный openage build для повседневной разработки не требуются.
 
-Отдельные проверочные контракты: `VISUAL_PARITY_CONTRACT.md` задаёт границу визуального соответствия, `SOURCE_UI_EXECUTABLE_MEASUREMENT.md` — обязательный порядок доказательства исходных HUD-контролов и их состояний, а `ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md` — исполнимую I13-замену высотного fog renderer с dirty-chunk/performance gates.
+Отдельные проверочные контракты: `VISUAL_PARITY_CONTRACT.md` задаёт границу визуального соответствия, `SOURCE_UI_EXECUTABLE_MEASUREMENT.md` — обязательный порядок доказательства исходных HUD-контролов и их состояний, а `ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md` разделяет ближайшее E1-исправление геометрии/depth/map-edge и E6 dirty-chunk/performance backend.

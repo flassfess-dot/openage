@@ -36,4 +36,4 @@ Space pauses; comma/period change the fixed-tick speed; R restarts the same defi
 - `test_ai_vs_ai_match.gd`: both sides receive their legal snapshots, issue accepted public commands and finish a deterministic unscripted conquest match.
 - Full suite at integration: `108 passed, 0 failed`.
 
-I11 is `INTEGRATED`, not `PARITY`. I12 must expand random-map algorithms/biomes and fairness rules, authoritative build availability for economic AI, naval AI, difficulty policies, multi-team diplomacy UI, scenario actions/triggers, imported RoR scenarios and long L4 balance/stability matches.
+I11 is `INTEGRATED`, not `PARITY`. Under the 2026-09-14 core-first rebaseline, E3 first revalidates the common gameplay command/AI boundary, E4 supplies the complete civilization content consumed by it, and E5 expands skirmish setup, random-map algorithms/biomes/fairness, economic/naval AI, difficulty and multi-team diplomacy. Long load/stability gates belong to E6. Scenario actions, imported RoR scenarios and campaigns are deliberately postponed to E7 so they consume a stable engine instead of driving it.
