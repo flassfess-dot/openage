@@ -15,6 +15,7 @@ func _initialize() -> void:
 	var scene_path := DEFAULT_SCENE
 	var selection_kind := ""
 	var open_build_menu := false
+	var hud_modal := ""
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--size="):
 			requested_size = parse_size(argument.trim_prefix("--size="))
@@ -26,6 +27,8 @@ func _initialize() -> void:
 			selection_kind = argument.trim_prefix("--selection-kind=")
 		elif argument == "--open-build-menu":
 			open_build_menu = true
+		elif argument.begins_with("--hud-modal="):
+			hud_modal = argument.trim_prefix("--hud-modal=")
 
 	var viewport := SubViewport.new()
 	viewport.size = requested_size
@@ -50,6 +53,13 @@ func _initialize() -> void:
 			hud_controls.train_button.emit_signal("pressed")
 			for _frame in range(2):
 				await process_frame
+	if not hud_modal.is_empty():
+		if hud_modal == "menu" and instance.has_method("_toggle_game_menu"):
+			instance.call("_toggle_game_menu")
+		elif hud_modal == "diplomacy" and instance.has_method("_show_diplomacy_summary"):
+			instance.call("_show_diplomacy_summary")
+		for _frame in range(2):
+			await process_frame
 
 	var image := viewport.get_texture().get_image()
 	var result := image.save_png(output_path)

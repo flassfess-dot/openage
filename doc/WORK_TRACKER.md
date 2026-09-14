@@ -1144,3 +1144,12 @@ ext_unit_id.
 - Manual capture tool обобщён для любой сцены, состояния direction calibration, выбора entity kind и открытия build submenu. Проверены 640×480 worker root/build menu, 640×480 multi-formation и 1280×720 idle/move/attack direction matrices; QA PNG остаются локальными.
 - Impact checks: player palette, building presentation, facing convention, graphic descriptor, facing simulation, animation/direction integration, interface source controls, HUD controls/skin и main HUD scene проходят. Полный suite/cache validation/export по-прежнему выполняется один раз на границе E1/E2.
 - Следующий пакет: модальные состояния `Дипломатия`/`Меню` с паузой и безопасными командами, затем оставшиеся source task glyph mappings и E1/E2 boundary matrix/smoke.
+
+### Прогресс (2026-09-15, E2 — игровые окна меню и дипломатии)
+
+- `RoRHUDModalOverlay` отделяет модальное presentation-состояние от авторитетной симуляции. `Меню` и `Дипломатия` теперь открывают настоящие блокирующие окна; мир, камера, ввод и постановка AI-команд не продолжают работу под ними.
+- Открытие окна сохраняет прежнее состояние паузы, а закрытие восстанавливает его. Поэтому ручная пауза не снимается случайно; сдача закрывает окно и снова запускает fixed tick, чтобы общий `ResignCommand` был обработан обычным командным конвейером.
+- Меню предоставляет работающие действия `Продолжить`, `Сдаться` и `Выбор игры`. Дипломатия отображает всех публичных игроков, локализованную цивилизацию, тип управления, состояние и текущую связь с наблюдателем. Изменение отношений намеренно не добавлено в UI до общего E5 diplomacy contract.
+- Действия используют подтверждённые source wide-button backplates 50747; размер окна и input shade следуют реальному viewport. Проверены L3-кадры меню 640×480 и дипломатии 1280×720, включая локализованные имена.
+- `test_hud_modal_overlay.gd`, `test_main_hud_scene.gd` и `test_interface_source_controls.gd` проходят. Остальные значения glyph sheet 50721 остаются measurement-gated: внешний reference подтверждает только frame 2 как build root, поэтому похожие пиктограммы не назначаются командам по внешнему виду.
+- Следующая задача: граница E1/E2 — свежая матрица 640×480/800×600/1024×768/wide, полный suite, cache validation, Windows export и packaged smoke без повторной конвертации. После успешного gate перейти к E3 gameplay-core acceptance matrix.

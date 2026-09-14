@@ -18,6 +18,7 @@ const ControlGroups := preload("res://scripts/control_groups.gd")
 const ContextResolver := preload("res://scripts/context_resolver.gd")
 const HUDControls := preload("res://scripts/hud_controls.gd")
 const TopBarControls := preload("res://scripts/top_bar_controls.gd")
+const HUDModalOverlay := preload("res://scripts/hud_modal_overlay.gd")
 const HudViewModel := preload("res://scripts/hud_view_model.gd")
 const PresentationAudioRouter := preload("res://scripts/presentation_audio_router.gd")
 const PresentationAudioEventRouter := preload("res://scripts/presentation_audio_event_router.gd")
@@ -104,6 +105,8 @@ var game_controller: GameController
 var render_world: RenderWorld
 var hud_controls: HUDControls
 var top_bar_controls: TopBarControls
+var hud_modal_overlay: HUDModalOverlay
+var modal_restore_paused := false
 var hud_view_model := HudViewModel.new()
 var hud_model: Dictionary = {}
 var scenario_overlay: ScenarioOverlay
@@ -169,6 +172,13 @@ func _ready() -> void:
 	top_bar_controls.set_viewport_size(get_viewport_rect().size)
 	top_bar_controls.diplomacy_requested.connect(_show_diplomacy_summary)
 	top_bar_controls.menu_requested.connect(_toggle_game_menu)
+	hud_modal_overlay = HUDModalOverlay.new()
+	add_child(hud_modal_overlay)
+	hud_modal_overlay.configure(resource_catalog.interface_skin, match_definition, 0, resource_catalog.localization)
+	hud_modal_overlay.set_viewport_size(get_viewport_rect().size)
+	hud_modal_overlay.close_requested.connect(_close_hud_modal)
+	hud_modal_overlay.resign_requested.connect(_resign_from_hud_modal)
+	hud_modal_overlay.launcher_requested.connect(_return_to_launcher)
 	scenario_overlay = ScenarioOverlay.new()
 	add_child(scenario_overlay)
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
@@ -237,6 +247,8 @@ func center_initial_view() -> void:
 		hud_controls.set_layout(InterfaceLayout.for_viewport(size))
 	if top_bar_controls != null:
 		top_bar_controls.set_viewport_size(size)
+	if hud_modal_overlay != null:
+		hud_modal_overlay.set_viewport_size(size)
 	if scenario_overlay != null:
 		scenario_overlay.position = Vector2.ZERO
 		scenario_overlay.size = size
@@ -279,6 +291,8 @@ func reset_game() -> void:
 	if scenario_overlay != null:
 		scenario_overlay.reset_presentation()
 		scenario_overlay.set_snapshot(presentation_snapshot)
+	if hud_modal_overlay != null:
+		hud_modal_overlay.close()
 	game_message = String(bootstrap.get("message", "Матч начат"))
 	message_time = 7.0
 	queue_redraw()
@@ -300,6 +314,8 @@ func _process(delta: float) -> void:
 	presentation_effect_timeline.advance(delta)
 	_sync_effect_snapshot()
 	if scenario_overlay != null and scenario_overlay.is_blocking():
+		return
+	if hud_modal_overlay != null and hud_modal_overlay.is_blocking():
 		return
 	update_camera(delta)
 	_sync_terrain_canvas()
@@ -437,6 +453,8 @@ func screen_to_world(screen: Vector2) -> Vector2:
 	return Coordinates.screen_to_world(screen, view_zoom, view_offset)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if hud_modal_overlay != null and hud_modal_overlay.is_blocking():
+		return
 	if scenario_overlay != null and scenario_overlay.is_blocking():
 		return
 	if handle_minimap_input(event):
@@ -533,25 +551,48 @@ func handle_input_action(action: Dictionary) -> void:
 
 
 func _show_diplomacy_summary() -> void:
-	var state: Dictionary = presentation_snapshot.get("player_state", {})
-	var own_team := int(state.get("team", PLAYER_TEAM))
-	var allies: Array = state.get("allies", [])
-	var parts: Array[String] = []
-	for player_value in state.get("players", []):
-		var player: Dictionary = player_value
-		var team := int(player.get("team", 0))
-		if team == own_team:
-			continue
-		var relation := "союзник" if team in allies else "противник"
-		parts.append("Игрок %d — %s" % [team, relation])
-	game_message = "Дипломатия: %s" % ", ".join(parts) if not parts.is_empty() else "Дипломатия: других игроков нет"
-	message_time = 3.5
+	_open_hud_modal(HUDModalOverlay.MODE_DIPLOMACY)
 
 
 func _toggle_game_menu() -> void:
-	var is_paused := game_controller.toggle_paused()
-	game_message = "Меню: игра приостановлена · Esc — продолжить" if is_paused else "Игра продолжена"
-	message_time = 3.5
+	if hud_modal_overlay != null and hud_modal_overlay.is_blocking():
+		_close_hud_modal()
+		return
+	_open_hud_modal(HUDModalOverlay.MODE_MENU)
+
+
+func _open_hud_modal(mode: String) -> void:
+	if hud_modal_overlay == null or game_controller == null:
+		return
+	if not hud_modal_overlay.is_blocking():
+		modal_restore_paused = game_controller.paused
+	game_controller.set_paused(true)
+	hud_modal_overlay.set_snapshot(presentation_snapshot)
+	if mode == HUDModalOverlay.MODE_DIPLOMACY:
+		hud_modal_overlay.show_diplomacy()
+	else:
+		hud_modal_overlay.show_menu()
+
+
+func _close_hud_modal() -> void:
+	if hud_modal_overlay == null or not hud_modal_overlay.is_blocking():
+		return
+	hud_modal_overlay.close()
+	if game_controller != null:
+		game_controller.set_paused(modal_restore_paused)
+	game_message = "Пауза" if modal_restore_paused else "Игра продолжена"
+	message_time = 1.5
+
+
+func _resign_from_hud_modal() -> void:
+	if hud_modal_overlay != null:
+		hud_modal_overlay.close()
+	if game_controller == null:
+		return
+	game_controller.set_paused(false)
+	var command = RoRCommands.ResignCommand.new(game_controller.tick_index + 1)
+	game_controller.enqueue_command(command, true, PLAYER_TEAM)
+	command_feedback_router.register(command, "Вы сдались", "", null)
 
 func is_world_interaction_area(position: Vector2) -> bool:
 	return position.y > HUD_TOP and position.y < get_viewport_rect().size.y - HUD_BOTTOM
@@ -941,6 +982,8 @@ func sync_world_state() -> void:
 	refresh_hud_model()
 	if scenario_overlay != null:
 		scenario_overlay.set_snapshot(presentation_snapshot)
+	if hud_modal_overlay != null:
+		hud_modal_overlay.set_snapshot(presentation_snapshot)
 
 
 func _restart_from_scenario_overlay() -> void:
