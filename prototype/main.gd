@@ -17,6 +17,7 @@ const PlayerControlState := preload("res://scripts/player_control_state.gd")
 const ControlGroups := preload("res://scripts/control_groups.gd")
 const ContextResolver := preload("res://scripts/context_resolver.gd")
 const HUDControls := preload("res://scripts/hud_controls.gd")
+const TopBarControls := preload("res://scripts/top_bar_controls.gd")
 const HudViewModel := preload("res://scripts/hud_view_model.gd")
 const PresentationAudioRouter := preload("res://scripts/presentation_audio_router.gd")
 const PresentationAudioEventRouter := preload("res://scripts/presentation_audio_event_router.gd")
@@ -28,6 +29,7 @@ const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
 const AiPlayer := preload("res://scripts/ai_player.gd")
 const SpriteGeometry := preload("res://scripts/sprite_geometry.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
+const FacingConvention := preload("res://scripts/facing_convention.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
@@ -101,6 +103,7 @@ var simulation_world: SimulationWorld
 var game_controller: GameController
 var render_world: RenderWorld
 var hud_controls: HUDControls
+var top_bar_controls: TopBarControls
 var hud_view_model := HudViewModel.new()
 var hud_model: Dictionary = {}
 var scenario_overlay: ScenarioOverlay
@@ -130,7 +133,7 @@ func _ready() -> void:
 	berry_texture = resource_catalog.berry_texture
 	interface_panel_texture = resource_catalog.interface_panel_texture
 	var status_candidate: Dictionary = resource_catalog.interface_skin.status_candidate()
-	if resource_catalog.interface_skin.is_measured_unit_health(status_candidate):
+	if resource_catalog.interface_skin.is_unit_health(status_candidate):
 		for texture_value in status_candidate.get("frames", []):
 			health_status_frames.append(texture_value)
 	unit_textures = resource_catalog.unit_textures
@@ -151,6 +154,7 @@ func _ready() -> void:
 	hud_controls = HUDControls.new()
 	add_child(hud_controls)
 	hud_controls.configure_icons(resource_catalog.interface_icons)
+	hud_controls.configure_interface_skin(resource_catalog.interface_skin, 0)
 	hud_controls.position = Vector2.ZERO
 	hud_controls.size = get_viewport_rect().size
 	hud_controls.formation_requested.connect(set_formation)
@@ -159,6 +163,12 @@ func _ready() -> void:
 	hud_controls.research_requested.connect(research_from_hud)
 	hud_controls.cancel_production_requested.connect(cancel_production_from_hud)
 	hud_controls.trade_resource_requested.connect(set_trade_resource_from_hud)
+	top_bar_controls = TopBarControls.new()
+	add_child(top_bar_controls)
+	top_bar_controls.configure(resource_catalog.interface_skin, 0)
+	top_bar_controls.set_viewport_size(get_viewport_rect().size)
+	top_bar_controls.diplomacy_requested.connect(_show_diplomacy_summary)
+	top_bar_controls.menu_requested.connect(_toggle_game_menu)
 	scenario_overlay = ScenarioOverlay.new()
 	add_child(scenario_overlay)
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
@@ -225,6 +235,8 @@ func center_initial_view() -> void:
 		hud_controls.position = Vector2.ZERO
 		hud_controls.size = size
 		hud_controls.set_layout(InterfaceLayout.for_viewport(size))
+	if top_bar_controls != null:
+		top_bar_controls.set_viewport_size(size)
 	if scenario_overlay != null:
 		scenario_overlay.position = Vector2.ZERO
 		scenario_overlay.size = size
@@ -518,6 +530,28 @@ func handle_input_action(action: Dictionary) -> void:
 			command_feedback_router.register(command, "Вы сдались", "", null)
 		"quit":
 			get_tree().quit()
+
+
+func _show_diplomacy_summary() -> void:
+	var state: Dictionary = presentation_snapshot.get("player_state", {})
+	var own_team := int(state.get("team", PLAYER_TEAM))
+	var allies: Array = state.get("allies", [])
+	var parts: Array[String] = []
+	for player_value in state.get("players", []):
+		var player: Dictionary = player_value
+		var team := int(player.get("team", 0))
+		if team == own_team:
+			continue
+		var relation := "союзник" if team in allies else "противник"
+		parts.append("Игрок %d — %s" % [team, relation])
+	game_message = "Дипломатия: %s" % ", ".join(parts) if not parts.is_empty() else "Дипломатия: других игроков нет"
+	message_time = 3.5
+
+
+func _toggle_game_menu() -> void:
+	var is_paused := game_controller.toggle_paused()
+	game_message = "Меню: игра приостановлена · Esc — продолжить" if is_paused else "Игра продолжена"
+	message_time = 3.5
 
 func is_world_interaction_area(position: Vector2) -> bool:
 	return position.y > HUD_TOP and position.y < get_viewport_rect().size.y - HUD_BOTTOM
@@ -1157,16 +1191,13 @@ func draw_unit_health(item: Dictionary) -> void:
 	var screen := PixelScaling.snap_screen(world_to_screen(item["world_anchor"]))
 	var hotspot: Vector2 = item["hotspot"]
 	var ratio: float = clampf(float(unit["hp"]) / maxf(1.0, float(unit["max_hp"])), 0.0, 1.0)
-	if not health_status_frames.is_empty():
-		var frame_index := resource_catalog.interface_skin.status_frame_index(ratio, health_status_frames.size())
-		var texture := health_status_frames[frame_index]
-		var bar_pos := PixelScaling.snap_screen(Vector2(screen.x - texture.get_width() * 0.5, screen.y - hotspot.y * view_zoom - 9.0))
-		draw_texture(texture, bar_pos)
-		return
-	var bar_width := 29.0 * view_zoom
-	var bar_pos := Vector2(screen.x - bar_width * 0.5, screen.y - hotspot.y * view_zoom - 8.0)
-	draw_rect(Rect2(bar_pos, Vector2(bar_width, 4.0)), Color(0.06, 0.08, 0.08, 0.9), true)
-	draw_rect(Rect2(bar_pos + Vector2(1, 1), Vector2((bar_width - 2) * ratio, 2.0)), Color("62df78") if unit["team"] == PLAYER_TEAM else Color("ed5a4f"), true)
+	# 50745 is the 50x7 selection-card meter. World-space selection bars in
+	# RoR are a separate, compact presentation and must not reuse that strip.
+	var bar_width := 25.0 * view_zoom
+	var bar_height := maxf(3.0, 3.0 * view_zoom)
+	var bar_pos := PixelScaling.snap_screen(Vector2(screen.x - bar_width * 0.5, screen.y - hotspot.y * view_zoom - 5.0))
+	draw_rect(Rect2(bar_pos, Vector2(bar_width, bar_height)), Color(0.02, 0.04, 0.03, 0.95), true)
+	draw_rect(Rect2(bar_pos + Vector2(1, 1), Vector2(maxf(0.0, (bar_width - 2.0) * ratio), maxf(1.0, bar_height - 2.0))), Color("21dc4b") if unit["team"] == PLAYER_TEAM else Color("e44339"), true)
 
 func draw_anchored_texture(texture: Texture2D, name: String, frame: int, anchor: Vector2, scale: float, mirrored: bool = false, opacity: float = 1.0, provided_hotspot: Variant = null) -> void:
 	var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
@@ -1214,8 +1245,7 @@ func draw_diagnostics() -> void:
 		if actual_velocity.length_squared() > 0.0001:
 			draw_line(screen, world_to_screen(position + actual_velocity * 0.55), Color(0.2, 1.0, 0.45, 0.95), 2.0)
 
-		var facing_angle := float(snapshot["facing"]) * TAU / 8.0
-		var facing_screen := Vector2(sin(facing_angle), cos(facing_angle)) * 24.0
+		var facing_screen := FacingConvention.screen_vector(int(snapshot["facing"])) * 24.0
 		draw_line(screen, screen + facing_screen, Color(1.0, 0.25, 0.9, 0.95), 2.0)
 		var label := "#%d  %s/%s  %s  T%d  G%d:S%d/%s  F%d  RK %.1f:%d  %s" % [
 			snapshot["id"], snapshot["order"], snapshot["animation"], snapshot["stance"], snapshot["target_id"], snapshot["formation_group_id"], snapshot["formation_slot_id"], snapshot["formation_slot_mode"], snapshot["facing"], screen.y, snapshot["id"], snapshot["diagnostic_reason"]
@@ -1250,8 +1280,6 @@ func draw_hud() -> void:
 	for index in range(resource_x.size()):
 		draw_string(font, Vector2(resource_x[index], 15), String.num_int64(int(resources.get(resource_keys[index], 0))), HORIZONTAL_ALIGNMENT_LEFT, 44.0, 11, Color("20180f"))
 	draw_string(font, Vector2(width * 0.5 - 90.0, 15), String(hud_model.get("age", {}).get("label", "")), HORIZONTAL_ALIGNMENT_CENTER, 180.0, 11, Color("20180f"))
-	draw_string(font, Vector2(width - 168.0, 15), "Дипломатия", HORIZONTAL_ALIGNMENT_CENTER, 96.0, 10, Color("20180f"))
-	draw_string(font, Vector2(width - 68.0, 15), "Меню", HORIZONTAL_ALIGNMENT_CENTER, 60.0, 10, Color("20180f"))
 
 	var command_rect: Rect2 = layout["command"]
 	var info_rect: Rect2 = layout["selection"]
@@ -1279,11 +1307,15 @@ func draw_hud() -> void:
 		var hp := int(leader.get("hp", 0))
 		var max_hp := maxi(1, int(leader.get("max_hp", 1)))
 		var hp_ratio := clampf(float(hp) / float(max_hp), 0.0, 1.0)
-		var hp_rect := Rect2(info_rect.position + Vector2(5, 103), Vector2(50, 7))
-		draw_rect(hp_rect, Color("351714"), true)
-		var hp_color := Color("18d74a") if hp_ratio > 0.5 else Color("e2c62d") if hp_ratio > 0.25 else Color("dc352f")
-		draw_rect(Rect2(hp_rect.position + Vector2.ONE, Vector2((hp_rect.size.x - 2.0) * hp_ratio, hp_rect.size.y - 2.0)), hp_color, true)
-		draw_string(font, info_rect.position + Vector2(text_x, 110), "%d/%d" % [hp, max_hp], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color.WHITE)
+		var hp_rect := Rect2(info_rect.position + Vector2(5, 91), Vector2(50, 7))
+		if not health_status_frames.is_empty():
+			var hp_frame := resource_catalog.interface_skin.status_frame_index(hp_ratio, health_status_frames.size())
+			draw_texture(health_status_frames[hp_frame], hp_rect.position)
+		else:
+			draw_rect(hp_rect, Color("351714"), true)
+			var hp_color := Color("18d74a") if hp_ratio > 0.5 else Color("e2c62d") if hp_ratio > 0.25 else Color("dc352f")
+			draw_rect(Rect2(hp_rect.position + Vector2.ONE, Vector2((hp_rect.size.x - 2.0) * hp_ratio, hp_rect.size.y - 2.0)), hp_color, true)
+		draw_string(font, info_rect.position + Vector2(5, 108), "%d/%d" % [hp, max_hp], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color.WHITE)
 	var queue: Array = hud_model.get("queue", [])
 	var queue_text := ""
 	if not queue.is_empty():

@@ -17,6 +17,15 @@ func _ready() -> void:
 	font = ThemeDB.fallback_font
 	catalog = ResourceCatalog.new()
 	catalog.load()
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--unit="):
+			var requested_unit := argument.trim_prefix("--unit=")
+			if not requested_unit.is_empty():
+				texture_key = requested_unit
+		elif argument.begins_with("--animation="):
+			var requested_animation := argument.trim_prefix("--animation=")
+			if requested_animation in ["idle", "move", "attack"]:
+				animation_state = requested_animation
 	queue_redraw()
 
 func _process(delta: float) -> void:

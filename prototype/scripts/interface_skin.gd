@@ -3,24 +3,28 @@ extends RefCounted
 
 const RoRInterfaceLayout := preload("res://scripts/interface_layout.gd")
 const INVENTORY_PATH := "res://assets/generated/interface-source-inventory.json"
+const STYLE_SQUARE_CONTROL_IDS := [50713, 50714, 50715, 50716]
+const STYLE_SMALL_MENU_IDS := [50717, 50718, 50719, 50717]
+const STYLE_COMMAND_ARROW_IDS := [50725, 50726, 50727, 50728]
+const STYLE_MEDIUM_MENU_IDS := [50747, 50748, 50749, 50750]
 const SOURCE_CANDIDATES := {
-	50713: {"asset_name": "hud_control_50713", "frame_count": 4, "kind": "square_control_backplate"},
-	50714: {"asset_name": "hud_control_50714", "frame_count": 4, "kind": "square_control_backplate"},
-	50715: {"asset_name": "hud_control_50715", "frame_count": 4, "kind": "square_control_backplate"},
-	50716: {"asset_name": "hud_control_50716", "frame_count": 4, "kind": "square_control_backplate"},
-	50717: {"asset_name": "hud_control_50717", "frame_count": 2, "kind": "text_button_backplate"},
-	50718: {"asset_name": "hud_control_50718", "frame_count": 2, "kind": "text_button_backplate"},
-	50719: {"asset_name": "hud_control_50719", "frame_count": 2, "kind": "text_button_backplate"},
-	50721: {"asset_name": "hud_glyph_50721", "frame_count": 15, "kind": "command_glyph_sheet"},
-	50725: {"asset_name": "hud_control_50725", "frame_count": 4, "kind": "compact_control"},
-	50726: {"asset_name": "hud_control_50726", "frame_count": 4, "kind": "compact_control"},
-	50727: {"asset_name": "hud_control_50727", "frame_count": 4, "kind": "compact_control"},
-	50728: {"asset_name": "hud_control_50728", "frame_count": 4, "kind": "compact_control"},
-	50745: {"asset_name": "hud_status_50745", "frame_count": 26, "kind": "status_strip"},
-	50747: {"asset_name": "hud_control_50747", "frame_count": 2, "kind": "wide_text_button_backplate"},
-	50748: {"asset_name": "hud_control_50748", "frame_count": 2, "kind": "wide_text_button_backplate"},
-	50749: {"asset_name": "hud_control_50749", "frame_count": 2, "kind": "wide_text_button_backplate"},
-	50750: {"asset_name": "hud_control_50750", "frame_count": 2, "kind": "wide_text_button_backplate"},
+	50713: {"asset_name": "hud_control_50713", "frame_count": 4, "kind": "square_command_backplate"},
+	50714: {"asset_name": "hud_control_50714", "frame_count": 4, "kind": "square_command_backplate"},
+	50715: {"asset_name": "hud_control_50715", "frame_count": 4, "kind": "square_command_backplate"},
+	50716: {"asset_name": "hud_control_50716", "frame_count": 4, "kind": "square_command_backplate"},
+	50717: {"asset_name": "hud_control_50717", "frame_count": 2, "kind": "small_menu_button"},
+	50718: {"asset_name": "hud_control_50718", "frame_count": 2, "kind": "small_menu_button"},
+	50719: {"asset_name": "hud_control_50719", "frame_count": 2, "kind": "small_menu_button"},
+	50721: {"asset_name": "hud_glyph_50721", "frame_count": 15, "kind": "unit_command_glyph_sheet"},
+	50725: {"asset_name": "hud_control_50725", "frame_count": 4, "kind": "command_arrow_button"},
+	50726: {"asset_name": "hud_control_50726", "frame_count": 4, "kind": "command_arrow_button"},
+	50727: {"asset_name": "hud_control_50727", "frame_count": 4, "kind": "command_arrow_button"},
+	50728: {"asset_name": "hud_control_50728", "frame_count": 4, "kind": "command_arrow_button"},
+	50745: {"asset_name": "hud_status_50745", "frame_count": 26, "kind": "unit_health_strip"},
+	50747: {"asset_name": "hud_control_50747", "frame_count": 2, "kind": "medium_menu_button"},
+	50748: {"asset_name": "hud_control_50748", "frame_count": 2, "kind": "medium_menu_button"},
+	50749: {"asset_name": "hud_control_50749", "frame_count": 2, "kind": "medium_menu_button"},
+	50750: {"asset_name": "hud_control_50750", "frame_count": 2, "kind": "medium_menu_button"},
 }
 
 var records_by_key: Dictionary = {}
@@ -72,22 +76,48 @@ func hud_shell(source_width: int, style_index: int = 0) -> Dictionary:
 
 func control_candidate(source_id: int) -> Dictionary:
 	var candidate := source_candidate(source_id)
-	if candidate.is_empty() or String(candidate.get("kind", "")) in ["status_strip", "command_glyph_sheet"]:
+	if candidate.is_empty() or String(candidate.get("kind", "")) in ["unit_health_strip", "unit_command_glyph_sheet"]:
 		return {}
 	return candidate
 
 
 func status_candidate(source_id: int = 50745) -> Dictionary:
 	var candidate := source_candidate(source_id)
-	if String(candidate.get("kind", "")) != "status_strip":
+	if String(candidate.get("kind", "")) != "unit_health_strip":
 		return {}
-	candidate["semantic_role"] = ""
-	candidate["semantic_role_status"] = "original_capture_pending"
+	candidate["semantic_role"] = "unit_health"
+	candidate["semantic_role_status"] = "reference_confirmed"
 	return candidate
 
 
-static func is_measured_unit_health(candidate: Dictionary) -> bool:
-	return String(candidate.get("semantic_role_status", "")) == "measured" and String(candidate.get("semantic_role", "")) == "unit_health"
+static func is_unit_health(candidate: Dictionary) -> bool:
+	return String(candidate.get("semantic_role_status", "")) in ["reference_confirmed", "measured"] and String(candidate.get("semantic_role", "")) == "unit_health"
+
+
+func menu_button(style_index: int, medium: bool) -> Dictionary:
+	var style := clampi(style_index, 0, 3)
+	var ids := STYLE_MEDIUM_MENU_IDS if medium else STYLE_SMALL_MENU_IDS
+	var candidate := source_candidate(int(ids[style]))
+	var frames: Array = candidate.get("frames", [])
+	if frames.size() < 2:
+		return {}
+	return {
+		"source_id": int(ids[style]),
+		"normal": frames[0],
+		"pressed": frames[1],
+		"size": Vector2(frames[0].get_size()),
+		"semantic_role": "medium_menu_button" if medium else "small_menu_button",
+	}
+
+
+func square_command_backplate(style_index: int) -> Texture2D:
+	var candidate := source_candidate(int(STYLE_SQUARE_CONTROL_IDS[clampi(style_index, 0, 3)]))
+	var frames: Array = candidate.get("frames", [])
+	return frames[0] if not frames.is_empty() else null
+
+
+func command_arrow_frames(style_index: int) -> Array:
+	return source_candidate(int(STYLE_COMMAND_ARROW_IDS[clampi(style_index, 0, 3)])).get("frames", [])
 
 
 func source_candidate(source_id: int) -> Dictionary:

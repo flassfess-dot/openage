@@ -60,8 +60,12 @@ func test_buttons_and_signals() -> void:
 	hud.set_view_model({"commands": [
 		{"type": "build", "id": "house", "label": "Дом", "cost_text": "30 WOOD", "duration": 20.0, "enabled": true, "reason": ""},
 	]})
+	assert_equal(hud.active_train_commands[0].get("type"), "open_build_menu", "worker first exposes the source build-menu command")
+	hud.train_button.emit_signal("pressed")
+	assert_equal(hud.active_train_commands[0].get("type"), "build", "build-menu command opens the building choices")
 	hud.train_button.emit_signal("pressed")
 	assert_equal(build_request[0], "house", "build signal preserves selected building kind")
+	assert_equal(hud.build_menu_open, false, "choosing a building closes the presentation submenu")
 	var trade_resource_request := [-1]
 	hud.trade_resource_requested.connect(func(resource_type_id: int): trade_resource_request[0] = resource_type_id)
 	hud.set_view_model({"commands": [

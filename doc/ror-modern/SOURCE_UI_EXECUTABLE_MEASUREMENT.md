@@ -12,10 +12,10 @@ The runtime may expose unresolved frames as candidates. It may not attach semant
 
 - `data/Interfac.drs` SHA-256 is `8a7f1b1f9009d4bc0262c7890935d69d62668c80751ec3b861345064a0e63d33`; in-game palette is explicitly `50500`.
 - IDs 50713…50716 each contain four 54×54 frames. Within each individual SLP all four decoded PNG hashes are identical. Therefore frame index cannot encode four distinct button states.
-- IDs 50725…50728 each contain four 54×31 frames. All four decoded hashes within each SLP are distinct, but this alone does not establish their control role or state meaning.
-- IDs 50717…50719 each contain two distinct 72×20 frames; IDs 50747…50750 each contain two distinct 108×20 frames. Their pixel structure is consistent with narrow and wide text-button backplates, but normal/pressed meaning and shell association remain capture-gated.
-- ID 50721 contains 15 distinct small glyph frames at 50×50, 50×51 and 3×3. Visual inspection identifies command-like glyphs, but runtime meaning and layering are deliberately not assigned without executable evidence.
-- ID 50745 contains 26 distinct 50×7 frames forming a green-to-red progression. It is provisionally used by the presentation layer for remaining health, with the old drawn bar retained as a missing-asset fallback. Exact executable role and threshold mapping remain capture-gated.
+- IDs 50725…50728 each contain four 54×31 frames. Independent Genie-compatible reference code and the decoded pixels agree that frames 0/1 are normal/pressed forward-arrow controls and 2/3 are normal/pressed cancel controls; the four source IDs are shell styles rather than interaction states.
+- IDs 50717…50719 each contain two distinct 72×20 frames; IDs 50747…50750 each contain two distinct 108×20 frames. Independent reference code identifies the first family as small top-menu buttons and the second as medium top-menu buttons, with frame 0 normal and frame 1 held/pressed. Runtime uses the light-brown 50717/50747 pair at native 72×20 and 108×20 sizes; exact original crops remain required for final `PARITY`.
+- ID 50721 contains 15 distinct glyph frames at 50×50, 50×51 and 3×3. Both openage metadata and the independent reference identify it as the in-game task/command glyph sheet; the reference maps frame 2 to the worker build-menu action. Other frame semantics remain capture-gated.
+- ID 50745 contains 26 distinct 50×7 frames forming a green-to-red progression. Independent reference identifiers and HUD code confirm it as the unit health strip and the 0…25 missing-health mapping. Runtime now uses it only in the selection card; compact world-space health bars remain a separate presentation.
 - IDs 50733…50744 are the four two-frame HUD shell variants at 640, 800 and 1024 pixels. Their context/civilization mapping is still unknown.
 
 Every exported frame records a SHA-256 digest in `assets.json`, so equality and later capture matching do not depend on timestamps or image viewers.
@@ -38,3 +38,9 @@ Every exported frame records a SHA-256 digest in `assets.json`, so equality and 
 4. Capture no-selection, unit, multi-selection, building, queue, disabled command and damaged-object states.
 
 The presentation pipeline is `INTEGRATED`, not `PARITY`. If automated Windows capture is unavailable, deterministic implementation work based on already measured source frame geometry continues; only claims about original state semantics remain capture-gated. User-provided lossless RoR captures are valid evidence when their resolution, state and provenance are recorded. `FolkertVanVerseveld/aoe` may be consulted as a secondary implementation/resource-layout reference, but it is neither the runtime dependency nor authority for executable behavior, palette semantics or gameplay rules.
+
+## Secondary-reference result, 2026-09-15
+
+The public `FolkertVanVerseveld/aoe` source was inspected locally as a read-only reference. Its DRS inventory names 50721 as unit command buttons, 50725…50728 as four styled command-arrow families, 50745 as unit health progress, 50717 as the small menu button family and 50747 as the medium family. Its HUD code independently uses 50745 at selection offset `(+10,+91)`, draws the numeric HP at `(+10,+102)`, uses task glyph frame 2 to enter the worker build menu, and switches menu-button frame 0 to frame 1 while held.
+
+These agreements are sufficient for `reference_confirmed` runtime use because they match our own decoded dimensions/hashes and the user-provided RoR frames. They do not close the executable measurement gate: final pixel crops, disabled/hover composition and all remaining task-glyph meanings still require observations of the pinned RoR build.

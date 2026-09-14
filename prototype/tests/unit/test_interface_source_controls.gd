@@ -37,7 +37,7 @@ func _initialize() -> void:
 		assert_control_family(catalog, source_id, Vector2i(108, 20), false, 2)
 		assert_inventory_role(catalog, source_id, "wide_text_button_backplate_candidate")
 	var glyphs: Dictionary = catalog.interface_skin.source_candidate(50721)
-	assert_equal(glyphs.get("kind", ""), "command_glyph_sheet", "50721 remains a role-gated glyph candidate")
+	assert_equal(glyphs.get("kind", ""), "unit_command_glyph_sheet", "50721 is the source unit-command glyph sheet")
 	var glyph_frames: Array = glyphs.get("frames", [])
 	assert_equal(glyph_frames.size(), 15, "every 50721 glyph candidate frame loads")
 	var glyph_dimensions: Dictionary = {}
@@ -50,7 +50,8 @@ func _initialize() -> void:
 	assert_inventory_role(catalog, 50721, "command_glyph_sheet_candidate")
 
 	var status: Dictionary = catalog.interface_skin.status_candidate()
-	assert_equal(status.get("semantic_role_status", ""), "original_capture_pending", "status meaning remains observation-gated")
+	assert_equal(status.get("semantic_role_status", ""), "reference_confirmed", "50745 health meaning is confirmed by an independent Genie-compatible renderer")
+	assert_equal(status.get("semantic_role", ""), "unit_health", "50745 keeps its confirmed gameplay role")
 	var status_frames: Array = status.get("frames", [])
 	assert_equal(status_frames.size(), 26, "all status candidate frames load")
 	for texture_value in status_frames:
@@ -62,7 +63,16 @@ func _initialize() -> void:
 	assert_equal(catalog.interface_skin.status_frame_index(0.5), 13, "half remaining value selects the central source strip")
 	assert_equal(catalog.interface_skin.status_frame_index(0.0), 25, "empty remaining value selects the last source strip")
 	assert_true(catalog.interface_skin.status_frame(0.5) != null, "source status lookup returns a renderable texture")
-	assert_true(not catalog.interface_skin.is_measured_unit_health(status), "unmeasured 50745 is not rendered as unit health")
+	assert_true(catalog.interface_skin.is_unit_health(status), "reference-confirmed 50745 is enabled for unit health")
+
+	var small_button: Dictionary = catalog.interface_skin.menu_button(0, false)
+	assert_equal(small_button.get("source_id", -1), 50717, "light-brown small top button uses source 50717")
+	assert_equal(small_button.get("size", Vector2.ZERO), Vector2(72, 20), "small top button keeps native size")
+	var medium_button: Dictionary = catalog.interface_skin.menu_button(0, true)
+	assert_equal(medium_button.get("source_id", -1), 50747, "light-brown diplomacy button uses source 50747")
+	assert_equal(medium_button.get("size", Vector2.ZERO), Vector2(108, 20), "diplomacy button keeps native size")
+	assert_true(small_button.get("normal") != small_button.get("pressed"), "small top button exposes distinct normal and pressed source frames")
+	assert_true(medium_button.get("normal") != medium_button.get("pressed"), "medium top button exposes distinct normal and pressed source frames")
 
 	var reference: Dictionary = manifest.get("reference_build", {})
 	assert_equal(String(reference.get("interface_archive", "")), "data/Interfac.drs", "measurement names the exact interface layer")
