@@ -27,6 +27,8 @@ const MinimapProjection := preload("res://scripts/minimap_projection.gd")
 const MatchDefinition := preload("res://scripts/match_definition.gd")
 const MatchBootstrap := preload("res://scripts/match_bootstrap.gd")
 const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
+const ReplaySystem := preload("res://scripts/replay_system.gd")
+const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 const AiPlayer := preload("res://scripts/ai_player.gd")
 const SpriteGeometry := preload("res://scripts/sprite_geometry.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
@@ -141,12 +143,7 @@ func _ready() -> void:
 			health_status_frames.append(texture_value)
 	unit_textures = resource_catalog.unit_textures
 
-	simulation_world = SimulationWorld.new(map_size)
-	simulation_world.set_gamespec(gamespec_data)
-	simulation_world.set_terrain_catalog(resource_catalog.terrain_catalog_data)
-	simulation_world.set_object_catalog(resource_catalog.object_catalog_data)
-	simulation_world.set_graphics_catalog(resource_catalog.graphics_catalog_data)
-	simulation_world.set_runtime_catalog(resource_catalog.runtime_catalog_data)
+	simulation_world = _new_simulation_world()
 	game_controller = GameController.new(simulation_world)
 	render_world = RenderWorld.new()
 	terrain_canvas = TerrainCanvas.new()
@@ -177,6 +174,8 @@ func _ready() -> void:
 	hud_modal_overlay.configure(resource_catalog.interface_skin, match_definition, 0, resource_catalog.localization)
 	hud_modal_overlay.set_viewport_size(get_viewport_rect().size)
 	hud_modal_overlay.close_requested.connect(_close_hud_modal)
+	hud_modal_overlay.save_requested.connect(_save_quick_game)
+	hud_modal_overlay.load_requested.connect(_load_quick_game)
 	hud_modal_overlay.resign_requested.connect(_resign_from_hud_modal)
 	hud_modal_overlay.launcher_requested.connect(_return_to_launcher)
 	scenario_overlay = ScenarioOverlay.new()
@@ -194,6 +193,16 @@ func unit_stats(kind: String) -> Dictionary:
 	if simulation_world == null:
 		return gamespec_data.get("units", {}).get(kind, {})
 	return simulation_world.unit_stats(kind)
+
+
+func _new_simulation_world():
+	var world = SimulationWorld.new(map_size)
+	world.set_gamespec(gamespec_data)
+	world.set_terrain_catalog(resource_catalog.terrain_catalog_data)
+	world.set_object_catalog(resource_catalog.object_catalog_data)
+	world.set_graphics_catalog(resource_catalog.graphics_catalog_data)
+	world.set_runtime_catalog(resource_catalog.runtime_catalog_data)
+	return world
 
 func setup_audio() -> void:
 	audio_player = AudioStreamPlayer.new()
@@ -269,6 +278,7 @@ func reset_game() -> void:
 		return
 	var bootstrap: Dictionary = MatchBootstrap.apply(simulation_world, match_definition, map_definition)
 	game_controller.reset_timing()
+	game_controller.start_recording(map_seed, false)
 	configure_ai_players()
 	control_groups.clear()
 	player_control_state.clear()
@@ -347,13 +357,18 @@ func update_units(delta: float) -> void:
 
 
 func configure_ai_players() -> void:
-	ai_players.clear()
+	ai_players = _new_ai_players()
+
+
+func _new_ai_players() -> Array:
+	var result: Array = []
 	for player_value in match_definition.get("players", []):
 		var player: Dictionary = player_value
 		if String(player.get("controller", "ai")) == "ai":
 			var ai := AiPlayer.new(player)
 			if ai.enabled:
-				ai_players.append(ai)
+				result.append(ai)
+	return result
 
 
 func queue_ai_commands() -> void:
@@ -571,6 +586,8 @@ func _open_hud_modal(mode: String) -> void:
 	if mode == HUDModalOverlay.MODE_DIPLOMACY:
 		hud_modal_overlay.show_diplomacy()
 	else:
+		hud_modal_overlay.set_save_available(FileAccess.file_exists(GameSaveArchive.SAVE_PATH))
+		hud_modal_overlay.set_menu_status("")
 		hud_modal_overlay.show_menu()
 
 
@@ -593,6 +610,136 @@ func _resign_from_hud_modal() -> void:
 	var command = RoRCommands.ResignCommand.new(game_controller.tick_index + 1)
 	game_controller.enqueue_command(command, true, PLAYER_TEAM)
 	command_feedback_router.register(command, "Вы сдались", "", null)
+
+
+func _save_quick_game() -> void:
+	if save_game_to_path(GameSaveArchive.SAVE_PATH):
+		hud_modal_overlay.set_save_available(true)
+		hud_modal_overlay.set_menu_status("Игра сохранена")
+	else:
+		hud_modal_overlay.set_menu_status("Не удалось сохранить игру", true)
+
+
+func _load_quick_game() -> void:
+	if not load_game_from_path(GameSaveArchive.SAVE_PATH):
+		if hud_modal_overlay != null:
+			hud_modal_overlay.set_menu_status("Сохранение несовместимо или повреждено", true)
+
+
+func save_game_to_path(path: String) -> bool:
+	if game_controller == null or simulation_world == null or game_controller.replay_recorder == null:
+		return false
+	var ai_states: Array = []
+	for ai in ai_players:
+		ai_states.append(ai.canonical_state())
+	var view_state := {
+		"view_offset": view_offset,
+		"view_zoom": view_zoom,
+		"selection": player_control_state.selected_ids(),
+		"formation": formation,
+		"control_groups": control_groups.groups.duplicate(true),
+		"last_recalled_group": control_groups.last_recalled_group,
+	}
+	var controller_state := {
+		"speed": game_controller.get_speed_multiplier(),
+		"paused": modal_restore_paused if hud_modal_overlay != null and hud_modal_overlay.is_blocking() else game_controller.paused,
+	}
+	var verifier := ReplaySystem.new()
+	var archive := GameSaveArchive.create(
+		match_path,
+		match_definition,
+		game_controller.tick_index,
+		verifier.world_state_hash(simulation_world, game_controller.tick_index, game_controller),
+		game_controller.replay_recorder.to_dictionary(),
+		ai_states,
+		view_state,
+		controller_state
+	)
+	return GameSaveArchive.write(path, archive) == OK
+
+
+func load_game_from_path(path: String) -> bool:
+	var loaded: Dictionary = GameSaveArchive.read(path)
+	if not bool(loaded.get("valid", false)):
+		return false
+	var archive: Dictionary = loaded.get("archive", {})
+	if String(archive.get("match_path", "")) != match_path:
+		return false
+	if String(archive.get("match_fingerprint", "")) != GameSaveArchive.fingerprint(match_definition):
+		return false
+
+	# Reconstruct off to the side. A corrupt or incompatible archive never
+	# mutates the live match before its authoritative hash has been verified.
+	var restored_world = _new_simulation_world()
+	MatchBootstrap.apply(restored_world, match_definition, map_definition)
+	var restored_controller = GameController.new(restored_world)
+	restored_controller.reset_timing()
+	var replay_data: Dictionary = archive.get("replay", {})
+	if not restored_controller.load_replay(replay_data):
+		return false
+	if not restored_controller.replay_until_tick(int(archive.get("tick", 0)), PLAYER_TEAM, ENEMY_TEAM):
+		return false
+	var verifier := ReplaySystem.new()
+	var restored_hash := verifier.world_state_hash(restored_world, restored_controller.tick_index, restored_controller)
+	if restored_hash != String(archive.get("state_sha256", "")):
+		return false
+	restored_controller.replay_source = null
+	if not restored_controller.install_recording_history(replay_data, false):
+		return false
+
+	var restored_ai_players := _new_ai_players()
+	var ai_state_by_team: Dictionary = {}
+	for state_value in archive.get("ai_states", []):
+		var state: Dictionary = state_value
+		ai_state_by_team[int(state.get("team", 0))] = state
+	for ai in restored_ai_players:
+		if not ai_state_by_team.has(int(ai.team)):
+			return false
+		if not ai.restore_state(ai_state_by_team[int(ai.team)]):
+			return false
+
+	simulation_world = restored_world
+	game_controller = restored_controller
+	ai_players = restored_ai_players
+	var saved_controller: Dictionary = archive.get("controller_state", {})
+	game_controller.set_speed_multiplier(float(saved_controller.get("speed", 1.5)))
+	game_controller.set_paused(bool(saved_controller.get("paused", false)))
+	modal_restore_paused = game_controller.paused
+	var saved_view: Dictionary = archive.get("view_state", {})
+	view_offset = saved_view.get("view_offset", view_offset)
+	view_zoom = float(saved_view.get("view_zoom", view_zoom))
+	formation = String(saved_view.get("formation", "RECTANGLE"))
+	player_control_state.clear()
+	var selected_ids: Array[int] = []
+	for entity_id in saved_view.get("selection", []):
+		selected_ids.append(int(entity_id))
+	player_control_state.replace_or_add(selected_ids, false)
+	control_groups.clear()
+	for group_key in saved_view.get("control_groups", {}):
+		var group_ids: Array[int] = []
+		for entity_id in saved_view["control_groups"][group_key]:
+			group_ids.append(int(entity_id))
+		control_groups.assign(int(group_key), group_ids)
+	control_groups.last_recalled_group = int(saved_view.get("last_recalled_group", -1))
+	input_adapter.reset()
+	command_feedback_router.reset()
+	presentation_effect_timeline.reset()
+	command_marker_presentation.reset()
+	cached_fog_revision = -1
+	cached_fog_runs.clear()
+	pending_build_kind = ""
+	terrain_canvas.configure(map_size, map_seed, resource_catalog, simulation_world, Callable(self, "terrain_id_at_cell"), Callable(self, "visible_tile_bounds"))
+	_sync_terrain_canvas()
+	sync_world_state()
+	if scenario_overlay != null:
+		scenario_overlay.reset_presentation()
+		scenario_overlay.set_snapshot(presentation_snapshot)
+	if hud_modal_overlay != null:
+		hud_modal_overlay.close()
+	game_message = "Игра загружена"
+	message_time = 2.0
+	queue_redraw()
+	return true
 
 func is_world_interaction_area(position: Vector2) -> bool:
 	return position.y > HUD_TOP and position.y < get_viewport_rect().size.y - HUD_BOTTOM

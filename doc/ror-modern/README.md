@@ -43,4 +43,4 @@ Core-first очередь закреплена в `doc/DEVELOPMENT_ROADMAP_ROR_P
 
 WSL и полный openage build для повседневной разработки не требуются.
 
-Отдельные проверочные контракты: `VISUAL_PARITY_CONTRACT.md` задаёт границу визуального соответствия, `SOURCE_UI_EXECUTABLE_MEASUREMENT.md` — обязательный порядок доказательства исходных HUD-контролов и их состояний, а `ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md` разделяет ближайшее E1-исправление геометрии/depth/map-edge и E6 dirty-chunk/performance backend.
+Отдельные проверочные контракты: `VISUAL_PARITY_CONTRACT.md` задаёт границу визуального соответствия, `SOURCE_UI_EXECUTABLE_MEASUREMENT.md` — обязательный порядок доказательства исходных HUD-контролов и их состояний, `GAME_SAVE_CONTRACT.md` — транзакционное replay-backed восстановление матча, а `ELEVATION_AWARE_FOG_OPTIMIZATION_PLAN.md` разделяет ближайшее E1-исправление геометрии/depth/map-edge и E6 dirty-chunk/performance backend.

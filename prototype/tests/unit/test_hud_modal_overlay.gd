@@ -37,6 +37,14 @@ func _initialize() -> void:
 	assert_true(overlay.is_blocking(), "menu blocks world input")
 	assert_true(overlay.menu_panel.visible and not overlay.diplomacy_panel.visible, "menu owns the visible modal panel")
 	assert_equal(overlay.resume_button.custom_minimum_size, Vector2(108, 20), "modal action keeps native wide source-button dimensions")
+	overlay.set_save_available(false)
+	assert_true(overlay.load_button.disabled, "load action reports an absent quick save")
+	overlay.set_save_available(true)
+	assert_true(not overlay.load_button.disabled, "load action becomes available for an existing quick save")
+	var save_requested := [false]
+	overlay.save_requested.connect(func(): save_requested[0] = true)
+	overlay.save_button.emit_signal("pressed")
+	assert_true(save_requested[0], "menu delegates save ownership to the game scene")
 	overlay.close()
 	assert_true(not overlay.visible and not overlay.is_blocking(), "close releases the modal layer")
 

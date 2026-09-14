@@ -2,6 +2,8 @@ class_name RoRHUDModalOverlay
 extends Control
 
 signal close_requested
+signal save_requested
+signal load_requested
 signal resign_requested
 signal launcher_requested
 
@@ -21,9 +23,12 @@ var menu_panel: PanelContainer
 var diplomacy_panel: PanelContainer
 var diplomacy_rows: VBoxContainer
 var resume_button: Button
+var save_button: Button
+var load_button: Button
 var resign_button: Button
 var launcher_button: Button
 var diplomacy_close_button: Button
+var menu_status: Label
 
 
 func _init() -> void:
@@ -39,7 +44,7 @@ func configure(skin, definition: Dictionary, requested_style_index: int = 0, loc
 	localization = localization_catalog
 	match_definition = definition.duplicate(true)
 	style_index = clampi(requested_style_index, 0, 3)
-	for button in [resume_button, resign_button, launcher_button, diplomacy_close_button]:
+	for button in [resume_button, save_button, load_button, resign_button, launcher_button, diplomacy_close_button]:
 		_apply_source_button_style(button)
 
 
@@ -62,6 +67,16 @@ func show_menu() -> void:
 	set_process_unhandled_input(true)
 	if is_inside_tree():
 		resume_button.grab_focus()
+
+
+func set_save_available(available: bool) -> void:
+	load_button.disabled = not available
+	load_button.tooltip_text = "" if available else "Сохранённая игра не найдена"
+
+
+func set_menu_status(text: String, failed: bool = false) -> void:
+	menu_status.text = text
+	menu_status.add_theme_color_override("font_color", Color("e57b68") if failed else Color("85cf80"))
 
 
 func show_diplomacy() -> void:
@@ -100,18 +115,29 @@ func _build_interface() -> void:
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(shade)
 
-	menu_panel = _center_panel(Vector2(360, 260))
+	menu_panel = _center_panel(Vector2(360, 350))
 	var menu_column := _panel_column(menu_panel)
 	menu_column.add_child(_heading("МЕНЮ"))
 	resume_button = _action_button("ПРОДОЛЖИТЬ")
 	resume_button.pressed.connect(func(): close_requested.emit())
 	menu_column.add_child(_centered(resume_button))
+	save_button = _action_button("СОХРАНИТЬ")
+	save_button.pressed.connect(func(): save_requested.emit())
+	menu_column.add_child(_centered(save_button))
+	load_button = _action_button("ЗАГРУЗИТЬ")
+	load_button.pressed.connect(func(): load_requested.emit())
+	menu_column.add_child(_centered(load_button))
 	resign_button = _action_button("СДАТЬСЯ")
 	resign_button.pressed.connect(func(): resign_requested.emit())
 	menu_column.add_child(_centered(resign_button))
 	launcher_button = _action_button("ВЫБОР ИГРЫ")
 	launcher_button.pressed.connect(func(): launcher_requested.emit())
 	menu_column.add_child(_centered(launcher_button))
+	menu_status = Label.new()
+	menu_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	menu_status.add_theme_font_size_override("font_size", 12)
+	menu_status.add_theme_color_override("font_color", Color("85cf80"))
+	menu_column.add_child(menu_status)
 	add_child(menu_panel)
 
 	diplomacy_panel = _center_panel(Vector2(610, 410))

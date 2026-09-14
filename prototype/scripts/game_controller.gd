@@ -32,6 +32,7 @@ var formation_groups: Dictionary = {}
 var next_formation_group_id: int = 1
 var replay_recorder: Variant = null
 var replay_source: Variant = null
+var record_replay_state_hashes := true
 var last_replay_mismatch: String = ""
 
 func _init(world = null) -> void:
@@ -54,9 +55,11 @@ func enqueue_command(command, record: bool = true, issuer_id: int = 0) -> void:
 		replay_recorder.record_command(command)
 
 
-func start_recording(seed_value: int = 1337):
+func start_recording(seed_value: int = 1337, capture_state_hashes: bool = true):
 	replay_recorder = ReplaySystem.new()
 	replay_recorder.begin(seed_value)
+	replay_source = null
+	record_replay_state_hashes = capture_state_hashes
 	if simulation_world != null:
 		simulation_world.set_simulation_seed(seed_value)
 	return replay_recorder
@@ -66,6 +69,17 @@ func stop_recording():
 	var completed = replay_recorder
 	replay_recorder = null
 	return completed
+
+
+func install_recording_history(replay_data: Dictionary, capture_state_hashes: bool = false) -> bool:
+	var history := ReplaySystem.new()
+	if not history.load_dictionary(replay_data):
+		return false
+	history.state_hashes.clear()
+	history.playback_cursor = 0
+	replay_recorder = history
+	record_replay_state_hashes = capture_state_hashes
+	return true
 
 
 func load_replay(data: Variant) -> bool:
@@ -133,6 +147,18 @@ func get_speed_multiplier() -> float:
 
 func get_interpolation_alpha() -> float:
 	return clampf(accumulator_seconds / FIXED_STEP_SECONDS, 0.0, 1.0)
+
+
+func replay_until_tick(target_tick: int, player_team: int, enemy_team: int) -> bool:
+	if replay_source == null or simulation_world == null or target_tick < tick_index:
+		return false
+	var was_paused := paused
+	paused = false
+	while tick_index < target_tick:
+		_run_fixed_tick(player_team, enemy_team)
+	paused = was_paused
+	accumulator_seconds = 0.0
+	return tick_index == target_tick and last_replay_mismatch.is_empty()
 
 func process_commands() -> void:
 	command_queue.sort_custom(_command_less)
@@ -747,7 +773,7 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
 	simulation_world.end_event_capture()
 	_forward_domain_events()
 	_emit_runtime_task_changes(task_states_after_commands)
-	if replay_recorder != null:
+	if replay_recorder != null and record_replay_state_hashes:
 		replay_recorder.record_state(tick_index, simulation_world, self)
 	if replay_source != null:
 		var expected: String = replay_source.expected_hash_at(tick_index)
