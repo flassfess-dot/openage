@@ -18,6 +18,13 @@ const FORMATIONS := [
 	["WEDGE", "F8 WEDGE", "Wedge formation"],
 	["STAGGERED", "F9 STAGGER", "Staggered formation"],
 ]
+const FORMATION_SHORT_LABELS := {
+	"LINE": "ЛИН",
+	"RECTANGLE": "КАРЕ",
+	"COLUMN": "КОЛ",
+	"WEDGE": "КЛИН",
+	"STAGGERED": "ШАХ",
+}
 
 var formation_buttons: Dictionary = {}
 var train_button: Button
@@ -50,6 +57,8 @@ func build_controls() -> void:
 		button.focus_mode = Control.FOCUS_NONE
 		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		apply_button_theme(button)
+		button.add_theme_font_size_override("font_size", 9)
+		button.clip_text = true
 		set_bottom_rect(button, Rect2(4, 4, 41, 31))
 		button.pressed.connect(_on_formation_pressed.bind(formation_name))
 		formation_buttons[formation_name] = button
@@ -100,7 +109,7 @@ func set_view_model(model: Dictionary) -> void:
 		button.visible = not command.is_empty()
 		if command.is_empty():
 			continue
-		button.text = "%s %s" % [String(command.get("hotkey", "")), String(command.get("label", formation_name)).to_upper()]
+		button.text = "%s\n%s" % [String(command.get("hotkey", "")), String(FORMATION_SHORT_LABELS.get(formation_name, formation_name))]
 		button.disabled = not bool(command.get("enabled", false))
 		button.set_pressed_no_signal(bool(command.get("active", false)))
 		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else String(command.get("label", formation_name))
@@ -129,15 +138,15 @@ func layout_controls() -> void:
 		current_layout = InterfaceLayout.for_viewport(size)
 	var command_rect: Rect2 = current_layout.get("command", Rect2(4, size.y - HUD_HEIGHT + 4, 300, HUD_HEIGHT - 8))
 	var local_rect := Rect2(command_rect.position - Vector2(0, size.y - HUD_HEIGHT), command_rect.size)
-	var cell_size := Vector2(44, 34)
-	var columns := maxi(3, floori((local_rect.size.x - 8.0) / cell_size.x))
+	var cell_size := Vector2(54, 54)
+	var columns := 5
 	var slot := 0
 	for button in train_buttons:
 		if not button.visible:
 			continue
 		var column := slot % columns
 		var row := slot / columns
-		set_bottom_rect(button, Rect2(local_rect.position + Vector2(4 + column * cell_size.x, 4 + row * cell_size.y), Vector2(41, 31)))
+		set_bottom_rect(button, Rect2(local_rect.position + Vector2(2 + column * cell_size.x, 2 + row * cell_size.y), Vector2(50, 50)))
 		slot += 1
 	for formation_name in formation_buttons:
 		var button: Button = formation_buttons[formation_name]
@@ -145,7 +154,7 @@ func layout_controls() -> void:
 			continue
 		var column := slot % columns
 		var row := slot / columns
-		set_bottom_rect(button, Rect2(local_rect.position + Vector2(4 + column * cell_size.x, 4 + row * cell_size.y), Vector2(41, 31)))
+		set_bottom_rect(button, Rect2(local_rect.position + Vector2(2 + column * cell_size.x, 2 + row * cell_size.y), Vector2(50, 50)))
 		slot += 1
 
 func set_bottom_rect(control: Control, rectangle: Rect2) -> void:

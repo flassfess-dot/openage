@@ -26,6 +26,8 @@ func _initialize() -> void:
 	assert_equal(model["resources"]["food"], 180, "resources come from presentation snapshot")
 	assert_equal(model["age"]["label"], "Каменный век", "age has localized display model")
 	assert_equal(model["selection"]["leader"]["name"], "Казармы", "selected entity name comes from localization catalog")
+	assert_equal(model["selection"]["leader"]["civilization_name"], "Римляне", "selection card resolves the source civilization label")
+	assert_true(model["selection"]["leader"].has("attack") and model["selection"]["leader"].has("armor"), "selection card receives authoritative combat values")
 	var train: Dictionary = first_command(model["commands"], "train", "clubman")
 	assert_true(not train.is_empty(), "Barracks exposes its data-driven train command")
 	assert_true(bool(train["enabled"]), "authoritative availability enables affordable Clubman")

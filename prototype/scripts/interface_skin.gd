@@ -86,6 +86,10 @@ func status_candidate(source_id: int = 50745) -> Dictionary:
 	return candidate
 
 
+static func is_measured_unit_health(candidate: Dictionary) -> bool:
+	return String(candidate.get("semantic_role_status", "")) == "measured" and String(candidate.get("semantic_role", "")) == "unit_health"
+
+
 func source_candidate(source_id: int) -> Dictionary:
 	var descriptor: Dictionary = SOURCE_CANDIDATES.get(source_id, {})
 	if descriptor.is_empty():

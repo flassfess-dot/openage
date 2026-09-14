@@ -18,6 +18,50 @@ static func color_for_state(state: int, minimap: bool = false) -> Color:
 	return EXPLORED_MINIMAP_COLOR if minimap else EXPLORED_WORLD_COLOR
 
 
+static func terrain_conforming_cell_triangles(cell: Vector2i, projector: Callable, snap_to_pixels: bool = true) -> Array[PackedVector2Array]:
+	var result: Array[PackedVector2Array] = []
+	if not projector.is_valid():
+		return result
+	# Keep every terrain cell independent. Row-wide elevation polygons can become
+	# concave or self-intersecting and Godot may then triangulate them across
+	# visible cells or outside the map. The 0->2 diagonal follows the logical
+	# terrain quad and gives both triangles exactly the same shared vertices.
+	var corners := PackedVector2Array([
+		_project(Vector2(cell), projector, snap_to_pixels),
+		_project(Vector2(cell + Vector2i(1, 0)), projector, snap_to_pixels),
+		_project(Vector2(cell + Vector2i(1, 1)), projector, snap_to_pixels),
+		_project(Vector2(cell + Vector2i(0, 1)), projector, snap_to_pixels),
+	])
+	result.append(PackedVector2Array([corners[0], corners[1], corners[2]]))
+	result.append(PackedVector2Array([corners[0], corners[2], corners[3]]))
+	return result
+
+
+static func map_edge_guard_chains(map_size: Vector2i, projector: Callable, snap_to_pixels: bool = true) -> Array[PackedVector2Array]:
+	var result: Array[PackedVector2Array] = []
+	if map_size.x <= 0 or map_size.y <= 0 or not projector.is_valid():
+		return result
+	# Source terrain bitmaps are 65x33 on a 64x32 lattice. Their shared edge
+	# texel is intentional between adjacent cells, but at the finite outer map
+	# boundary it can protrude by one pixel into the black void. Cover only the
+	# four outer chains; never add skirts around internal elevation edges.
+	var top := PackedVector2Array()
+	var right := PackedVector2Array()
+	var bottom := PackedVector2Array()
+	var left := PackedVector2Array()
+	for x in range(map_size.x + 1):
+		top.append(_project(Vector2(x, 0), projector, snap_to_pixels))
+		bottom.append(_project(Vector2(map_size.x - x, map_size.y), projector, snap_to_pixels))
+	for y in range(map_size.y + 1):
+		right.append(_project(Vector2(map_size.x, y), projector, snap_to_pixels))
+		left.append(_project(Vector2(0, map_size.y - y), projector, snap_to_pixels))
+	result.append(top)
+	result.append(right)
+	result.append(bottom)
+	result.append(left)
+	return result
+
+
 static func terrain_conforming_run_polygon(run: Dictionary, projector: Callable, snap_to_pixels: bool = true) -> PackedVector2Array:
 	var y := int(run.get("y", 0))
 	var x_from := int(run.get("x_from", 0))

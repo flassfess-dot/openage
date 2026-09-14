@@ -62,6 +62,7 @@ func _initialize() -> void:
 	assert_equal(catalog.interface_skin.status_frame_index(0.5), 13, "half remaining value selects the central source strip")
 	assert_equal(catalog.interface_skin.status_frame_index(0.0), 25, "empty remaining value selects the last source strip")
 	assert_true(catalog.interface_skin.status_frame(0.5) != null, "source status lookup returns a renderable texture")
+	assert_true(not catalog.interface_skin.is_measured_unit_health(status), "unmeasured 50745 is not rendered as unit health")
 
 	var reference: Dictionary = manifest.get("reference_build", {})
 	assert_equal(String(reference.get("interface_archive", "")), "data/Interfac.drs", "measurement names the exact interface layer")

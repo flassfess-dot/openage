@@ -1120,3 +1120,16 @@ ext_unit_id.
 - Test workflow: внутри итерации — изменённая подсистема плюс прямые потребители; на границе пакета — короткий smoke; полный suite/cache validation/Windows export — один раз в конце этапа либо после сквозного изменения tick/command/snapshot/data contract.
 - `FolkertVanVerseveld/aoe` добавлен как вторичный reference для HUD/resource/presentation исследования, без включения его движка или реконструированной игровой логики в runtime.
 - Следующий пакет: E1/E2 visual-core baseline и recovery — матрица разрешений, SLP player palette/alpha/composite, fog/map edge/depth, затем source-native responsive HUD и корректное здоровье.
+
+### Прогресс (2026-09-15, E1/E2 — fog/map edge и source-native HUD geometry)
+
+- Мировой fog больше не объединяет строку клеток в один потенциально вогнутый полигон: каждая невидимая клетка покрывается двумя детерминированными terrain-conforming triangles. Это устранило длинный клин на возвышенности без изменения gameplay visibility.
+- Четыре внешних map-edge chain используют ту же проекцию/округление и закрывают общий краевой texel чёрным guard stroke. Цветная диагональная полоса на нижнем правом краю исчезла; пространство вне конечной карты теперь непрозрачно чёрное.
+- Старое растягивание фиксированного viewport отключено. Runtime layout выбирает исходную геометрию 640/800/1024 по реальному размеру окна; wide composition сохраняет неизменными левую selection/command область и правый отступ minimap.
+- Нижний shell приведён к исходным областям: selection `128×118` при x=4, command grid `270×118` при x=136, minimap aperture `220×114` с восьмипиксельным правым отступом. Пурпурный служебный ромб source bitmap всегда закрывается чёрной aperture перед отрисовкой карты.
+- Верхняя строка больше не дублирует source icons словами `WOOD/FOOD/...`: рисуются четыре исходных значения, возраст по центру и правые подписи. Population остаётся в модели экономики, но не добавляется в неподтверждённое место оригинального top bar.
+- Selection card показывает локализованную цивилизацию и объект, source portrait, количество, авторитетные attack/armor и HP ratio. 50745 больше не используется как world-space health bar без доказанной семантики; над юнитами здоровье видно только для selection/hover preview и рисуется безопасным fallback.
+- Прототипная верхняя рамка сообщения заменена короткой feedback-строкой над нижней панелью, как в исходных кадрах RoR.
+- Добавлен ручной L3 capture tool `tests/manual/capture_main_scene.gd`; он рендерит точный размер SubViewport и не запускает импорт ресурсов. Проверены кадры 640×480, 800×600, 1024×768 и 1280×720; QA PNG остаются локальными и не входят в репозиторий.
+- Impact-gate: fog of war, viewport/fog geometry, render items, HUD view model, source UI evidence, layout, pixel scaling и main HUD integration проходят. Известные Windows host errors записи `user://logs`/root certificate store не являются ошибками проекта. Полный suite/export отложен до границы E1/E2 согласно test policy.
+- Следующий пакет: E1 player-color palette/alpha/composite audit на юнитах и зданиях, затем единый facing/animation visual matrix. После него — E2 source command glyph/backplate states и интерактивные `Дипломатия`/`Меню`, не возвращаясь к кампаниям.

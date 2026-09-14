@@ -6,7 +6,7 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
-	test_project_uses_fixed_virtual_frame()
+	test_project_uses_native_window_pixels()
 	test_zoom_is_discrete_and_pixel_safe()
 	test_sprite_anchor_is_snapped_once()
 
@@ -19,11 +19,10 @@ func _initialize() -> void:
 	quit(1)
 
 
-func test_project_uses_fixed_virtual_frame() -> void:
-	assert_equal(int(ProjectSettings.get_setting("display/window/size/viewport_width")), PixelScaling.VIRTUAL_SIZE.x, "virtual width")
-	assert_equal(int(ProjectSettings.get_setting("display/window/size/viewport_height")), PixelScaling.VIRTUAL_SIZE.y, "virtual height")
-	assert_equal(String(ProjectSettings.get_setting("display/window/stretch/mode")), "viewport", "final-frame scaling mode")
-	assert_equal(String(ProjectSettings.get_setting("display/window/stretch/aspect")), "keep", "virtual aspect is preserved")
+func test_project_uses_native_window_pixels() -> void:
+	assert_equal(int(ProjectSettings.get_setting("display/window/size/viewport_width")), PixelScaling.DEFAULT_WINDOW_SIZE.x, "default window width")
+	assert_equal(int(ProjectSettings.get_setting("display/window/size/viewport_height")), PixelScaling.DEFAULT_WINDOW_SIZE.y, "default window height")
+	assert_equal(String(ProjectSettings.get_setting("display/window/stretch/mode")), "disabled", "root viewport follows real window pixels")
 	assert_equal(int(ProjectSettings.get_setting("rendering/textures/canvas_textures/default_texture_filter")), 0, "nearest texture filtering")
 
 

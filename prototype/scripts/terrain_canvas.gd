@@ -37,7 +37,10 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, viewport_size), Color("101820"), true)
+	# RoR's space outside the finite isometric map is opaque black. Keeping a
+	# separate blue-gray canvas behind the map exposes colored wedges whenever
+	# fog/terrain end at different projected edges.
+	draw_rect(Rect2(Vector2.ZERO, viewport_size), Color.BLACK, true)
 	if resource_catalog == null or simulation_world == null or not terrain_id_provider.is_valid() or not bounds_provider.is_valid():
 		return
 	var bounds: Rect2i = bounds_provider.call()

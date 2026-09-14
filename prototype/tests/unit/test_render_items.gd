@@ -11,6 +11,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_required_render_item_fields()
 	test_stable_layer_sorting_and_overlays()
+	test_health_bars_follow_selection_visibility()
 	test_presentation_marker_is_a_non_selectable_drawable()
 	test_objective_is_a_non_selectable_drawable()
 	test_environment_field_culls_and_renders_non_selectable_items()
@@ -51,6 +52,21 @@ func test_stable_layer_sorting_and_overlays() -> void:
 	assert_equal(items.filter(func(item): return item["kind"] == "health_bar").size(), 1, "health bar is a separate overlay")
 	var resource_item: Dictionary = items.filter(func(item): return item["kind"] == "resource")[0]
 	assert_true(resource_item["layer"] < bodies[0]["layer"], "resource layer precedes units")
+
+
+func test_health_bars_follow_selection_visibility() -> void:
+	var world = SimulationWorld.new(Vector2i(16, 16))
+	var friendly: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	var enemy: Dictionary = world.add_unit(2, "clubman", Vector2(6.0, 6.0), false)
+	enemy["hp"] = maxf(1.0, float(enemy["max_hp"]) - 1.0)
+	enemy.get("components", {}).get("health", {})["current"] = enemy["hp"]
+	var renderer = RenderWorld.new()
+	var hidden_bars: Array = renderer.create_world_drawables(world, func(position: Vector2) -> Vector2: return position * 10.0, 1.0, Callable(self, "fake_frame_info"), [], 1, [])
+	assert_equal(hidden_bars.filter(func(item): return item["kind"] == "health_bar").size(), 0, "unselected friendly and damaged enemy do not leak persistent health bars")
+	var selected_bars: Array = renderer.create_world_drawables(world, func(position: Vector2) -> Vector2: return position * 10.0, 1.0, Callable(self, "fake_frame_info"), [], 1, [int(friendly["id"])])
+	var health_items := selected_bars.filter(func(item): return item["kind"] == "health_bar")
+	assert_equal(health_items.size(), 1, "selected unit exposes exactly one health bar")
+	assert_equal(int(health_items[0]["stable_id"]), int(friendly["id"]), "health bar belongs to the selected unit")
 
 
 func test_presentation_marker_is_a_non_selectable_drawable() -> void:

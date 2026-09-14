@@ -130,8 +130,9 @@ func _ready() -> void:
 	berry_texture = resource_catalog.berry_texture
 	interface_panel_texture = resource_catalog.interface_panel_texture
 	var status_candidate: Dictionary = resource_catalog.interface_skin.status_candidate()
-	for texture_value in status_candidate.get("frames", []):
-		health_status_frames.append(texture_value)
+	if resource_catalog.interface_skin.is_measured_unit_health(status_candidate):
+		for texture_value in status_candidate.get("frames", []):
+			health_status_frames.append(texture_value)
 	unit_textures = resource_catalog.unit_textures
 
 	simulation_world = SimulationWorld.new(map_size)
@@ -940,6 +941,7 @@ func selection_rectangle(first: Vector2, second: Vector2) -> Rect2:
 func _draw() -> void:
 	draw_world_objects()
 	draw_fog_overlay()
+	draw_map_edge_guard()
 	draw_command_marker()
 	if diagnostics_enabled:
 		draw_diagnostics()
@@ -1058,21 +1060,25 @@ func draw_fog_overlay() -> void:
 	if presentation_snapshot.is_empty():
 		return
 	var bounds := visible_tile_bounds()
-	for run_value in fog_runs():
-		var run: Dictionary = run_value
-		var y := int(run["y"])
-		if y < bounds.position.y or y >= bounds.end.y:
-			continue
-		var x_from := maxi(int(run["x_from"]), bounds.position.x)
-		var x_to := mini(int(run["x_to"]), bounds.end.x)
-		if x_from >= x_to:
-			continue
-		var clipped_run := run.duplicate()
-		clipped_run["x_from"] = x_from
-		clipped_run["x_to"] = x_to
-		var points := FogPresentation.terrain_conforming_run_polygon(clipped_run, Callable(self, "world_to_screen"))
-		var color := FogPresentation.color_for_state(int(run["state"]))
-		draw_colored_polygon(points, color)
+	var cells: Variant = presentation_snapshot.get("fog", {}).get("cells", [])
+	if cells.size() < map_size.x * map_size.y:
+		return
+	for y in range(bounds.position.y, bounds.end.y):
+		for x in range(bounds.position.x, bounds.end.x):
+			var state := int(cells[y * map_size.x + x])
+			if state == FogOfWar.VISIBLE:
+				continue
+			var color := FogPresentation.color_for_state(state)
+			for triangle in FogPresentation.terrain_conforming_cell_triangles(Vector2i(x, y), Callable(self, "world_to_screen")):
+				draw_colored_polygon(triangle, color)
+
+
+func draw_map_edge_guard() -> void:
+	for chain in FogPresentation.map_edge_guard_chains(map_size, Callable(self, "world_to_screen")):
+		if chain.size() >= 2:
+			# A two-pixel centered stroke covers the one shared texel outside either
+			# rasterized edge orientation while consuming at most one pixel inside.
+			draw_polyline(chain, Color.BLACK, maxf(2.0, view_zoom * 2.0), false)
 
 func render_item_frame_info(kind: String, data: Variant) -> Dictionary:
 	match kind:
@@ -1238,18 +1244,14 @@ func draw_hud() -> void:
 	var width := viewport_size.x
 	var layout := InterfaceLayout.for_viewport(viewport_size)
 	var resources: Dictionary = hud_model.get("resources", {})
-	var population: Dictionary = hud_model.get("population", {})
 	draw_source_hud_shell(layout)
-	var source_width := int(layout["source_width"])
-	var compact := source_width == 640
-	var resource_x := [16.0, 122.0, 228.0, 334.0, 440.0] if compact else [18.0, 142.0, 266.0, 390.0, 514.0]
-	var label_size := 10 if compact else 11
-	draw_string(font, Vector2(resource_x[0], 15), "WOOD %d" % int(resources.get("wood", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color("f1dda5"))
-	draw_string(font, Vector2(resource_x[1], 15), "FOOD %d" % int(resources.get("food", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color("f1dda5"))
-	draw_string(font, Vector2(resource_x[2], 15), "GOLD %d" % int(resources.get("gold", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color("f1dda5"))
-	draw_string(font, Vector2(resource_x[3], 15), "STONE %d" % int(resources.get("stone", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color("f1dda5"))
-	draw_string(font, Vector2(resource_x[4], 15), "POP %d+%d/%d" % [int(population.get("current", 0)), int(population.get("reserved", 0)), int(population.get("cap", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color("f1dda5"))
-	draw_string(font, Vector2(width - (118.0 if compact else 155.0), 15), String(hud_model.get("age", {}).get("label", "")), HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color("fff0b8"))
+	var resource_x := [32.0, 104.0, 172.0, 240.0]
+	var resource_keys := ["wood", "food", "gold", "stone"]
+	for index in range(resource_x.size()):
+		draw_string(font, Vector2(resource_x[index], 15), String.num_int64(int(resources.get(resource_keys[index], 0))), HORIZONTAL_ALIGNMENT_LEFT, 44.0, 11, Color("20180f"))
+	draw_string(font, Vector2(width * 0.5 - 90.0, 15), String(hud_model.get("age", {}).get("label", "")), HORIZONTAL_ALIGNMENT_CENTER, 180.0, 11, Color("20180f"))
+	draw_string(font, Vector2(width - 168.0, 15), "Дипломатия", HORIZONTAL_ALIGNMENT_CENTER, 96.0, 10, Color("20180f"))
+	draw_string(font, Vector2(width - 68.0, 15), "Меню", HORIZONTAL_ALIGNMENT_CENTER, 60.0, 10, Color("20180f"))
 
 	var command_rect: Rect2 = layout["command"]
 	var info_rect: Rect2 = layout["selection"]
@@ -1257,33 +1259,43 @@ func draw_hud() -> void:
 
 	var selection: Dictionary = hud_model.get("selection", {})
 	var leader: Dictionary = selection.get("leader", {})
-	draw_string(font, info_rect.position + Vector2(8, 15), "ВЫБРАНО %d" % int(selection.get("count", 0)), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("f2dfa8"))
 	if not leader.is_empty():
+		draw_rect(Rect2(info_rect.position + Vector2(3, 3), info_rect.size - Vector2(6, 6)), Color.BLACK, true)
+		draw_string(font, info_rect.position + Vector2(5, 14), String(leader.get("civilization_name", "")), HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 10.0, 10, Color.WHITE)
+		draw_string(font, info_rect.position + Vector2(5, 28), String(leader.get("name", "")), HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 10.0, 10, Color.WHITE)
 		var portrait: Texture2D = resource_catalog.interface_icons.texture(String(leader.get("icon_kind", "object")), int(leader.get("icon_id", -1)))
 		if portrait != null:
-			draw_texture_rect(portrait, Rect2(info_rect.position + Vector2(8, 22), Vector2(48, 48)), false)
-		var text_x := 64.0
-		draw_string(font, info_rect.position + Vector2(text_x, 38), String(leader.get("name", "")), HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - text_x - 4.0, 13, Color("fff2c1"))
-		draw_string(font, info_rect.position + Vector2(text_x, 57), "HP %d/%d" % [int(leader.get("hp", 0)), int(leader.get("max_hp", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("b8df8c"))
-		var status_text := "Строй: %s" % formation_name() if String(selection.get("category", "")) == "unit" else "Состояние: %s" % String(leader.get("task", ""))
-		draw_string(font, info_rect.position + Vector2(text_x, 75), status_text, HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - text_x - 4.0, 11, Color("dfc37d"))
+			draw_texture_rect(portrait, Rect2(info_rect.position + Vector2(5, 35), Vector2(50, 50)), false)
+		var text_x := 61.0
+		var selected_count := int(selection.get("count", 0))
+		if selected_count > 1:
+			draw_string(font, info_rect.position + Vector2(text_x, 48), "%d ×" % selected_count, HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
+		draw_string(font, info_rect.position + Vector2(text_x, 63), "АТК %d" % int(leader.get("attack", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
+		draw_string(font, info_rect.position + Vector2(text_x, 77), "БРН %d" % int(leader.get("armor", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
 		if int(leader.get("carried_amount", 0)) > 0:
-			draw_string(font, info_rect.position + Vector2(text_x, 93), "%s %d/%d" % [String(leader.get("carried_resource", "")).to_upper(), int(leader.get("carried_amount", 0)), int(leader.get("carry_capacity", 0))], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("f0d16d"))
+			draw_string(font, info_rect.position + Vector2(text_x, 91), "%s %d" % [String(leader.get("carried_resource", "")).to_upper(), int(leader.get("carried_amount", 0))], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color("f0d16d"))
 		if bool(leader.get("conversion_enabled", false)):
-			draw_string(font, info_rect.position + Vector2(text_x, 93), "ВЕРА %d/%d" % [roundi(float(leader.get("faith", 0.0))), roundi(float(leader.get("max_faith", 100.0)))], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("d8c8ff"))
+			draw_string(font, info_rect.position + Vector2(text_x, 91), "ВЕРА %d" % roundi(float(leader.get("faith", 0.0))), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color("d8c8ff"))
+		var hp := int(leader.get("hp", 0))
+		var max_hp := maxi(1, int(leader.get("max_hp", 1)))
+		var hp_ratio := clampf(float(hp) / float(max_hp), 0.0, 1.0)
+		var hp_rect := Rect2(info_rect.position + Vector2(5, 103), Vector2(50, 7))
+		draw_rect(hp_rect, Color("351714"), true)
+		var hp_color := Color("18d74a") if hp_ratio > 0.5 else Color("e2c62d") if hp_ratio > 0.25 else Color("dc352f")
+		draw_rect(Rect2(hp_rect.position + Vector2.ONE, Vector2((hp_rect.size.x - 2.0) * hp_ratio, hp_rect.size.y - 2.0)), hp_color, true)
+		draw_string(font, info_rect.position + Vector2(text_x, 110), "%d/%d" % [hp, max_hp], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color.WHITE)
 	var queue: Array = hud_model.get("queue", [])
 	var queue_text := ""
 	if not queue.is_empty():
 		queue_text = "  Очередь: %s  %d%%" % [String(queue[0].get("label", "")), roundi(float(queue[0].get("progress", 0.0)) * 100.0)]
-	draw_string(font, info_rect.position + Vector2(8, 112), "ПКМ: приказ · Победы %d/4%s" % [int(hud_model.get("kills", 0)), queue_text], HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 12.0, 10, Color("e6d6ae"))
+	if not queue_text.is_empty():
+		draw_string(font, command_rect.position + Vector2(4, 116), queue_text.strip_edges(), HORIZONTAL_ALIGNMENT_LEFT, command_rect.size.x - 8.0, 9, Color("e6d6ae"))
 
 	draw_minimap(map_rect)
 	if message_time > 0.0:
-		var message_width := minf(780.0, width - 80.0)
-		var message_rect := Rect2((width - message_width) * 0.5, HUD_TOP + 8, message_width, 30)
-		draw_rect(message_rect, Color(0.04, 0.08, 0.1, 0.88), true)
-		draw_rect(message_rect, Color("bb9654"), false, 1.0)
-		draw_string(font, message_rect.position + Vector2(12, 20), game_message, HORIZONTAL_ALIGNMENT_CENTER, message_rect.size.x - 24, 13, Color("f4e8c7"))
+		var message_rect := Rect2(0.0, viewport_size.y - HUD_BOTTOM - 18.0, width, 18.0)
+		draw_rect(message_rect, Color(0.0, 0.0, 0.0, 0.92), true)
+		draw_string(font, message_rect.position + Vector2(5, 13), game_message, HORIZONTAL_ALIGNMENT_LEFT, message_rect.size.x - 10.0, 10, Color.WHITE)
 
 
 func draw_source_hud_shell(layout: Dictionary) -> void:
@@ -1331,10 +1343,16 @@ func unit_display_name(unit: Dictionary) -> String:
 	return {"villager": "Villager", "clubman": "Clubman", "archer": "Bowman"}.get(unit["kind"], unit["kind"])
 
 func draw_minimap(rectangle: Rect2) -> void:
-	draw_string(font, rectangle.position + Vector2(6, 13), "КАРТА", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("ecd591"))
 	var geometry := minimap_geometry(rectangle)
 	var center: Vector2 = geometry["center"]
 	var scale: float = geometry["scale"]
+	var aperture := PackedVector2Array([
+		Vector2(rectangle.get_center().x, rectangle.position.y),
+		Vector2(rectangle.end.x, rectangle.get_center().y),
+		Vector2(rectangle.get_center().x, rectangle.end.y),
+		Vector2(rectangle.position.x, rectangle.get_center().y),
+	])
+	draw_colored_polygon(aperture, Color.BLACK)
 	var map_points := MinimapProjection.map_polygon(map_size, center, scale)
 	draw_colored_polygon(map_points, Color("3e7a35"))
 	for run_value in fog_runs():
@@ -1403,10 +1421,13 @@ func minimap_rectangle() -> Rect2:
 
 func minimap_geometry(rectangle: Rect2 = Rect2()) -> Dictionary:
 	var resolved := rectangle if rectangle.size != Vector2.ZERO else minimap_rectangle()
+	var horizontal_padding := 8.0
+	var vertical_padding := 6.0
+	var span := maxf(1.0, float(map_size.x + map_size.y))
 	return {
 		"rectangle": resolved,
-		"center": resolved.position + Vector2(resolved.size.x * 0.5, 20),
-		"scale": minf((resolved.size.x - 30.0) / (map_size.x + map_size.y), (resolved.size.y - 34.0) / (map_size.x + map_size.y)),
+		"center": resolved.position + Vector2(resolved.size.x * 0.5, vertical_padding),
+		"scale": minf((resolved.size.x - horizontal_padding * 2.0) / span, (resolved.size.y - vertical_padding * 2.0) * 2.0 / span),
 	}
 
 

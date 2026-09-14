@@ -10,19 +10,19 @@ const WIDE_RIGHT_SOURCE_X := 716.0
 
 const REFERENCE_REGIONS := {
 	640: {
-		"command": Rect2(4, 4, 218, 118),
-		"selection": Rect2(226, 4, 190, 118),
-		"minimap": Rect2(420, 4, 216, 118),
+		"command": Rect2(136, 4, 270, 118),
+		"selection": Rect2(4, 4, 128, 118),
+		"minimap": Rect2(412, 4, 220, 114),
 	},
 	800: {
-		"command": Rect2(4, 4, 260, 118),
-		"selection": Rect2(268, 4, 260, 118),
-		"minimap": Rect2(532, 4, 264, 118),
+		"command": Rect2(136, 4, 270, 118),
+		"selection": Rect2(4, 4, 128, 118),
+		"minimap": Rect2(572, 4, 220, 114),
 	},
 	1024: {
-		"command": Rect2(4, 4, 300, 118),
-		"selection": Rect2(308, 4, 404, 118),
-		"minimap": Rect2(716, 4, 304, 118),
+		"command": Rect2(136, 4, 270, 118),
+		"selection": Rect2(4, 4, 128, 118),
+		"minimap": Rect2(796, 4, 220, 114),
 	},
 }
 
@@ -37,8 +37,8 @@ static func for_viewport(viewport_size: Vector2) -> Dictionary:
 	var expanded := viewport_size.x > 1024.0
 	if expanded:
 		command = Rect2(command.position, command.size)
-		minimap = Rect2(Vector2(viewport_size.x - WIDE_RIGHT_WIDTH, minimap.position.y), Vector2(WIDE_RIGHT_WIDTH - 4.0, minimap.size.y))
-		selection = Rect2(Vector2(WIDE_LEFT_WIDTH + 4.0, selection.position.y), Vector2(maxf(1.0, minimap.position.x - WIDE_LEFT_WIDTH - 8.0), selection.size.y))
+		minimap = Rect2(Vector2(viewport_size.x - (1024.0 - minimap.position.x), minimap.position.y), minimap.size)
+		selection = Rect2(selection.position, selection.size)
 	elif viewport_size.x < float(source_width):
 		var clipped_width := maxf(320.0, viewport_size.x)
 		var factor := clipped_width / float(source_width)
@@ -74,4 +74,3 @@ static func source_width_for(viewport_width: float) -> int:
 
 static func shell_asset_name(source_width: int, style_index: int = 0) -> String:
 	return "hud_shell_%d_%d" % [source_width, clampi(style_index, 0, 3)]
-

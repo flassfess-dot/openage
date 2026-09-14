@@ -1,6 +1,6 @@
 class_name RoRPixelScaling
 
-const VIRTUAL_SIZE := Vector2i(1280, 720)
+const DEFAULT_WINDOW_SIZE := Vector2i(1280, 720)
 const ZOOM_LEVELS := [1.0, 2.0, 3.0]
 
 

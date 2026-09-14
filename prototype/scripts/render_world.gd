@@ -100,7 +100,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				drawables.append(RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, screen_y, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order))
 			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or preview_ids.has(stable_id)):
 				drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, screen_y, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
-			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or int(unit.get("team", 0)) == 2 or float(unit["hp"]) < float(unit["max_hp"])):
+			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or preview_ids.has(stable_id)):
 				drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, screen_y, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
 	drawables.sort_custom(RenderItem.less)
 	return drawables

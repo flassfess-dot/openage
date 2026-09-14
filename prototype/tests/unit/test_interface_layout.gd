@@ -24,6 +24,9 @@ func test_source_resolution_layouts() -> void:
 		assert_equal(layout["top"], Rect2(0, 0, size.x, 20), "top source frame %d" % int(size.x))
 		assert_equal(layout["bottom"], Rect2(0, size.y - 126, size.x, 126), "bottom source frame %d" % int(size.x))
 		assert_equal(layout["world"], Rect2(0, 20, size.x, size.y - 146), "world excludes exact source shell %d" % int(size.x))
+		assert_equal(layout["selection"], Rect2(4, size.y - 122, 128, 118), "selection card follows the source left frame at %d" % int(size.x))
+		assert_equal(layout["command"], Rect2(136, size.y - 122, 270, 118), "command grid remains beside the selection card at %d" % int(size.x))
+		assert_equal(layout["minimap"].size, Vector2(220, 114), "minimap aperture preserves measured source size at %d" % int(size.x))
 		assert_non_overlapping(layout["command"], layout["selection"], "command/selection %d" % int(size.x))
 		assert_non_overlapping(layout["selection"], layout["minimap"], "selection/minimap %d" % int(size.x))
 		for region_name in ["command", "selection", "minimap"]:
@@ -35,8 +38,10 @@ func test_wide_layout_preserves_source_edges() -> void:
 	var layout := InterfaceLayout.for_viewport(Vector2(1536, 864))
 	assert_equal(layout["source_width"], 1024, "wide viewport uses largest source shell")
 	assert_true(bool(layout["expanded"]), "wide viewport declares composed expansion")
-	assert_equal(layout["command"].position.x, 4.0, "wide command region keeps original left anchor")
-	assert_equal(layout["minimap"].end.x, 1532.0, "wide minimap region keeps original right inset")
+	assert_equal(layout["selection"].position.x, 4.0, "wide selection card keeps original left anchor")
+	assert_equal(layout["command"].position.x, 136.0, "wide command grid keeps original left anchor")
+	assert_equal(layout["minimap"].position.x, 1308.0, "wide minimap aperture keeps its source offset inside the right shell")
+	assert_equal(layout["minimap"].end.x, 1528.0, "wide minimap aperture keeps original eight-pixel right inset")
 	assert_non_overlapping(layout["command"], layout["selection"], "wide command/selection")
 	assert_non_overlapping(layout["selection"], layout["minimap"], "wide selection/minimap")
 
@@ -53,4 +58,3 @@ func assert_true(value: bool, context: String) -> void:
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
-

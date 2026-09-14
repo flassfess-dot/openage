@@ -182,6 +182,9 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 	var homogeneous := selected.all(func(entity): return String(entity.get("kind", "")) == String(leader.get("kind", "")))
 	var conversion: Dictionary = leader.get("components", {}).get("conversion", {})
 	var trade: Dictionary = leader.get("components", {}).get("trade", {})
+	var ownership: Dictionary = leader.get("components", {}).get("ownership", {})
+	var civilization_id := int(ownership.get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
+	var combat: Dictionary = leader.get("components", {}).get("combat", {})
 	return {
 		"count": selected.size(),
 		"category": category if selected.all(func(entity): return _category(entity) == category) else "mixed",
@@ -189,8 +192,12 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 			"id": int(leader.get("id", -1)),
 			"kind": String(leader.get("kind", "")),
 			"name": _name_for_kind(String(leader.get("kind", "")), leader, locale),
+			"civilization_id": civilization_id,
+			"civilization_name": _civilization_name(civilization_id, locale),
 			"hp": roundi(float(leader.get("hp", 0.0))),
 			"max_hp": roundi(float(leader.get("max_hp", 0.0))),
+			"attack": roundi(float(leader.get("attack_damage", _largest_amount(combat.get("attacks", []))))),
+			"armor": maxi(0, roundi(_largest_amount(combat.get("armors", [])))),
 			"task": String(leader.get("task", leader.get("state", ""))),
 			"carried_amount": roundi(float(leader.get("carried_amount", 0.0))),
 			"carry_capacity": roundi(float(leader.get("carry_capacity", 0.0))),
@@ -210,6 +217,25 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 		},
 		"summary": _name_for_kind(String(leader.get("kind", "")), leader, locale) if selected.size() == 1 else "%d × %s" % [selected.size(), _name_for_kind(String(leader.get("kind", "")), leader, locale)] if homogeneous else "%d %s" % [selected.size(), "объектов" if locale == "ru" else "objects"],
 	}
+
+
+func _civilization_name(civilization_id: int, locale: String) -> String:
+	# The original language table numbers the twelve AoE civilizations from
+	# 10231 and the four Rise of Rome additions from 10246.
+	var name_id := 10230 + civilization_id if civilization_id <= 12 else 10233 + civilization_id
+	if localization != null and civilization_id > 0:
+		var translated := String(localization.text(name_id, locale))
+		if not translated.begins_with("["):
+			return translated
+	return "Цивилизация %d" % civilization_id if locale == "ru" else "Civilization %d" % civilization_id
+
+
+func _largest_amount(entries: Array) -> float:
+	var result := 0.0
+	for entry_value in entries:
+		var entry: Dictionary = entry_value
+		result = maxf(result, float(entry.get("amount", 0.0)))
+	return result
 
 
 func _trade_resource_label(resource_type_id: int, locale: String) -> String:

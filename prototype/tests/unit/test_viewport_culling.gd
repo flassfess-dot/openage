@@ -16,6 +16,8 @@ func _initialize() -> void:
 	assert_equal(runs[1], {"y": 1, "x_from": 0, "x_to": 3, "state": 1}, "explored row run keeps exact extent")
 	test_fog_run_coverage()
 	test_fog_presentation_contract()
+	test_cell_triangle_fog_geometry()
+	test_map_edge_guard_geometry()
 	if failures.is_empty():
 		print("I12-020D viewport culling tests passed")
 		quit(0)
@@ -75,6 +77,45 @@ func test_fog_presentation_contract() -> void:
 	assert_true(elevated_points.size() > 4, "elevation bends survive collinear fog simplification")
 	assert_true(Vector2(6, 0) in elevated_points, "top elevation boundary remains in fog polygon")
 	assert_true(Vector2(6, 3) in elevated_points, "bottom elevation boundary remains in fog polygon")
+
+
+func test_cell_triangle_fog_geometry() -> void:
+	var vertex_heights := {
+		Vector2i(2, 3): 1,
+		Vector2i(3, 3): 0,
+		Vector2i(3, 4): 0,
+		Vector2i(2, 4): 0,
+	}
+	var projector := func(world: Vector2):
+		var vertex := Vector2i(roundi(world.x), roundi(world.y))
+		var elevation := float(vertex_heights.get(vertex, 0))
+		return Vector2((world.x - world.y) * 32.0, (world.x + world.y) * 16.0 - elevation * 16.0)
+	var triangles := FogPresentation.terrain_conforming_cell_triangles(Vector2i(2, 3), projector)
+	assert_equal(triangles.size(), 2, "one fog cell has exactly two deterministic triangles")
+	assert_equal(triangles[0].size(), 3, "first fog triangle has three vertices")
+	assert_equal(triangles[1].size(), 3, "second fog triangle has three vertices")
+	assert_equal(triangles[0][0], triangles[1][0], "fog triangles share the first diagonal vertex")
+	assert_equal(triangles[0][2], triangles[1][1], "fog triangles share the second diagonal vertex")
+	for triangle in triangles:
+		for point in triangle:
+			assert_equal(point, point.round(), "cell fog geometry is pixel snapped")
+	var invalid := FogPresentation.terrain_conforming_cell_triangles(Vector2i.ZERO, Callable())
+	assert_true(invalid.is_empty(), "invalid projector creates no fog geometry")
+
+
+func test_map_edge_guard_geometry() -> void:
+	var chains := FogPresentation.map_edge_guard_chains(
+		Vector2i(3, 2),
+		func(world: Vector2): return world * 10.0 + Vector2(0.4, 0.6)
+	)
+	assert_equal(chains.size(), 4, "finite map has four independent outer guard chains")
+	assert_equal(chains[0].size(), 4, "top map edge contains every horizontal source vertex")
+	assert_equal(chains[1].size(), 3, "right map edge contains every vertical source vertex")
+	assert_equal(chains[0][0], Vector2(0, 1), "edge vertices use the same pixel snapping as terrain fog")
+	assert_equal(chains[0][chains[0].size() - 1], Vector2(30, 1), "top guard reaches exact map corner")
+	assert_equal(chains[1][0], Vector2(30, 1), "adjacent guards share exact corner pixels")
+	assert_equal(chains[1][chains[1].size() - 1], Vector2(30, 21), "right guard reaches exact map corner")
+	assert_true(FogPresentation.map_edge_guard_chains(Vector2i.ZERO, Callable()).is_empty(), "invalid map produces no guard geometry")
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
