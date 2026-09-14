@@ -21,8 +21,10 @@ func _initialize() -> void:
 		var selected_worker_ids: Array[int] = [int(worker["id"])]
 		game.player_control_state.replace_or_add(selected_worker_ids, false)
 		game.refresh_hud_model()
+		assert_equal(String(game.hud_controls.active_train_commands[0].get("type", "")), "open_build_menu", "worker HUD starts from the source build-root action")
+		game.hud_controls.train_button.emit_signal("pressed")
 		var build_index := command_index(game.hud_controls.active_train_commands, "build", "house")
-		assert_true(build_index >= 0, "worker HUD exposes House through the age-filtered palette")
+		assert_true(build_index >= 0, "source build-root opens House in the age-filtered palette")
 		if build_index >= 0:
 			var button: Button = game.hud_controls.train_buttons[build_index]
 			assert_true(button.icon != null and not button.disabled, "House action uses its imported source icon and is enabled")
