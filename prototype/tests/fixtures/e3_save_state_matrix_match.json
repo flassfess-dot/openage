@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "e3_save_state_matrix",
+  "title": "E3 save state matrix",
+  "start_message": "Deterministic gameplay-core save fixture",
+  "map": {
+    "size": [28, 28],
+    "seed": 73517,
+    "generator": {
+      "type": "coastal_land",
+      "water_border": {"left": 4, "top": 0, "right": 0, "bottom": 0, "shore_width": 1, "land_terrain_id": 0},
+      "naval_start": {"dock_footprint_radius_cells": 1, "dock_surface_terrain_ids": [1, 2, 4, 22]}
+    }
+  },
+  "players": [
+    {"team": 1, "controller": "human", "civilization_id": 13, "start": [14.0, 14.0], "population_housing": 50, "starting_resources": {"food": 2000, "wood": 2000, "stone": 2000, "gold": 2000}},
+    {"team": 2, "controller": "ai", "civilization_id": 13, "start": [23.0, 22.0], "population_housing": 50, "starting_resources": {"food": 2000, "wood": 2000, "stone": 2000, "gold": 2000}, "ai": {"enabled": false}}
+  ],
+  "entities": [
+    {"category": "building", "team": 1, "kind": "town_center", "position": [14.0, 14.0]},
+    {"category": "building", "team": 1, "kind": "barracks", "position": [10.0, 14.0]},
+    {"category": "building", "team": 1, "kind": "granary", "position": [18.0, 14.0]},
+    {"category": "building", "team": 1, "kind": "dock", "position": [3.5, 18.5]},
+    {"category": "building", "team": 2, "kind": "dock", "position": [3.5, 8.5]},
+    {"category": "unit", "team": 1, "kind": "villager", "position": [12.0, 18.0], "selected": true},
+    {"category": "unit", "team": 1, "kind": "villager", "position": [13.0, 18.0]},
+    {"category": "unit", "team": 1, "kind": "clubman", "position": [16.0, 18.0]},
+    {"category": "unit", "team": 1, "kind": "clubman", "position": [17.0, 18.0]},
+    {"category": "unit", "team": 2, "kind": "clubman", "position": [21.0, 18.0]},
+    {"category": "unit", "team": 2, "kind": "clubman", "position": [23.0, 22.0]},
+    {"category": "unit", "team": 1, "kind": "scout_ship", "position": [1.5, 15.0]},
+    {"category": "unit", "team": 2, "kind": "scout_ship", "position": [1.5, 11.5]},
+    {"category": "resource", "kind": "tree", "position": [11.0, 19.0], "amount": 150}
+  ],
+  "alliances": [],
+  "victory_rules": [{"type": "conquest"}]
+}

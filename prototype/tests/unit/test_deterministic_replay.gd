@@ -14,6 +14,7 @@ func _initialize() -> void:
 	catalog.load_generated_data()
 	test_round_trip_and_identical_state(catalog)
 	test_same_tick_command_order(catalog)
+	test_issue_tick_preserves_autonomous_sequence(catalog)
 	test_legacy_replay_envelope_migration(catalog)
 	test_cancel_production_round_trip()
 	test_resign_round_trip()
@@ -89,6 +90,23 @@ func test_same_tick_command_order(catalog) -> void:
 	assert_equal(second["world"].find_unit(unit_id)["task"], first["world"].find_unit(unit_id)["task"], "same-tick final task matches live order")
 	assert_equal(second["world"].find_unit(unit_id)["target"], first["world"].find_unit(unit_id)["target"], "same-tick target matches live order")
 	assert_equal(second["controller"].last_replay_mismatch, "", "same-tick state hash matches playback")
+
+
+func test_issue_tick_preserves_autonomous_sequence(catalog) -> void:
+	var first := setup_match(catalog, 992)
+	var controller = first["controller"]
+	var recorder = controller.start_recording(992)
+	controller.next_command_sequence = 5
+	controller.tick_index = 4
+	var command = Commands.StopCommand.new(6, [int(first["player_ids"][0])])
+	controller.enqueue_command(command, true, 1)
+	assert_equal(int(recorder.command_records[0].get("issued_tick", -1)), 4, "recorder distinguishes issue tick from execution tick")
+	var loaded := ReplaySystem.new()
+	assert_true(loaded.load_dictionary(recorder.to_dictionary()), "issue-timed replay loads")
+	assert_equal(loaded.commands_issued_through_tick(3).size(), 0, "future issuance is not injected early")
+	var issued: Array = loaded.commands_issued_through_tick(4)
+	assert_equal(issued.size(), 1, "command appears on its original issue tick")
+	assert_equal(int(issued[0].sequence_id), 5, "issue-timed command preserves its envelope")
 
 
 func test_legacy_replay_envelope_migration(catalog) -> void:

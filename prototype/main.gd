@@ -109,6 +109,7 @@ var hud_controls: HUDControls
 var top_bar_controls: TopBarControls
 var hud_modal_overlay: HUDModalOverlay
 var modal_restore_paused := false
+var last_save_error := ""
 var hud_view_model := HudViewModel.new()
 var hud_model: Dictionary = {}
 var scenario_overlay: ScenarioOverlay
@@ -627,7 +628,9 @@ func _load_quick_game() -> void:
 
 
 func save_game_to_path(path: String) -> bool:
+	last_save_error = ""
 	if game_controller == null or simulation_world == null or game_controller.replay_recorder == null:
+		last_save_error = "runtime_not_ready"
 		return false
 	var ai_states: Array = []
 	for ai in ai_players:
@@ -655,18 +658,23 @@ func save_game_to_path(path: String) -> bool:
 		view_state,
 		controller_state
 	)
-	return GameSaveArchive.write(path, archive) == OK
+	var write_error := GameSaveArchive.write(path, archive)
+	if write_error != OK:
+		last_save_error = "write_failed:%d" % int(write_error)
+		return false
+	return true
 
 
 func load_game_from_path(path: String) -> bool:
+	last_save_error = ""
 	var loaded: Dictionary = GameSaveArchive.read(path)
 	if not bool(loaded.get("valid", false)):
-		return false
+		return _load_failed(String(loaded.get("error", "archive_invalid")))
 	var archive: Dictionary = loaded.get("archive", {})
 	if String(archive.get("match_path", "")) != match_path:
-		return false
+		return _load_failed("match_path_mismatch")
 	if String(archive.get("match_fingerprint", "")) != GameSaveArchive.fingerprint(match_definition):
-		return false
+		return _load_failed("match_fingerprint_mismatch")
 
 	# Reconstruct off to the side. A corrupt or incompatible archive never
 	# mutates the live match before its authoritative hash has been verified.
@@ -676,16 +684,16 @@ func load_game_from_path(path: String) -> bool:
 	restored_controller.reset_timing()
 	var replay_data: Dictionary = archive.get("replay", {})
 	if not restored_controller.load_replay(replay_data):
-		return false
+		return _load_failed("replay_invalid")
 	if not restored_controller.replay_until_tick(int(archive.get("tick", 0)), PLAYER_TEAM, ENEMY_TEAM):
-		return false
+		return _load_failed("replay_failed:%s" % restored_controller.last_replay_mismatch)
 	var verifier := ReplaySystem.new()
 	var restored_hash := verifier.world_state_hash(restored_world, restored_controller.tick_index, restored_controller)
 	if restored_hash != String(archive.get("state_sha256", "")):
-		return false
+		return _load_failed("state_hash_mismatch:%s" % restored_hash)
 	restored_controller.replay_source = null
 	if not restored_controller.install_recording_history(replay_data, false):
-		return false
+		return _load_failed("recording_history_invalid")
 
 	var restored_ai_players := _new_ai_players()
 	var ai_state_by_team: Dictionary = {}
@@ -694,9 +702,9 @@ func load_game_from_path(path: String) -> bool:
 		ai_state_by_team[int(state.get("team", 0))] = state
 	for ai in restored_ai_players:
 		if not ai_state_by_team.has(int(ai.team)):
-			return false
+			return _load_failed("ai_state_missing:%d" % int(ai.team))
 		if not ai.restore_state(ai_state_by_team[int(ai.team)]):
-			return false
+			return _load_failed("ai_state_invalid:%d" % int(ai.team))
 
 	simulation_world = restored_world
 	game_controller = restored_controller
@@ -740,6 +748,11 @@ func load_game_from_path(path: String) -> bool:
 	message_time = 2.0
 	queue_redraw()
 	return true
+
+
+func _load_failed(reason: String) -> bool:
+	last_save_error = reason
+	return false
 
 func is_world_interaction_area(position: Vector2) -> bool:
 	return position.y > HUD_TOP and position.y < get_viewport_rect().size.y - HUD_BOTTOM

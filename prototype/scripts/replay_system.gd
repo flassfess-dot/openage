@@ -3,13 +3,15 @@ extends RefCounted
 
 const Commands := preload("res://scripts/commands.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
-const FORMAT_VERSION: int = 2
-const LEGACY_FORMAT_VERSION: int = 1
+const FORMAT_VERSION: int = 3
+const LEGACY_FORMAT_VERSIONS := [1, 2]
 
 var simulation_seed: int = 1
 var command_records: Array = []
 var state_hashes: Array = []
 var playback_cursor: int = 0
+var issuance_records: Array = []
+var issuance_cursor: int = 0
 
 
 func begin(seed_value: int) -> void:
@@ -17,11 +19,14 @@ func begin(seed_value: int) -> void:
 	command_records.clear()
 	state_hashes.clear()
 	playback_cursor = 0
+	issuance_records.clear()
+	issuance_cursor = 0
 
 
-func record_command(command) -> void:
+func record_command(command, issued_tick: int = 0) -> void:
 	command_records.append({
 		"tick": int(command.tick),
+		"issued_tick": maxi(0, issued_tick),
 		"issuer_id": int(command.issuer_id),
 		"sequence_id": int(command.sequence_id),
 		"type": String(command.command_type()),
@@ -29,6 +34,7 @@ func record_command(command) -> void:
 		"params": encode_variant(command.params),
 	})
 	command_records.sort_custom(_record_less)
+	_rebuild_issuance_records()
 
 
 func record_state(tick: int, world, controller = null) -> String:
@@ -45,8 +51,17 @@ func commands_through_tick(tick: int) -> Array:
 	return result
 
 
+func commands_issued_through_tick(tick: int) -> Array:
+	var result: Array = []
+	while issuance_cursor < issuance_records.size() and int(issuance_records[issuance_cursor].get("issued_tick", 0)) <= tick:
+		result.append(command_from_record(issuance_records[issuance_cursor]))
+		issuance_cursor += 1
+	return result
+
+
 func reset_playback() -> void:
 	playback_cursor = 0
+	issuance_cursor = 0
 
 
 func expected_hash_at(tick: int) -> String:
@@ -71,7 +86,7 @@ func to_json() -> String:
 
 func load_dictionary(data: Dictionary) -> bool:
 	var source_version := int(data.get("format_version", -1))
-	if source_version not in [LEGACY_FORMAT_VERSION, FORMAT_VERSION]:
+	if source_version not in LEGACY_FORMAT_VERSIONS and source_version != FORMAT_VERSION:
 		return false
 	simulation_seed = int(data.get("simulation_seed", 1))
 	command_records = data.get("commands", []).duplicate(true)
@@ -84,8 +99,14 @@ func load_dictionary(data: Dictionary) -> bool:
 			record["sequence_id"] = index + 1
 		if not record.has("issuer_id"):
 			record["issuer_id"] = 0
+		# Versions 1 and 2 only recorded the scheduled execution tick. Their
+		# historical playback contract queued every command at tick zero.
+		if not record.has("issued_tick"):
+			record["issued_tick"] = 0
 	command_records.sort_custom(_record_less)
+	_rebuild_issuance_records()
 	playback_cursor = 0
+	issuance_cursor = 0
 	return true
 
 
@@ -97,6 +118,19 @@ func _record_less(left: Dictionary, right: Dictionary) -> bool:
 	if int(left.get("issuer_id", 0)) != int(right.get("issuer_id", 0)):
 		return int(left.get("issuer_id", 0)) < int(right.get("issuer_id", 0))
 	return String(left.get("type", "")) < String(right.get("type", ""))
+
+
+func _rebuild_issuance_records() -> void:
+	issuance_records = command_records.duplicate(false)
+	issuance_records.sort_custom(_issuance_record_less)
+
+
+func _issuance_record_less(left: Dictionary, right: Dictionary) -> bool:
+	if int(left.get("issued_tick", 0)) != int(right.get("issued_tick", 0)):
+		return int(left.get("issued_tick", 0)) < int(right.get("issued_tick", 0))
+	if int(left.get("sequence_id", 0)) != int(right.get("sequence_id", 0)):
+		return int(left.get("sequence_id", 0)) < int(right.get("sequence_id", 0))
+	return _record_less(left, right)
 
 
 func load_json(text: String) -> bool:

@@ -52,7 +52,7 @@ func enqueue_command(command, record: bool = true, issuer_id: int = 0) -> void:
 	next_command_sequence = maxi(next_command_sequence, int(command.sequence_id) + 1)
 	command_queue.append(command)
 	if record and replay_recorder != null:
-		replay_recorder.record_command(command)
+		replay_recorder.record_command(command, tick_index)
 
 
 func start_recording(seed_value: int = 1337, capture_state_hashes: bool = true):
@@ -94,11 +94,7 @@ func load_replay(data: Variant) -> bool:
 	command_results.clear()
 	event_stream.clear()
 	next_command_sequence = 1
-	# Keep the scheduled command buffer identical to a live recording. Injecting
-	# commands only when their tick arrived made the canonical pending queue differ
-	# even though the eventual gameplay happened to be the same.
-	for replay_command in replay_source.commands_through_tick(0x7fffffff):
-		enqueue_command(replay_command, false)
+	_inject_replay_commands_for_current_tick()
 	if simulation_world != null:
 		simulation_world.set_simulation_seed(source.simulation_seed)
 	return true
@@ -156,6 +152,9 @@ func replay_until_tick(target_tick: int, player_team: int, enemy_team: int) -> b
 	paused = false
 	while tick_index < target_tick:
 		_run_fixed_tick(player_team, enemy_team)
+	# A live player may issue a future command after the last completed tick and
+	# save before another tick begins. Restore that pending queue as well.
+	_inject_replay_commands_for_current_tick()
 	paused = was_paused
 	accumulator_seconds = 0.0
 	return tick_index == target_tick and last_replay_mismatch.is_empty()
@@ -757,6 +756,7 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	return simulation_world.get_last_battle_message()
 
 func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
+	_inject_replay_commands_for_current_tick()
 	tick_index += 1
 	simulation_world.begin_event_capture()
 	process_commands()
@@ -781,6 +781,13 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
 			var actual: String = replay_source.world_state_hash(simulation_world, tick_index, self)
 			if actual != expected:
 				last_replay_mismatch = "tick:%d expected:%s actual:%s" % [tick_index, expected, actual]
+
+
+func _inject_replay_commands_for_current_tick() -> void:
+	if replay_source == null:
+		return
+	for replay_command in replay_source.commands_issued_through_tick(tick_index):
+		enqueue_command(replay_command, false)
 
 
 
