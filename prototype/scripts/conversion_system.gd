@@ -5,9 +5,7 @@ const CombatRules := preload("res://scripts/combat_rules.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 
 const MONOTHEISM_TECHNOLOGY_ID: int = 19
-const FANATICISM_TECHNOLOGY_ID: int = 20
 const BASE_RECHARGE_RATE: float = 2.0
-const FANATICISM_MULTIPLIER: float = 1.5
 const RESISTANT_TARGET_MULTIPLIER: float = 0.25
 const MARTYRDOM_RESOURCE_ID: int = 57
 
@@ -76,10 +74,8 @@ func success_chance_for(converter: Dictionary, target: Dictionary) -> float:
 
 
 func recharge_rate_for(converter: Dictionary) -> float:
-	var rate := BASE_RECHARGE_RATE
-	if world.technology_system.is_researched(int(converter.get("team", 0)), FANATICISM_TECHNOLOGY_ID):
-		rate *= FANATICISM_MULTIPLIER
-	return rate
+	var team := int(converter.get("team", 0))
+	return world.technology_system.rule_resource_value(team, 35, BASE_RECHARGE_RATE)
 
 
 func advance_faith(converter: Dictionary, delta: float) -> void:

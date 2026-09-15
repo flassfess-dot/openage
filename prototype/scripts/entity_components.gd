@@ -106,6 +106,7 @@ static func for_unit(entity_id: int, team: int, civilization_id: int, kind: Stri
 		"combat": {
 			"attacks": attacks,
 			"armors": armors,
+			"base_armor": float(combat_source.get("base_armor", 0.0)),
 			"attack_period": float(combat_source.get("attack_period", stats.get("attack_period", 0.0))),
 			"range_min": float(combat_source.get("range_min", stats.get("range_min", 0.0))),
 			"range_max": float(combat_source.get("range_max", stats.get("range", 0.0))),

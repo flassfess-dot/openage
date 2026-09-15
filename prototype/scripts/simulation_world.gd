@@ -948,8 +948,9 @@ func civilization_record(team: int) -> Dictionary:
 
 
 func initialize_team_rules(team: int) -> void:
-	apply_technology_commands(team, technology_system.initialize_team(team), false)
 	var civilization := civilization_record(team)
+	technology_system.initialize_rule_resources(team, civilization.get("resources", []))
+	apply_technology_commands(team, technology_system.initialize_team(team), false)
 	apply_technology_commands(team, technology_system.apply_effect_bundle(team, int(civilization.get("tech_tree_id", -1))), false)
 	resolve_automatic_technologies(team)
 
@@ -2609,9 +2610,7 @@ func harvestable_amount_for(kind: String, team: int) -> int:
 	var amount_resource_id := int(data_repository.runtime_metadata(kind).get("resource_amount_id", -1))
 	if amount_resource_id < 0:
 		return 0
-	var civilization_resources: Array = civilization_record(team).get("resources", [])
-	var base_amount := float(civilization_resources[amount_resource_id]) if amount_resource_id < civilization_resources.size() else 0.0
-	return maxi(0, roundi(base_amount + float(get_resource_amount(team, amount_resource_id))))
+	return maxi(0, roundi(technology_system.rule_resource_value(team, amount_resource_id)))
 
 
 func population_support_for(kind: String, team: int) -> int:
@@ -3547,6 +3546,7 @@ func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int) -> vo
 	components.get("movement", {})["speed"] = entity["speed"]
 	components.get("combat", {})["attacks"] = attacks
 	components.get("combat", {})["armors"] = combat.get("armors", []).duplicate(true)
+	components.get("combat", {})["base_armor"] = float(combat.get("base_armor", 0.0))
 	components.get("combat", {})["attack_period"] = entity["attack_period"]
 	components.get("combat", {})["range_min"] = entity["attack_range_min"]
 	components.get("combat", {})["range_max"] = entity["attack_range"]
@@ -3621,6 +3621,9 @@ func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 		14:
 			entity["carry_capacity"] = maxf(0.0, apply_effect_operator(float(entity.get("carry_capacity", 0.0)), effect_type, value))
 			components.get("resource_carrier", {})["capacity"] = entity["carry_capacity"]
+		15:
+			var combat: Dictionary = components.get("combat", {})
+			combat["base_armor"] = apply_effect_operator(float(combat.get("base_armor", 0.0)), effect_type, value)
 		16:
 			entity["projectile_id"] = roundi(apply_effect_operator(float(entity.get("projectile_id", -1)), effect_type, value))
 			components.get("combat", {})["projectile_id"] = entity["projectile_id"]
@@ -3658,9 +3661,16 @@ func apply_resource_effect(team: int, command: Dictionary, effect_type: int) -> 
 	var operator := effect_type
 	if effect_type == 1:
 		operator = 0 if int(command.get("attr_b", 0)) == 0 else 4
-	var previous_value := get_resource_amount(team, resource_id)
-	set_resource_amount(team, resource_id, roundi(apply_effect_operator(float(previous_value), operator, value)))
-	apply_harvestable_amount_delta(team, resource_id, get_resource_amount(team, resource_id) - previous_value)
+	if resource_id in [0, 1, 2, 3]:
+		var previous_stockpile := get_resource_amount(team, resource_id)
+		set_resource_amount(team, resource_id, roundi(apply_effect_operator(float(previous_stockpile), operator, value)))
+		return
+	var previous_value := technology_system.rule_resource_value(team, resource_id)
+	var updated_value := technology_system.apply_rule_resource_effect(team, resource_id, operator, value)
+	# Keep the old integer query facade for existing consumers while rule systems
+	# use the precise DAT value (faith and tribute modifiers are fractional).
+	set_resource_amount(team, resource_id, roundi(updated_value))
+	apply_harvestable_amount_delta(team, resource_id, roundi(updated_value) - roundi(previous_value))
 
 
 func apply_harvestable_amount_delta(team: int, resource_amount_id: int, delta: int) -> void:

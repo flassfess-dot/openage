@@ -192,6 +192,7 @@ func _apply_combat_source(worker: Dictionary, source: Dictionary) -> void:
 	worker["combat_enabled"] = not attacks.is_empty()
 	component["attacks"] = attacks
 	component["armors"] = source_combat.get("armors", []).duplicate(true)
+	component["base_armor"] = float(source_combat.get("base_armor", 0.0))
 	component["attack_period"] = worker["attack_period"]
 	component["range_min"] = worker["attack_range_min"]
 	component["range_max"] = worker["attack_range"]

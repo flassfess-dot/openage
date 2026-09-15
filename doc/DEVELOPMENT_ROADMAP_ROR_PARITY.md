@@ -620,3 +620,14 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 4. Какой тест докажет безопасность изменения порядка?
 
 Видимый дефект сам по себе не нарушает порядок. Он становится немедленным приоритетом, если блокирует управление, диагностику, контрольный сценарий или выявляет ошибку фундаментального контракта.
+
+## Активный журнал E4
+
+### Прогресс (2026-09-15, E4-001…E4-003 — общая матрица и правила цивилизаций)
+
+- Создана source-derived матрица всех 16 игровых цивилизаций и 41 общей roster-линии. Она отделяет общий механизм от статуса конкретной нации: Roman остаётся `integrated`, остальные 15 цивилизаций не будут объявлены готовыми до собственного end-to-end vertical evidence.
+- Исправлена исходная идентичность дополнения: civilization ID 15 — Palmyran, ID 16 — Macedonian, включая name ID, русскую локализацию и technology-tree bundle. Chariot Archer 41 и Camel Rider 338, а также Heavy Horse Archer 281, Cataphract 283 и Armored Elephant 345 подключены к общему runtime/presentation catalog.
+- Civilization effect pipeline теперь хранит дробные rule resources без потери точности. Faith Recharge 35 управляет восстановлением веры и Fanaticism через DAT-команду; Farm Food 36 управляет ёмкостью новых и существующих ферм; Tribute Inefficiency 46 готов для E5 торговли. Attribute 15 подключён как default/base armor с class-specific armor precedence.
+- Инкрементальный импорт добавил только 1170 недостающих P1/P2 кадров: 21641 запись была взята из постоянного cache. Текущий catalog содержит 22811 asset records и 68 runtime archetypes; полная перепаковка не выполнялась.
+- Impact-gate проходит: all-civilization source matrix, общий roster extension, все civilization attribute/resource commands, Palmyran runtime bonus, Babylonian faith, melee combat, Temple/Priest conversion, HUD model, runtime repository и presentation/cavalry regression. Полный suite/cache validation/export отложен до границы E4.
+- Следующая активная работа: пакет цивилизаций 1–4 (Egyptian, Greek, Babylonian, Assyrian) — availability/restrictions, production/research, бонусы, building shell/icon set, unit presentation/audio и короткий skirmish oracle для каждой нации.

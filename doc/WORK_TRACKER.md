@@ -1196,3 +1196,11 @@ ext_unit_id.
 - Полный stage gate: `A-006 suite: 192 passed, 0 failed`. Cache validation: `0 errors / 181 source-owned warnings`; source asset import не запускался.
 - Windows PCK пересобран из готового cache: `246 998 356` байт, SHA-256 `c9e65cfb3e979e7af4057c889b0dfb9e75dcafc354ab95338232123f40d050f3`. Экспортированный EXE автономно запустил `prototype_skirmish` в headless-режиме и завершился с кодом 0 без runtime/script errors.
 - E3 закрыт как стабильный `INTEGRATED`, не `PARITY/HARDENED`. Активная очередь: E4 — source-derived матрица всех цивилизаций и вертикальные data-driven волны roster/technology/bonus/restriction/graphics/audio. Кампании остаются заморожены до E7.
+
+### Прогресс (2026-09-15, E4-001…E4-003 — all-civilization foundation)
+
+- `data/content_waves/all_civilizations.json` фиксирует 16 игровых цивилизаций, их source IDs/name IDs/effect bundles/icon sets, 41 общую roster-линию и явные gaps. Ошибочная перестановка Palmyran/Macedonian для ID 15/16 устранена.
+- Общий runtime roster дополнен Chariot Archer, Camel Rider и upgrade-вариантами Heavy Horse Archer, Cataphract, Armored Elephant. Инкрементальный asset pass: 21641 cache hits, 1170 misses; итог — 22811 asset records и 68 archetypes.
+- `TechnologySystem` разделяет целочисленные экономические stockpiles и точные DAT rule resources. Подключены resource 35/36/46; Fanaticism больше не дублируется отдельным множителем. Base armor attribute 15 проходит через entity components, upgrades, worker roles, combat и HUD.
+- E4-001 source matrix, E4-002 common roster и E4-003 civilization rule tests проходят вместе с затронутыми melee, Priest conversion, HUD, repository и presentation regressions. Полный stage gate остаётся на границе E4.
+- Текущая очередь: закрыть вертикальным пакетом Egyptian/Greek/Babylonian/Assyrian, после чего тем же контрактом пройти 5–8, 9–12 и 14–16; Roman используется как контрольный fixture.

@@ -27,6 +27,25 @@ func initialize_team(team: int) -> Array:
 	return complete_research(team, 100)
 
 
+func initialize_rule_resources(team: int, source_values: Array) -> void:
+	var values: Dictionary = {}
+	for resource_id in range(source_values.size()):
+		values[resource_id] = float(source_values[resource_id])
+	_state(team)["rule_resources"] = values
+
+
+func rule_resource_value(team: int, resource_id: int, fallback: float = 0.0) -> float:
+	return float(_state(team)["rule_resources"].get(resource_id, fallback))
+
+
+func apply_rule_resource_effect(team: int, resource_id: int, operator: int, value: float) -> float:
+	var state := _state(team)
+	var current := float(state["rule_resources"].get(resource_id, 0.0))
+	var updated := _apply_operator(current, operator, value)
+	state["rule_resources"][resource_id] = updated
+	return updated
+
+
 func technology(technology_id: int) -> Dictionary:
 	return catalog.get("technologies", {}).get(String.num_int64(technology_id), {})
 
@@ -350,6 +369,7 @@ func _state(team: int) -> Dictionary:
 			"entity_effects": [],
 			"technology_cost_modifiers": {},
 			"technology_time_modifiers": {},
+			"rule_resources": {},
 		}
 	return team_states[team]
 

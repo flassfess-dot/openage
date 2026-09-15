@@ -3,25 +3,29 @@ class_name RoRCombatRules
 const MELEE_CONTACT_MARGIN: float = 0.08
 
 
-static func damage_for_attack(attack: Dictionary, armors: Array, multiplier: float = 1.0) -> float:
+static func damage_for_attack(attack: Dictionary, armors: Array, multiplier: float = 1.0, base_armor: float = 0.0) -> float:
 	var amount := float(attack.get("amount", 0.0))
 	if not attack.has("type_id"):
 		return maxf(amount * multiplier, 0.0)
 	var attack_class := int(attack["type_id"])
-	var armor_amount := 0.0
+	var armor_amount := base_armor
+	var matched_class := false
 	for armor_value in armors:
 		var armor: Dictionary = armor_value
 		if int(armor.get("type_id", -1)) != attack_class:
 			continue
+		matched_class = true
 		armor_amount += float(armor.get("amount", 0.0))
+	if matched_class:
+		armor_amount -= base_armor
 	return maxf((amount - armor_amount) * multiplier, 0.0)
 
 
-static func total_damage(attacks: Array, armors: Array, multiplier: float = 1.0, minimum_damage: float = 1.0) -> float:
+static func total_damage(attacks: Array, armors: Array, multiplier: float = 1.0, minimum_damage: float = 1.0, base_armor: float = 0.0) -> float:
 	var total := 0.0
 	for attack_value in attacks:
 		var attack: Dictionary = attack_value
-		total += damage_for_attack(attack, armors, multiplier)
+		total += damage_for_attack(attack, armors, multiplier, base_armor)
 	return maxf(total, minimum_damage)
 
 
@@ -36,7 +40,7 @@ static func damage_from_attacks(attacks: Array, target: Dictionary, multiplier: 
 	var minimum_damage := 0.1 if building_target else 1.0
 	if attacks.is_empty():
 		return maxf(fallback * final_multiplier, minimum_damage)
-	return total_damage(attacks, target_combat.get("armors", []), final_multiplier, minimum_damage)
+	return total_damage(attacks, target_combat.get("armors", []), final_multiplier, minimum_damage, float(target_combat.get("base_armor", 0.0)))
 
 
 static func primary_attack_damage(attacks: Array, fallback: float = 0.0) -> float:

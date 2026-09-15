@@ -220,7 +220,7 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 			"hp": roundi(float(leader.get("hp", 0.0))),
 			"max_hp": roundi(float(leader.get("max_hp", 0.0))),
 			"attack": roundi(float(leader.get("attack_damage", _largest_amount(combat.get("attacks", []))))),
-			"armor": maxi(0, roundi(_largest_amount(combat.get("armors", [])))),
+			"armor": maxi(0, roundi(maxf(float(combat.get("base_armor", 0.0)), _largest_amount(combat.get("armors", []))))),
 			"task": String(leader.get("task", leader.get("state", ""))),
 			"stance": String(leader.get("stance", "")),
 			"carried_amount": roundi(float(leader.get("carried_amount", 0.0))),

@@ -242,6 +242,24 @@
       }
     },
     {
+      "alias": "chariot_archer",
+      "internal_id": "ror.unit.chariot_archer",
+      "source_unit_id": 41,
+      "presentation_id": "unit.chariot_archer",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "ranged", "cavalry", "chariot"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "chariot_archer_idle", "enemy_asset_name": "enemy_chariot_archer_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "chariot_archer_move", "enemy_asset_name": "enemy_chariot_archer_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "chariot_archer_attack", "enemy_asset_name": "enemy_chariot_archer_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "chariot_archer_death", "enemy_asset_name": "enemy_chariot_archer_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "chariot_archer_corpse", "enemy_asset_name": "enemy_chariot_archer_corpse", "graphic_id": 145, "loop": false}
+        }
+      }
+    },
+    {
       "alias": "slinger",
       "internal_id": "ror.unit.slinger",
       "source_unit_id": 347,
@@ -334,6 +352,13 @@
             "attack": {"asset_name": "heavy_cavalry_attack", "enemy_asset_name": "enemy_heavy_cavalry_attack", "graphic_field": "attack", "loop": false},
             "death": {"asset_name": "heavy_cavalry_death", "enemy_asset_name": "enemy_heavy_cavalry_death", "graphic_field": "death", "loop": false},
             "corpse": {"asset_name": "heavy_cavalry_corpse", "enemy_asset_name": "enemy_heavy_cavalry_corpse", "graphic_id": 152, "loop": false}
+          },
+          "283": {
+            "idle": {"asset_name": "cataphract_idle", "enemy_asset_name": "enemy_cataphract_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "cataphract_move", "enemy_asset_name": "enemy_cataphract_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "cataphract_attack", "enemy_asset_name": "enemy_cataphract_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "cataphract_death", "enemy_asset_name": "enemy_cataphract_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "cataphract_corpse", "enemy_asset_name": "enemy_cataphract_corpse", "graphic_id": 152, "loop": false}
           }
         }
       }
@@ -353,6 +378,33 @@
           "attack": {"asset_name": "horse_archer_attack", "enemy_asset_name": "enemy_horse_archer_attack", "graphic_field": "attack", "loop": false},
           "death": {"asset_name": "horse_archer_death", "enemy_asset_name": "enemy_horse_archer_death", "graphic_field": "death", "loop": false},
           "corpse": {"asset_name": "horse_archer_corpse", "enemy_asset_name": "enemy_horse_archer_corpse", "graphic_id": 134, "loop": false}
+        },
+        "presentation_variants": {
+          "281": {
+            "idle": {"asset_name": "horse_archer_idle", "enemy_asset_name": "enemy_horse_archer_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "horse_archer_move", "enemy_asset_name": "enemy_horse_archer_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "horse_archer_attack", "enemy_asset_name": "enemy_horse_archer_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "horse_archer_death", "enemy_asset_name": "enemy_horse_archer_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "horse_archer_corpse", "enemy_asset_name": "enemy_horse_archer_corpse", "graphic_id": 134, "loop": false}
+          }
+        }
+      }
+    },
+    {
+      "alias": "camel_rider",
+      "internal_id": "ror.unit.camel_rider",
+      "source_unit_id": 338,
+      "presentation_id": "unit.camel_rider",
+      "category": "unit",
+      "civilization_scope": "team",
+      "behavior_tags": ["mobile", "combatant", "melee", "cavalry", "camel"],
+      "runtime": {
+        "presentation_states": {
+          "idle": {"asset_name": "camel_rider_idle", "enemy_asset_name": "enemy_camel_rider_idle", "graphic_field": "idle", "loop": true},
+          "move": {"asset_name": "camel_rider_move", "enemy_asset_name": "enemy_camel_rider_move", "graphic_field": "move", "loop": true},
+          "attack": {"asset_name": "camel_rider_attack", "enemy_asset_name": "enemy_camel_rider_attack", "graphic_field": "attack", "loop": false},
+          "death": {"asset_name": "camel_rider_death", "enemy_asset_name": "enemy_camel_rider_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "camel_rider_corpse", "enemy_asset_name": "enemy_camel_rider_corpse", "graphic_id": 849, "loop": false}
         }
       }
     },
@@ -371,6 +423,15 @@
           "attack": {"asset_name": "war_elephant_attack", "enemy_asset_name": "enemy_war_elephant_attack", "graphic_field": "attack", "loop": false},
           "death": {"asset_name": "war_elephant_death", "enemy_asset_name": "enemy_war_elephant_death", "graphic_field": "death", "loop": false},
           "corpse": {"asset_name": "war_elephant_corpse", "enemy_asset_name": "enemy_war_elephant_corpse", "graphic_id": 165, "loop": false}
+        },
+        "presentation_variants": {
+          "345": {
+            "idle": {"asset_name": "armored_elephant_idle", "enemy_asset_name": "enemy_armored_elephant_idle", "graphic_field": "idle", "loop": true},
+            "move": {"asset_name": "armored_elephant_move", "enemy_asset_name": "enemy_armored_elephant_move", "graphic_field": "move", "loop": true},
+            "attack": {"asset_name": "armored_elephant_attack", "enemy_asset_name": "enemy_armored_elephant_attack", "graphic_field": "attack", "loop": false},
+            "death": {"asset_name": "armored_elephant_death", "enemy_asset_name": "enemy_armored_elephant_death", "graphic_field": "death", "loop": false},
+            "corpse": {"asset_name": "armored_elephant_corpse", "enemy_asset_name": "enemy_armored_elephant_corpse", "graphic_id": 926, "loop": false}
+          }
         }
       }
     },
