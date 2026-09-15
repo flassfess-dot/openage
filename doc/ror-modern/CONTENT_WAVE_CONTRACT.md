@@ -58,16 +58,16 @@ RoR расширяется законченными вертикальными �
 
 - Stone Age matrix не содержит скрытых gaps: береговая/глубоководная рыба, Fisherman 119, Dock 45 и Fishing Boat 13 имеют авторитетный runtime path и evidence.
 - Roman matrix: наземные unit/building линии, defences, Wonder, Priest actions и вся source-driven морская вертикаль интегрированы. Naval economy включает Whale 370; Trade/Transport — Dock-to-Dock lifecycle; combat 19 -> 20 -> 21/250 -> 277 имеет damage/death/impact, доступные source sounds, обе палитры/composite golden, mixed-domain AI и full-roster stress. Executable-level side-by-side и точная distance-to-gold формула остаются отдельными измеряемыми `PARITY` gaps.
-- E4 all-civilizations matrix перечисляет все 16 игровых цивилизаций и 41 общую линию roster. ID 15/16 закреплены по исходному каталогу как Palmyran/Macedonian. Roman и первая волна Egyptian/Greek/Babylonian/Assyrian имеют полный вертикальный статус `integrated`; ещё 11 цивилизаций остаются `planned` до собственных end-to-end доказательств.
+- E4 all-civilizations matrix перечисляет все 16 игровых цивилизаций и 41 общую линию roster. ID 15/16 закреплены по исходному каталогу как Palmyran/Macedonian. Roman и цивилизации 1–8 имеют полный вертикальный статус `integrated`; ещё 7 цивилизаций остаются `planned` до собственных end-to-end доказательств.
 - Civilization effects сохраняют дробные rule resources отдельно от целочисленных складов экономики. Уже подключены Faith Recharge 35, Farm Food 36 и Tribute Inefficiency 46; attribute 15 реализован как исходная base armor, применяемая при отсутствии явной брони соответствующего класса.
 - Placement и navigation используют декларативные movement domain/source terrain restriction. Dock обязан иметь доступную воду для флота и сухопутный периметр для строителя. Deep Fish принимает только водного gatherer, Shore Fish — наземного Fisherman либо водного gatherer.
 - Составные корабли рендерятся общим unit-composite contract: hull, sail, oars и weapon layer выбираются из source graphics/deltas без корабельных веток в renderer.
 - Asset cache: 23315 выбранных элементов и 68 runtime archetypes; unit/building/resource/projectile/effect/icon frames загружаются лениво. Волна цивилизаций 1–4 добавила только 504 отсутствовавших P1/P2 кадра архитектуры, остальные 22811 записей были cache hits. Manifest умеет явно выбирать `data`/`data2` при совпадающих SLP ID.
-- Последний полный boundary gate E3: `192 passed, 0 failed`, cache validation — `0 errors, 181 warnings`, Windows export и packaged smoke успешны. E4-001…E4-004 прошли impact-набор общей матрицы, roster, civilization rules и первой четырёхцивилизационной вертикали; полный suite/cache/export будет выполнен один раз на границе E4.
+- Последний полный boundary gate E3: `192 passed, 0 failed`, cache validation — `0 errors, 181 warnings`, Windows export и packaged smoke успешны. E4-001…E4-005 прошли impact-набор общей матрицы, roster, civilization rules и вертикалей цивилизаций 1–8; полный suite/cache/export будет выполнен один раз на границе E4.
 
 ## Ближайшая очередь
 
 1. E1–E3 завершены; E4 использует их как неизменяемый gameplay-core baseline.
-2. Тем же контрактом закрыть end-to-end вертикали цивилизаций 5–8, 9–12 и 14–16 поверх общей матрицы roster и правил.
+2. Тем же контрактом закрыть end-to-end вертикали цивилизаций 9–12 и 14–16 поверх общей матрицы roster и правил.
 3. На E5 закрыть data requirements skirmish/random maps/AI.
 4. После E6 возобновить scenarios/campaigns с `Reign of the Hittites` по сохранённой portfolio matrix.

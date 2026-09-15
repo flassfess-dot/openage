@@ -3415,6 +3415,8 @@ func change_resource_amount(team: int, resource_id: int, delta: int) -> void:
 
 
 func apply_technology_commands(team: int, commands: Array, resolve_automatic: bool = true) -> void:
+	var upgraded_entities: Array[Dictionary] = []
+	var upgraded_entity_ids: Dictionary = {}
 	for command_value in commands:
 		var command: Dictionary = command_value
 		var raw_type := int(command.get("type_id", -1))
@@ -3435,7 +3437,19 @@ func apply_technology_commands(team: int, commands: Array, resolve_automatic: bo
 				var target_id := int(command.get("attr_b", -1))
 				for entity in get_all_units_including_embarked() + buildings:
 					if int(entity.get("team", 0)) == team and not bool(entity.get("technology_locked", false)) and entity.get("unit_lineage", []).has(source_id):
-						apply_unit_upgrade_to_entity(entity, target_id)
+						apply_unit_upgrade_to_entity(entity, target_id, false)
+						var entity_id := int(entity.get("id", -1))
+						if not upgraded_entity_ids.has(entity_id):
+							upgraded_entity_ids[entity_id] = true
+							upgraded_entities.append(entity)
+	# An upgrade replaces the source-owned base values. Rebuild every upgraded
+	# entity once after the complete bundle, then apply all persistent modifiers
+	# exactly once so pre-existing and newly produced units remain equivalent.
+	for entity in upgraded_entities:
+		apply_unit_upgrade_to_entity(entity, int(entity.get("source_unit_id", -1)), false)
+		for persistent_value in technology_system.persistent_entity_effects(team):
+			apply_attribute_effect(entity, persistent_value)
+		configure_entity_combat_awareness(entity)
 	var researched := technology_system.researched_ids(team)
 	for entity in get_all_units_including_embarked() + buildings:
 		if int(entity.get("team", 0)) == team and not bool(entity.get("technology_locked", false)):
@@ -3500,13 +3514,13 @@ func apply_technology_state_to_entity(entity: Dictionary, team: int) -> void:
 	var source_id := int(entity.get("source_unit_id", -1))
 	var resolved_id := technology_system.resolved_unit_id(team, source_id)
 	if resolved_id >= 0 and resolved_id != source_id:
-		apply_unit_upgrade_to_entity(entity, resolved_id)
+		apply_unit_upgrade_to_entity(entity, resolved_id, false)
 	for command_value in technology_system.persistent_entity_effects(team):
 		apply_attribute_effect(entity, command_value)
 	entity.get("components", {}).get("technology", {})["researched_ids"] = technology_system.researched_ids(team)
 
 
-func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int) -> void:
+func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapply_persistent_effects: bool = true) -> void:
 	if bool(entity.get("technology_locked", false)):
 		return
 	var team := int(entity.get("team", 0))
@@ -3565,6 +3579,9 @@ func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int) -> vo
 	components.get("animation_state", {})["source_graphics"] = source.get("graphics", {}).duplicate(true)
 	if not active_worker_profile.is_empty():
 		worker_role_system.apply(entity, active_worker_profile, active_worker_combat)
+	if reapply_persistent_effects:
+		for persistent_value in technology_system.persistent_entity_effects(team):
+			apply_attribute_effect(entity, persistent_value)
 	configure_entity_combat_awareness(entity)
 
 

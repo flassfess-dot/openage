@@ -6,7 +6,10 @@ const PresentationAudioRouter := preload("res://scripts/presentation_audio_route
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
-const MATRIX_PATH := "res://data/content_waves/civilizations_1_4.json"
+const MATRIX_PATHS := [
+	"res://data/content_waves/civilizations_1_4.json",
+	"res://data/content_waves/civilizations_5_8.json",
+]
 const ALL_CIVILIZATIONS_PATH := "res://data/content_waves/all_civilizations.json"
 
 var failures: Array[String] = []
@@ -15,12 +18,13 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
-	var matrix := read_json(MATRIX_PATH)
 	var all_civilizations := read_json(ALL_CIVILIZATIONS_PATH)
-	for civilization_value in matrix.get("civilizations", []):
-		verify_civilization_vertical(catalog, civilization_value, all_civilizations.get("common_roster_lines", []))
+	for matrix_path in MATRIX_PATHS:
+		var matrix := read_json(matrix_path)
+		for civilization_value in matrix.get("civilizations", []):
+			verify_civilization_vertical(catalog, civilization_value, all_civilizations.get("common_roster_lines", []))
 	if failures.is_empty():
-		print("E4-004 civilizations 1-4 vertical tests passed")
+		print("E4 civilization vertical tests passed")
 		quit(0)
 		return
 	for failure in failures:
@@ -88,20 +92,54 @@ func verify_signature_bonus(world, specification: Dictionary, context: String) -
 	var kind := String(bonus.get("kind", ""))
 	var source_id := int(bonus.get("source_unit_id", -1))
 	var source: Dictionary = world.object_record_by_id(source_id, 1)
+	if String(bonus.get("field", "")) == "resource_cost":
+		verify_signature_cost(world, source, bonus, kind, context)
+		return
 	var entity: Dictionary
 	if String(source.get("movement", {}).get("domain", "land")) == "static" or kind == "tower":
 		entity = world.add_building(1100 + int(specification.get("civilization_id", 0)), kind, Vector2(20.0, 20.0), 1)
 	else:
 		entity = world.add_unit(1, kind, Vector2(20.0, 20.0), false)
+	var upgrade_from_source_id := int(bonus.get("upgrade_from_source_unit_id", -1))
+	if upgrade_from_source_id >= 0:
+		assert_equal(int(entity.get("source_unit_id", -1)), upgrade_from_source_id, "%s signature object upgrade source identity" % context)
+		world.apply_unit_upgrade_to_entity(entity, source_id)
 	assert_equal(int(entity.get("source_unit_id", -1)), source_id, "%s signature object source identity" % context)
 	var field := String(bonus.get("field", ""))
-	var source_value := float(source.get("health", 0.0)) if field == "max_hp" else float(source.get(field, 0.0))
+	var source_value := source_field_value(source, field)
 	var expected := source_value
 	if String(bonus.get("operator", "")) == "multiply":
 		expected *= float(bonus.get("value", 1.0))
 	elif String(bonus.get("operator", "")) == "add":
 		expected += float(bonus.get("value", 0.0))
+	elif String(bonus.get("operator", "")) == "set":
+		expected = float(bonus.get("value", source_value))
 	assert_near(float(entity.get(field, 0.0)), expected, 0.0001, "%s signature bonus is active in runtime" % context)
+
+
+func verify_signature_cost(world, source: Dictionary, bonus: Dictionary, kind: String, context: String) -> void:
+	var resource_type_id := int(bonus.get("resource_type_id", -1))
+	var source_cost := 0.0
+	for cost_value in source.get("resources", {}).get("cost", []):
+		var cost: Dictionary = cost_value
+		if bool(cost.get("enabled", false)) and int(cost.get("type_id", -1)) == resource_type_id:
+			source_cost = float(cost.get("amount", 0.0))
+	var expected := source_cost
+	if String(bonus.get("operator", "")) == "multiply":
+		expected *= float(bonus.get("value", 1.0))
+	elif String(bonus.get("operator", "")) == "add":
+		expected += float(bonus.get("value", 0.0))
+	var actual := int(world.unit_resource_cost(kind, 1).get(resource_type_id, -1))
+	assert_equal(actual, maxi(0, roundi(expected)), "%s signature production cost is active in runtime" % context)
+
+
+func source_field_value(source: Dictionary, field: String) -> float:
+	match field:
+		"max_hp": return float(source.get("health", 0.0))
+		"attack_period": return float(source.get("combat", {}).get("attack_period", 0.0))
+		"attack_range": return float(source.get("combat", {}).get("range_max", 0.0))
+		"carry_capacity": return float(source.get("resources", {}).get("capacity", 0.0))
+	return float(source.get(field, 0.0))
 
 
 func verify_common_presentation_and_audio(catalog, world, civilization_id: int, context: String) -> void:

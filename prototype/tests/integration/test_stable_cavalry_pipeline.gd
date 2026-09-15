@@ -83,9 +83,10 @@ func verify_stable_cavalry_line(catalog) -> void:
 		assert_equal(world.get_resource_amount(1, 1), wood_before - 1200, "Scythe Chariot reserves original wood cost")
 		assert_equal(world.get_resource_amount(1, 3), gold_before - 800, "Scythe Chariot reserves original gold cost")
 		world.update_production(150.0)
-	assert_unit_variant(catalog, chariot, 339, "scythe_chariot", 120.0, 9.0, "Scythe Chariot")
+	assert_unit_variant(catalog, chariot, 339, "scythe_chariot", 138.0, 9.0, "Scythe Chariot")
 	var future: Dictionary = world.add_unit(1, "chariot", Vector2(10.0, 10.0), false)
 	assert_equal(future.get("source_unit_id"), 339, "future Chariots inherit Scythe Chariot upgrade")
+	assert_near(float(future.get("max_hp", 0.0)), float(chariot.get("max_hp", 0.0)), 0.001, "existing and future Scythe Chariots keep the same Nobility health bonus")
 	var enemy := {"kind": "chariot", "source_unit_id": 339, "team": 2, "facing": 0, "anim": 0.0}
 	assert_equal(catalog.unit_frame_info(enemy, "attack").get("asset_name"), "enemy_scythe_chariot_attack", "enemy Scythe Chariot uses recolored source attack")
 
@@ -110,7 +111,7 @@ func assert_unit_variant(catalog, unit: Dictionary, source_id: int, asset_prefix
 	if unit.is_empty():
 		return
 	assert_equal(unit.get("source_unit_id"), source_id, "%s source identity" % context)
-	assert_equal(unit.get("max_hp"), hp, "%s source health" % context)
+	assert_near(float(unit.get("max_hp", 0.0)), hp, 0.001, "%s effective health" % context)
 	assert_equal(unit.get("attack_damage"), damage, "%s primary source attack" % context)
 	for state in ["idle", "move", "attack", "death", "corpse"]:
 		assert_equal(catalog.unit_frame_info(unit, state).get("asset_name"), "%s_%s" % [asset_prefix, state], "%s %s presentation" % [context, state])
@@ -124,3 +125,8 @@ func assert_true(value: bool, context: String) -> void:
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
+
+
+func assert_near(actual: float, expected: float, tolerance: float, context: String) -> void:
+	if absf(actual - expected) > tolerance:
+		failures.append("%s: expected %s ± %s, got %s" % [context, expected, tolerance, actual])

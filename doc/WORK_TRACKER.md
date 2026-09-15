@@ -1211,3 +1211,10 @@ ext_unit_id.
 - Усиленный presentation oracle проверяет не только семантическое имя ресурса, а все видимые SLP-листья исходного graphic tree. Благодаря этому составные корабли и здания с пустым root graphic подтверждаются по hull/sail/oars/weapon и архитектурным слоям без ложного требования к несуществующей root-текстуре.
 - Новый selection sync добавляет только недостающие графические деревья зданий выбранных цивилизаций. Импорт: 22811 cache hits, 504 misses; итог — 23315 asset records и 68 runtime archetypes. Старые ресурсы не перепаковывались.
 - E4-004 integration oracle проходит. Матрица переводит civilization ID 1–4 в `integrated`; остаются 11 не-римских вертикалей. Следующий пакет — Minoan/Hittite/Phoenician/Sumerian (5–8), полный stage gate остаётся на границе E4.
+
+### Прогресс (2026-09-16, E4-005 — цивилизации 5–8)
+
+- Minoan, Hittite, Phoenician и Sumerian прошли общий end-to-end civilization oracle. Проверены их restrictions, Town Center/Tool Age, полный общий roster, presentation/audio, combat и характерные бонусы Composite Bowman/siege/elephant/villager.
+- Нового импорта не потребовалось: эти нации используют уже загруженные architecture icon sets 0/1/2; selection sync вернул 0 additions, catalog сохранил 23315 assets.
+- Исправлен общий дефект улучшения существующих юнитов: source replacement больше не теряет постоянные civilization/technology modifiers и не применяет их дважды. Отдельный тест сравнивает существующего Minoan Composite Bowman с созданным после исследования; обновлённый Roman cavalry oracle подтвердил сохранение Nobility HP на Scythe Chariot.
+- Затронутые technology, building-age, unit-line, naval, economy, civilization и deterministic replay проверки проходят. Матрица переводит ID 5–8 в `integrated`; остаются 7 не-римских вертикалей. Следующий пакет — Persian/Shang/Yamato/Choson (9–12).

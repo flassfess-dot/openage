@@ -43,7 +43,7 @@
   "evidence": [
     "res://tests/unit/test_all_civilizations_content_matrix.gd",
     "res://tests/integration/test_all_civilization_bonus_rules.gd",
-    "res://tests/integration/test_e4_civilizations_1_4_vertical.gd"
+    "res://tests/integration/test_e4_civilization_verticals.gd"
   ],
   "acceptance": [
     "source identity and restrictions",

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "wave_id": "e4_civilizations_5_8",
+  "scope": "Minoan, Hittite, Phoenician and Sumerian end-to-end civilization verticals",
+  "civilizations": [
+    {
+      "civilization_id": 5,
+      "alias": "minoan",
+      "technology_tree_effect_bundle_id": 86,
+      "icon_set": 1,
+      "signature_bonus": {"kind": "improved_bowman", "upgrade_from_source_unit_id": 5, "source_unit_id": 6, "field": "attack_range", "operator": "add", "value": 2.0},
+      "signature_disabled_technology_id": 19,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 6,
+      "alias": "hittite",
+      "technology_tree_effect_bundle_id": 85,
+      "icon_set": 2,
+      "signature_bonus": {"kind": "stone_thrower", "source_unit_id": 35, "field": "max_hp", "operator": "multiply", "value": 2.0},
+      "signature_disabled_technology_id": 9,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 7,
+      "alias": "phoenician",
+      "technology_tree_effect_bundle_id": 88,
+      "icon_set": 1,
+      "signature_bonus": {"kind": "war_elephant", "source_unit_id": 46, "field": "resource_cost", "resource_type_id": 0, "operator": "multiply", "value": 0.75},
+      "signature_disabled_technology_id": 112,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 8,
+      "alias": "sumerian",
+      "technology_tree_effect_bundle_id": 90,
+      "icon_set": 0,
+      "signature_bonus": {"kind": "villager", "source_unit_id": 83, "field": "max_hp", "operator": "add", "value": 15.0},
+      "signature_disabled_technology_id": 110,
+      "status": "integrated"
+    }
+  ],
+  "evidence": [
+    "res://tests/unit/test_all_civilizations_content_matrix.gd",
+    "res://tests/integration/test_all_civilization_bonus_rules.gd",
+    "res://tests/integration/test_civilization_upgrade_effect_persistence.gd",
+    "res://tests/integration/test_e4_civilization_verticals.gd"
+  ],
+  "acceptance": [
+    "source identity and restrictions",
+    "Town Center production and Tool Age research",
+    "signature runtime bonus, including upgraded entities and production cost",
+    "civilization building shell and complete common-roster presentation",
+    "source attack audio",
+    "authoritative short combat exchange"
+  ]
+}

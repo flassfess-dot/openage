@@ -639,3 +639,10 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Инкрементальный selection синхронизатор обошёл только графические деревья 17 общих building-линий для icon sets 0/1/2. Импорт добавил 504 недостающих кадра архитектуры, а 22811 существующих записей взял из cache; итоговый catalog — 23315 assets и 68 runtime archetypes.
 - Матрица переводит civilization ID 1–4 в `integrated`; открытый vertical-evidence gap сокращён с 15 до 11 цивилизаций. Полный suite/cache validation/export по-прежнему выполняется один раз на границе E4.
 - Следующая активная работа: пакет цивилизаций 5–8 (Minoan, Hittite, Phoenician, Sumerian) по тому же oracle и с добавлением только реально недостающих ресурсов.
+
+### Прогресс (2026-09-16, E4-005 — Minoan/Hittite/Phoenician/Sumerian)
+
+- Общий oracle перевёл цивилизации 5–8 в `integrated`: проверены ограничения, производство/исследование, полный roster, архитектура, составные unit graphics, source audio и короткий бой. Характерные runtime-пробы: Minoan Composite Bowman range, Hittite siege HP, Phoenician elephant cost и Sumerian villager HP.
+- Волна полностью переиспользовала уже импортированные icon sets 0/1/2: selection sync сообщил `0 additions`, поэтому catalog остался на 23315 assets и старые ресурсы не перепаковывались.
+- Найден и исправлен общий upgrade lifecycle gap. Замена source-варианта сбрасывала ранее действующий civilization modifier; теперь после полного effect bundle улучшенная сущность один раз пересобирается из нового source и получает весь persistent modifier set. Новый oracle доказывает равенство уже существующего и произведённого после исследования юнита; Roman Scythe Chariot теперь также правильно сохраняет Nobility HP.
+- Impact-набор technology/ages, Bowman, age buildings, cavalry, transport, farm, civilization rules, replay и обе civilization waves проходит. Открытый vertical-evidence gap сокращён до 7 цивилизаций; следующая волна — Persian/Shang/Yamato/Choson (9–12).
