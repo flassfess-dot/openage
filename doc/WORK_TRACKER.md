@@ -1204,3 +1204,10 @@ ext_unit_id.
 - `TechnologySystem` разделяет целочисленные экономические stockpiles и точные DAT rule resources. Подключены resource 35/36/46; Fanaticism больше не дублируется отдельным множителем. Base armor attribute 15 проходит через entity components, upgrades, worker roles, combat и HUD.
 - E4-001 source matrix, E4-002 common roster и E4-003 civilization rule tests проходят вместе с затронутыми melee, Priest conversion, HUD, repository и presentation regressions. Полный stage gate остаётся на границе E4.
 - Текущая очередь: закрыть вертикальным пакетом Egyptian/Greek/Babylonian/Assyrian, после чего тем же контрактом пройти 5–8, 9–12 и 14–16; Roman используется как контрольный fixture.
+
+### Прогресс (2026-09-16, E4-004 — цивилизации 1–4)
+
+- Egyptian, Greek, Babylonian и Assyrian закрыты единым вертикальным контрактом: source identity/restrictions, Town Center production, Tool Age research, характерный DAT-бонус, 41 общая roster-линия, presentation/audio и короткий авторитетный бой.
+- Усиленный presentation oracle проверяет не только семантическое имя ресурса, а все видимые SLP-листья исходного graphic tree. Благодаря этому составные корабли и здания с пустым root graphic подтверждаются по hull/sail/oars/weapon и архитектурным слоям без ложного требования к несуществующей root-текстуре.
+- Новый selection sync добавляет только недостающие графические деревья зданий выбранных цивилизаций. Импорт: 22811 cache hits, 504 misses; итог — 23315 asset records и 68 runtime archetypes. Старые ресурсы не перепаковывались.
+- E4-004 integration oracle проходит. Матрица переводит civilization ID 1–4 в `integrated`; остаются 11 не-римских вертикалей. Следующий пакет — Minoan/Hittite/Phoenician/Sumerian (5–8), полный stage gate остаётся на границе E4.

@@ -631,3 +631,11 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Инкрементальный импорт добавил только 1170 недостающих P1/P2 кадров: 21641 запись была взята из постоянного cache. Текущий catalog содержит 22811 asset records и 68 runtime archetypes; полная перепаковка не выполнялась.
 - Impact-gate проходит: all-civilization source matrix, общий roster extension, все civilization attribute/resource commands, Palmyran runtime bonus, Babylonian faith, melee combat, Temple/Priest conversion, HUD model, runtime repository и presentation/cavalry regression. Полный suite/cache validation/export отложен до границы E4.
 - Следующая активная работа: пакет цивилизаций 1–4 (Egyptian, Greek, Babylonian, Assyrian) — availability/restrictions, production/research, бонусы, building shell/icon set, unit presentation/audio и короткий skirmish oracle для каждой нации.
+
+### Прогресс (2026-09-16, E4-004 — Egyptian/Greek/Babylonian/Assyrian)
+
+- Четыре цивилизации прошли один end-to-end oracle: source identity, technology restrictions, Town Center production, Tool Age research, характерный DAT-бонус, полный общий roster, исходные graphics/composite layers, attack audio и авторитетный combat exchange.
+- Проверка общего roster выявила, что корни составных кораблей и части зданий не имеют собственного SLP. Критерий исправлен на проверку всех видимых листьев исходного graphic tree; это сохраняет исходные hull/sail/oars/weapon и архитектурные слои, не подменяя их Roman-графикой.
+- Инкрементальный selection синхронизатор обошёл только графические деревья 17 общих building-линий для icon sets 0/1/2. Импорт добавил 504 недостающих кадра архитектуры, а 22811 существующих записей взял из cache; итоговый catalog — 23315 assets и 68 runtime archetypes.
+- Матрица переводит civilization ID 1–4 в `integrated`; открытый vertical-evidence gap сокращён с 15 до 11 цивилизаций. Полный suite/cache validation/export по-прежнему выполняется один раз на границе E4.
+- Следующая активная работа: пакет цивилизаций 5–8 (Minoan, Hittite, Phoenician, Sumerian) по тому же oracle и с добавлением только реально недостающих ресурсов.

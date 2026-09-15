@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "wave_id": "e4_civilizations_1_4",
+  "scope": "Egyptian, Greek, Babylonian and Assyrian end-to-end civilization verticals",
+  "civilizations": [
+    {
+      "civilization_id": 1,
+      "alias": "egyptian",
+      "technology_tree_effect_bundle_id": 83,
+      "icon_set": 0,
+      "signature_bonus": {"kind": "chariot_archer", "source_unit_id": 41, "field": "max_hp", "operator": "multiply", "value": 1.3300000429153442},
+      "signature_disabled_technology_id": 69,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 2,
+      "alias": "greek",
+      "technology_tree_effect_bundle_id": 84,
+      "icon_set": 1,
+      "signature_bonus": {"kind": "hoplite", "source_unit_id": 93, "field": "speed", "operator": "add", "value": 0.30000001192092896},
+      "signature_disabled_technology_id": 68,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 3,
+      "alias": "babylonian",
+      "technology_tree_effect_bundle_id": 82,
+      "icon_set": 2,
+      "signature_bonus": {"kind": "tower", "source_unit_id": 79, "field": "max_hp", "operator": "multiply", "value": 2.0},
+      "signature_disabled_technology_id": 71,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 4,
+      "alias": "assyrian",
+      "technology_tree_effect_bundle_id": 81,
+      "icon_set": 0,
+      "signature_bonus": {"kind": "villager", "source_unit_id": 83, "field": "speed", "operator": "add", "value": 0.20000000298023224},
+      "signature_disabled_technology_id": 37,
+      "status": "integrated"
+    }
+  ],
+  "evidence": [
+    "res://tests/unit/test_all_civilizations_content_matrix.gd",
+    "res://tests/integration/test_all_civilization_bonus_rules.gd",
+    "res://tests/integration/test_e4_civilizations_1_4_vertical.gd"
+  ],
+  "acceptance": [
+    "source identity and restrictions",
+    "Town Center production and Tool Age research",
+    "signature runtime bonus",
+    "civilization building shell and common unit presentation",
+    "source attack audio",
+    "authoritative short combat exchange"
+  ]
+}
