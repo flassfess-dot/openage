@@ -338,6 +338,7 @@
       "civilization_scope": "team",
       "behavior_tags": ["mobile", "combatant", "melee", "cavalry"],
       "runtime": {
+        "source_mapping_excluded_ids": [283],
         "presentation_states": {
           "idle": {"asset_name": "cavalry_idle", "enemy_asset_name": "enemy_cavalry_idle", "graphic_field": "idle", "loop": true},
           "move": {"asset_name": "cavalry_move", "enemy_asset_name": "enemy_cavalry_move", "graphic_field": "move", "loop": true},
@@ -417,6 +418,7 @@
       "civilization_scope": "team",
       "behavior_tags": ["mobile", "combatant", "melee", "cavalry", "elephant"],
       "runtime": {
+        "source_mapping_excluded_ids": [345],
         "presentation_states": {
           "idle": {"asset_name": "war_elephant_idle", "enemy_asset_name": "enemy_war_elephant_idle", "graphic_field": "idle", "loop": true},
           "move": {"asset_name": "war_elephant_move", "enemy_asset_name": "enemy_war_elephant_move", "graphic_field": "move", "loop": true},

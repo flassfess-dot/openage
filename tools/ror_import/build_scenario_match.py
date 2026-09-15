@@ -264,16 +264,31 @@ def register_source(
 
 def archetype_by_source(manifest: dict[str, Any]) -> dict[int, dict[str, Any]]:
     result: dict[int, dict[str, Any]] = {}
+    excluded_sources: set[int] = set()
     for archetype in manifest.get("archetypes", []):
         register_source(result, archetype.get("source_unit_id"), archetype)
         runtime = archetype.get("runtime", {})
+        archetype_exclusions = {
+            int(source_id) for source_id in runtime.get("source_mapping_excluded_ids", [])
+        }
+        excluded_sources.update(archetype_exclusions)
         for source_id in runtime.get("source_variant_unit_ids", []):
+            if int(source_id) in archetype_exclusions:
+                continue
             register_source(result, source_id, archetype)
         for source_id in runtime.get("presentation_variants", {}):
+            if int(source_id) in archetype_exclusions:
+                continue
             register_source(result, source_id, archetype)
         for profile_group in ("worker_resource_profiles", "worker_task_profiles"):
             for profile in runtime.get(profile_group, {}).values():
                 register_source(result, profile.get("role_source_unit_id"), archetype)
+    missing_owners = sorted(source_id for source_id in excluded_sources if source_id not in result)
+    if missing_owners:
+        raise ScenarioConversionError(
+            "source mapping exclusions have no canonical owner: "
+            + ", ".join(str(source_id) for source_id in missing_owners)
+        )
     return result
 
 

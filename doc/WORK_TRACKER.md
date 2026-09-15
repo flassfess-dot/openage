@@ -1224,3 +1224,12 @@ ext_unit_id.
 - Persian, Shang, Yamato и Choson прошли общий civilization oracle: restrictions, Town Center/Tool Age, полный roster, source graphics/audio, combat и характерные bonus probes.
 - Азиатский icon set 3 потребовал только 150 новых кадров; 23315 прежних записей переиспользованы из cache. Catalog содержит 23465 asset records и 68 archetypes.
 - Матрица переводит ID 9–12 в `integrated`; остаются Carthaginian, Palmyran и Macedonian. Следующий пакет — цивилизации 14–16, после него один полный E4 suite/cache/export gate.
+
+### Граница (2026-09-16, E4-007 — цивилизации 14–16 и полный gate)
+
+- Carthaginian, Palmyran и Macedonian прошли общий civilization oracle. Проверены исходные restrictions, Town Center/Tool Age, 41 roster-линия, presentation/audio, combat и характерные бонусы: War Elephant HP, Camel Rider speed и Stone Thrower wood cost.
+- Все 16 цивилизаций переведены в `integrated`; `E4-CIV-VERTICAL-EVIDENCE` удалён из gap ledger. Icon set 4 уже находился в постоянном cache, поэтому контрольный импорт сообщил `23465 hits / 0 misses` и ничего не перепаковал.
+- Общий upgrade lifecycle сохраняет modifiers существующих юнитов и не складывает команды разных source-ступеней дважды. Для source ID 283/345 добавлено явное data-driven владение между scenario archetype и presentation variant; неоднозначный импорт теперь остаётся ошибкой, а исключение без канонического владельца также отклоняется.
+- Пересчитаны обе кампанийные матрицы: Rise of Rome — 6/6 ready; весь установленный portfolio — 14 кампаний, 95 миссий, 18 launcher-ready и 77 explicit blocked. Аудиторы и cache validator принимают явный Python runtime, не завися от Windows App Execution Alias.
+- Полный gate: `A-006 suite: 197 passed, 0 failed`; validation `0 errors / 181 warnings`; Windows PCK `255789072` байта, SHA-256 `666372d82d8284ab8101bd5b2c42c72e38f12773a6e216bc1bf0f5c5d18b8f06`; packaged `prototype_skirmish` smoke — процесс стабилен 15 секунд, script/runtime errors отсутствуют.
+- E4 закрыт как `INTEGRATED`. Активная очередь — E5: skirmish settings/diplomacy, random-map data requirements и полноценный AI-матч; E6 сохраняет нагрузочные цели 500 юнитов на игрока и карты ×4, E7 — размороженные кампании.

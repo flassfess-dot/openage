@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "wave_id": "e4_civilizations_14_16",
+  "scope": "Carthaginian, Palmyran and Macedonian end-to-end civilization verticals",
+  "civilizations": [
+    {
+      "civilization_id": 14,
+      "alias": "carthaginian",
+      "technology_tree_effect_bundle_id": 205,
+      "icon_set": 4,
+      "signature_bonus": {"kind": "war_elephant", "source_unit_id": 46, "field": "max_hp", "operator": "multiply", "value": 1.25},
+      "signature_disabled_technology_id": 36,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 15,
+      "alias": "palmyran",
+      "technology_tree_effect_bundle_id": 207,
+      "icon_set": 4,
+      "signature_bonus": {"kind": "camel_rider", "source_unit_id": 338, "field": "speed", "operator": "multiply", "value": 1.25},
+      "signature_disabled_technology_id": 8,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 16,
+      "alias": "macedonian",
+      "technology_tree_effect_bundle_id": 206,
+      "icon_set": 4,
+      "signature_bonus": {"kind": "stone_thrower", "source_unit_id": 35, "field": "resource_cost", "resource_type_id": 1, "operator": "multiply", "value": 0.5},
+      "signature_disabled_technology_id": 14,
+      "status": "integrated"
+    }
+  ],
+  "evidence": [
+    "res://tests/unit/test_all_civilizations_content_matrix.gd",
+    "res://tests/integration/test_all_civilization_bonus_rules.gd",
+    "res://tests/integration/test_e4_civilization_verticals.gd"
+  ],
+  "acceptance": [
+    "source identity and restrictions",
+    "Town Center production and Tool Age research",
+    "signature runtime bonus, including production cost",
+    "civilization building shell and complete common-roster presentation",
+    "source attack audio",
+    "authoritative short combat exchange"
+  ]
+}

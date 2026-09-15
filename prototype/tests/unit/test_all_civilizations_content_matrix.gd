@@ -170,7 +170,8 @@ func add_representation(result: Dictionary, source_id: int, alias: String) -> vo
 
 func verify_gap_ledger(matrix: Dictionary) -> void:
 	var gap_ids: Array = matrix.get("known_gaps", []).map(func(gap): return String(gap.get("id", "")))
-	assert_true("E4-CIV-VERTICAL-EVIDENCE" in gap_ids, "non-Roman vertical evidence remains explicit")
+	assert_true(matrix.get("civilizations", []).all(func(civilization): return String(civilization.get("vertical_status", "")) == "integrated"), "every playable civilization has end-to-end vertical evidence")
+	assert_true("E4-CIV-VERTICAL-EVIDENCE" not in gap_ids, "completed civilization verticals leave no stale evidence gap")
 	assert_true("E4-CIV-PARITY-CAPTURE" in gap_ids, "executable parity remains separate from source integration")
 
 

@@ -3,7 +3,7 @@
   "auditor_version": "campaign-portfolio-gap-matrix-2",
   "manifest_sha256": "0b1f0d47184be660b1fd8336e99a3f2ac790e45e0f848b4762b1ae84ce265956",
   "source_catalog_cache_key": "503d563c4df9d249e72e596c0cad57fab905435ca0a349b57669361271080ca3",
-  "runtime_catalog_cache_key": "fc8ded7860c462e446ade5a7ad14f1bd074eabbbe5c142518c3e1bb8379c0afd",
+  "runtime_catalog_cache_key": "672739c97ead0d1fd0fcf4bbe85014e128d0e925bf40abc4c5268cb1c7dbcd1a",
   "published_campaign_filenames": [
     "first punic war.cpx",
     "расцвет рима.cpx"
@@ -11,8 +11,8 @@
   "summary": {
     "campaign_count": 14,
     "mission_count": 95,
-    "launcher_ready_mission_count": 17,
-    "blocked_mission_count": 78,
+    "launcher_ready_mission_count": 18,
+    "blocked_mission_count": 77,
     "parity_ready_mission_count": 0,
     "common_gap_campaign_counts": {
       "ai_normalization_gap": 3,
@@ -31,8 +31,8 @@
     "source_campaign_12",
     "source_campaign_08",
     "source_campaign_06",
-    "source_campaign_01",
     "source_campaign_00",
+    "source_campaign_01",
     "source_campaign_03",
     "source_campaign_13",
     "source_campaign_02",
@@ -49,22 +49,21 @@
       "extension": ".cpx",
       "sha256": "b5cb78bf2b4a25278e5da8cdc0c088ae50baaa13d2687133ffd4b8b643df9102",
       "mission_count": 8,
-      "launcher_ready_mission_count": 2,
-      "blocked_mission_count": 6,
+      "launcher_ready_mission_count": 3,
+      "blocked_mission_count": 5,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 69,
+      "blocking_gap_total": 40,
       "parity_gap_total": 20,
       "gap_mission_counts": {
         "ai_semantics_gap": 8,
         "asset_gap": 3,
         "condition_gap": 4,
-        "object_gap": 5
+        "object_gap": 4
       },
       "object_gap_reasons": {
-        "archetype_missing": 41
+        "archetype_missing": 12
       },
       "unsupported_source_object_counts": {
-        "41": 29,
         "60": 2,
         "89": 6,
         "90": 2,
@@ -103,8 +102,8 @@
         "graphic_618"
       ],
       "selection_score": [
-        6,
-        69,
+        5,
+        40,
         20,
         8
       ],
@@ -1084,12 +1083,12 @@
             144
           ],
           "source_object_count": 4878,
-          "runtime_entity_count": 4222,
+          "runtime_entity_count": 4227,
           "presentation_object_count": 647,
           "source_ai_profile_count": 1,
           "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 9,
+            "object_gap_count": 4,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -1100,7 +1099,7 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 12,
+          "blocking_gap_total": 7,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -1108,14 +1107,9 @@
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 9
+            "archetype_missing": 4
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 41,
-              "count": 5
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 60,
@@ -2369,12 +2363,12 @@
             200
           ],
           "source_object_count": 12134,
-          "runtime_entity_count": 11256,
+          "runtime_entity_count": 11280,
           "presentation_object_count": 854,
           "source_ai_profile_count": 3,
           "normalized_condition_count": 6,
           "blocking_gaps": {
-            "object_gap_count": 24,
+            "object_gap_count": 0,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -2385,22 +2379,13 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 24,
+          "blocking_gap_total": 0,
           "parity_gap_total": 3,
           "gap_ids": [
-            "object_gap",
             "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 24
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 41,
-              "count": 24
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
@@ -2735,7 +2720,7 @@
           ],
           "missing_runtime_aliases": [],
           "missing_asset_names": [],
-          "launcher_ready": false,
+          "launcher_ready": true,
           "parity_ready": false
         }
       ]
@@ -2751,19 +2736,18 @@
       "launcher_ready_mission_count": 2,
       "blocked_mission_count": 6,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 32,
+      "blocking_gap_total": 23,
       "parity_gap_total": 25,
       "gap_mission_counts": {
         "ai_semantics_gap": 8,
         "asset_gap": 2,
         "condition_gap": 4,
-        "object_gap": 3
+        "object_gap": 2
       },
       "object_gap_reasons": {
-        "archetype_missing": 22
+        "archetype_missing": 13
       },
       "unsupported_source_object_counts": {
-        "41": 9,
         "60": 10,
         "89": 3
       },
@@ -2790,7 +2774,7 @@
       ],
       "selection_score": [
         6,
-        32,
+        23,
         25,
         8
       ],
@@ -2808,12 +2792,12 @@
             120
           ],
           "source_object_count": 1680,
-          "runtime_entity_count": 1227,
+          "runtime_entity_count": 1232,
           "presentation_object_count": 448,
           "source_ai_profile_count": 2,
           "normalized_condition_count": 6,
           "blocking_gaps": {
-            "object_gap_count": 5,
+            "object_gap_count": 0,
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -2824,23 +2808,14 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 6,
+          "blocking_gap_total": 1,
           "parity_gap_total": 2,
           "gap_ids": [
-            "object_gap",
             "condition_gap",
             "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 5
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 41,
-              "count": 5
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [
             {
               "team": 1,
@@ -5015,12 +4990,12 @@
             144
           ],
           "source_object_count": 4208,
-          "runtime_entity_count": 3530,
+          "runtime_entity_count": 3534,
           "presentation_object_count": 663,
           "source_ai_profile_count": 7,
           "normalized_condition_count": 10,
           "blocking_gaps": {
-            "object_gap_count": 15,
+            "object_gap_count": 11,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -5031,21 +5006,16 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 15,
+          "blocking_gap_total": 11,
           "parity_gap_total": 7,
           "gap_ids": [
             "object_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 15
+            "archetype_missing": 11
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 41,
-              "count": 4
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 60,
@@ -5759,7 +5729,7 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 8,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 73,
+      "blocking_gap_total": 63,
       "parity_gap_total": 18,
       "gap_mission_counts": {
         "ai_semantics_gap": 8,
@@ -5768,14 +5738,12 @@
         "object_gap": 5
       },
       "object_gap_reasons": {
-        "archetype_missing": 40
+        "archetype_missing": 30
       },
       "unsupported_source_object_counts": {
-        "41": 6,
         "60": 6,
         "89": 19,
-        "90": 5,
-        "281": 4
+        "90": 5
       },
       "unsupported_condition_command_counts": {
         "0": 6,
@@ -5809,7 +5777,7 @@
       ],
       "selection_score": [
         8,
-        73,
+        63,
         18,
         8
       ],
@@ -6819,12 +6787,12 @@
             144
           ],
           "source_object_count": 5013,
-          "runtime_entity_count": 4639,
+          "runtime_entity_count": 4643,
           "presentation_object_count": 348,
           "source_ai_profile_count": 5,
           "normalized_condition_count": 4,
           "blocking_gaps": {
-            "object_gap_count": 26,
+            "object_gap_count": 22,
             "condition_gap_count": 8,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -6835,7 +6803,7 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 35,
+          "blocking_gap_total": 31,
           "parity_gap_total": 5,
           "gap_ids": [
             "object_gap",
@@ -6844,7 +6812,7 @@
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 26
+            "archetype_missing": 22
           },
           "object_gaps": [
             {
@@ -6861,11 +6829,6 @@
               "reason": "archetype_missing",
               "source_unit_id": 90,
               "count": 3
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 281,
-              "count": 4
             }
           ],
           "unsupported_conditions": [
@@ -8270,12 +8233,12 @@
             144
           ],
           "source_object_count": 4234,
-          "runtime_entity_count": 3526,
+          "runtime_entity_count": 3532,
           "presentation_object_count": 701,
           "source_ai_profile_count": 1,
           "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 7,
+            "object_gap_count": 1,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -8286,7 +8249,7 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 11,
+          "blocking_gap_total": 5,
           "parity_gap_total": 1,
           "gap_ids": [
             "object_gap",
@@ -8294,14 +8257,9 @@
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 7
+            "archetype_missing": 1
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 41,
-              "count": 6
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 89,
@@ -12656,23 +12614,22 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 4,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 105,
+      "blocking_gap_total": 80,
       "parity_gap_total": 8,
       "gap_mission_counts": {
         "ai_normalization_gap": 1,
         "ai_semantics_gap": 4,
         "asset_gap": 1,
         "condition_gap": 1,
-        "object_gap": 4
+        "object_gap": 3
       },
       "object_gap_reasons": {
-        "archetype_missing": 99
+        "archetype_missing": 74
       },
       "unsupported_source_object_counts": {
         "10": 1,
         "89": 1,
         "115": 69,
-        "281": 25,
         "375": 1,
         "384": 2
       },
@@ -12697,7 +12654,7 @@
       ],
       "selection_score": [
         4,
-        105,
+        80,
         8,
         4
       ],
@@ -13033,12 +12990,12 @@
             200
           ],
           "source_object_count": 9848,
-          "runtime_entity_count": 5543,
+          "runtime_entity_count": 5556,
           "presentation_object_count": 4223,
           "source_ai_profile_count": 3,
           "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 82,
+            "object_gap_count": 69,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -13049,25 +13006,20 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 82,
+          "blocking_gap_total": 69,
           "parity_gap_total": 3,
           "gap_ids": [
             "object_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 82
+            "archetype_missing": 69
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 115,
               "count": 69
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 281,
-              "count": 13
             }
           ],
           "unsupported_conditions": [],
@@ -13252,12 +13204,12 @@
             200
           ],
           "source_object_count": 12191,
-          "runtime_entity_count": 8033,
+          "runtime_entity_count": 8045,
           "presentation_object_count": 4146,
           "source_ai_profile_count": 2,
           "normalized_condition_count": 2,
           "blocking_gaps": {
-            "object_gap_count": 12,
+            "object_gap_count": 0,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 1,
@@ -13268,23 +13220,14 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 13,
+          "blocking_gap_total": 1,
           "parity_gap_total": 1,
           "gap_ids": [
-            "object_gap",
             "ai_normalization_gap",
             "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 12
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 281,
-              "count": 12
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
@@ -13543,20 +13486,19 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 8,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 105,
+      "blocking_gap_total": 100,
       "parity_gap_total": 22,
       "gap_mission_counts": {
         "ai_semantics_gap": 8,
         "asset_gap": 7,
         "condition_gap": 3,
-        "object_gap": 4,
+        "object_gap": 3,
         "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 60
+        "archetype_missing": 55
       },
       "unsupported_source_object_counts": {
-        "41": 5,
         "62": 1,
         "89": 13,
         "90": 2,
@@ -13600,7 +13542,7 @@
       ],
       "selection_score": [
         8,
-        105,
+        100,
         22,
         8
       ],
@@ -15369,12 +15311,12 @@
             120
           ],
           "source_object_count": 4060,
-          "runtime_entity_count": 3281,
+          "runtime_entity_count": 3286,
           "presentation_object_count": 774,
           "source_ai_profile_count": 6,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 5,
+            "object_gap_count": 0,
             "condition_gap_count": 1,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -15385,24 +15327,15 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 13,
+          "blocking_gap_total": 8,
           "parity_gap_total": 5,
           "gap_ids": [
-            "object_gap",
             "condition_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 5
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 41,
-              "count": 5
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [
             {
               "team": 1,
@@ -16012,7 +15945,7 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 4,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 67,
+      "blocking_gap_total": 50,
       "parity_gap_total": 41,
       "gap_mission_counts": {
         "ai_semantics_gap": 4,
@@ -16023,12 +15956,10 @@
         "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 24
+        "archetype_missing": 7
       },
       "unsupported_source_object_counts": {
-        "41": 13,
         "89": 2,
-        "281": 4,
         "376": 4,
         "381": 1
       },
@@ -16069,7 +16000,7 @@
       ],
       "selection_score": [
         4,
-        67,
+        50,
         41,
         4
       ],
@@ -16397,12 +16328,12 @@
             144
           ],
           "source_object_count": 4781,
-          "runtime_entity_count": 4021,
+          "runtime_entity_count": 4034,
           "presentation_object_count": 733,
           "source_ai_profile_count": 4,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 14,
+            "object_gap_count": 1,
             "condition_gap_count": 9,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -16413,7 +16344,7 @@
             "source_settings_gap_count": 1,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 30,
+          "blocking_gap_total": 17,
           "parity_gap_total": 5,
           "gap_ids": [
             "object_gap",
@@ -16423,14 +16354,9 @@
             "source_settings_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 14
+            "archetype_missing": 1
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 41,
-              "count": 13
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 376,
@@ -16982,12 +16908,12 @@
             144
           ],
           "source_object_count": 5028,
-          "runtime_entity_count": 3491,
+          "runtime_entity_count": 3495,
           "presentation_object_count": 1496,
           "source_ai_profile_count": 4,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 6,
+            "object_gap_count": 2,
             "condition_gap_count": 5,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -16998,7 +16924,7 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 16,
+          "blocking_gap_total": 12,
           "parity_gap_total": 4,
           "gap_ids": [
             "object_gap",
@@ -17007,14 +16933,9 @@
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 6
+            "archetype_missing": 2
           },
           "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 281,
-              "count": 4
-            },
             {
               "reason": "archetype_missing",
               "source_unit_id": 376,
@@ -17707,21 +17628,20 @@
       "launcher_ready_mission_count": 0,
       "blocked_mission_count": 8,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 97,
+      "blocking_gap_total": 92,
       "parity_gap_total": 13,
       "gap_mission_counts": {
         "ai_normalization_gap": 1,
         "ai_semantics_gap": 8,
         "asset_gap": 8,
         "condition_gap": 3,
-        "object_gap": 6,
+        "object_gap": 5,
         "source_settings_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 59
+        "archetype_missing": 54
       },
       "unsupported_source_object_counts": {
-        "41": 5,
         "58": 2,
         "63": 1,
         "89": 38,
@@ -17760,7 +17680,7 @@
       ],
       "selection_score": [
         8,
-        97,
+        92,
         13,
         8
       ],
@@ -19553,12 +19473,12 @@
             144
           ],
           "source_object_count": 4089,
-          "runtime_entity_count": 2261,
+          "runtime_entity_count": 2266,
           "presentation_object_count": 1823,
           "source_ai_profile_count": 1,
           "normalized_condition_count": 0,
           "blocking_gaps": {
-            "object_gap_count": 5,
+            "object_gap_count": 0,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -19569,23 +19489,14 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 10,
+          "blocking_gap_total": 5,
           "parity_gap_total": 1,
           "gap_ids": [
-            "object_gap",
             "asset_gap",
             "ai_semantics_gap"
           ],
-          "object_gap_reasons": {
-            "archetype_missing": 5
-          },
-          "object_gaps": [
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 41,
-              "count": 5
-            }
-          ],
+          "object_gap_reasons": {},
+          "object_gaps": [],
           "unsupported_conditions": [],
           "source_trigger_summary": {
             "condition_count": 0,
@@ -22413,7 +22324,7 @@
       "launcher_ready_mission_count": 1,
       "blocked_mission_count": 4,
       "parity_ready_mission_count": 0,
-      "blocking_gap_total": 48,
+      "blocking_gap_total": 40,
       "parity_gap_total": 96,
       "gap_mission_counts": {
         "ai_semantics_gap": 5,
@@ -22423,12 +22334,11 @@
         "source_asset_fallback_gap": 1
       },
       "object_gap_reasons": {
-        "archetype_missing": 24
+        "archetype_missing": 16
       },
       "unsupported_source_object_counts": {
         "89": 14,
         "90": 1,
-        "281": 8,
         "377": 1
       },
       "unsupported_condition_command_counts": {
@@ -22467,7 +22377,7 @@
       ],
       "selection_score": [
         4,
-        48,
+        40,
         96,
         5
       ],
@@ -23584,12 +23494,12 @@
             200
           ],
           "source_object_count": 9965,
-          "runtime_entity_count": 7404,
+          "runtime_entity_count": 7412,
           "presentation_object_count": 2550,
           "source_ai_profile_count": 4,
           "normalized_condition_count": 1,
           "blocking_gaps": {
-            "object_gap_count": 11,
+            "object_gap_count": 3,
             "condition_gap_count": 0,
             "trigger_semantics_gap_count": 0,
             "ai_normalization_gap_count": 0,
@@ -23600,25 +23510,20 @@
             "source_settings_gap_count": 0,
             "source_asset_fallback_gap_count": 0
           },
-          "blocking_gap_total": 11,
+          "blocking_gap_total": 3,
           "parity_gap_total": 4,
           "gap_ids": [
             "object_gap",
             "ai_semantics_gap"
           ],
           "object_gap_reasons": {
-            "archetype_missing": 11
+            "archetype_missing": 3
           },
           "object_gaps": [
             {
               "reason": "archetype_missing",
               "source_unit_id": 89,
               "count": 3
-            },
-            {
-              "reason": "archetype_missing",
-              "source_unit_id": 281,
-              "count": 8
             }
           ],
           "unsupported_conditions": [],

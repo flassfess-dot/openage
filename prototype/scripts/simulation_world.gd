@@ -3657,7 +3657,10 @@ func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 func technology_effect_matches_entity(entity: Dictionary, command: Dictionary) -> bool:
 	var unit_id := int(command.get("attr_a", -1))
 	if unit_id >= 0:
-		return entity.get("unit_lineage", []).has(unit_id)
+		# Genie effects address a concrete current DAT record. Upgrade bundles
+		# commonly contain one command per variant, so matching every historical
+		# lineage ID would stack the same research bonus after an upgrade.
+		return int(entity.get("source_unit_id", -1)) == unit_id
 	var class_id := int(command.get("attr_b", -1))
 	if class_id < 0:
 		return false

@@ -3,7 +3,8 @@ param(
     [string]$GamePath = "D:\Games\Age of Empires 1 - Rise of Rome",
     [ValidateRange(1, 16)]
     [int]$Workers = 4,
-    [string]$Output
+    [string]$Output,
+    [string]$PythonExecutable
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,12 @@ $publishedManifests = @(
 if (-not $Output) {
     $Output = Join-Path $repositoryRoot "prototype\data\content_waves\source_campaign_portfolio.json"
 }
+$pythonCommand = "py"
+$pythonPrefix = @("-3")
+if ($PythonExecutable) {
+    $pythonCommand = (Resolve-Path -LiteralPath $PythonExecutable).Path
+    $pythonPrefix = @()
+}
 
 if (-not (Test-Path -LiteralPath $converter -PathType Leaf)) {
     $cargoManifest = Join-Path $PSScriptRoot "scenario_converter\Cargo.toml"
@@ -37,12 +44,12 @@ if (-not (Test-Path -LiteralPath $converter -PathType Leaf)) {
     }
 }
 
-& py -3 $manifestBuilder --catalog $scenarioCatalog --output $manifest
+& $pythonCommand @pythonPrefix $manifestBuilder --catalog $scenarioCatalog --output $manifest
 if ($LASTEXITCODE -ne 0) {
     throw "Portfolio manifest generation failed with exit code $LASTEXITCODE"
 }
 
-& py -3 $auditor `
+& $pythonCommand @pythonPrefix $auditor `
     --game-path $GamePath `
     --manifest $manifest `
     --catalog $scenarioCatalog `

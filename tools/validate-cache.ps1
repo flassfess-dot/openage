@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$PythonExecutable
+)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -10,7 +12,14 @@ $validator = Join-Path $repositoryRoot "tools\ror_import\validate_cache.py"
 $jsonReport = Join-Path $generatedRoot "validation-report.json"
 $markdownReport = Join-Path $repositoryRoot "doc\ror-modern\CACHE_VALIDATION_REPORT.md"
 
-& py -3 $validator `
+$pythonCommand = "py"
+$pythonPrefix = @("-3")
+if ($PythonExecutable) {
+    $pythonCommand = (Resolve-Path -LiteralPath $PythonExecutable).Path
+    $pythonPrefix = @()
+}
+
+& $pythonCommand @pythonPrefix $validator `
     --cache-dir $generatedRoot `
     --json-output $jsonReport `
     --markdown-output $markdownReport

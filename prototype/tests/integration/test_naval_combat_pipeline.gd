@@ -98,8 +98,10 @@ func verify_dock_combat_roster_and_upgrades(catalog) -> void:
 	if juggernaught_research != null:
 		world.update_production(180.0)
 	if catapult != null:
-		assert_ship_stats(catapult, 277, 200.0, 10.0, 5.0, 368, "Juggernaught")
+		assert_ship_stats(catapult, 277, 200.0, 12.0, 5.0, 368, "Juggernaught")
 		assert_float(float(catapult.get("components", {}).get("combat", {}).get("blast_range", 0.0)), 1.5, "Juggernaught original blast radius")
+	var future_juggernaught: Dictionary = world.add_unit(1, "catapult_trireme", Vector2(8.0, 12.0), false)
+	assert_ship_stats(future_juggernaught, 277, 200.0, 12.0, 5.0, 368, "Future Juggernaught")
 	assert_true(not bool(world.get_research_availability(int(dock["id"]), 1, 118).get("accepted", false)), "Roman Fire Galley connector 118 remains unavailable")
 	assert_true(not world.is_object_available(1, 360), "Roman Fire Galley source 360 remains disabled")
 

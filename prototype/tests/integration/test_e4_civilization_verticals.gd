@@ -10,6 +10,7 @@ const MATRIX_PATHS := [
 	"res://data/content_waves/civilizations_1_4.json",
 	"res://data/content_waves/civilizations_5_8.json",
 	"res://data/content_waves/civilizations_9_12.json",
+	"res://data/content_waves/civilizations_14_16.json",
 ]
 const ALL_CIVILIZATIONS_PATH := "res://data/content_waves/all_civilizations.json"
 
