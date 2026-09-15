@@ -9,6 +9,7 @@ signal train_requested(unit_kind: String, building_id: int)
 signal research_requested(technology_id: int, building_id: int)
 signal cancel_production_requested(building_id: int, queue_index: int)
 signal trade_resource_requested(resource_type_id: int)
+signal unit_action_requested(action_name: String)
 
 const HUD_HEIGHT: float = InterfaceLayout.BOTTOM_HEIGHT
 const FORMATIONS := [
@@ -123,14 +124,16 @@ func set_view_model(model: Dictionary) -> void:
 		match String(command.get("type", "")):
 			"formation": formation_commands[String(command.get("id", ""))] = command
 			"build": build_commands.append(command)
-			"train", "research", "cancel_production", "trade_resource": active_train_commands.append(command)
+			"train", "research", "cancel_production", "trade_resource", "unit_action": active_train_commands.append(command)
 	if not build_commands.is_empty():
+		var unit_actions := active_train_commands.filter(func(command): return String(command.get("type", "")) == "unit_action")
 		active_train_commands.clear()
 		if build_menu_open:
 			active_train_commands.append_array(build_commands)
 			active_train_commands.append({"type": "close_build_menu", "id": "close_build_menu", "label": "Назад", "enabled": true, "reason": ""})
 		else:
 			active_train_commands.append({"type": "open_build_menu", "id": "open_build_menu", "label": "Строить", "enabled": true, "reason": ""})
+			active_train_commands.append_array(unit_actions)
 	for formation_name in formation_buttons:
 		var button: Button = formation_buttons[formation_name]
 		var command: Dictionary = formation_commands.get(formation_name, {})
@@ -152,7 +155,9 @@ func set_view_model(model: Dictionary) -> void:
 		var icon := command_icon(command)
 		button.icon = icon
 		button.expand_icon = false
-		button.text = "" if icon != null else label
+		var hotkey := String(command.get("hotkey", ""))
+		var short_label := String(command.get("short_label", label))
+		button.text = "" if icon != null else "%s%s" % ["%s\n" % hotkey if not hotkey.is_empty() else "", short_label]
 		button.disabled = not bool(command.get("enabled", false))
 		var description := "%s%s" % [label, " — %s" % cost_text if not cost_text.is_empty() else ""]
 		if float(command.get("duration", 0.0)) > 0.0:
@@ -270,6 +275,7 @@ func _on_action_pressed(index: int) -> void:
 		"research": research_requested.emit(int(command.get("technology_id", -1)), int(command.get("building_id", -1)))
 		"cancel_production": cancel_production_requested.emit(int(command.get("building_id", -1)), int(command.get("queue_index", 0)))
 		"trade_resource": trade_resource_requested.emit(int(command.get("resource_type_id", -1)))
+		"unit_action": unit_action_requested.emit(String(command.get("id", "")))
 
 
 static func reason_text(reason: String) -> String:

@@ -59,10 +59,13 @@ func test_buttons_and_signals() -> void:
 	hud.build_requested.connect(func(kind: String): build_request[0] = kind)
 	hud.set_view_model({"commands": [
 		{"type": "build", "id": "house", "label": "Дом", "cost_text": "30 WOOD", "duration": 20.0, "enabled": true, "reason": ""},
+		{"type": "unit_action", "id": "stop", "label": "Остановиться", "short_label": "СТОП", "hotkey": "X", "enabled": true, "reason": ""},
 	]})
 	assert_equal(hud.active_train_commands[0].get("type"), "open_build_menu", "worker first exposes the source build-menu command")
+	assert_equal(hud.active_train_commands[1].get("id"), "stop", "worker retains common unit orders beside the closed build root")
 	hud.train_button.emit_signal("pressed")
 	assert_equal(hud.active_train_commands[0].get("type"), "build", "build-menu command opens the building choices")
+	assert_equal(hud.active_train_commands.size(), 2, "open build submenu replaces common orders with build choices and back")
 	hud.train_button.emit_signal("pressed")
 	assert_equal(build_request[0], "house", "build signal preserves selected building kind")
 	assert_equal(hud.build_menu_open, false, "choosing a building closes the presentation submenu")
@@ -73,9 +76,22 @@ func test_buttons_and_signals() -> void:
 	]})
 	hud.train_button.emit_signal("pressed")
 	assert_equal(trade_resource_request[0], 2, "trade resource signal preserves selected resource ID")
+	var unit_action_request := [""]
+	hud.unit_action_requested.connect(func(action_name: String): unit_action_request[0] = action_name)
+	hud.set_view_model({"commands": [
+		{"type": "unit_action", "id": "hold", "label": "Держать позицию", "short_label": "ДЕРЖ", "hotkey": "H", "enabled": true, "reason": ""},
+	]})
+	hud.train_button.emit_signal("pressed")
+	assert_equal(unit_action_request[0], "hold", "unit-order button preserves its semantic action")
+	assert_true(hud.train_button.text.contains("H") and hud.train_button.text.contains("ДЕРЖ"), "unmeasured action uses a readable label instead of a guessed source glyph")
 	hud.free()
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
+
+
+func assert_true(value: bool, context: String) -> void:
+	if not value:
+		failures.append("%s: expected true" % context)

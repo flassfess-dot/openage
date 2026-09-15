@@ -57,6 +57,10 @@ func test_keyboard_actions() -> void:
 	assert_equal(adapter.translate(key_event(KEY_R))[0], {"type": "reset_game"}, "R keeps deterministic match restart")
 	assert_equal(adapter.translate(key_event(KEY_DELETE))[0], {"type": "martyrdom"}, "Delete maps to the replayable Martyrdom intent")
 	assert_equal(adapter.translate(key_event(KEY_U))[0].get("type"), "unload", "U maps to the replayable unload intent")
+	assert_equal(adapter.translate(key_event(KEY_Q))[0], {"type": "attack_move_mode"}, "Q enters attack-move targeting")
+	assert_equal(adapter.translate(key_event(KEY_X))[0], {"type": "stop"}, "X maps to the replayable stop intent")
+	assert_equal(adapter.translate(key_event(KEY_H))[0], {"type": "hold"}, "H maps to hold-position intent")
+	assert_equal(adapter.translate(key_event(KEY_V))[0], {"type": "cycle_stance"}, "V cycles the selected stance")
 
 
 func test_outside_world_cancels_gesture() -> void:

@@ -74,6 +74,9 @@ func _initialize() -> void:
 	model = view_model.build(SimulationSnapshot.presentation(world, 11, 1), [int(first["id"]), int(second["id"])], "WEDGE", "ru")
 	assert_equal(model["commands"].filter(func(command): return command["type"] == "formation").size(), 5, "mobile group receives formation palette")
 	assert_true(bool(first_command(model["commands"], "formation", "WEDGE")["active"]), "current formation is marked active")
+	assert_equal(model["commands"].filter(func(command): return command["type"] == "unit_action").size(), 4, "mobile selection exposes its complete order palette")
+	assert_equal(first_command(model["commands"], "unit_action", "stance").get("stance"), "defensive", "stance action derives the next mode from authoritative selection state")
+	assert_equal(model["selection"]["leader"].get("stance"), "aggressive", "selection presentation exposes the authoritative stance")
 
 	var trader: Dictionary = world.add_unit(1, "trade_boat", Vector2(5.5, 5.5), false)
 	model = view_model.build(SimulationSnapshot.presentation(world, 12, 1), [int(trader["id"])], "RECTANGLE", "ru")

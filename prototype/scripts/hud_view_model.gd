@@ -1,6 +1,7 @@
 class_name RoRHudViewModel
 extends RefCounted
 
+const RoRCommands := preload("res://scripts/commands.gd")
 const RESOURCE_NAMES := {0: "food", 1: "wood", 2: "stone", 3: "gold"}
 const FORMATIONS := [
 	{"id": "LINE", "label": "Линия", "hotkey": "F5"},
@@ -9,6 +10,12 @@ const FORMATIONS := [
 	{"id": "WEDGE", "label": "Клин", "hotkey": "F8"},
 	{"id": "STAGGERED", "label": "Шахматный", "hotkey": "F9"},
 ]
+const STANCE_LABELS_RU := {
+	"aggressive": "Агрессивная",
+	"defensive": "Оборонительная",
+	"stand_ground": "Держать позицию",
+	"passive": "Не атаковать",
+}
 
 var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
@@ -47,6 +54,22 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 		"battle_over": bool(snapshot.get("battle_over", false)),
 	}
 	var unit_count := selected.filter(func(entity): return _category(entity) == "unit").size()
+	if unit_count == selected.size() and unit_count > 0:
+		var leader_stance := String(selected[0].get("stance", "aggressive"))
+		var next_stance := RoRCommands.next_stance(leader_stance)
+		var disabled_reason := "battle_over" if bool(model["battle_over"]) else ""
+		for action_value in [
+			{"id": "attack_move", "label": "Атаковать по пути", "short_label": "АТАКА", "hotkey": "Q"},
+			{"id": "stop", "label": "Остановиться", "short_label": "СТОП", "hotkey": "X"},
+			{"id": "hold", "label": "Держать позицию", "short_label": "ДЕРЖ", "hotkey": "H"},
+			{"id": "stance", "label": "Стойка: %s" % String(STANCE_LABELS_RU.get(next_stance, next_stance)), "short_label": "СТОЙКА", "hotkey": "V", "stance": next_stance},
+		]:
+			var action: Dictionary = action_value
+			action["type"] = "unit_action"
+			action["enabled"] = disabled_reason.is_empty()
+			action["active"] = false
+			action["reason"] = disabled_reason
+			model["commands"].append(action)
 	if unit_count == selected.size() and unit_count > 1:
 		for definition_value in FORMATIONS:
 			var definition: Dictionary = definition_value
@@ -154,8 +177,8 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 		model["command_title"] = "TRADE"
 	elif model["commands"].any(func(command): return String(command.get("type", "")) == "build"):
 		model["command_title"] = "BUILD"
-	elif model["commands"].any(func(command): return String(command.get("type", "")) == "formation"):
-		model["command_title"] = "FORMATION"
+	elif model["commands"].any(func(command): return String(command.get("type", "")) in ["formation", "unit_action"]):
+		model["command_title"] = "ORDERS"
 	return model
 
 
@@ -199,6 +222,7 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 			"attack": roundi(float(leader.get("attack_damage", _largest_amount(combat.get("attacks", []))))),
 			"armor": maxi(0, roundi(_largest_amount(combat.get("armors", [])))),
 			"task": String(leader.get("task", leader.get("state", ""))),
+			"stance": String(leader.get("stance", "")),
 			"carried_amount": roundi(float(leader.get("carried_amount", 0.0))),
 			"carry_capacity": roundi(float(leader.get("carry_capacity", 0.0))),
 			"carried_resource": String(RESOURCE_NAMES.get(int(leader.get("carried_resource_type_id", -1)), "")),

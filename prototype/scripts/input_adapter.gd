@@ -56,6 +56,10 @@ func translate(event: InputEvent, in_world_area: bool = true) -> Array[Dictionar
 			actions.append({"type": "control_group", "number": group_number, "assign": event.ctrl_pressed, "additive": event.shift_pressed})
 			return actions
 		match event.keycode:
+			KEY_Q: actions.append({"type": "attack_move_mode"})
+			KEY_X: actions.append({"type": "stop"})
+			KEY_H: actions.append({"type": "hold"})
+			KEY_V: actions.append({"type": "cycle_stance"})
 			KEY_F5: actions.append({"type": "set_formation", "formation": "LINE"})
 			KEY_F6: actions.append({"type": "set_formation", "formation": "RECTANGLE"})
 			KEY_F7: actions.append({"type": "set_formation", "formation": "COLUMN"})

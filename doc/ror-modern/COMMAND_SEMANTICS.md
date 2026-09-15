@@ -44,9 +44,9 @@ UI не сообщает об успехе до `command_accepted`. Если ц�
 | repair | building entity ID | `INTEGRATED` |
 | train | producer ID + archetype | `INTEGRATED` в симуляции и HUD вертикального среза |
 | research | producer ID + technology ID | `INTEGRATED` в симуляции; полный UI — I8/I10 |
-| stop / hold | список управляемых entity ID | `INTEGRATED` в симуляции; command panel — I10 |
-| attack-move | точка + acquisition policy | `INTEGRATED` в command/simulation; кнопка/горячая клавиша — I10 |
-| stance | aggressive / defensive / stand_ground / passive | `INTEGRATED` в command/simulation; command panel — I10 |
+| stop / hold | список управляемых entity ID | `INTEGRATED`: HUD/клавиатура, command/simulation/replay; stop сохраняет stance, hold устанавливает stand_ground; оба отменяют устаревший formation route |
+| attack-move | точка + acquisition policy | `INTEGRATED`: явный target mode из HUD/клавиатуры, command/simulation/replay и подтверждённая feedback-цепочка |
+| stance | aggressive / defensive / stand_ground / passive | `INTEGRATED`: HUD/клавиатура, command/simulation/replay и детерминированный цикл четырёх режимов |
 | return resources | drop-off или автоматический выбор | `INTEGRATED`: явная команда, контекстный ПКМ, replay и data-driven Granary/Storage Pit policy |
 
 ## Наблюдаемая обратная связь
@@ -64,3 +64,6 @@ UI не сообщает об успехе до `command_accepted`. Если ц�
 - `test_context_resolver.gd`: матрица контекстных целей и явные отказы.
 - `test_interaction_cursor.gd`: соответствие наведения игровой семантике.
 - `test_pointer_command_feedback.gd`: полный путь клика, подтверждение и late rejection.
+- `test_player_unit_order_controls.gd`: player-facing attack-move/stop/hold/stance, отмена formation route и сохранение replayable boundary.
+
+Текущие клавиши `Q/X/H/V` принадлежат проекту и не заявлены как точные привязки оригинального RoR. Неподтверждённые source glyph не назначаются по внешнему сходству.

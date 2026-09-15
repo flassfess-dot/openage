@@ -78,6 +78,7 @@ var resource_nodes: Array = []
 var presentation_snapshot: Dictionary = {}
 var formation := "RECTANGLE"
 var pending_build_kind := ""
+var pending_target_command := ""
 var game_message := "Выберите отряд и отдайте приказ правой кнопкой"
 var message_time := 5.0
 var battle_over := false
@@ -164,6 +165,7 @@ func _ready() -> void:
 	hud_controls.research_requested.connect(research_from_hud)
 	hud_controls.cancel_production_requested.connect(cancel_production_from_hud)
 	hud_controls.trade_resource_requested.connect(set_trade_resource_from_hud)
+	hud_controls.unit_action_requested.connect(issue_unit_action)
 	top_bar_controls = TopBarControls.new()
 	add_child(top_bar_controls)
 	top_bar_controls.configure(resource_catalog.interface_skin, 0)
@@ -296,6 +298,7 @@ func reset_game() -> void:
 
 	formation = "RECTANGLE"
 	pending_build_kind = ""
+	pending_target_command = ""
 	player_control_state.replace_or_add(bootstrap.get("selected_ids", []), false)
 
 	sync_world_state()
@@ -509,13 +512,17 @@ func handle_input_action(action: Dictionary) -> void:
 		"selection_started":
 			selection_preview_ids.clear()
 		"selection_committed":
-			if pending_build_kind.is_empty():
+			if not pending_target_command.is_empty():
+				commit_pending_target(action["to"])
+			elif pending_build_kind.is_empty():
 				finish_selection(action["from"], action["to"])
 			else:
 				commit_build_placement(action["to"])
 			selection_preview_ids.clear()
 		"context_committed":
-			if pending_build_kind.is_empty():
+			if not pending_target_command.is_empty():
+				commit_pending_target(action["position"])
+			elif pending_build_kind.is_empty():
 				issue_order(action["position"], action.get("direction_end"))
 			else:
 				pending_build_kind = ""
@@ -532,6 +539,14 @@ func handle_input_action(action: Dictionary) -> void:
 				recall_control_group(int(action["number"]), bool(action["additive"]))
 		"set_formation":
 			set_formation(String(action["formation"]))
+		"attack_move_mode":
+			begin_attack_move()
+		"stop":
+			issue_unit_action("stop")
+		"hold":
+			issue_unit_action("hold")
+		"cycle_stance":
+			issue_unit_action("stance")
 		"train":
 			request_primary_train_command()
 		"toggle_audio":
@@ -736,6 +751,7 @@ func load_game_from_path(path: String) -> bool:
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
 	pending_build_kind = ""
+	pending_target_command = ""
 	terrain_canvas.configure(map_size, map_seed, resource_catalog, simulation_world, Callable(self, "terrain_id_at_cell"), Callable(self, "visible_tile_bounds"))
 	_sync_terrain_canvas()
 	sync_world_state()
@@ -967,6 +983,65 @@ func issue_unload_at_pointer() -> void:
 	var target := screen_to_world(input_adapter.pointer_position)
 	var command = RoRCommands.UnloadCommand.new(game_controller.tick_index + 1, _selection_ids(transports), target)
 	enqueue_with_feedback(command, "Высадить пассажиров", "", target)
+
+
+func issue_unit_action(action_name: String) -> void:
+	if action_name == "attack_move":
+		begin_attack_move()
+		return
+	if battle_over:
+		return
+	var selected := selected_units()
+	if selected.is_empty():
+		game_message = "Для приказа выберите своих юнитов"
+		message_time = 1.5
+		return
+	var ids := _selection_ids(selected)
+	var command: Variant = null
+	var message := ""
+	match action_name:
+		"stop":
+			command = RoRCommands.StopCommand.new(game_controller.tick_index + 1, ids)
+			message = "Остановиться"
+		"hold":
+			command = RoRCommands.HoldCommand.new(game_controller.tick_index + 1, ids)
+			message = "Держать позицию"
+		"stance":
+			var stance := RoRCommands.next_stance(String(selected[0].get("stance", "aggressive")))
+			command = RoRCommands.StanceCommand.new(game_controller.tick_index + 1, ids, stance)
+			message = "Стойка: %s" % stance_name(stance)
+		_:
+			return
+	enqueue_with_feedback(command, message, "command:%s" % String(selected[0].get("kind", "")), null)
+
+
+func begin_attack_move() -> void:
+	if selected_units().is_empty() or battle_over:
+		game_message = "Для атаки выберите своих юнитов"
+		message_time = 1.5
+		return
+	pending_build_kind = ""
+	pending_target_command = "attack_move"
+	game_message = "Укажите точку движения с атакой"
+	message_time = 4.0
+
+
+func commit_pending_target(screen_position: Vector2) -> void:
+	if pending_target_command != "attack_move":
+		return
+	pending_target_command = ""
+	var selected := selected_units()
+	if selected.is_empty() or battle_over:
+		return
+	var target := screen_to_world(screen_position)
+	var command = RoRCommands.AttackMoveCommand.new(game_controller.tick_index + 1, _selection_ids(selected), target)
+	enqueue_with_feedback(command, "Двигаться с атакой", "command:%s" % String(selected[0].get("kind", "")), target)
+
+
+func stance_name(value: String) -> String:
+	return {"aggressive": "агрессивная", "defensive": "оборонительная", "stand_ground": "держать позицию", "passive": "не атаковать"}.get(value, value)
+
+
 func selected_units() -> Array:
 	var selected: Array = []
 	for unit in units:

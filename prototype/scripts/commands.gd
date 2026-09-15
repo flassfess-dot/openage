@@ -1,5 +1,16 @@
 class_name RoRCommands
 
+const STANCE_ORDER := ["aggressive", "defensive", "stand_ground", "passive"]
+
+
+static func is_valid_stance(value: String) -> bool:
+	return value in STANCE_ORDER
+
+
+static func next_stance(current: String) -> String:
+	var index := STANCE_ORDER.find(current)
+	return STANCE_ORDER[(index + 1) % STANCE_ORDER.size()] if index >= 0 else STANCE_ORDER[0]
+
 class Command:
 	var tick: int
 	var command_id: int = 0

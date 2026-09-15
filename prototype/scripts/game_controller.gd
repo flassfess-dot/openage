@@ -504,10 +504,14 @@ func _apply_halt(command) -> String:
 	var selected = _units_for_ids(command.unit_ids, command.issuer_id)
 	if selected.is_empty():
 		return "no_eligible_units"
+	_detach_units_from_formations(selected)
 	for unit in selected:
 		if unit == null:
 			continue
 		simulation_world.halt_unit(unit, command.command_type())
+		if command.command_type() == "hold":
+			unit["stance"] = "stand_ground"
+			unit["diagnostic_reason"] = "hold_position"
 	return ""
 
 
@@ -521,7 +525,7 @@ func _apply_stance(command) -> String:
 	if selected.is_empty():
 		return "no_eligible_units"
 	var stance := String(command.params.get("stance", ""))
-	if stance not in ["aggressive", "defensive", "stand_ground", "passive"]:
+	if not RoRCommands.is_valid_stance(stance):
 		return "invalid_stance"
 	for unit in selected:
 		unit["stance"] = stance
