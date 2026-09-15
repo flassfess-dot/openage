@@ -646,3 +646,9 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Волна полностью переиспользовала уже импортированные icon sets 0/1/2: selection sync сообщил `0 additions`, поэтому catalog остался на 23315 assets и старые ресурсы не перепаковывались.
 - Найден и исправлен общий upgrade lifecycle gap. Замена source-варианта сбрасывала ранее действующий civilization modifier; теперь после полного effect bundle улучшенная сущность один раз пересобирается из нового source и получает весь persistent modifier set. Новый oracle доказывает равенство уже существующего и произведённого после исследования юнита; Roman Scythe Chariot теперь также правильно сохраняет Nobility HP.
 - Impact-набор technology/ages, Bowman, age buildings, cavalry, transport, farm, civilization rules, replay и обе civilization waves проходит. Открытый vertical-evidence gap сокращён до 7 цивилизаций; следующая волна — Persian/Shang/Yamato/Choson (9–12).
+
+### Прогресс (2026-09-16, E4-006 — Persian/Shang/Yamato/Choson)
+
+- Цивилизации 9–12 прошли тот же end-to-end oracle. Характерные source-driven пробы подтверждают Persian War Elephant speed, Shang Villager fixed cost, Yamato cavalry cost и Choson Legion HP поверх общего production/research/combat/presentation/audio пути.
+- Для icon set 3 selection sync нашёл только 150 отсутствующих кадров азиатской архитектуры. Инкрементальный импорт сообщил 23315 cache hits / 150 misses; итоговый catalog — 23465 assets и 68 archetypes.
+- Полный общий roster каждой нации проверен по исходному graphic tree, включая здания с составными корнями. Открытый vertical-evidence gap сокращён до Carthaginian/Palmyran/Macedonian; следующий пакет закрывает ID 14–16, затем выполняется единый E4 boundary gate.

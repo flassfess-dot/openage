@@ -1218,3 +1218,9 @@ ext_unit_id.
 - Нового импорта не потребовалось: эти нации используют уже загруженные architecture icon sets 0/1/2; selection sync вернул 0 additions, catalog сохранил 23315 assets.
 - Исправлен общий дефект улучшения существующих юнитов: source replacement больше не теряет постоянные civilization/technology modifiers и не применяет их дважды. Отдельный тест сравнивает существующего Minoan Composite Bowman с созданным после исследования; обновлённый Roman cavalry oracle подтвердил сохранение Nobility HP на Scythe Chariot.
 - Затронутые technology, building-age, unit-line, naval, economy, civilization и deterministic replay проверки проходят. Матрица переводит ID 5–8 в `integrated`; остаются 7 не-римских вертикалей. Следующий пакет — Persian/Shang/Yamato/Choson (9–12).
+
+### Прогресс (2026-09-16, E4-006 — цивилизации 9–12)
+
+- Persian, Shang, Yamato и Choson прошли общий civilization oracle: restrictions, Town Center/Tool Age, полный roster, source graphics/audio, combat и характерные bonus probes.
+- Азиатский icon set 3 потребовал только 150 новых кадров; 23315 прежних записей переиспользованы из cache. Catalog содержит 23465 asset records и 68 archetypes.
+- Матрица переводит ID 9–12 в `integrated`; остаются Carthaginian, Palmyran и Macedonian. Следующий пакет — цивилизации 14–16, после него один полный E4 suite/cache/export gate.

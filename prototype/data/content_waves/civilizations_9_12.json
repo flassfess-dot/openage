@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "wave_id": "e4_civilizations_9_12",
+  "scope": "Persian, Shang, Yamato and Choson end-to-end civilization verticals",
+  "civilizations": [
+    {
+      "civilization_id": 9,
+      "alias": "persian",
+      "technology_tree_effect_bundle_id": 87,
+      "icon_set": 2,
+      "signature_bonus": {"kind": "war_elephant", "source_unit_id": 46, "field": "speed", "operator": "add", "value": 0.5},
+      "signature_disabled_technology_id": 31,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 10,
+      "alias": "shang",
+      "technology_tree_effect_bundle_id": 89,
+      "icon_set": 3,
+      "signature_bonus": {"kind": "villager", "source_unit_id": 83, "field": "resource_cost", "resource_type_id": 0, "operator": "set", "value": 35.0},
+      "signature_disabled_technology_id": 70,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 11,
+      "alias": "yamato",
+      "technology_tree_effect_bundle_id": 92,
+      "icon_set": 3,
+      "signature_bonus": {"kind": "scout", "source_unit_id": 299, "field": "resource_cost", "resource_type_id": 0, "operator": "multiply", "value": 0.75},
+      "signature_disabled_technology_id": 21,
+      "status": "integrated"
+    },
+    {
+      "civilization_id": 12,
+      "alias": "choson",
+      "technology_tree_effect_bundle_id": 91,
+      "icon_set": 3,
+      "signature_bonus": {"kind": "swordsman", "upgrade_from_source_unit_id": 75, "source_unit_id": 77, "field": "max_hp", "operator": "add", "value": 80.0},
+      "signature_disabled_technology_id": 59,
+      "status": "integrated"
+    }
+  ],
+  "evidence": [
+    "res://tests/unit/test_all_civilizations_content_matrix.gd",
+    "res://tests/integration/test_all_civilization_bonus_rules.gd",
+    "res://tests/integration/test_civilization_upgrade_effect_persistence.gd",
+    "res://tests/integration/test_e4_civilization_verticals.gd"
+  ],
+  "acceptance": [
+    "source identity and restrictions",
+    "Town Center production and Tool Age research",
+    "signature runtime bonus, including production cost and upgraded entities",
+    "civilization building shell and complete common-roster presentation",
+    "source attack audio",
+    "authoritative short combat exchange"
+  ]
+}

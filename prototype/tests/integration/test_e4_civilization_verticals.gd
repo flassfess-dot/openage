@@ -9,6 +9,7 @@ const SimulationWorld := preload("res://scripts/simulation_world.gd")
 const MATRIX_PATHS := [
 	"res://data/content_waves/civilizations_1_4.json",
 	"res://data/content_waves/civilizations_5_8.json",
+	"res://data/content_waves/civilizations_9_12.json",
 ]
 const ALL_CIVILIZATIONS_PATH := "res://data/content_waves/all_civilizations.json"
 
@@ -129,6 +130,8 @@ func verify_signature_cost(world, source: Dictionary, bonus: Dictionary, kind: S
 		expected *= float(bonus.get("value", 1.0))
 	elif String(bonus.get("operator", "")) == "add":
 		expected += float(bonus.get("value", 0.0))
+	elif String(bonus.get("operator", "")) == "set":
+		expected = float(bonus.get("value", source_cost))
 	var actual := int(world.unit_resource_cost(kind, 1).get(resource_type_id, -1))
 	assert_equal(actual, maxi(0, roundi(expected)), "%s signature production cost is active in runtime" % context)
 

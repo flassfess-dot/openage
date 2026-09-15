@@ -19,10 +19,10 @@
     {"civilization_id": 6, "alias": "hittite", "name_id": 10236, "technology_tree_effect_bundle_id": 85, "icon_set": 2, "vertical_status": "integrated"},
     {"civilization_id": 7, "alias": "phoenician", "name_id": 10237, "technology_tree_effect_bundle_id": 88, "icon_set": 1, "vertical_status": "integrated"},
     {"civilization_id": 8, "alias": "sumerian", "name_id": 10238, "technology_tree_effect_bundle_id": 90, "icon_set": 0, "vertical_status": "integrated"},
-    {"civilization_id": 9, "alias": "persian", "name_id": 10239, "technology_tree_effect_bundle_id": 87, "icon_set": 2, "vertical_status": "planned"},
-    {"civilization_id": 10, "alias": "shang", "name_id": 10240, "technology_tree_effect_bundle_id": 89, "icon_set": 3, "vertical_status": "planned"},
-    {"civilization_id": 11, "alias": "yamato", "name_id": 10241, "technology_tree_effect_bundle_id": 92, "icon_set": 3, "vertical_status": "planned"},
-    {"civilization_id": 12, "alias": "choson", "name_id": 10242, "technology_tree_effect_bundle_id": 91, "icon_set": 3, "vertical_status": "planned"},
+    {"civilization_id": 9, "alias": "persian", "name_id": 10239, "technology_tree_effect_bundle_id": 87, "icon_set": 2, "vertical_status": "integrated"},
+    {"civilization_id": 10, "alias": "shang", "name_id": 10240, "technology_tree_effect_bundle_id": 89, "icon_set": 3, "vertical_status": "integrated"},
+    {"civilization_id": 11, "alias": "yamato", "name_id": 10241, "technology_tree_effect_bundle_id": 92, "icon_set": 3, "vertical_status": "integrated"},
+    {"civilization_id": 12, "alias": "choson", "name_id": 10242, "technology_tree_effect_bundle_id": 91, "icon_set": 3, "vertical_status": "integrated"},
     {"civilization_id": 13, "alias": "roman", "name_id": 10246, "technology_tree_effect_bundle_id": 208, "icon_set": 4, "vertical_status": "integrated"},
     {"civilization_id": 14, "alias": "carthaginian", "name_id": 10247, "technology_tree_effect_bundle_id": 205, "icon_set": 4, "vertical_status": "planned"},
     {"civilization_id": 15, "alias": "palmyran", "name_id": 10249, "technology_tree_effect_bundle_id": 207, "icon_set": 4, "vertical_status": "planned"},
@@ -76,7 +76,7 @@
     {"scope": "gaia_and_objectives", "reason": "shared Gaia resources, wildlife and objectives are already owned by the gameplay core"}
   ],
   "known_gaps": [
-    {"id": "E4-CIV-VERTICAL-EVIDENCE", "owner": "civilization waves", "reason": "seven non-Roman civilizations still need end-to-end availability, bonus, presentation and audio evidence before their status becomes integrated"},
+    {"id": "E4-CIV-VERTICAL-EVIDENCE", "owner": "civilization waves", "reason": "three non-Roman civilizations still need end-to-end availability, bonus, presentation and audio evidence before their status becomes integrated"},
     {"id": "E4-CIV-PARITY-CAPTURE", "owner": "E8 executable comparison", "reason": "source-driven integration does not claim pixel/audio timing parity without original-executable comparison"}
   ]
 }
