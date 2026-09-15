@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "e3_controlled_skirmish",
+  "title": "E3 controlled skirmish",
+  "start_message": "Public input and command acceptance fixture",
+  "map": {
+    "size": [34, 26],
+    "seed": 92173,
+    "generator": {
+      "type": "coastal_land",
+      "water_border": {"left": 0, "top": 0, "right": 0, "bottom": 0, "shore_width": 0, "land_terrain_id": 0}
+    }
+  },
+  "players": [
+    {"team": 1, "controller": "human", "civilization_id": 13, "start": [14.0, 14.0], "population_housing": 50, "starting_resources": {"food": 2000, "wood": 2000, "stone": 2000, "gold": 2000}},
+    {"team": 2, "controller": "ai", "civilization_id": 13, "start": [29.0, 18.0], "population_housing": 10, "starting_resources": {"food": 0, "wood": 0, "stone": 0, "gold": 0}, "ai": {"enabled": false}}
+  ],
+  "entities": [
+    {"category": "building", "team": 1, "kind": "town_center", "position": [14.0, 14.0]},
+    {"category": "building", "team": 1, "kind": "barracks", "position": [10.0, 14.0]},
+    {"category": "building", "team": 1, "kind": "granary", "position": [18.0, 14.0]},
+    {"category": "unit", "team": 1, "kind": "villager", "position": [12.0, 18.0], "selected": true},
+    {"category": "unit", "team": 1, "kind": "clubman", "position": [16.0, 18.0]},
+    {"category": "unit", "team": 1, "kind": "clubman", "position": [17.0, 18.0]},
+    {"category": "unit", "team": 2, "kind": "clubman", "position": [29.0, 18.0]},
+    {"category": "resource", "kind": "tree", "position": [11.0, 19.0], "amount": 4}
+  ],
+  "alliances": [],
+  "victory_rules": [{"type": "conquest"}]
+}

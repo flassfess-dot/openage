@@ -1188,3 +1188,11 @@ ext_unit_id.
 - Рабочий сохраняет общие приказы рядом с закрытым build root. После открытия строительное подменю предсказуемо занимает сетку зданиями и кнопкой возврата.
 - Impact-gate проходит: input adapter, HUD view model/controls, полный player-order vertical, build palette, combat awareness, formation lifecycle/combat lifecycle и deterministic replay. Исходные ресурсы не импортировались; полный suite/cache/export внутри E3 не запускался.
 - Единственный открытый сквозной критерий матрицы — непрерывный controlled-skirmish через настоящую `main.tscn`, использующий только публичный ввод/commands от экономики до терминальной победы. Это следующий пакет.
+
+### Граница E3 (2026-09-15 — stable gameplay-core baseline)
+
+- `e3_controlled_skirmish_match.json` — компактный тестовый skirmish, не кампания и не launcher content. `test_e3_controlled_skirmish.gd` управляет настоящей `main.tscn` через selection/HUD/world actions: рабочий собирает и сдаёт дерево, строит House, Barracks производит Clubman, Town Center завершает Tool Age, группа получает форму/направление, самостоятельно входит в `ENGAGED` и заканчивает conquest.
+- Harness не меняет gameplay state напрямую. Он дважды проходит одинаковую последовательность; во второй ветке выполняется сохранение, временное продвижение и точная загрузка checkpoint. Обе ветки завершаются одинаковым canonical SHA-256.
+- Полный stage gate: `A-006 suite: 192 passed, 0 failed`. Cache validation: `0 errors / 181 source-owned warnings`; source asset import не запускался.
+- Windows PCK пересобран из готового cache: `246 998 356` байт, SHA-256 `c9e65cfb3e979e7af4057c889b0dfb9e75dcafc354ab95338232123f40d050f3`. Экспортированный EXE автономно запустил `prototype_skirmish` в headless-режиме и завершился с кодом 0 без runtime/script errors.
+- E3 закрыт как стабильный `INTEGRATED`, не `PARITY/HARDENED`. Активная очередь: E4 — source-derived матрица всех цивилизаций и вертикальные data-driven волны roster/technology/bonus/restriction/graphics/audio. Кампании остаются заморожены до E7.
