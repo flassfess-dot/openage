@@ -120,6 +120,23 @@ func _initialize() -> void:
 	var naval_explore_commands: Array = AiPlayer.new({"team": 2}).collect_commands(naval_explore, 1)
 	assert_equal(naval_explore_commands[0].command_type(), "attack_move", "naval exploration uses a public attack-move command")
 	assert_true(naval_explore_commands[0].target in naval_explore["navigation"]["water"], "naval exploration target comes only from explored water knowledge")
+	var group_explore := snapshot_base()
+	group_explore["units"] = [fighter(71, 2, Vector2(4, 4)), fighter(72, 2, Vector2(4, 5)), fighter(73, 2, Vector2(5, 4))]
+	group_explore["navigation"] = {"land": [Vector2(8.5, 4.5)], "water": []}
+	var group_goal := StrategicPlanner.choose_goal(group_explore, 2, 0)
+	var group_explore_commands := TacticalPlanner.plan(group_explore, 1, 2, group_goal, "WEDGE")
+	assert_equal(group_explore_commands.size(), 1, "one exploration group receives one shared route")
+	assert_equal(group_explore_commands[0].command_type(), "formation_move", "multi-unit exploration uses formation slots instead of crowding one attack-move destination")
+	assert_equal(group_explore_commands[0].formation, "WEDGE", "exploration preserves the selected formation")
+	var frontier_snapshot := snapshot_base()
+	frontier_snapshot["units"] = [fighter(74, 2, Vector2(4, 4))]
+	frontier_snapshot["navigation"] = {
+		"land": [Vector2(3.5, 3.5), Vector2(4.5, 4.5), Vector2(10.5, 10.5)],
+		"water": [],
+		"frontier": {"land": [Vector2(10.5, 10.5), Vector2(1.5, 1.5)], "water": []},
+	}
+	var frontier_goal := StrategicPlanner.choose_goal(frontier_snapshot, 2, 0)
+	assert_equal(frontier_goal.get("position"), Vector2(10.5, 10.5), "skirmish exploration advances toward the farthest known fog frontier")
 
 	var dock_build_snapshot := snapshot_base()
 	var dock_worker := worker(75, 2, Vector2(4, 10))

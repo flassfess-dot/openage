@@ -34,8 +34,40 @@ static func choose_goal(snapshot: Dictionary, team: int, decision_index: int) ->
 		Vector2(size) * 0.5,
 	]
 	var positions_by_domain: Dictionary = {}
+	var owned_positions: Array[Vector2] = []
+	for entity_value in snapshot.get("buildings", []):
+		var entity: Dictionary = entity_value
+		if int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0:
+			owned_positions.append(Vector2(entity.get("pos", Vector2.ZERO)))
+	if owned_positions.is_empty():
+		for entity_value in snapshot.get("units", []):
+			var entity: Dictionary = entity_value
+			if int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0:
+				owned_positions.append(Vector2(entity.get("pos", Vector2.ZERO)))
+	var home_center := Vector2(size) * 0.5
+	if not owned_positions.is_empty():
+		home_center = Vector2.ZERO
+		for position in owned_positions:
+			home_center += position
+		home_center /= float(owned_positions.size())
 	for domain in ["land", "water"]:
-		var known: Array = snapshot.get("navigation", {}).get(domain, [])
+		var navigation: Dictionary = snapshot.get("navigation", {})
+		var frontier: Array = navigation.get("frontier", {}).get(domain, []).duplicate()
+		if not frontier.is_empty():
+			frontier.sort_custom(func(left, right):
+				var left_point := Vector2(left)
+				var right_point := Vector2(right)
+				var left_distance := left_point.distance_squared_to(home_center)
+				var right_distance := right_point.distance_squared_to(home_center)
+				if not is_equal_approx(left_distance, right_distance):
+					return left_distance > right_distance
+				if not is_equal_approx(left_point.y, right_point.y):
+					return left_point.y < right_point.y
+				return left_point.x < right_point.x
+			)
+			positions_by_domain[domain] = frontier[posmod(decision_index, mini(frontier.size(), 4))]
+			continue
+		var known: Array = navigation.get(domain, [])
 		if not known.is_empty():
 			positions_by_domain[domain] = known[posmod(decision_index + team, known.size())]
 	if not positions_by_domain.has("land"):

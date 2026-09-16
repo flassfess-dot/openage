@@ -25,7 +25,7 @@
 7. **E7 — scenarios/campaigns:** triggers, scenario AI и последовательная публикация оставшихся кампаний. Первым сохранённым кандидатом остаётся `Reign of the Hittites`.
 8. **E8 — final parity/release:** итоговые original side-by-side, полный suite/cache validation/export и release candidate.
 
-E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. E5-001…E5-005 закрыли дипломатию, generated skirmish, четыре профиля случайных карт, DE evidence ledger и собственную difficulty-aware AI policy. Текущая активная работа — многосторонняя acceptance-матрица E5-006. Кампанийный portfolio остаётся заморожен до прохождения E6.
+E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. E5-001…E5-006B закрыли дипломатию, generated skirmish, четыре профиля случайных карт, DE evidence ledger, собственную difficulty-aware AI policy и первый полный детерминированный двухсторонний conquest с replay hash. Текущая активная работа — E5-006C: 4/8 сторон и coastal/islands naval vertical. Кампанийный portfolio остаётся заморожен до прохождения E6.
 
 ## 2. Статусы готовности
 

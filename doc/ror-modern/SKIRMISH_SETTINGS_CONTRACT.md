@@ -32,7 +32,7 @@ Builder детерминированно создаёт:
 
 - `colour_index` уже является независимой частью player data, но полный набор восьми source palette variants в presentation — отдельная проверяемая работа E5/E8; выбор цвета не считается визуально завершённым только из-за наличия поля.
 - E5-003 добавил `inland_v1`, `highlands_v1`, `coastal_v1` и `islands_v1` с автоматическими spawn/resource/connectivity/naval guarantees. Exact RoR preset dimensions, названия и статистическое распределение terrain всё ещё требуют source-калибровки; рабочий engine contract не выдаётся за классический алгоритм.
-- E5-005 подключил `skirmish_policy_v1`: AI difficulty, cadence, задержку/разделение атак, минимальный/максимальный отряд и оборонную реакцию. E5-006A добавил проверяемую opening economy: порядок/лимиты построек, жильё, число рабочих, source-cost-aware переход эпохи, достижимые foundations и боевую группу. Это ещё не полноценная стратегическая игра: E5-006B/C должны закрыть deterministic victory для двух игроков, 4/8 сторон, diplomacy и водную экономику/войну.
+- E5-005 подключил `skirmish_policy_v1`: AI difficulty, cadence, задержку/разделение атак, минимальный/максимальный отряд и оборонную реакцию. E5-006A добавил проверяемую opening economy, а E5-006B закрыл детерминированную двухстороннюю сухопутную победу с fog-safe frontier exploration и полным replay hash. До завершения E5 остаётся E5-006C: 4/8 сторон, alliance/diplomacy outcomes и водная экономика/война на coastal/islands.
 - Campaign definitions не переводятся в эту схему и остаются замороженными до E7.
 
 ## Доказательства E5-002

@@ -294,7 +294,11 @@ static func _presentation_fog(fog, observer_team: int) -> Dictionary:
 
 
 static func _presentation_navigation(world, fog, observer_team: int) -> Dictionary:
-	var result := {"land": [], "water": []}
+	var result := {
+		"land": [],
+		"water": [],
+		"frontier": {"land": [], "water": []},
+	}
 	if observer_team <= 0:
 		return result
 	for y in range(world.map_size.y):
@@ -303,10 +307,20 @@ static func _presentation_navigation(world, fog, observer_team: int) -> Dictiona
 			if fog.state_at_cell(observer_team, cell) == 0:
 				continue
 			var point := Vector2(x + 0.5, y + 0.5)
+			var borders_unknown := false
+			for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var neighbor: Vector2i = cell + offset
+				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < world.map_size.x and neighbor.y < world.map_size.y and fog.state_at_cell(observer_team, neighbor) == 0:
+					borders_unknown = true
+					break
 			if world.navigation_grid.surface_accessible(cell, "land"):
 				result["land"].append(point)
+				if borders_unknown:
+					result["frontier"]["land"].append(point)
 			if world.navigation_grid.surface_accessible(cell, "water"):
 				result["water"].append(point)
+				if borders_unknown:
+					result["frontier"]["water"].append(point)
 	return result
 
 

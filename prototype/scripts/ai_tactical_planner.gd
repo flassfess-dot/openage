@@ -46,7 +46,12 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 		elif goal_type == "explore":
 			var positions: Dictionary = goal.get("positions_by_domain", {})
 			if positions.has(domain):
-				result.append(Commands.AttackMoveCommand.new(tick, ids, Vector2(positions[domain])))
+				var destination := Vector2(positions[domain])
+				if ids.size() > 1:
+					var forward := (destination - center).normalized()
+					result.append(Commands.FormationMoveCommand.new(tick, ids, destination, formation_name, forward))
+				else:
+					result.append(Commands.AttackMoveCommand.new(tick, ids, destination))
 	return result
 
 

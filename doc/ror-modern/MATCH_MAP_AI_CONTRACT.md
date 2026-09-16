@@ -45,6 +45,8 @@ E5-006A extends the same policy with an engine-owned opening economy. Constructi
 
 A building centre is the default "no rally point" sentinel. Produced units remain at a valid exit slot unless a real rally point was set. A fighter whose previous destination was unreachable receives an individual move to the nearest observer-known navigation point; healthy members keep their strategic group order.
 
+E5-006B closes the first complete generated outcome. The presentation snapshot derives reachable land/water fog frontiers during the existing navigation scan, without exposing unknown cells or copying the full fog array into the skirmish planner. With no visible enemy, the strategic layer advances toward a deterministic far frontier from the owned centre. A multi-unit explorer receives one formation route; normal combat awareness releases members into individual engagements when an enemy becomes visible.
+
 ## Match controls
 
 Space pauses; comma/period change the fixed-tick speed; R restarts the same definition and seed; Shift+R submits resign; Escape closes the application. These inputs are presentation intents only and do not mutate simulation objects directly.
@@ -57,6 +59,7 @@ Space pauses; comma/period change the fixed-tick speed; R restarts the same defi
 - `test_player_registry.gd`, `test_resign_pipeline.gd` and replay round-trip coverage.
 - `test_ai_vs_ai_match.gd`: both sides receive their legal snapshots, issue accepted public commands and finish a deterministic unscripted conquest match.
 - `test_generated_skirmish_ai_acceptance.gd`: a generated inland opening reaches housing, Barracks/Granary, Tool Age and a policy-sized attack group through public commands.
+- `test_generated_skirmish_deterministic_outcome.gd`: a generated two-player inland match reaches conquest, then a fresh runtime replays the recorded public commands to an identical terminal tick, canonical hash and victory result.
 - Full suite at integration: `108 passed, 0 failed`.
 
 I11 is `INTEGRATED`, not `PARITY`. Under the 2026-09-14 core-first rebaseline, E3 first revalidates the common gameplay command/AI boundary, E4 supplies the complete civilization content consumed by it, and E5 expands skirmish setup, random-map algorithms/biomes/fairness, economic/naval AI, difficulty and multi-team diplomacy. Long load/stability gates belong to E6. Scenario actions, imported RoR scenarios and campaigns are deliberately postponed to E7 so they consume a stable engine instead of driving it.

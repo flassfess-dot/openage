@@ -55,7 +55,9 @@ func test_hash_covers_authoritative_subsystems() -> void:
 
 func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	var world = SimulationWorld.new(Vector2i(32, 32))
+	world.navigation_grid.configure_terrain(func(_cell): return "grass")
 	var player: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	player["components"]["vision"] = {"enabled": true, "range": 4.0}
 	var hidden_enemy: Dictionary = world.add_unit(2, "clubman", Vector2(28.0, 28.0), false)
 	var visible_objective: Dictionary = world.add_victory_object("ruin", Vector2(4.0, 4.0), 1, true)
 	world.add_victory_object("ruin", Vector2(28.0, 27.0), 0, true)
@@ -72,6 +74,8 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	assert_equal(float(player["hp"]), original_hp, "presentation snapshot is detached from simulation state")
 	assert_equal(snapshot["player_state"]["stone"], 44, "presentation snapshot includes player economy")
 	assert_equal(snapshot["fog"]["cells"].size(), 32 * 32, "presentation snapshot contains observer fog grid")
+	assert_true(not snapshot["navigation"].get("frontier", {}).get("land", []).is_empty(), "presentation snapshot exposes compact reachable fog-frontier knowledge")
+	assert_true(snapshot["navigation"]["frontier"]["land"].all(func(point): return point in snapshot["navigation"]["land"]), "every land frontier point is part of known reachable navigation")
 	snapshot["player_state"]["food"] = 0
 	snapshot["fog"]["cells"][0] = 99
 	assert_equal(world.get_food(), 180, "player economy snapshot is detached")

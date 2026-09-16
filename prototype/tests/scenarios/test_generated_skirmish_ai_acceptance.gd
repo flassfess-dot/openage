@@ -79,7 +79,7 @@ func _initialize() -> void:
 	assert_true("barracks" in kinds, "generated AI completes its first military producer")
 	assert_true(combatants.size() >= 3 or world.is_battle_over(), "generated AI fields a policy-sized attack group")
 	assert_true(int(accepted_types.get("research", 0)) > 0 or world.get_current_age(2) >= 101, "generated AI starts its first age advance")
-	assert_true(int(accepted_types.get("attack_move", 0)) > 0 or int(accepted_types.get("attack", 0)) > 0, "generated military leaves the base through the ordinary combat command pipeline")
+	assert_true(int(accepted_types.get("formation_move", 0)) > 0 or int(accepted_types.get("attack_move", 0)) > 0 or int(accepted_types.get("attack", 0)) > 0, "generated military leaves the base through the ordinary combat command pipeline")
 	assert_true(rejected <= maxi(2, accepted / 10), "generated AI does not rely on rejected command spam (%d/%d)" % [rejected, accepted])
 	_finish()
 
