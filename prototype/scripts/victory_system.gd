@@ -4,7 +4,7 @@ extends RefCounted
 var rules: Array = [{"type": "conquest"}]
 var elapsed_seconds: float = 0.0
 var hold_seconds: Dictionary = {}
-var result: Dictionary = {"over": false, "winner_team": -1, "loser_teams": [], "reason": ""}
+var result: Dictionary = {"over": false, "winner_team": -1, "winner_teams": [], "loser_teams": [], "reason": ""}
 
 
 func configure(new_rules: Array) -> void:
@@ -15,7 +15,7 @@ func configure(new_rules: Array) -> void:
 func reset() -> void:
 	elapsed_seconds = 0.0
 	hold_seconds.clear()
-	result = {"over": false, "winner_team": -1, "loser_teams": [], "reason": ""}
+	result = {"over": false, "winner_team": -1, "winner_teams": [], "loser_teams": [], "reason": ""}
 
 
 func update(delta: float, context: Dictionary) -> Dictionary:
@@ -30,9 +30,9 @@ func update(delta: float, context: Dictionary) -> Dictionary:
 		var rule_type := String(rule.get("type", "conquest"))
 		match rule_type:
 			"conquest":
-				var winner := conquest_winner(teams, context)
-				if winner >= 0:
-					return finish(winner, all_teams, "conquest")
+				var winners := conquest_winners(teams, context)
+				if not winners.is_empty():
+					return finish_side(winners, all_teams, "conquest")
 			"artifacts", "ruins":
 				var winner := held_object_winner(rule_type.trim_suffix("s"), rule, teams, context, delta)
 				if winner >= 0:
@@ -57,6 +57,11 @@ func update(delta: float, context: Dictionary) -> Dictionary:
 
 
 func conquest_winner(teams: Array, context: Dictionary) -> int:
+	var winners := conquest_winners(teams, context)
+	return -1 if winners.is_empty() else int(winners[0])
+
+
+func conquest_winners(teams: Array, context: Dictionary) -> Array[int]:
 	var active: Array[int] = []
 	for team_value in teams:
 		var team := int(team_value)
@@ -64,7 +69,19 @@ func conquest_winner(teams: Array, context: Dictionary) -> int:
 		var has_buildings: bool = context.get("buildings", []).any(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)))
 		if has_units or has_buildings:
 			active.append(team)
-	return active[0] if active.size() == 1 and int(context.get("participant_count", teams.size())) > 1 else -1
+	if active.is_empty() or int(context.get("participant_count", teams.size())) <= 1:
+		return []
+	active.sort()
+	if active.size() == 1:
+		return active
+	var relations: Dictionary = context.get("relations", {})
+	for first_index in range(active.size()):
+		for second_index in range(first_index + 1, active.size()):
+			var first := active[first_index]
+			var second := active[second_index]
+			if String(relations.get(first, {}).get(second, "enemy")) != "ally" or String(relations.get(second, {}).get(first, "enemy")) != "ally":
+				return []
+	return active
 
 
 func held_object_winner(category: String, rule: Dictionary, teams: Array, context: Dictionary, delta: float) -> int:
@@ -147,9 +164,21 @@ func scenario_condition_met(condition_value: Variant, default_team: int, context
 
 
 func finish(winner_team: int, teams: Array, reason: String) -> Dictionary:
+	return finish_side([winner_team], teams, reason)
+
+
+func finish_side(winner_teams_value: Array, teams: Array, reason: String) -> Dictionary:
+	var winners: Array[int] = []
+	for team_value in winner_teams_value:
+		var team := int(team_value)
+		if team >= 0 and team not in winners:
+			winners.append(team)
+	winners.sort()
+	if winners.is_empty():
+		return result
 	var losers: Array[int] = []
 	for team_value in teams:
-		if int(team_value) != winner_team:
+		if int(team_value) not in winners:
 			losers.append(int(team_value))
-	result = {"over": true, "winner_team": winner_team, "loser_teams": losers, "reason": reason}
+	result = {"over": true, "winner_team": winners[0], "winner_teams": winners, "loser_teams": losers, "reason": reason}
 	return result

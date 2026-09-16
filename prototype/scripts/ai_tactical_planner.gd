@@ -64,7 +64,9 @@ static func _recovery_commands(snapshot: Dictionary, tick: int, stranded: Array)
 		var origin := Vector2(fighter.get("pos", Vector2.ZERO))
 		var best: Variant = null
 		var best_distance := INF
-		for position_value in snapshot.get("navigation", {}).get(domain, []):
+		var navigation: Dictionary = snapshot.get("navigation", {})
+		var known: Array = navigation.get("reachable", {}).get(domain, []) if navigation.has("reachable") else navigation.get(domain, [])
+		for position_value in known:
 			var position := Vector2(position_value)
 			var distance := origin.distance_squared_to(position)
 			if distance <= 0.01:

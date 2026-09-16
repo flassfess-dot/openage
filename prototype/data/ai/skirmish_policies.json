@@ -59,6 +59,9 @@
         "worker_target": 8,
         "minimum_workers_before_age_up": 6,
         "age_advance_technology_ids": [101, 102, 103],
+        "age_saving_construction_exceptions": ["house", "granary", "storage_pit", "dock"],
+        "age_saving_production_exceptions": ["fishing_boat", "scout_ship"],
+        "structure_gap_fallback_kinds": ["house"],
         "minimum_structure_gap": 1.0
       }
     }

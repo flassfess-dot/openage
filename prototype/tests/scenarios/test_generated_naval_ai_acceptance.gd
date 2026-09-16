@@ -1,0 +1,110 @@
+extends SceneTree
+
+const AiPlayer := preload("res://scripts/ai_player.gd")
+const GameController := preload("res://scripts/game_controller.gd")
+const MatchBootstrap := preload("res://scripts/match_bootstrap.gd")
+const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
+const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
+const SimulationWorld := preload("res://scripts/simulation_world.gd")
+const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
+
+const MAX_TICKS := 10000
+const AI_TEAM := 2
+
+var failures: Array[String] = []
+
+
+func _initialize() -> void:
+	var settings := SkirmishSettings.default_settings()
+	settings["map_size_id"] = "compact"
+	settings["map_type_id"] = "islands"
+	settings["seed"] = 41721
+	settings["resource_preset_id"] = "very_high"
+	settings["ai_difficulty_id"] = "hard"
+	var built := SkirmishSettings.build(settings)
+	assert_true(bool(built.get("valid", false)), "generated islands match builds: %s" % [built.get("errors", [])])
+	if not bool(built.get("valid", false)):
+		finish()
+		return
+
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	var definition: Dictionary = built["definition"]
+	var world = SimulationWorld.new(built["map_data"]["size"])
+	world.set_gamespec(catalog.gamespec_data)
+	world.set_terrain_catalog(catalog.terrain_catalog_data)
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.set_graphics_catalog(catalog.graphics_catalog_data)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
+	var bootstrap := MatchBootstrap.apply(world, definition, built["map_data"])
+	assert_true(bool(bootstrap.get("naval_start_guarantees_met", false)), "generated islands bootstrap retains a legal naval start for every player")
+	var controller = GameController.new(world)
+	controller.set_speed_multiplier(3.0)
+	var ai = AiPlayer.new(definition["players"][1])
+	var issued_types: Dictionary = {}
+	var accepted_types: Dictionary = {}
+	var rejected_reasons: Dictionary = {}
+	var accepted_naval_orders := 0
+
+	while int(controller.tick_index) < MAX_TICKS and not world.is_battle_over():
+		var next_tick := int(controller.tick_index) + 1
+		var submitted: Array = []
+		if ai.needs_decision(next_tick):
+			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, AI_TEAM, ai.presentation_options())
+			for command in ai.collect_commands(knowledge, next_tick):
+				var command_type := String(command.command_type())
+				issued_types[command_type] = int(issued_types.get(command_type, 0)) + 1
+				controller.enqueue_command(command, true, AI_TEAM)
+				submitted.append(command)
+		controller.advance_frame(0.5, 1, 2)
+		for command in submitted:
+			var command_type := String(command.command_type())
+			var result: Dictionary = controller.get_command_result(int(command.sequence_id))
+			if bool(result.get("accepted", false)):
+				accepted_types[command_type] = int(accepted_types.get(command_type, 0)) + 1
+				if command_type in ["move", "formation_move", "attack", "attack_move"] and _command_has_live_water_unit(world, command):
+					accepted_naval_orders += 1
+			else:
+				var reason := String(result.get("reason", "unknown"))
+				rejected_reasons[reason] = int(rejected_reasons.get(reason, 0)) + 1
+		var completed_dock_exists: bool = world.get_buildings().any(func(building): return int(building.get("team", 0)) == AI_TEAM and String(building.get("kind", "")) == "dock" and String(building.get("state", "complete")) == "complete")
+		var live_water_unit_exists: bool = world.get_units().any(func(unit): return int(unit.get("team", 0)) == AI_TEAM and float(unit.get("hp", 0.0)) > 0.0 and String(unit.get("movement_domain", "land")) == "water")
+		if completed_dock_exists and live_water_unit_exists and accepted_naval_orders > 0:
+			break
+
+	var own_units: Array = world.get_units().filter(func(unit): return int(unit.get("team", 0)) == AI_TEAM and float(unit.get("hp", 0.0)) > 0.0)
+	var own_buildings: Array = world.get_buildings().filter(func(building): return int(building.get("team", 0)) == AI_TEAM)
+	var completed_docks: Array = own_buildings.filter(func(building): return String(building.get("kind", "")) == "dock" and String(building.get("state", "complete")) == "complete")
+	var water_units: Array = own_units.filter(func(unit): return String(unit.get("movement_domain", "land")) == "water")
+	assert_true(not accepted_types.is_empty(), "generated islands AI acts through accepted public commands")
+	assert_true(not completed_docks.is_empty(), "generated islands AI completes an autonomous Dock")
+	assert_true(not water_units.is_empty(), "generated islands AI autonomously produces a water-domain unit")
+	assert_true(accepted_naval_orders > 0, "generated islands AI issues an accepted order to its produced water-domain unit")
+	if failures.is_empty():
+		print("E5-006C naval vertical reached at tick %d: dock=%d water_units=%d naval_orders=%d" % [controller.tick_index, completed_docks.size(), water_units.size(), accepted_naval_orders])
+	else:
+		print("E5-006C naval failure diagnostics tick=%d age=%d issued=%s accepted=%s rejected=%s result=%s" % [controller.tick_index, world.get_current_age(AI_TEAM), issued_types, accepted_types, rejected_reasons, world.get_victory_result()])
+	finish()
+
+
+func _command_has_live_water_unit(world, command) -> bool:
+	for unit_id_value in command.unit_ids:
+		var unit = world.find_unit(int(unit_id_value))
+		if unit != null and int(unit.get("team", 0)) == AI_TEAM and float(unit.get("hp", 0.0)) > 0.0 and String(unit.get("movement_domain", "land")) == "water":
+			return true
+	return false
+
+
+func assert_true(value: bool, context: String) -> void:
+	if not value:
+		failures.append("%s: expected true" % context)
+
+
+func finish() -> void:
+	if failures.is_empty():
+		print("E5-006C generated naval AI acceptance passed")
+		quit(0)
+		return
+	for failure in failures:
+		push_error(failure)
+	quit(1)

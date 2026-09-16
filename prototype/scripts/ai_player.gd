@@ -57,6 +57,9 @@ func _init(player_definition: Dictionary) -> void:
 		"worker_target": maxi(0, int(settings.get("worker_target", 0))),
 		"minimum_workers_before_age_up": maxi(0, int(settings.get("minimum_workers_before_age_up", 0))),
 		"age_advance_technology_ids": settings.get("age_advance_technology_ids", []).duplicate(),
+		"age_saving_construction_exceptions": settings.get("age_saving_construction_exceptions", []).duplicate(),
+		"age_saving_production_exceptions": settings.get("age_saving_production_exceptions", []).duplicate(),
+		"structure_gap_fallback_kinds": settings.get("structure_gap_fallback_kinds", []).duplicate(),
 		"minimum_structure_gap": maxf(0.0, float(settings.get("minimum_structure_gap", 0.0))),
 	}
 	source_contract = player_definition.get("source_ai", {}).duplicate(true)
@@ -208,6 +211,7 @@ func presentation_options() -> Dictionary:
 			"requested_build_site_kinds": requested_build_site_kinds,
 			"maximum_build_sites_per_kind": maximum_build_sites_per_kind,
 			"build_site_search_radius": source_city_plan.recommended_search_radius() if source_city_plan != null and source_city_plan.enabled else 12,
+			"minimum_structure_gap": float(economic_policy.get("minimum_structure_gap", 0.0)),
 			"preferred_build_sites": preferred_build_sites,
 			"strict_preferred_build_site_kinds": strict_preferred_build_site_kinds,
 		}
@@ -224,6 +228,7 @@ func presentation_options() -> Dictionary:
 			"planning_technology_ids": economic_policy.get("age_advance_technology_ids", []).duplicate(),
 			"maximum_build_sites_per_kind": 12,
 			"build_site_search_radius": 12,
+			"minimum_structure_gap": float(economic_policy.get("minimum_structure_gap", 0.0)),
 		}
 	return {}
 

@@ -9,6 +9,7 @@ var occupied_cells: Dictionary = {}
 var elevation_cells: Dictionary = {}
 var slope_cells: Dictionary = {}
 var terrain_restrictions: Array = []
+var surface_component_cache: Dictionary = {}
 var revision: int = 0
 
 
@@ -21,6 +22,7 @@ func _init(grid_size: Vector2i = Vector2i.ONE) -> void:
 func configure_terrain(provider: Callable = Callable()) -> void:
 	terrain_cells.clear()
 	terrain_ids.clear()
+	surface_component_cache.clear()
 	for y in range(size.y):
 		for x in range(size.x):
 			var cell := Vector2i(x, y)
@@ -31,6 +33,7 @@ func configure_terrain(provider: Callable = Callable()) -> void:
 
 
 func configure_terrain_ids(provider: Callable = Callable()) -> void:
+	surface_component_cache.clear()
 	for y in range(size.y):
 		for x in range(size.x):
 			var cell := Vector2i(x, y)
@@ -40,6 +43,7 @@ func configure_terrain_ids(provider: Callable = Callable()) -> void:
 
 func configure_restrictions(restrictions: Array) -> void:
 	terrain_restrictions = restrictions.duplicate(true)
+	surface_component_cache.clear()
 	revision += 1
 
 
@@ -48,6 +52,7 @@ func set_terrain(cell: Vector2i, terrain_kind: String) -> void:
 		return
 	terrain_cells[cell] = terrain_kind
 	terrain_ids[cell] = TerrainRules.terrain_id_for_logical(terrain_kind)
+	surface_component_cache.clear()
 	revision += 1
 
 
@@ -55,6 +60,7 @@ func set_terrain_id(cell: Vector2i, terrain_id: int) -> void:
 	if not contains(cell) or int(terrain_ids.get(cell, -1)) == terrain_id:
 		return
 	terrain_ids[cell] = terrain_id
+	surface_component_cache.clear()
 	revision += 1
 
 
@@ -209,6 +215,39 @@ func surface_accessible(cell: Vector2i, movement_domain: String = "land", restri
 		"water": return TerrainRules.is_water_navigable(terrain(cell))
 		"amphibious": return TerrainRules.is_land_walkable(terrain(cell)) or TerrainRules.is_water_navigable(terrain(cell))
 		_: return TerrainRules.is_land_walkable(terrain(cell))
+
+
+func surface_component_id(cell: Vector2i, movement_domain: String = "land", restriction_id: int = -1) -> int:
+	if not contains(cell) or not surface_accessible(cell, movement_domain, restriction_id):
+		return -1
+	var key := "%s:%d" % [movement_domain, restriction_id]
+	if not surface_component_cache.has(key):
+		surface_component_cache[key] = _build_surface_components(movement_domain, restriction_id)
+	return int(surface_component_cache[key].get(cell, -1))
+
+
+func _build_surface_components(movement_domain: String, restriction_id: int) -> Dictionary:
+	var result: Dictionary = {}
+	var next_component_id := 0
+	for y in range(size.y):
+		for x in range(size.x):
+			var start := Vector2i(x, y)
+			if result.has(start) or not surface_accessible(start, movement_domain, restriction_id):
+				continue
+			var queue: Array[Vector2i] = [start]
+			result[start] = next_component_id
+			var cursor := 0
+			while cursor < queue.size():
+				var cell: Vector2i = queue[cursor]
+				cursor += 1
+				for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+					var neighbor: Vector2i = cell + offset
+					if not contains(neighbor) or result.has(neighbor) or not surface_accessible(neighbor, movement_domain, restriction_id):
+						continue
+					result[neighbor] = next_component_id
+					queue.append(neighbor)
+			next_component_id += 1
+	return result
 
 
 func can_place(cells: Array, movement_domain: String, restriction_id: int = -1) -> bool:

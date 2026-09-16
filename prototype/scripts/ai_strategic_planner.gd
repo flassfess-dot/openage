@@ -52,7 +52,9 @@ static func choose_goal(snapshot: Dictionary, team: int, decision_index: int) ->
 		home_center /= float(owned_positions.size())
 	for domain in ["land", "water"]:
 		var navigation: Dictionary = snapshot.get("navigation", {})
-		var frontier: Array = navigation.get("frontier", {}).get(domain, []).duplicate()
+		var has_reachability := navigation.has("reachable")
+		var frontier_source: Dictionary = navigation.get("reachable_frontier", {}) if has_reachability else navigation.get("frontier", {})
+		var frontier: Array = frontier_source.get(domain, []).duplicate()
 		if not frontier.is_empty():
 			frontier.sort_custom(func(left, right):
 				var left_point := Vector2(left)
@@ -67,9 +69,14 @@ static func choose_goal(snapshot: Dictionary, team: int, decision_index: int) ->
 			)
 			positions_by_domain[domain] = frontier[posmod(decision_index, mini(frontier.size(), 4))]
 			continue
-		var known: Array = navigation.get(domain, [])
+		var known_source: Dictionary = navigation.get("reachable", {}) if has_reachability else navigation
+		var known: Array = known_source.get(domain, [])
 		if not known.is_empty():
 			positions_by_domain[domain] = known[posmod(decision_index + team, known.size())]
 	if not positions_by_domain.has("land"):
-		positions_by_domain["land"] = points[posmod(decision_index + team, points.size())]
-	return {"type": "explore", "position": positions_by_domain["land"], "positions_by_domain": positions_by_domain}
+		if not snapshot.get("navigation", {}).has("reachable"):
+			positions_by_domain["land"] = points[posmod(decision_index + team, points.size())]
+		elif positions_by_domain.is_empty():
+			return {"type": "wait", "reason": "no_reachable_exploration_surface"}
+	var primary_position: Vector2 = positions_by_domain.get("land", positions_by_domain.values()[0])
+	return {"type": "explore", "position": primary_position, "positions_by_domain": positions_by_domain}

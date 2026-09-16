@@ -58,6 +58,10 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	world.navigation_grid.configure_terrain(func(_cell): return "grass")
 	var player: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
 	player["components"]["vision"] = {"enabled": true, "range": 4.0}
+	player["components"]["cargo"] = {"enabled": true, "capacity": 5, "passenger_ids": [101, 102]}
+	player["components"]["trade"] = {"enabled": true, "selected_input_resource_type_id": 2, "cargo_gold": 7.0}
+	var visible_enemy: Dictionary = world.add_unit(2, "clubman", Vector2(6.0, 4.0), false)
+	visible_enemy["components"]["cargo"] = {"enabled": true, "capacity": 5, "passenger_ids": [201, 202]}
 	var hidden_enemy: Dictionary = world.add_unit(2, "clubman", Vector2(28.0, 28.0), false)
 	var visible_objective: Dictionary = world.add_victory_object("ruin", Vector2(4.0, 4.0), 1, true)
 	world.add_victory_object("ruin", Vector2(28.0, 27.0), 0, true)
@@ -65,7 +69,7 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	world.update_fog_of_war()
 	var snapshot := SimulationSnapshot.presentation(world, 7, 1)
 	assert_equal(snapshot["tick"], 7, "presentation tick is explicit")
-	assert_equal(snapshot["units"].size(), 1, "presentation snapshot excludes unseen enemies")
+	assert_equal(snapshot["units"].size(), 2, "presentation snapshot excludes unseen enemies while retaining visible contacts")
 	assert_equal(snapshot["units"][0]["id"], player["id"], "presentation snapshot retains visible unit")
 	assert_equal(snapshot["objectives"].size(), 1, "presentation snapshot excludes unseen objectives")
 	assert_equal(snapshot["objectives"][0]["id"], visible_objective["id"], "presentation snapshot retains visible objective")
@@ -76,6 +80,7 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	assert_equal(snapshot["fog"]["cells"].size(), 32 * 32, "presentation snapshot contains observer fog grid")
 	assert_true(not snapshot["navigation"].get("frontier", {}).get("land", []).is_empty(), "presentation snapshot exposes compact reachable fog-frontier knowledge")
 	assert_true(snapshot["navigation"]["frontier"]["land"].all(func(point): return point in snapshot["navigation"]["land"]), "every land frontier point is part of known reachable navigation")
+	assert_true(snapshot["navigation"]["reachable_frontier"]["land"].all(func(point): return point in snapshot["navigation"]["reachable"]["land"]), "reachable frontier never crosses the observer's land component")
 	snapshot["player_state"]["food"] = 0
 	snapshot["fog"]["cells"][0] = 99
 	assert_equal(world.get_food(), 180, "player economy snapshot is detached")
@@ -84,6 +89,11 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	var distress_snapshot := SimulationSnapshot.presentation(world, 8, 1, {"compact_entities": true})
 	assert_equal(distress_snapshot.get("ai_distress_signals", []).size(), 1, "observer receives only its own recent distress calls")
 	assert_equal(int(distress_snapshot.get("ai_distress_signals", [])[0].get("attacker_id", -1)), int(hidden_enemy["id"]), "distress call preserves the authoritative attacker identity")
+	var compact_own: Dictionary = distress_snapshot["units"].filter(func(unit): return int(unit.get("id", -1)) == int(player["id"]))[0]
+	var compact_enemy: Dictionary = distress_snapshot["units"].filter(func(unit): return int(unit.get("id", -1)) == int(visible_enemy["id"]))[0]
+	assert_equal(compact_own.get("components", {}).get("cargo", {}).get("passenger_ids"), [101, 102], "compact AI snapshot preserves own transport manifest")
+	assert_equal(compact_own.get("components", {}).get("trade", {}).get("selected_input_resource_type_id"), 2, "compact AI snapshot preserves own trade policy")
+	assert_true(not compact_enemy.get("components", {}).get("cargo", {}).has("passenger_ids"), "compact AI snapshot hides an enemy transport manifest")
 	distress_snapshot["ai_distress_signals"][0]["attacker_id"] = -1
 	assert_equal(int(world.get_attack_distress_signals(1)[0].get("attacker_id", -1)), int(hidden_enemy["id"]), "distress presentation is detached from authoritative state")
 	world.ai_distress_system.advance({"delta": 4.0})

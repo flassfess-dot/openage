@@ -27,6 +27,9 @@ func _initialize() -> void:
 	assert_equal(int(standard.get("building_limits", {}).get("house", 0)), 4, "engine-owned economy can add multiple houses")
 	assert_equal(int(standard.get("worker_target", 0)), 8, "engine-owned economy has an explicit workforce target")
 	assert_equal(standard.get("age_advance_technology_ids", []).map(func(value): return int(value)), [101, 102, 103], "engine-owned economy names the authoritative age technologies")
+	assert_true("dock" in standard.get("age_saving_construction_exceptions", []), "engine-owned economy may add naval food infrastructure while preserving age resources")
+	assert_equal(standard.get("age_saving_production_exceptions", []), ["fishing_boat", "scout_ship"], "engine-owned economy can bootstrap naval scouting without spending reserved age resources")
+	assert_equal(standard.get("structure_gap_fallback_kinds", []), ["house"], "critical housing can use a legal compact fallback when an island has no spacious site")
 	assert_equal(float(standard.get("minimum_structure_gap", -1.0)), 1.0, "engine-owned placement preserves a navigation lane between structures")
 	assert_true(not bool(standard.get("use_workers_in_attack_groups", true)), "engine-owned economy keeps workers out of ordinary attack groups")
 

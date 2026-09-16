@@ -10,6 +10,7 @@ func _initialize() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load_generated_data()
 	test_conquest(catalog)
+	test_allied_conquest(catalog)
 	test_artifacts_and_ruins(catalog)
 	test_wonder_and_score(catalog)
 	test_scenario_conditions(catalog)
@@ -30,6 +31,31 @@ func test_conquest(catalog) -> void:
 	world.check_battle_state(1, 2)
 	assert_equal(world.get_victory_result()["reason"], "conquest", "default conquest condition")
 	assert_equal(world.get_victory_result()["winner_team"], 1, "conquest winner")
+	assert_equal(world.get_victory_result()["winner_teams"], [1], "solo conquest preserves an explicit winning side")
+
+
+func test_allied_conquest(catalog) -> void:
+	var world = SimulationWorld.new(Vector2i(20, 20))
+	world.set_gamespec(catalog.gamespec_data)
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.configure_players([
+		{"team": 1, "controller": "human"},
+		{"team": 2, "controller": "ai"},
+		{"team": 3, "controller": "ai"},
+		{"team": 4, "controller": "ai"},
+	])
+	world.set_alliance(1, 2, true)
+	world.set_alliance(3, 4, true)
+	world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	world.add_unit(2, "clubman", Vector2(5.0, 4.0), false)
+	world.check_battle_state(2, 3)
+	var result: Dictionary = world.get_victory_result()
+	assert_equal(result.get("winner_team"), 1, "allied conquest keeps the lowest stable team as compatibility winner")
+	assert_equal(result.get("winner_teams"), [1, 2], "all mutually allied survivors share conquest victory")
+	assert_equal(result.get("loser_teams"), [3, 4], "eliminated opposing alliance is the losing side")
+	assert_equal(world.player_registry.status(1), "victorious", "first ally is finalized as victorious")
+	assert_equal(world.player_registry.status(2), "victorious", "second ally is finalized as victorious")
+	assert_true(world.get_last_battle_message().begins_with("ПОБЕДА"), "local member of the winning alliance receives victory presentation")
 
 
 func test_artifacts_and_ruins(catalog) -> void:

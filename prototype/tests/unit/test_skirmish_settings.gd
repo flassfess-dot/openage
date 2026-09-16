@@ -25,6 +25,15 @@ func _initialize() -> void:
 	var first_start := Vector2(definition.get("players", [])[0].get("start", Vector2.ZERO))
 	var first_villagers: Array = definition.get("entities", []).filter(func(entity): return String(entity.get("category", "")) == "unit" and int(entity.get("team", 0)) == 1)
 	assert_true(first_villagers.all(func(entity): return Vector2(entity.get("position", Vector2.ZERO)).distance_to(first_start) >= 3.0), "starting villagers spawn outside the Town Center navigation footprint")
+	for entity_value in definition.get("entities", []):
+		var entity: Dictionary = entity_value
+		var exclusion_radius := int(entity.get("resource_exclusion_radius_cells", 0))
+		if exclusion_radius <= 0:
+			continue
+		var entity_cell := Vector2i(Vector2(entity.get("position", Vector2.ZERO)))
+		for resource_value in first.get("map_data", {}).get("resources", []):
+			var resource_cell := Vector2i(Vector2(resource_value.get("position", Vector2.ZERO)))
+			assert_true(maxi(absi(resource_cell.x - entity_cell.x), absi(resource_cell.y - entity_cell.y)) > exclusion_radius, "generated resources preserve the declared starting-entity clearance")
 	assert_equal(int(definition.get("players", [])[0].get("starting_age_technology_id", -1)), 100, "Stone Age is represented by the authoritative age technology")
 	assert_equal(int(definition.get("players", [])[0].get("population_limit", -1)), 50, "population limit reaches the match definition")
 	var human_ai: Dictionary = definition.get("players", [])[0].get("ai", {})

@@ -47,6 +47,13 @@ func _initialize() -> void:
 	assert_equal(economy_commands.size(), 1, "economic layer assigns visible work without military units")
 	assert_equal(economy_commands[0].command_type(), "gather", "economic layer uses public gather command")
 	assert_equal(economy_commands[0].resource_id, 80, "economic layer can only choose resource present in snapshot")
+	var recovery_economy_snapshot := snapshot_base()
+	var blocked_worker := worker(45, 2, Vector2(3, 3))
+	blocked_worker["diagnostic_reason"] = "no_path"
+	recovery_economy_snapshot["units"] = [blocked_worker, worker(46, 2, Vector2(7, 3))]
+	recovery_economy_snapshot["resources"] = [{"id": 81, "kind": "berries", "pos": Vector2(3.5, 3), "amount": 100}]
+	var recovery_economy_commands := EconomicPlanner.plan(recovery_economy_snapshot, 2, 2)
+	assert_equal(recovery_economy_commands[0].unit_ids, [46], "a failed nearest route cannot starve another healthy idle worker")
 
 	var resume_snapshot := snapshot_base()
 	resume_snapshot["units"] = [worker(41, 2, Vector2(3, 3))]
@@ -57,6 +64,12 @@ func _initialize() -> void:
 	assert_equal(resume_commands[0].target, Vector2(5, 3), "foundation recovery targets the existing site exactly")
 	resume_snapshot["buildings"][0]["builder_count"] = 1
 	assert_equal(EconomicPlanner.plan(resume_snapshot, 3, 2, {"construction_priorities": ["house", "barracks"]}).size(), 0, "economic policy does not spam a foundation that already has an active builder")
+	var reachable_resume := snapshot_base()
+	reachable_resume["units"] = [worker(43, 2, Vector2(3, 3)), worker(44, 2, Vector2(8, 3))]
+	reachable_resume["buildings"] = [{"id": 94, "team": 2, "kind": "house", "pos": Vector2(6, 3), "hp": 7.5, "state": "foundation", "builder_count": 0, "reachable_builder_ids": [44], "production_queue": []}]
+	var reachable_resume_commands := EconomicPlanner.plan(reachable_resume, 3, 2, {"construction_priorities": ["house"]})
+	assert_equal(reachable_resume_commands.size(), 1, "foundation recovery waits for an authoritatively reachable builder")
+	assert_equal(reachable_resume_commands[0].unit_ids, [44], "foundation recovery does not repeatedly assign a blocked nearer worker")
 
 	var spaced_snapshot := snapshot_base()
 	var spaced_worker := worker(42, 2, Vector2(5, 7))
@@ -67,19 +80,44 @@ func _initialize() -> void:
 	var spaced_commands := EconomicPlanner.plan(spaced_snapshot, 4, 2, {"construction_priorities": ["house"], "building_limits": {"house": 1}, "minimum_structure_gap": 1.0})
 	assert_equal(spaced_commands.size(), 1, "economic policy finds a construction site outside the protected navigation lane")
 	assert_equal(spaced_commands[0].target, Vector2(9, 5), "economic policy rejects a site that packs structures too tightly")
+	spaced_snapshot["build_sites"] = {"house": [Vector2(6.5, 5)]}
+	var compact_house_commands := EconomicPlanner.plan(spaced_snapshot, 5, 2, {"construction_priorities": ["house"], "building_limits": {"house": 1}, "minimum_structure_gap": 1.0, "structure_gap_fallback_kinds": ["house"]})
+	assert_equal(compact_house_commands.size(), 1, "critical housing uses a legal compact fallback when no gap-preserving site exists")
+	assert_equal(compact_house_commands[0].target, Vector2(6.5, 5), "compact housing fallback remains deterministic")
 
 	var saving_snapshot := snapshot_base()
 	for worker_id in range(100, 106):
 		saving_snapshot["units"].append(worker(worker_id, 2, Vector2(worker_id - 96, 4)))
 	saving_snapshot["player_state"]["age"] = 100
 	saving_snapshot["buildings"] = [
-		{"id": 92, "team": 2, "kind": "town_center", "pos": Vector2(4, 4), "hp": 600.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("villager", ["worker"])], "research": [{"technology_id": 101, "accepted": false, "reason": "insufficient_resources"}]}},
+		{"id": 92, "team": 2, "kind": "town_center", "pos": Vector2(4, 4), "hp": 600.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("villager", ["worker"], {0: 50})], "research": [{"technology_id": 101, "accepted": false, "reason": "insufficient_resources", "cost": {0: 500}}]}},
 		{"id": 93, "team": 2, "kind": "barracks", "pos": Vector2(8, 4), "hp": 350.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("clubman", ["combatant"])], "research": []}},
 	]
-	var age_policy := {"minimum_workers_before_age_up": 6, "age_advance_technology_ids": [101, 102, 103], "worker_target": 8}
+	var age_policy := {"minimum_workers_before_age_up": 6, "age_advance_technology_ids": [101, 102, 103], "worker_target": 8, "construction_priorities": ["dock"], "building_limits": {"dock": 1}, "age_saving_construction_exceptions": ["dock"], "age_saving_production_exceptions": ["scout_ship"]}
 	assert_equal(EconomicPlanner.plan(saving_snapshot, 5, 2, age_policy).size(), 0, "economic policy saves resources instead of continuously training through an age-up target")
+	saving_snapshot["units"][0]["command_options"] = {"build": [{"kind": "dock", "accepted": true, "cost": {1: 150}}]}
+	saving_snapshot["build_sites"] = {"dock": [Vector2(3.5, 8.5)]}
+	var saving_build_commands := EconomicPlanner.plan(saving_snapshot, 6, 2, age_policy)
+	assert_equal(saving_build_commands.size(), 1, "age saving permits declared economic infrastructure that avoids the reserved resource")
+	assert_equal(saving_build_commands[0].command_type(), "build", "age-saving infrastructure uses the public build pipeline")
+	assert_equal(String(saving_build_commands[0].building_type), "dock", "naval economy can bootstrap before the next age")
+	saving_snapshot["units"][0].erase("command_options")
+	saving_snapshot.erase("build_sites")
+	var saving_dock := {"id": 94, "team": 2, "kind": "dock", "pos": Vector2(4, 8), "hp": 350.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("fishing_boat", ["worker", "naval"], {1: 50})], "research": []}}
+	saving_snapshot["buildings"].append(saving_dock)
+	saving_snapshot["resources"] = [{"id": 95, "kind": "deep_fish", "pos": Vector2(4, 10), "amount": 250, "resource_type_id": 0, "allowed_gatherer_domains": ["water"]}]
+	var saving_naval_commands := EconomicPlanner.plan(saving_snapshot, 7, 2, age_policy)
+	assert_equal(saving_naval_commands.size(), 1, "age saving still permits an economic unit that does not spend the reserved resource")
+	assert_equal(saving_naval_commands[0].command_type(), "train", "economic exception remains inside the public production pipeline")
+	assert_equal(String(saving_naval_commands[0].unit_type), "fishing_boat", "Dock can bootstrap food income while land economy saves for the next age")
+	saving_dock["command_options"]["train"] = [train_option("scout_ship", ["combatant", "naval"], {1: 135})]
+	saving_snapshot["resources"].clear()
+	var saving_scout_commands := EconomicPlanner.plan(saving_snapshot, 8, 2, age_policy)
+	assert_equal(saving_scout_commands.size(), 1, "declared naval scout can launch while food remains reserved for the next age")
+	assert_equal(String(saving_scout_commands[0].unit_type), "scout_ship", "age-saving production exception remains kind-specific")
+	saving_snapshot["buildings"].pop_back()
 	saving_snapshot["buildings"][0]["command_options"]["research"][0] = {"technology_id": 101, "accepted": true, "reason": ""}
-	var age_commands := EconomicPlanner.plan(saving_snapshot, 6, 2, age_policy)
+	var age_commands := EconomicPlanner.plan(saving_snapshot, 9, 2, age_policy)
 	assert_equal(age_commands.size(), 1, "economic policy reserves one decision for the age advance")
 	assert_equal(age_commands[0].command_type(), "research", "age advance uses the ordinary public research command")
 
@@ -137,14 +175,19 @@ func _initialize() -> void:
 	}
 	var frontier_goal := StrategicPlanner.choose_goal(frontier_snapshot, 2, 0)
 	assert_equal(frontier_goal.get("position"), Vector2(10.5, 10.5), "skirmish exploration advances toward the farthest known fog frontier")
+	frontier_snapshot["navigation"]["reachable"] = {"land": [Vector2(3.5, 3.5), Vector2(4.5, 4.5)], "water": []}
+	frontier_snapshot["navigation"]["reachable_frontier"] = {"land": [Vector2(3.5, 3.5)], "water": []}
+	var island_goal := StrategicPlanner.choose_goal(frontier_snapshot, 2, 0)
+	assert_equal(island_goal.get("position"), Vector2(3.5, 3.5), "land exploration never targets a visible but disconnected island")
 
 	var dock_build_snapshot := snapshot_base()
 	var dock_worker := worker(75, 2, Vector2(4, 10))
+	dock_worker["task"] = "gather"
 	dock_worker["command_options"] = {"build": [{"kind": "dock", "accepted": true}]}
 	dock_build_snapshot["units"] = [dock_worker]
 	dock_build_snapshot["build_sites"] = {"dock": [Vector2(2.5, 10.5)]}
 	var dock_commands: Array = AiPlayer.new({"team": 2}).collect_commands(dock_build_snapshot, 1)
-	assert_equal(dock_commands.size(), 1, "economic AI emits one authoritative shoreline build order")
+	assert_equal(dock_commands.size(), 1, "economic AI can reassign one gathering worker to an authoritative shoreline build order")
 	assert_equal(dock_commands[0].command_type(), "build", "economic AI builds Dock through public BuildCommand")
 	assert_equal(dock_commands[0].building_type, "dock", "mixed-domain build site selects Dock")
 	assert_equal(dock_commands[0].target, Vector2(2.5, 10.5), "AI uses only authoritative explored placement candidate")
@@ -194,6 +237,9 @@ func test_fleet_production_and_trade_routes() -> void:
 	first_boat["task"] = "gather"
 	second_boat["task"] = "gather"
 	fleet_snapshot["units"] = [first_boat, second_boat]
+	var fishing_only := fleet_snapshot.duplicate(true)
+	fishing_only["buildings"][0]["command_options"]["train"] = [train_option("fishing_boat", ["worker", "naval"])]
+	assert_equal(first_command_of_type(EconomicPlanner.plan(fishing_only, 2, 2), "train"), null, "Dock does not replace an unavailable fleet class with surplus Fishing Boats")
 	fleet_snapshot["buildings"].append({"id": 193, "team": 1, "kind": "dock", "pos": Vector2(2.5, 20.5), "hp": 350.0, "state": "complete", "trade": {"trade_goods": 40}})
 	commands = EconomicPlanner.plan(fleet_snapshot, 2, 2)
 	train = first_command_of_type(commands, "train")
@@ -281,7 +327,7 @@ func test_skirmish_policy_attack_control() -> void:
 	stranded["diagnostic_reason"] = "no_path"
 	var recovery_snapshot := snapshot_base()
 	recovery_snapshot["units"] = [stranded, fighter(25, 2, Vector2(7, 5))]
-	recovery_snapshot["navigation"] = {"land": [Vector2(6.5, 5), Vector2(9, 5)], "water": []}
+	recovery_snapshot["navigation"] = {"land": [Vector2(6.25, 5), Vector2(6.5, 5), Vector2(9, 5)], "water": [], "reachable": {"land": [Vector2(6.5, 5), Vector2(9, 5)], "water": []}}
 	var recovery_goal := {"type": "explore", "positions_by_domain": {"land": Vector2(9, 5)}}
 	var recovery_commands := TacticalPlanner.plan(recovery_snapshot, 12, 2, recovery_goal, "LINE")
 	assert_equal(recovery_commands.size(), 2, "tactical planner separates local recovery from the healthy attack group")
@@ -305,11 +351,18 @@ func test_skirmish_policy_attack_control() -> void:
 	configured_policy["worker_target"] = 8
 	configured_policy["minimum_workers_before_age_up"] = 6
 	configured_policy["age_advance_technology_ids"] = [101, 102, 103]
+	configured_policy["age_saving_construction_exceptions"] = ["house", "dock"]
+	configured_policy["age_saving_production_exceptions"] = ["scout_ship"]
+	configured_policy["structure_gap_fallback_kinds"] = ["house"]
 	configured_policy["use_workers_in_attack_groups"] = false
 	var configured_player = AiPlayer.new({"team": 2, "ai": configured_policy})
 	var options: Dictionary = configured_player.presentation_options()
 	assert_equal(options.get("requested_build_site_kinds"), ["house", "barracks"], "skirmish AI requests only policy-owned construction knowledge")
 	assert_equal(options.get("planning_technology_ids"), [101, 102, 103], "skirmish AI requests authoritative future age costs without exposing hidden world state")
+	assert_equal(configured_player.economic_policy.get("age_saving_construction_exceptions"), ["house", "dock"], "skirmish AI preserves data-driven construction exceptions while saving for an age advance")
+	assert_equal(configured_player.economic_policy.get("age_saving_production_exceptions"), ["scout_ship"], "skirmish AI preserves kind-specific production exceptions while saving for an age advance")
+	assert_equal(configured_player.economic_policy.get("structure_gap_fallback_kinds"), ["house"], "skirmish AI preserves data-driven compact-site fallbacks")
+	assert_equal(float(options.get("minimum_structure_gap", -1.0)), float(configured_policy.get("minimum_structure_gap", 0.0)), "skirmish AI forwards its structure clearance to the bounded site query")
 	assert_true(not bool(options.get("include_fog_cells", true)), "skirmish AI does not copy the full fog grid into every decision")
 	var worker_only := snapshot_base()
 	var armed_worker := worker(40, 2, Vector2(4, 4))
@@ -319,8 +372,8 @@ func test_skirmish_policy_attack_control() -> void:
 	assert_equal(configured_player.collect_commands(worker_only, 1).size(), 0, "skirmish tactical policy never pulls an economic worker into its attack group")
 
 
-func train_option(kind: String, tags: Array) -> Dictionary:
-	return {"kind": kind, "accepted": true, "behavior_tags": tags}
+func train_option(kind: String, tags: Array, cost: Dictionary = {}) -> Dictionary:
+	return {"kind": kind, "accepted": true, "behavior_tags": tags, "cost": cost.duplicate(true)}
 
 
 func transport(id: int, position: Vector2, passenger_ids: Array) -> Dictionary:

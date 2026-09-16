@@ -111,8 +111,14 @@ func defeat(team: int) -> bool:
 
 
 func finalize(winner_team: int, loser_teams: Array) -> void:
-	if players.has(winner_team):
-		players[winner_team]["status"] = VICTORIOUS
+	finalize_side([winner_team], loser_teams)
+
+
+func finalize_side(winner_teams: Array, loser_teams: Array) -> void:
+	for team_value in winner_teams:
+		var team := int(team_value)
+		if players.has(team) and String(players[team].get("status", ACTIVE)) == ACTIVE:
+			players[team]["status"] = VICTORIOUS
 	for team_value in loser_teams:
 		var team := int(team_value)
 		if players.has(team) and String(players[team].get("status", ACTIVE)) == ACTIVE:

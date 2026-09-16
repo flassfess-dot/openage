@@ -22,6 +22,8 @@ static func generate(match_definition: Dictionary) -> Dictionary:
 	var naval_start_settings: Dictionary = generator.get("naval_start", {})
 	var naval_start_zones := _generate_naval_start_zones(match_definition.get("players", []), size, terrain_ids, naval_start_settings)
 	var reserved_naval_cells := _reserved_naval_cells(naval_start_zones, maxi(0, int(naval_start_settings.get("dock_footprint_radius_cells", 1))))
+	var resource_exclusion_cells := reserved_naval_cells.duplicate()
+	resource_exclusion_cells.merge(_starting_entity_exclusion_cells(match_definition, size), true)
 	var reserved_foundation_cells: Array = reserved_naval_cells.keys()
 	reserved_foundation_cells.sort_custom(func(left, right):
 		var left_cell := Vector2i(left)
@@ -40,7 +42,7 @@ static func generate(match_definition: Dictionary) -> Dictionary:
 		"seed": seed,
 		"terrain_ids": terrain_ids,
 		"vertex_levels": vertex_levels,
-		"resources": _generate_resource_clusters(generator.get("resource_clusters", []), size, seed, terrain_ids, reserved_naval_cells),
+		"resources": _generate_resource_clusters(generator.get("resource_clusters", []), size, seed, terrain_ids, resource_exclusion_cells),
 		"naval_start_zones": naval_start_zones,
 		"reserved_foundation_cells": reserved_foundation_cells,
 	}
@@ -62,6 +64,8 @@ static func _seeded_skirmish_map(match_definition: Dictionary, size: Vector2i, s
 	if bool(generator.get("requires_naval_starts", false)):
 		naval_start_zones = _generate_naval_start_zones(match_definition.get("players", []), size, terrain_ids, naval_start_settings)
 	var reserved_naval_cells := _reserved_naval_cells(naval_start_zones, maxi(0, int(naval_start_settings.get("dock_footprint_radius_cells", 1))))
+	var resource_exclusion_cells := reserved_naval_cells.duplicate()
+	resource_exclusion_cells.merge(_starting_entity_exclusion_cells(match_definition, size), true)
 	var reserved_foundation_cells: Array = reserved_naval_cells.keys()
 	reserved_foundation_cells.sort_custom(func(left, right):
 		var left_cell := Vector2i(left)
@@ -78,7 +82,7 @@ static func _seeded_skirmish_map(match_definition: Dictionary, size: Vector2i, s
 		"seed": seed,
 		"terrain_ids": terrain_ids,
 		"vertex_levels": vertex_levels,
-		"resources": _generate_resource_clusters(generator.get("resource_clusters", []), size, seed, terrain_ids, reserved_naval_cells),
+		"resources": _generate_resource_clusters(generator.get("resource_clusters", []), size, seed, terrain_ids, resource_exclusion_cells),
 		"naval_start_zones": naval_start_zones,
 		"reserved_foundation_cells": reserved_foundation_cells,
 	}
@@ -304,6 +308,7 @@ static func _apply_hill(levels: Array[int], size: Vector2i, hill_value: Variant)
 
 static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: int, terrain_ids: Array[int], blocked_cells: Dictionary = {}) -> Array:
 	var resources: Array = []
+	var occupied_cells := blocked_cells.duplicate()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed
 	for cluster_value in clusters:
@@ -318,7 +323,8 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 			position.x = clampf(position.x, 1.5, float(size.x) - 1.5)
 			position.y = clampf(position.y, 1.5, float(size.y) - 1.5)
 			var placement_domain := String(cluster.get("placement_domain", "land"))
-			position = _nearest_domain(position, size, terrain_ids, placement_domain, blocked_cells)
+			position = _nearest_domain(position, size, terrain_ids, placement_domain, occupied_cells)
+			occupied_cells[Vector2i(floori(position.x), floori(position.y))] = true
 			resources.append({
 				"category": "resource",
 				"kind": String(cluster.get("kind", "tree")),
@@ -327,6 +333,20 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 				"placement_domain": placement_domain,
 			})
 	return resources
+
+
+static func _starting_entity_exclusion_cells(match_definition: Dictionary, size: Vector2i) -> Dictionary:
+	var result: Dictionary = {}
+	for entity_value in match_definition.get("entities", []):
+		var entity: Dictionary = entity_value
+		var radius := maxi(0, int(entity.get("resource_exclusion_radius_cells", 0)))
+		if radius <= 0:
+			continue
+		var center := Vector2i(Vector2(entity.get("position", Vector2.ZERO)))
+		for y in range(maxi(0, center.y - radius), mini(size.y, center.y + radius + 1)):
+			for x in range(maxi(0, center.x - radius), mini(size.x, center.x + radius + 1)):
+				result[Vector2i(x, y)] = true
+	return result
 
 
 static func _nearest_land(position: Vector2, size: Vector2i, terrain_ids: Array[int]) -> Vector2:

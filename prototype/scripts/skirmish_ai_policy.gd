@@ -91,6 +91,15 @@ static func _validate_runtime(runtime: Dictionary, errors: Array[String]) -> voi
 	var age_advance_ids = runtime.get("age_advance_technology_ids", [])
 	if not age_advance_ids is Array or age_advance_ids.is_empty() or age_advance_ids.any(func(value): return int(value) <= 0):
 		errors.append("skirmish_ai_policy_field_invalid:age_advance_technology_ids")
+	var age_saving_exceptions = runtime.get("age_saving_construction_exceptions", [])
+	if not age_saving_exceptions is Array or age_saving_exceptions.any(func(value): return String(value).is_empty() or String(value) not in priorities):
+		errors.append("skirmish_ai_policy_field_invalid:age_saving_construction_exceptions")
+	var age_saving_production_exceptions = runtime.get("age_saving_production_exceptions", [])
+	if not age_saving_production_exceptions is Array or age_saving_production_exceptions.any(func(value): return String(value).is_empty()):
+		errors.append("skirmish_ai_policy_field_invalid:age_saving_production_exceptions")
+	var gap_fallback_kinds = runtime.get("structure_gap_fallback_kinds", [])
+	if not gap_fallback_kinds is Array or gap_fallback_kinds.any(func(value): return String(value).is_empty() or String(value) not in priorities):
+		errors.append("skirmish_ai_policy_field_invalid:structure_gap_fallback_kinds")
 	if float(runtime.get("minimum_structure_gap", -1.0)) < 0.0:
 		errors.append("skirmish_ai_policy_field_invalid:minimum_structure_gap")
 	if not runtime.has("use_workers_in_attack_groups") or not runtime["use_workers_in_attack_groups"] is bool:

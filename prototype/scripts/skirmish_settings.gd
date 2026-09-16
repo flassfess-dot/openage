@@ -164,9 +164,9 @@ static func build(source: Dictionary) -> Dictionary:
 			"starting_technology_mode": "age_start",
 			"ai": _player_ai_settings(ai_policy, String(slot["controller"]) == "ai"),
 		})
-		entities.append({"category": "building", "team": team, "kind": "town_center", "position": start})
+		entities.append({"category": "building", "team": team, "kind": "town_center", "position": start, "resource_exclusion_radius_cells": 2})
 		for position in _starting_villager_positions(start, size):
-			entities.append({"category": "unit", "team": team, "kind": "villager", "position": position, "selected": team == 1})
+			entities.append({"category": "unit", "team": team, "kind": "villager", "position": position, "selected": team == 1, "resource_exclusion_radius_cells": 1})
 
 	var raw_definition := {
 		"schema_version": 1,

@@ -30,6 +30,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var requested_build_site_kinds: Array = options.get("requested_build_site_kinds", [])
 	var maximum_build_sites_per_kind := maxi(1, int(options.get("maximum_build_sites_per_kind", 4)))
 	var build_site_search_radius := maxi(1, int(options.get("build_site_search_radius", 12)))
+	var minimum_structure_gap := maxf(0.0, float(options.get("minimum_structure_gap", 0.0)))
 	var preferred_build_sites: Dictionary = options.get("preferred_build_sites", {})
 	var strict_preferred_build_site_kinds: Array = options.get("strict_preferred_build_site_kinds", [])
 	var requested_build_options: Array = []
@@ -70,6 +71,8 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				presentation_building["trade"] = world.trade_system.presentation_for_dock(building)
 			if observer_team > 0 and int(building.get("team", 0)) == observer_team:
 				presentation_building["builder_count"] = building.get("builders", {}).size()
+				if String(building.get("state", "complete")) == "foundation":
+					presentation_building["reachable_builder_ids"] = world.reachable_builder_ids(building)
 				if requested_production_only:
 					presentation_building["command_options"] = _requested_production_options(world, building, observer_team, production_requests)
 				else:
@@ -93,7 +96,8 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 			maximum_build_sites_per_kind,
 			build_site_search_radius,
 			preferred_build_sites,
-			strict_preferred_build_site_kinds
+			strict_preferred_build_site_kinds,
+			minimum_structure_gap
 		)
 	elif observer_team > 0 and include_build_sites:
 		build_sites = world.get_mixed_domain_build_sites(observer_team)
@@ -191,7 +195,7 @@ static func _sorted_entities(source: Array) -> Array:
 
 static func _presentation_entity(entity: Dictionary, observer_team: int = 0, compact: bool = false) -> Dictionary:
 	if compact:
-		return _compact_ai_entity(entity)
+		return _compact_ai_entity(entity, observer_team)
 	var result: Dictionary = entity.duplicate(true)
 	result.erase("selected")
 	var cargo: Dictionary = result.get("components", {}).get("cargo", {})
@@ -207,12 +211,13 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 	return result
 
 
-static func _compact_ai_entity(entity: Dictionary) -> Dictionary:
+static func _compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Dictionary:
 	var result: Dictionary = {}
 	for key in [
 		"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
 		"pos", "hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
 		"resource_type_id", "harvestable", "footprint_radius", "rally_point", "attack_range",
+		"reachable_builder_ids",
 	]:
 		if entity.has(key):
 			result[key] = entity[key]
@@ -223,7 +228,23 @@ static func _compact_ai_entity(entity: Dictionary) -> Dictionary:
 	if entity.has("allowed_gatherer_domains"):
 		result["allowed_gatherer_domains"] = entity.get("allowed_gatherer_domains", []).duplicate()
 	var worker: Dictionary = entity.get("components", {}).get("worker", {})
-	result["components"] = {"worker": {"enabled": bool(worker.get("enabled", false))}}
+	var components := {"worker": {"enabled": bool(worker.get("enabled", false))}}
+	var cargo: Dictionary = entity.get("components", {}).get("cargo", {})
+	if bool(cargo.get("enabled", false)):
+		components["cargo"] = {
+			"enabled": true,
+			"capacity": maxi(0, int(cargo.get("capacity", 0))),
+		}
+		if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
+			components["cargo"]["passenger_ids"] = cargo.get("passenger_ids", []).duplicate()
+	var trade: Dictionary = entity.get("components", {}).get("trade", {})
+	if bool(trade.get("enabled", false)):
+		components["trade"] = {"enabled": true}
+		if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
+			for field in ["target_dock_id", "home_dock_id", "selected_input_resource_type_id", "approach_position", "cargo_goods", "cargo_gold", "trip_count"]:
+				if trade.has(field):
+					components["trade"][field] = trade[field]
+	result["components"] = components
 	if entity.has("production_queue"):
 		var queue: Array = []
 		for order_value in entity.get("production_queue", []):
@@ -298,9 +319,32 @@ static func _presentation_navigation(world, fog, observer_team: int) -> Dictiona
 		"land": [],
 		"water": [],
 		"frontier": {"land": [], "water": []},
+		"reachable": {"land": [], "water": []},
+		"reachable_frontier": {"land": [], "water": []},
 	}
 	if observer_team <= 0:
 		return result
+	var reachable_components := {"land": {}, "water": {}}
+	for unit_value in world.get_units():
+		var unit: Dictionary = unit_value
+		if int(unit.get("team", 0)) != observer_team or float(unit.get("hp", 0.0)) <= 0.0:
+			continue
+		var domain := String(unit.get("movement_domain", "land"))
+		if domain not in reachable_components:
+			continue
+		var position := Vector2(unit.get("pos", Vector2.ZERO))
+		var component_id: int = world.navigation_grid.surface_component_id(Vector2i(floori(position.x), floori(position.y)), domain)
+		if component_id >= 0:
+			reachable_components[domain][component_id] = true
+	if reachable_components["land"].is_empty():
+		for building_value in world.get_buildings():
+			var building: Dictionary = building_value
+			if int(building.get("team", 0)) != observer_team or float(building.get("hp", 0.0)) <= 0.0:
+				continue
+			var position := Vector2(building.get("pos", Vector2.ZERO))
+			var component_id: int = world.navigation_grid.surface_component_id(Vector2i(floori(position.x), floori(position.y)), "land")
+			if component_id >= 0:
+				reachable_components["land"][component_id] = true
 	for y in range(world.map_size.y):
 		for x in range(world.map_size.x):
 			var cell := Vector2i(x, y)
@@ -313,14 +357,22 @@ static func _presentation_navigation(world, fog, observer_team: int) -> Dictiona
 				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < world.map_size.x and neighbor.y < world.map_size.y and fog.state_at_cell(observer_team, neighbor) == 0:
 					borders_unknown = true
 					break
-			if world.navigation_grid.surface_accessible(cell, "land"):
+			if world.navigation_grid.is_walkable_for(cell, "land"):
 				result["land"].append(point)
 				if borders_unknown:
 					result["frontier"]["land"].append(point)
-			if world.navigation_grid.surface_accessible(cell, "water"):
+				if reachable_components["land"].has(world.navigation_grid.surface_component_id(cell, "land")):
+					result["reachable"]["land"].append(point)
+					if borders_unknown:
+						result["reachable_frontier"]["land"].append(point)
+			if world.navigation_grid.is_walkable_for(cell, "water"):
 				result["water"].append(point)
 				if borders_unknown:
 					result["frontier"]["water"].append(point)
+				if reachable_components["water"].has(world.navigation_grid.surface_component_id(cell, "water")):
+					result["reachable"]["water"].append(point)
+					if borders_unknown:
+						result["reachable_frontier"]["water"].append(point)
 	return result
 
 

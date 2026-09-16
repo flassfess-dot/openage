@@ -25,7 +25,7 @@
 7. **E7 — scenarios/campaigns:** triggers, scenario AI и последовательная публикация оставшихся кампаний. Первым сохранённым кандидатом остаётся `Reign of the Hittites`.
 8. **E8 — final parity/release:** итоговые original side-by-side, полный suite/cache validation/export и release candidate.
 
-E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. E5-001…E5-006B закрыли дипломатию, generated skirmish, четыре профиля случайных карт, DE evidence ledger, собственную difficulty-aware AI policy и первый полный детерминированный двухсторонний conquest с replay hash. Текущая активная работа — E5-006C: 4/8 сторон и coastal/islands naval vertical. Кампанийный portfolio остаётся заморожен до прохождения E6.
+E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. E5-001…E5-006B закрыли дипломатию, generated skirmish, четыре профиля случайных карт, DE evidence ledger, собственную difficulty-aware AI policy и первый полный детерминированный двухсторонний conquest с replay hash. E5-006C1 закрыл alliance-survivor victory и автономный islands bootstrap до первого управляемого Scout Ship. Текущая активная работа — E5-006C2: fishing/transport/naval combat и 4/8 сторон на coastal/islands. Кампанийный portfolio остаётся заморожен до прохождения E6.
 
 ## 2. Статусы готовности
 
@@ -704,3 +704,11 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Generated villagers появляются вне footprint Town Center. Build-site snapshot публикует только доступные типы, проверяет достижимость периметра до размещения и не позволяет foundation накрыть живого юнита. AI строит foundations последовательно, повторно назначает другого рабочего при сбое и не посылает новый приказ, пока строитель уже работает.
 - Исправлена общая production-семантика: центр здания является sentinel отсутствующей rally point, а не приказом идти в непроходимую клетку. Редкий `no_path` отделяется в локальное восстановление одного бойца, не разрушая здоровую группу.
 - Это `opening acceptance`, а не завершённая E5-матрица. E5-006B должен довести двухсторонний inland/highlands матч до детерминированного victory/replay outcome; E5-006C добавляет 4/8 игроков, directed diplomacy и coastal/islands economy/naval combat. Полный suite/cache/export остаётся только на границе E5; ресурсы не переимпортировались.
+
+### E5-006B/C1 — conquest, alliance outcome и naval bootstrap (2026-09-16)
+
+- Двухсторонний generated inland матч завершает настоящий `conquest` на fixed tick 12 240; записанный поток команд повторяется с тем же canonical hash и victory result. Reachable frontier не пересекает разорванные land/water components и не раскрывает скрытый мир.
+- Victory contract теперь возвращает `winner_teams`: взаимно союзный набор единственных активных выживших побеждает совместно, при этом legacy `winner_team` сохраняется только для одиночного победителя. Generated alliance acceptance проходит через обычный settings/bootstrap/runtime.
+- Resource generator резервирует footprint стартовых сущностей и уже размещённых ресурсов. Foundation placement учитывает радиус мобильного юнита, а восстановление строительства выбирает только авторитетно достижимого рабочего; один неудачный маршрут больше не блокирует здоровых сборщиков.
+- На `compact / islands / seed 41721 / very_high / hard` AI сам строит Dock и второй House, выпускает Scout Ship и получает принятый water-domain приказ к fixed tick 6040. Минимальный проход между зданиями остаётся предпочтением, но data-driven `structure_gap_fallback_kinds` разрешает законный компактный House, если остров не содержит просторной площадки. Age-saving exceptions разрешают Dock/House и первый wood-only naval scout, не расходуя food reserve следующей эпохи.
+- Это ещё не полный E5-006C: следующий пакет обязан доказать обнаружение водных ресурсов и fishing loop, transport embark/landing, naval combat/victory и матрицу 4/8 игроков на coastal/islands. После неё выполняется единый E5 suite/cache/export; E6 получает отдельно измеряемую задачу кэширования build-site queries и больших карт.

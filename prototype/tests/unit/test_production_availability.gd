@@ -75,10 +75,21 @@ func test_local_ai_build_sites(catalog) -> void:
 	world.update_fog_of_war()
 	assert_true(not world.can_place_foundation(1, "house", Vector2(worker["pos"])), "a foundation cannot trap a living unit inside its occupied cells")
 	assert_equal(world.last_build_failure, "occupied_by_unit", "unit overlap has a stable placement rejection")
+	worker["pos"] = Vector2(14.1, 12.5)
+	assert_true(not world.can_place_foundation(1, "house", Vector2(12.5, 12.5)), "foundation placement accounts for the mobile radius outside the occupied center cells")
+	assert_equal(world.last_build_failure, "occupied_by_unit", "mobile-radius overlap uses the same stable rejection")
+	worker["pos"] = Vector2(16.0, 12.5)
 	var sites: Array = world.get_local_build_sites(1, ["house"], 2).get("house", [])
 	assert_equal(sites.size(), 2, "local AI placement returns the requested bounded number of House sites")
 	for site_value in sites:
 		assert_true(world.can_place_foundation(1, "house", Vector2(site_value)), "every exposed local AI site passes the authoritative placement rules")
+	var existing: Dictionary = world.add_building(711, "house", Vector2(15.5, 15.5), 1)
+	var spaced_sites: Array = world.get_local_build_sites(1, ["house"], 2, 12, {}, [], 2.0).get("house", [])
+	assert_equal(spaced_sites.size(), 2, "bounded site search continues until it finds enough candidates that preserve the requested structure gap")
+	var option: Dictionary = option_for(world.get_build_options(1), "house")
+	var clearance := float(existing.get("footprint_radius", 1.0)) + float(option.get("footprint_radius", 1.0)) + 2.0
+	for site_value in spaced_sites:
+		assert_true(Vector2(site_value).distance_to(Vector2(existing.get("pos", Vector2.ZERO))) >= clearance, "site query applies the structure gap before consuming its candidate budget")
 
 
 func configured_world(catalog):

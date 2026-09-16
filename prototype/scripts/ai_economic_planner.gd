@@ -13,10 +13,9 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 	var own_structures: Array = snapshot.get("buildings", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
 	var own_buildings: Array = own_structures.filter(func(entity): return String(entity.get("state", "complete")) == "complete")
 	var land_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("movement_domain", "land")) == "land")
+	var construction_workers: Array = land_workers.filter(func(entity): return String(entity.get("task", "idle")) in ["idle", "gather"])
 	var land_worker_count := land_workers.size()
 	var age_intent := _age_advance_intent(own_buildings, snapshot.get("player_state", {}), policy, land_worker_count, tick)
-	var suppress_production := bool(age_intent.get("saving", false)) or age_intent.has("command")
-	var suppress_construction := bool(age_intent.get("block_construction", false)) or age_intent.has("command")
 	if age_intent.has("command"):
 		commands.append(age_intent["command"])
 	commands.append_array(_plan_idle_trade(snapshot, tick, team, own_units, own_buildings))
@@ -29,7 +28,8 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 		foundation_has_assigned_worker = own_units.any(func(unit): return String(unit.get("task", "")) == "build" and int(unit.get("target_building_id", -1)) == active_foundation_id)
 	if not active_foundations.is_empty() and not land_workers.is_empty() and int(active_foundations[0].get("builder_count", 0)) == 0 and not foundation_has_assigned_worker:
 		var foundation: Dictionary = active_foundations[0]
-		var builder_candidates: Array = land_workers.duplicate()
+		var reachable_builder_ids: Array = foundation.get("reachable_builder_ids", [])
+		var builder_candidates: Array = land_workers.filter(func(worker): return not foundation.has("reachable_builder_ids") or int(worker.get("id", -1)) in reachable_builder_ids)
 		builder_candidates.sort_custom(func(left, right):
 			var left_stuck := 1 if String(left.get("diagnostic_reason", "")).begins_with("stuck_") else 0
 			var right_stuck := 1 if String(right.get("diagnostic_reason", "")).begins_with("stuck_") else 0
@@ -54,7 +54,9 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 		if not active_foundations.is_empty():
 			break
 		var kind := String(kind_value)
-		if suppress_construction and kind != "house":
+		if age_intent.has("command"):
+			continue
+		if bool(age_intent.get("block_construction", false)) and not _age_saving_build_allowed(kind, construction_workers, age_intent.get("cost", {}), policy.get("age_saving_construction_exceptions", [])):
 			continue
 		var limit := int(policy.get("building_limits", {}).get(kind, 1))
 		var same_kind := own_structures.filter(func(building): return String(building.get("kind", "")) == kind)
@@ -67,7 +69,8 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 			continue
 		var sites: Array = snapshot.get("build_sites", {}).get(kind, [])
 		var candidates: Array = []
-		for worker_value in idle_workers:
+		var allow_gap_fallback: bool = kind in policy.get("structure_gap_fallback_kinds", [])
+		for worker_value in construction_workers:
 			var worker: Dictionary = worker_value
 			if String(worker.get("movement_domain", "land")) != "land":
 				continue
@@ -76,10 +79,21 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 				continue
 			for site_value in sites:
 				var site := Vector2(site_value)
-				if not _site_preserves_structure_gap(site, kind, worker, own_structures, float(policy.get("minimum_structure_gap", 0.0))):
+				var preserves_gap := _site_preserves_structure_gap(site, kind, worker, own_structures, float(policy.get("minimum_structure_gap", 0.0)))
+				if not preserves_gap and not allow_gap_fallback:
 					continue
-				candidates.append({"worker": worker, "site": site, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(site)})
+				candidates.append({"worker": worker, "site": site, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(site), "preserves_gap": preserves_gap})
 		candidates.sort_custom(func(left, right):
+			if bool(left["preserves_gap"]) != bool(right["preserves_gap"]):
+				return bool(left["preserves_gap"])
+			var left_idle := 0 if String(left["worker"].get("task", "idle")) == "idle" else 1
+			var right_idle := 0 if String(right["worker"].get("task", "idle")) == "idle" else 1
+			if left_idle != right_idle:
+				return left_idle < right_idle
+			var left_failure := _navigation_failure_rank(left["worker"])
+			var right_failure := _navigation_failure_rank(right["worker"])
+			if left_failure != right_failure:
+				return left_failure < right_failure
 			if not is_equal_approx(float(left["distance"]), float(right["distance"])):
 				return float(left["distance"]) < float(right["distance"])
 			return int(left["worker"].get("id", -1)) < int(right["worker"].get("id", -1))
@@ -114,6 +128,10 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 					continue
 				pairs.append({"worker": worker, "resource": resource, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO)))})
 		pairs.sort_custom(func(left, right):
+			var left_failure := _navigation_failure_rank(left["worker"])
+			var right_failure := _navigation_failure_rank(right["worker"])
+			if left_failure != right_failure:
+				return left_failure < right_failure
 			if not is_equal_approx(float(left["distance"]), float(right["distance"])):
 				return float(left["distance"]) < float(right["distance"])
 			if int(left["worker"].get("id", -1)) != int(right["worker"].get("id", -1)):
@@ -128,22 +146,66 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 		var building: Dictionary = building_value
 		if not building.get("production_queue", []).is_empty():
 			continue
-		if suppress_production:
+		if age_intent.has("command"):
 			continue
 		var train_options: Array = building.get("command_options", {}).get("train", [])
 		var enabled := train_options.filter(func(option): return bool(option.get("accepted", false)))
+		if bool(age_intent.get("saving", false)):
+			var age_cost: Dictionary = age_intent.get("cost", {})
+			var production_exceptions: Array = policy.get("age_saving_production_exceptions", [])
+			enabled = enabled.filter(func(option): return _age_saving_economic_option(option, age_cost, production_exceptions))
 		var worker_target := int(policy.get("worker_target", 0))
 		if worker_target > 0 and land_worker_count >= worker_target:
 			enabled = enabled.filter(func(option): return String(option.get("kind", "")) != "villager" and "worker" not in option.get("behavior_tags", []))
 		var research_options: Array = building.get("command_options", {}).get("research", [])
-		var available_research := research_options.filter(func(option): return bool(option.get("accepted", false)))
+		var available_research := [] if bool(age_intent.get("saving", false)) else research_options.filter(func(option): return bool(option.get("accepted", false)))
 		if not enabled.is_empty():
 			var preferred: Dictionary = _preferred_unit(enabled, own_units, building, snapshot, team)
-			commands.append(Commands.TrainCommand.new(tick, [int(building.get("id", -1))], String(preferred.get("kind", "")), team, Vector2(building.get("rally_point", building.get("pos", Vector2.ZERO)))))
-			continue
+			if not preferred.is_empty():
+				commands.append(Commands.TrainCommand.new(tick, [int(building.get("id", -1))], String(preferred.get("kind", "")), team, Vector2(building.get("rally_point", building.get("pos", Vector2.ZERO)))))
+				continue
 		if not available_research.is_empty():
 			commands.append(Commands.ResearchCommand.new(tick, [int(building.get("id", -1))], String.num_int64(int(available_research[0].get("technology_id", -1)))))
 	return commands
+
+
+static func _age_saving_economic_option(option: Dictionary, age_cost: Dictionary, exceptions: Array = []) -> bool:
+	if "worker" not in option.get("behavior_tags", []) and String(option.get("kind", "")) not in exceptions:
+		return false
+	var option_cost: Dictionary = option.get("cost", {})
+	if option_cost.is_empty():
+		return false
+	return _cost_avoids_reserved_resources(option_cost, age_cost)
+
+
+static func _age_saving_build_allowed(kind: String, workers: Array, age_cost: Dictionary, exceptions: Array) -> bool:
+	if kind not in exceptions:
+		return false
+	for worker_value in workers:
+		var worker: Dictionary = worker_value
+		for option_value in worker.get("command_options", {}).get("build", []):
+			var option: Dictionary = option_value
+			if String(option.get("kind", "")) == kind and bool(option.get("accepted", false)) and _cost_avoids_reserved_resources(option.get("cost", {}), age_cost):
+				return true
+	return false
+
+
+static func _cost_avoids_reserved_resources(option_cost: Dictionary, age_cost: Dictionary) -> bool:
+	if option_cost.is_empty():
+		return false
+	var reserved_types: Dictionary = {}
+	for resource_type_value in age_cost.keys():
+		if int(age_cost.get(resource_type_value, 0)) > 0:
+			reserved_types[int(resource_type_value)] = true
+	for resource_type_value in option_cost.keys():
+		if int(option_cost.get(resource_type_value, 0)) > 0 and reserved_types.has(int(resource_type_value)):
+			return false
+	return true
+
+
+static func _navigation_failure_rank(entity: Dictionary) -> int:
+	var reason := String(entity.get("diagnostic_reason", ""))
+	return 1 if reason in ["no_path", "local_blocked"] or reason.begins_with("stuck_") else 0
 
 
 static func _age_advance_intent(buildings: Array, player_state: Dictionary, policy: Dictionary, worker_count: int, tick: int) -> Dictionary:
@@ -261,11 +323,7 @@ static func _preferred_naval_unit(options: Array, own_units: Array, snapshot: Di
 		var transport := _first_option_with_tag(options, "transport")
 		if not transport.is_empty():
 			return transport
-	for tag in ["combatant", "worker", "trader", "transport"]:
-		var fallback := _first_option_with_tag(options, tag)
-		if not fallback.is_empty():
-			return fallback
-	return options[0]
+	return {}
 
 
 static func _first_option_with_tag(options: Array, tag: String) -> Dictionary:

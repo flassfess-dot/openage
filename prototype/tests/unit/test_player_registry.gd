@@ -30,6 +30,16 @@ func _initialize() -> void:
 	assert_equal(registry.status(1), PlayerRegistry.VICTORIOUS, "winner receives terminal state")
 	assert_equal(registry.status(3), PlayerRegistry.DEFEATED, "active loser receives defeated state")
 	assert_equal(registry.status(2), PlayerRegistry.RESIGNED, "resigned state is not overwritten")
+	var allied_registry = PlayerRegistry.new()
+	allied_registry.configure([
+		{"team": 1, "controller": "human"},
+		{"team": 2, "controller": "ai"},
+		{"team": 3, "controller": "ai"},
+	])
+	allied_registry.finalize_side([1, 2], [3])
+	assert_equal(allied_registry.status(1), PlayerRegistry.VICTORIOUS, "first surviving ally receives terminal victory")
+	assert_equal(allied_registry.status(2), PlayerRegistry.VICTORIOUS, "every surviving ally receives terminal victory")
+	assert_equal(allied_registry.status(3), PlayerRegistry.DEFEATED, "enemy side receives terminal defeat")
 
 	if failures.is_empty():
 		print("I11-006 player registry and diplomacy tests passed")

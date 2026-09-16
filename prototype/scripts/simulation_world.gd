@@ -1660,6 +1660,7 @@ func check_battle_state(player_team: int, enemy_team: int, delta: float = 0.0) -
 		"scores": score_by_team,
 		"resources": resources,
 		"technologies": technologies,
+		"relations": _team_relations(),
 	}
 	var scenario_update: Dictionary = scenario_system.update(victory_context)
 	for event_value in scenario_update.get("events", []):
@@ -1671,14 +1672,16 @@ func check_battle_state(player_team: int, enemy_team: int, delta: float = 0.0) -
 		battle_message = ""
 		return
 	battle_over = true
-	player_registry.finalize(int(outcome.get("winner_team", -1)), outcome.get("loser_teams", []))
+	var winner_teams: Array = outcome.get("winner_teams", [int(outcome.get("winner_team", -1))])
+	player_registry.finalize_side(winner_teams, outcome.get("loser_teams", []))
 	var reason := String(outcome.get("reason", "conquest"))
 	_emit_domain_event("match_completed", {
 		"winner_team": int(outcome.get("winner_team", -1)),
+		"winner_teams": winner_teams.duplicate(),
 		"loser_teams": outcome.get("loser_teams", []).duplicate(),
 		"reason": reason,
 	})
-	if int(outcome.get("winner_team", -1)) == player_team:
+	if player_team in winner_teams:
 		battle_message = "ПОБЕДА — условие %s выполнено. Нажмите R, чтобы начать снова." % reason
 	else:
 		battle_message = "ПОРАЖЕНИЕ — противник выполнил условие %s. Нажмите R, чтобы начать снова." % reason
@@ -1689,6 +1692,13 @@ func _player_states_by_team() -> Dictionary:
 	for player_value in player_registry.public_states():
 		var player: Dictionary = player_value
 		result[int(player.get("team", 0))] = player
+	return result
+
+
+func _team_relations() -> Dictionary:
+	var result: Dictionary = {}
+	for team in player_registry.all_teams():
+		result[team] = player_registry.relations_for(team)
 	return result
 
 func find_unit(id: int) -> Variant:
@@ -2170,7 +2180,7 @@ func get_mixed_domain_build_sites(team: int, maximum_per_kind: int = 4) -> Dicti
 	return result
 
 
-func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = []) -> Dictionary:
+func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
 	var result: Dictionary = {}
 	var workers: Array = units.filter(func(unit):
 		return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land"
@@ -2182,6 +2192,7 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 	for kind_value in kinds:
 		var kind := String(kind_value)
 		var sites: Array = []
+		var fallback_sites: Array = []
 		var seen_cells: Dictionary = {}
 		for preferred_value in preferred_sites.get(kind, []):
 			var preferred_position := Vector2(preferred_value)
@@ -2192,10 +2203,14 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 			if visibility_system.state_at_world(team, preferred_position) == FogOfWar.UNKNOWN:
 				continue
 			if can_place_foundation(team, kind, preferred_position) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
-				sites.append(preferred_position)
-				if sites.size() >= maximum_per_kind:
-					break
+				if foundation_preserves_structure_gap(team, kind, preferred_position, minimum_structure_gap):
+					sites.append(preferred_position)
+					if sites.size() >= maximum_per_kind:
+						break
+				elif fallback_sites.size() < maximum_per_kind:
+					fallback_sites.append(preferred_position)
 		if kind in strict_preferred_kinds:
+			_append_bounded_sites(sites, fallback_sites, maximum_per_kind)
 			if not sites.is_empty():
 				result[kind] = sites
 			continue
@@ -2213,19 +2228,45 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 						seen_cells[cell] = true
 						var position := Vector2(cell) + Vector2(0.5, 0.5)
 						if can_place_foundation(team, kind, position) and worker_can_reach_foundation(worker, kind, position):
-							sites.append(position)
-							if sites.size() >= maximum_per_kind:
-								break
+							if foundation_preserves_structure_gap(team, kind, position, minimum_structure_gap):
+								sites.append(position)
+								if sites.size() >= maximum_per_kind:
+									break
+							elif fallback_sites.size() < maximum_per_kind:
+								fallback_sites.append(position)
 					if sites.size() >= maximum_per_kind:
 						break
 				if sites.size() >= maximum_per_kind:
 					break
 			if sites.size() >= maximum_per_kind:
 				break
+		_append_bounded_sites(sites, fallback_sites, maximum_per_kind)
 		if not sites.is_empty():
 			result[kind] = sites
 	last_build_failure = previous_failure
 	return result
+
+
+func _append_bounded_sites(sites: Array, fallback_sites: Array, maximum: int) -> void:
+	for fallback_position in fallback_sites:
+		if sites.size() >= maximum:
+			break
+		sites.append(fallback_position)
+
+
+func foundation_preserves_structure_gap(team: int, kind: String, position: Vector2, minimum_gap: float) -> bool:
+	if minimum_gap <= 0.0:
+		return true
+	var footprint := Footprint.building(unit_stats(kind), position)
+	var new_radius := maxf(0.5, maxf(float(footprint.get("half_size", Vector2.ONE).x), float(footprint.get("half_size", Vector2.ONE).y)))
+	for building in buildings:
+		if int(building.get("team", 0)) != team or float(building.get("hp", 0.0)) <= 0.0:
+			continue
+		var existing_radius := maxf(0.5, float(building.get("footprint_radius", 1.0)))
+		var clearance := new_radius + existing_radius + minimum_gap
+		if position.distance_squared_to(Vector2(building.get("pos", Vector2.ZERO))) < clearance * clearance:
+			return false
+	return true
 
 
 func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
@@ -2258,8 +2299,7 @@ func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
 	for unit in units:
 		if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)):
 			continue
-		var unit_cell := Vector2i(floori(float(unit.get("pos", Vector2.ZERO).x)), floori(float(unit.get("pos", Vector2.ZERO).y)))
-		if unit_cell in occupied_cells:
+		if mobile_footprint_overlaps_cells(unit, occupied_cells):
 			last_build_failure = "occupied_by_unit"
 			return false
 	if visibility_system.state_at_world(team, position) == FogOfWar.UNKNOWN:
@@ -2278,6 +2318,15 @@ func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
 		last_build_failure = "insufficient_resources"
 		return false
 	return true
+
+
+func mobile_footprint_overlaps_cells(unit: Dictionary, occupied_cells: Array) -> bool:
+	var position: Vector2 = unit.get("pos", Vector2.ZERO)
+	var radius := maxf(0.0, float(unit.get("footprint_radius", 0.3)))
+	for probe in [position, position + Vector2(radius, 0.0), position + Vector2(-radius, 0.0), position + Vector2(0.0, radius), position + Vector2(0.0, -radius)]:
+		if Vector2i(floori(probe.x), floori(probe.y)) in occupied_cells:
+			return true
+	return false
 
 
 func map_supports_foundation(kind: String, position: Vector2) -> bool:
@@ -2357,6 +2406,26 @@ func worker_can_reach_foundation(worker: Dictionary, kind: String, position: Vec
 		if not crosses_future_footprint:
 			return true
 	return false
+
+
+func reachable_builder_ids(building: Dictionary) -> Array[int]:
+	var result: Array[int] = []
+	if String(building.get("state", "complete")) != "foundation" or float(building.get("hp", 0.0)) <= 0.0:
+		return result
+	for worker_value in units:
+		var worker: Dictionary = worker_value
+		if int(worker.get("team", 0)) != int(building.get("team", 0)) or float(worker.get("hp", 0.0)) <= 0.0 or not entity_is_worker(worker) or String(worker.get("movement_domain", "land")) != "land":
+			continue
+		var domain := String(worker.get("movement_domain", "land"))
+		var restriction := int(worker.get("terrain_restriction", -1))
+		for candidate in building_perimeter_candidates(worker, building):
+			if not navigation_grid.is_position_walkable_for(candidate, float(worker.get("footprint_radius", 0.3)), domain, restriction):
+				continue
+			if not pathfinder.find_path(Vector2(worker.get("pos", Vector2.ZERO)), candidate, domain, restriction).is_empty():
+				result.append(int(worker.get("id", -1)))
+				break
+	result.sort()
+	return result
 
 
 func place_foundation(team: int, kind: String, position: Vector2, workers: Array = []) -> Variant:

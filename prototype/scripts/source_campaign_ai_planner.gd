@@ -1170,7 +1170,25 @@ static func _extermination_frontier(snapshot: Dictionary, group) -> Variant:
 static func _frontier_for_domain(snapshot: Dictionary, domain: String, origin: Vector2, minimum_distance: float = 0.0) -> Variant:
 	var size: Vector2i = snapshot.get("map_size", Vector2i.ZERO)
 	var fog_cells: Variant = snapshot.get("fog", {}).get("cells", [])
-	var navigation: Array = snapshot.get("navigation", {}).get(domain, [])
+	var navigation_knowledge: Dictionary = snapshot.get("navigation", {})
+	var reachable_frontier: Array = navigation_knowledge.get("reachable_frontier", {}).get(domain, []) if navigation_knowledge.has("reachable_frontier") else []
+	if navigation_knowledge.has("reachable_frontier"):
+		var reachable_candidates: Array = reachable_frontier.filter(func(point): return Vector2(point).distance_to(origin) > minimum_distance + 0.0001)
+		if reachable_candidates.is_empty():
+			return null
+		reachable_candidates.sort_custom(func(left, right):
+			var left_point := Vector2(left)
+			var right_point := Vector2(right)
+			var left_distance := left_point.distance_squared_to(origin)
+			var right_distance := right_point.distance_squared_to(origin)
+			if not is_equal_approx(left_distance, right_distance):
+				return left_distance < right_distance
+			if not is_equal_approx(left_point.y, right_point.y):
+				return left_point.y < right_point.y
+			return left_point.x < right_point.x
+		)
+		return Vector2(reachable_candidates[0])
+	var navigation: Array = navigation_knowledge.get(domain, [])
 	if size.x <= 0 or size.y <= 0 or fog_cells.size() != size.x * size.y or navigation.is_empty():
 		return null
 	var candidates: Array[Vector2] = []
