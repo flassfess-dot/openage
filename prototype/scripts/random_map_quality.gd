@@ -51,7 +51,7 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 	var naval_zones: Array = map_data.get("naval_start_zones", [])
 	if bool(generator.get("requires_naval_starts", false)) and naval_zones.size() != players.size():
 		errors.append("random_map_naval_start_missing")
-	var resource_errors := _resource_errors(starts, players, map_data.get("resources", []), quality)
+	var resource_errors := _resource_errors(starts, players, map_data.get("resources", []), quality, naval_zones, size, terrain_ids)
 	errors.append_array(resource_errors)
 	return {
 		"valid": errors.is_empty(),
@@ -67,7 +67,7 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 	}
 
 
-static func _resource_errors(starts: Array[Vector2], players: Array, resources: Array, quality: Dictionary) -> Array[String]:
+static func _resource_errors(starts: Array[Vector2], players: Array, resources: Array, quality: Dictionary, naval_zones: Array, size: Vector2i, terrain_ids: Array) -> Array[String]:
 	var errors: Array[String] = []
 	var radius := float(quality.get("resource_radius", 8.0))
 	var required: Dictionary = quality.get("resource_counts", {})
@@ -78,7 +78,28 @@ static func _resource_errors(starts: Array[Vector2], players: Array, resources: 
 			).size()
 			if nearby < int(required[kind]):
 				errors.append("random_map_resource_guarantee_missing:%d:%s" % [int(players[index].get("team", 0)), String(kind)])
+	var naval_radius := float(quality.get("naval_resource_radius", 12.0))
+	var naval_required: Dictionary = quality.get("naval_resource_counts", {})
+	var minimum_water_clearance := maxi(0, int(quality.get("naval_resource_minimum_water_clearance_cells", 0)))
+	for zone_value in naval_zones:
+		var zone: Dictionary = zone_value
+		var water_staging := Vector2(zone.get("water_staging", Vector2.ZERO))
+		for kind in naval_required:
+			var nearby := resources.filter(func(resource):
+				var resource_cell := Vector2i(Vector2(resource.get("position", Vector2.ZERO)))
+				return String(resource.get("kind", "")) == String(kind) and Vector2(resource.get("position", Vector2.ZERO)).distance_to(water_staging) <= naval_radius and _water_clearance(resource_cell, size, terrain_ids, minimum_water_clearance)
+			).size()
+			if nearby < int(naval_required[kind]):
+				errors.append("random_map_naval_resource_guarantee_missing:%d:%s" % [int(zone.get("team", 0)), String(kind)])
 	return errors
+
+
+static func _water_clearance(cell: Vector2i, size: Vector2i, terrain_ids: Array, clearance_cells: int) -> bool:
+	for y in range(cell.y - clearance_cells, cell.y + clearance_cells + 1):
+		for x in range(cell.x - clearance_cells, cell.x + clearance_cells + 1):
+			if x < 0 or y < 0 or x >= size.x or y >= size.y or not _is_water(Vector2i(x, y), size, terrain_ids):
+				return false
+	return true
 
 
 static func _land_component(start: Vector2i, size: Vector2i, terrain_ids: Array) -> Dictionary:

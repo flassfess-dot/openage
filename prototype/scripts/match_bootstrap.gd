@@ -40,7 +40,10 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 
 	var selected_ids: Array[int] = []
 	var entities: Array = definition.get("entities", []).duplicate(true)
-	entities.append_array(map_data.get("resources", []))
+	for generated_resource_value in map_data.get("resources", []):
+		var generated_resource: Dictionary = generated_resource_value.duplicate(true)
+		generated_resource["placement_validated"] = true
+		entities.append(generated_resource)
 	for entity_value in entities:
 		var entity: Dictionary = entity_value
 		var category := String(entity.get("category", ""))
@@ -58,7 +61,7 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 					selected_ids.append(int(building["id"]))
 			"resource":
 				var resource: Dictionary
-				if entity.has("scenario_object_id"):
+				if entity.has("scenario_object_id") or bool(entity.get("placement_validated", false)):
 					resource = world.add_scenario_resource(String(entity.get("kind", "tree")), position, int(entity.get("amount", 0)))
 				else:
 					resource = world.add_resource(String(entity.get("kind", "tree")), position, int(entity.get("amount", 0)))

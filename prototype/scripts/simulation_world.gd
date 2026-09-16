@@ -1753,7 +1753,9 @@ func resource_accessible_to_team(resource: Dictionary, team: int) -> bool:
 
 func resource_allows_worker(resource: Dictionary, worker: Dictionary) -> bool:
 	var allowed_domains: Array = data_repository.runtime_metadata(String(resource.get("kind", ""))).get("allowed_gatherer_domains", [])
-	return allowed_domains.is_empty() or String(worker.get("movement_domain", "land")) in allowed_domains
+	if allowed_domains.is_empty():
+		allowed_domains = ["land"]
+	return String(worker.get("movement_domain", "land")) in allowed_domains
 
 func update_gather_order(worker: Dictionary, delta: float) -> Dictionary:
 	if not entity_is_worker(worker):

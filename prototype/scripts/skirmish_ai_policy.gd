@@ -84,8 +84,10 @@ static func _validate_runtime(runtime: Dictionary, errors: Array[String]) -> voi
 				errors.append("skirmish_ai_policy_building_limit_invalid:%s" % kind)
 	if int(runtime.get("housing_buffer", -1)) < 0:
 		errors.append("skirmish_ai_policy_field_invalid:housing_buffer")
-	if int(runtime.get("worker_target", 0)) <= 0:
-		errors.append("skirmish_ai_policy_field_invalid:worker_target")
+	if int(runtime.get("land_worker_target", 0)) <= 0:
+		errors.append("skirmish_ai_policy_field_invalid:land_worker_target")
+	if int(runtime.get("water_worker_target", 0)) <= 0:
+		errors.append("skirmish_ai_policy_field_invalid:water_worker_target")
 	if int(runtime.get("minimum_workers_before_age_up", 0)) <= 0:
 		errors.append("skirmish_ai_policy_field_invalid:minimum_workers_before_age_up")
 	var age_advance_ids = runtime.get("age_advance_technology_ids", [])

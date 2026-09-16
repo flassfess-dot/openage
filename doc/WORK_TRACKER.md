@@ -1308,3 +1308,12 @@ ext_unit_id.
 - `test_generated_naval_ai_acceptance.gd` на `compact/islands/41721/very_high/hard` достиг полного bootstrap на tick 6040: второй House, завершённый Dock, созданный Scout Ship и принятый water-domain приказ. Тест останавливается по факту результата, а не досчитывает лишние такты.
 - Impact gates: player registry/victory, navigation/snapshot, production placement, skirmish settings/generator/policy, AI planners, alliance integration и islands naval acceptance проходят. Известные host-only ошибки `user://logs`/Windows certificate store неизменны; полный suite/cache/export и импорт ресурсов не запускались.
 - Следующий пакет E5-006C2: water-resource discovery/fishing economy, transport embark/landing, naval combat/victory и 4/8-player coastal/islands matrix. Build-site query caching фиксируется как измеряемая E6 optimization, а не преждевременная смена архитектуры E5.
+
+### Прогресс (2026-09-17, E5-006C2a — generated fishing economy)
+
+- Naval random-map contract добавляет по три Deep Fish на старт и требует двухклеточный водный просвет. Quality gate проверяет не только радиус, но и фактическую открытую воду; nearest-domain search теперь выбирает геометрически ближайшую детерминированную клетку.
+- Generated resources помечаются как уже проверенные и bootstrap сохраняет их точные позиции вместо повторного размещения после стартовых зданий.
+- Исправлена domain-семантика сбора: отсутствие явного списка означает land-only. Публичная gather-команда теперь сразу возвращает `incompatible_gatherer`; водный работник больше не получает формально принятую, но немедленно проваливающуюся команду на ягоды.
+- AI policy переименовал двусмысленный `worker_target` в `land_worker_target` и добавил `water_worker_target`. Это независимые цели состава; Fishing Boat подтверждён в общем population/housing pool вместе с Villager и остальными юнитами.
+- `test_generated_naval_economy_pipeline.gd` завершает train/gather/deposit на tick 1750 и проверяет прирост food `1000 -> 1015`. `test_generated_naval_ai_acceptance.gd` завершает естественный Dock/Scout/discovery путь на tick 6060. Связанные profile/generator/bootstrap/policy/AI/naval-economy impact gates проходят; полный suite/cache/export и импорт ресурсов не запускались.
+- Следующий пакет E5-006C2b: autonomous transport landing; затем naval combat/victory и 4/8-player coastal/islands matrix.

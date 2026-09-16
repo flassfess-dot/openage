@@ -44,13 +44,15 @@ func _initialize() -> void:
 	var issued_types: Dictionary = {}
 	var accepted_types: Dictionary = {}
 	var rejected_reasons: Dictionary = {}
-	var accepted_naval_orders := 0
+	var accepted_water_orders := 0
+	var fish_discovered := false
 
 	while int(controller.tick_index) < MAX_TICKS and not world.is_battle_over():
 		var next_tick := int(controller.tick_index) + 1
 		var submitted: Array = []
 		if ai.needs_decision(next_tick):
 			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, AI_TEAM, ai.presentation_options())
+			fish_discovered = fish_discovered or knowledge.get("resources", []).any(func(resource): return String(resource.get("kind", "")) == "deep_fish" and int(resource.get("amount", 0)) > 0)
 			for command in ai.collect_commands(knowledge, next_tick):
 				var command_type := String(command.command_type())
 				issued_types[command_type] = int(issued_types.get(command_type, 0)) + 1
@@ -62,26 +64,29 @@ func _initialize() -> void:
 			var result: Dictionary = controller.get_command_result(int(command.sequence_id))
 			if bool(result.get("accepted", false)):
 				accepted_types[command_type] = int(accepted_types.get(command_type, 0)) + 1
-				if command_type in ["move", "formation_move", "attack", "attack_move"] and _command_has_live_water_unit(world, command):
-					accepted_naval_orders += 1
+				if command_type in ["move", "formation_move", "attack", "attack_move", "gather"] and _command_has_live_water_unit(world, command):
+					accepted_water_orders += 1
 			else:
 				var reason := String(result.get("reason", "unknown"))
 				rejected_reasons[reason] = int(rejected_reasons.get(reason, 0)) + 1
 		var completed_dock_exists: bool = world.get_buildings().any(func(building): return int(building.get("team", 0)) == AI_TEAM and String(building.get("kind", "")) == "dock" and String(building.get("state", "complete")) == "complete")
-		var live_water_unit_exists: bool = world.get_units().any(func(unit): return int(unit.get("team", 0)) == AI_TEAM and float(unit.get("hp", 0.0)) > 0.0 and String(unit.get("movement_domain", "land")) == "water")
-		if completed_dock_exists and live_water_unit_exists and accepted_naval_orders > 0:
+		var scout_exists: bool = world.get_units().any(func(unit): return int(unit.get("team", 0)) == AI_TEAM and float(unit.get("hp", 0.0)) > 0.0 and String(unit.get("kind", "")) == "scout_ship")
+		if completed_dock_exists and scout_exists and fish_discovered and accepted_water_orders > 0:
 			break
 
 	var own_units: Array = world.get_units().filter(func(unit): return int(unit.get("team", 0)) == AI_TEAM and float(unit.get("hp", 0.0)) > 0.0)
 	var own_buildings: Array = world.get_buildings().filter(func(building): return int(building.get("team", 0)) == AI_TEAM)
 	var completed_docks: Array = own_buildings.filter(func(building): return String(building.get("kind", "")) == "dock" and String(building.get("state", "complete")) == "complete")
 	var water_units: Array = own_units.filter(func(unit): return String(unit.get("movement_domain", "land")) == "water")
+	var scout_ships: Array = water_units.filter(func(unit): return String(unit.get("kind", "")) == "scout_ship")
 	assert_true(not accepted_types.is_empty(), "generated islands AI acts through accepted public commands")
 	assert_true(not completed_docks.is_empty(), "generated islands AI completes an autonomous Dock")
 	assert_true(not water_units.is_empty(), "generated islands AI autonomously produces a water-domain unit")
-	assert_true(accepted_naval_orders > 0, "generated islands AI issues an accepted order to its produced water-domain unit")
+	assert_true(not scout_ships.is_empty(), "generated islands AI produces a Scout Ship to reveal its water component")
+	assert_true(accepted_water_orders > 0, "generated islands AI issues an accepted order to its produced water-domain unit")
+	assert_true(fish_discovered, "generated islands naval exploration reveals generated deep fish through fog-safe knowledge")
 	if failures.is_empty():
-		print("E5-006C naval vertical reached at tick %d: dock=%d water_units=%d naval_orders=%d" % [controller.tick_index, completed_docks.size(), water_units.size(), accepted_naval_orders])
+		print("E5-006C naval exploration reached at tick %d: dock=%d scouts=%d fish_discovered=%s water_orders=%d" % [controller.tick_index, completed_docks.size(), scout_ships.size(), fish_discovered, accepted_water_orders])
 	else:
 		print("E5-006C naval failure diagnostics tick=%d age=%d issued=%s accepted=%s rejected=%s result=%s" % [controller.tick_index, world.get_current_age(AI_TEAM), issued_types, accepted_types, rejected_reasons, world.get_victory_result()])
 	finish()

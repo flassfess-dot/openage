@@ -154,13 +154,13 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 			var age_cost: Dictionary = age_intent.get("cost", {})
 			var production_exceptions: Array = policy.get("age_saving_production_exceptions", [])
 			enabled = enabled.filter(func(option): return _age_saving_economic_option(option, age_cost, production_exceptions))
-		var worker_target := int(policy.get("worker_target", 0))
-		if worker_target > 0 and land_worker_count >= worker_target:
-			enabled = enabled.filter(func(option): return String(option.get("kind", "")) != "villager" and "worker" not in option.get("behavior_tags", []))
+		var land_worker_target := int(policy.get("land_worker_target", policy.get("worker_target", 0)))
+		if land_worker_target > 0 and land_worker_count >= land_worker_target:
+			enabled = enabled.filter(func(option): return String(option.get("kind", "")) != "villager")
 		var research_options: Array = building.get("command_options", {}).get("research", [])
 		var available_research := [] if bool(age_intent.get("saving", false)) else research_options.filter(func(option): return bool(option.get("accepted", false)))
 		if not enabled.is_empty():
-			var preferred: Dictionary = _preferred_unit(enabled, own_units, building, snapshot, team)
+			var preferred: Dictionary = _preferred_unit(enabled, own_units, building, snapshot, team, policy)
 			if not preferred.is_empty():
 				commands.append(Commands.TrainCommand.new(tick, [int(building.get("id", -1))], String(preferred.get("kind", "")), team, Vector2(building.get("rally_point", building.get("pos", Vector2.ZERO)))))
 				continue
@@ -278,12 +278,14 @@ static func _needs_housing(player_state: Dictionary, buffer: int) -> bool:
 
 static func _resource_allows_worker(resource: Dictionary, worker: Dictionary) -> bool:
 	var allowed_domains: Array = resource.get("allowed_gatherer_domains", [])
-	return allowed_domains.is_empty() or String(worker.get("movement_domain", "land")) in allowed_domains
+	if allowed_domains.is_empty():
+		allowed_domains = ["land"]
+	return String(worker.get("movement_domain", "land")) in allowed_domains
 
 
-static func _preferred_unit(options: Array, own_units: Array, building: Dictionary, snapshot: Dictionary, team: int) -> Dictionary:
+static func _preferred_unit(options: Array, own_units: Array, building: Dictionary, snapshot: Dictionary, team: int, policy: Dictionary = {}) -> Dictionary:
 	if String(building.get("kind", "")) == "dock":
-		return _preferred_naval_unit(options, own_units, snapshot, team)
+		return _preferred_naval_unit(options, own_units, snapshot, team, int(policy.get("water_worker_target", 2)))
 	var worker_count := own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("movement_domain", "land")) == "land").size()
 	if worker_count < 4:
 		for option_value in options:
@@ -297,12 +299,12 @@ static func _preferred_unit(options: Array, own_units: Array, building: Dictiona
 	return options[0]
 
 
-static func _preferred_naval_unit(options: Array, own_units: Array, snapshot: Dictionary, team: int) -> Dictionary:
+static func _preferred_naval_unit(options: Array, own_units: Array, snapshot: Dictionary, team: int, water_worker_target: int = 2) -> Dictionary:
 	var water_workers := own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("movement_domain", "")) == "water").size()
 	var water_food_known: bool = snapshot.get("resources", []).any(func(resource):
 		return int(resource.get("amount", 0)) > 0 and 0 == int(resource.get("resource_type_id", 0)) and "water" in resource.get("allowed_gatherer_domains", [])
 	)
-	if water_workers < 2 and water_food_known:
+	if water_worker_target > 0 and water_workers < water_worker_target and water_food_known:
 		var fishing := _first_option_with_tag(options, "worker")
 		if not fishing.is_empty():
 			return fishing

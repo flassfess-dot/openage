@@ -77,15 +77,37 @@ static func _seeded_skirmish_map(match_definition: Dictionary, size: Vector2i, s
 	vertex_levels.fill(0)
 	for hill_value in generator.get("hills", []):
 		_apply_hill(vertex_levels, size, hill_value)
+	var resource_clusters: Array = generator.get("resource_clusters", []).duplicate(true)
+	resource_clusters.append_array(_naval_resource_clusters(naval_start_zones, generator.get("naval_resource_clusters", [])))
 	return {
 		"size": size,
 		"seed": seed,
 		"terrain_ids": terrain_ids,
 		"vertex_levels": vertex_levels,
-		"resources": _generate_resource_clusters(generator.get("resource_clusters", []), size, seed, terrain_ids, resource_exclusion_cells),
+		"resources": _generate_resource_clusters(resource_clusters, size, seed, terrain_ids, resource_exclusion_cells),
 		"naval_start_zones": naval_start_zones,
 		"reserved_foundation_cells": reserved_foundation_cells,
 	}
+
+
+static func _naval_resource_clusters(zones: Array, templates: Array) -> Array:
+	var result: Array = []
+	for zone_value in zones:
+		var zone: Dictionary = zone_value
+		var dock_position := Vector2(zone.get("dock_position", Vector2.ZERO))
+		var water_staging := Vector2(zone.get("water_staging", dock_position))
+		var outward := (water_staging - dock_position).normalized()
+		if outward.length_squared() <= 0.000001:
+			outward = Vector2.LEFT
+		for template_value in templates:
+			var template: Dictionary = template_value
+			var cluster := template.duplicate(true)
+			var center := water_staging + outward * maxf(0.0, float(template.get("water_offset", 0.0)))
+			cluster["center"] = [center.x, center.y]
+			cluster["guarantee_team"] = int(zone.get("team", 0))
+			cluster.erase("water_offset")
+			result.append(cluster)
+	return result
 
 
 static func _seeded_water_cell(cell: Vector2i, size: Vector2i, starts: Array[Vector2], topology: String, generator: Dictionary, seed: int) -> bool:
@@ -323,7 +345,8 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 			position.x = clampf(position.x, 1.5, float(size.x) - 1.5)
 			position.y = clampf(position.y, 1.5, float(size.y) - 1.5)
 			var placement_domain := String(cluster.get("placement_domain", "land"))
-			position = _nearest_domain(position, size, terrain_ids, placement_domain, occupied_cells)
+			var minimum_domain_clearance := maxi(0, int(cluster.get("minimum_domain_clearance_cells", 0)))
+			position = _nearest_domain(position, size, terrain_ids, placement_domain, occupied_cells, minimum_domain_clearance)
 			occupied_cells[Vector2i(floori(position.x), floori(position.y))] = true
 			resources.append({
 				"category": "resource",
@@ -353,16 +376,39 @@ static func _nearest_land(position: Vector2, size: Vector2i, terrain_ids: Array[
 	return _nearest_domain(position, size, terrain_ids, "land", {})
 
 
-static func _nearest_domain(position: Vector2, size: Vector2i, terrain_ids: Array[int], placement_domain: String, blocked_cells: Dictionary = {}) -> Vector2:
+static func _nearest_domain(position: Vector2, size: Vector2i, terrain_ids: Array[int], placement_domain: String, blocked_cells: Dictionary = {}, minimum_clearance_cells: int = 0) -> Vector2:
 	var cell := Vector2i(floori(position.x), floori(position.y))
-	if not blocked_cells.has(cell) and _cell_matches_domain(cell, size, terrain_ids, placement_domain):
-		return position
+	if not blocked_cells.has(cell) and _cell_matches_domain_with_clearance(cell, size, terrain_ids, placement_domain, minimum_clearance_cells):
+		return Vector2(cell) + Vector2(0.5, 0.5) if minimum_clearance_cells > 0 else position
 	for radius in range(1, maxi(size.x, size.y)):
+		var candidates: Array[Vector2] = []
 		for y in range(maxi(0, cell.y - radius), mini(size.y, cell.y + radius + 1)):
 			for x in range(maxi(0, cell.x - radius), mini(size.x, cell.x + radius + 1)):
-				if not blocked_cells.has(Vector2i(x, y)) and _cell_matches_domain(Vector2i(x, y), size, terrain_ids, placement_domain):
-					return Vector2(x + 0.5, y + 0.5)
+				var candidate_cell := Vector2i(x, y)
+				if not blocked_cells.has(candidate_cell) and _cell_matches_domain_with_clearance(candidate_cell, size, terrain_ids, placement_domain, minimum_clearance_cells):
+					candidates.append(Vector2(candidate_cell) + Vector2(0.5, 0.5))
+		if not candidates.is_empty():
+			candidates.sort_custom(func(left, right):
+				var left_distance := position.distance_squared_to(left)
+				var right_distance := position.distance_squared_to(right)
+				if not is_equal_approx(left_distance, right_distance):
+					return left_distance < right_distance
+				return left.y < right.y or (is_equal_approx(left.y, right.y) and left.x < right.x)
+			)
+			return candidates[0]
 	return position
+
+
+static func _cell_matches_domain_with_clearance(cell: Vector2i, size: Vector2i, terrain_ids: Array[int], placement_domain: String, minimum_clearance_cells: int) -> bool:
+	if not _cell_matches_domain(cell, size, terrain_ids, placement_domain):
+		return false
+	if minimum_clearance_cells <= 0:
+		return true
+	for y in range(cell.y - minimum_clearance_cells, cell.y + minimum_clearance_cells + 1):
+		for x in range(cell.x - minimum_clearance_cells, cell.x + minimum_clearance_cells + 1):
+			if not _cell_matches_domain(Vector2i(x, y), size, terrain_ids, placement_domain):
+				return false
+	return true
 
 
 static func _cell_matches_domain(cell: Vector2i, size: Vector2i, terrain_ids: Array[int], placement_domain: String) -> bool:

@@ -28,8 +28,16 @@ func _initialize() -> void:
 			assert_equal(int(quality.get("metrics", {}).get("player_count", 0)), 4, "%s audits every active start" % profile.get("id"))
 			if bool(profile.get("requires_naval_starts", false)):
 				assert_equal(int(quality.get("metrics", {}).get("naval_start_count", 0)), 4, "%s gives every player a legal dock/staging pair" % profile.get("id"))
+				var deep_fish: Array = first.get("resources", []).filter(func(resource): return String(resource.get("kind", "")) == "deep_fish")
+				assert_equal(deep_fish.size(), 12, "%s gives every naval start a deterministic deep-fish cluster" % profile.get("id"))
+				assert_true(deep_fish.all(func(resource): return RandomMapGenerator._cell_matches_domain_with_clearance(Vector2i(Vector2(resource.get("position", Vector2.ZERO))), first["size"], first["terrain_ids"], "water", 2)), "%s keeps every generated deep-fish pool in navigable open water" % profile.get("id"))
+				for zone_value in first.get("naval_start_zones", []):
+					var zone: Dictionary = zone_value
+					var nearby := deep_fish.filter(func(resource): return Vector2(resource.get("position", Vector2.ZERO)).distance_to(Vector2(zone.get("water_staging", Vector2.ZERO))) <= 12.0)
+					assert_true(nearby.size() >= 2, "%s keeps harvestable water food near team %d's Dock staging" % [profile.get("id"), int(zone.get("team", 0))])
 			else:
 				assert_equal(int(quality.get("metrics", {}).get("naval_start_count", 0)), 0, "%s does not invent naval starts" % profile.get("id"))
+				assert_true(first.get("resources", []).all(func(resource): return String(resource.get("kind", "")) != "deep_fish"), "%s does not place naval food on a land-only profile" % profile.get("id"))
 	_finish("E5-003 random map profile tests passed")
 
 

@@ -56,7 +56,8 @@
           "dock": 1
         },
         "housing_buffer": 2,
-        "worker_target": 8,
+        "land_worker_target": 8,
+        "water_worker_target": 2,
         "minimum_workers_before_age_up": 6,
         "age_advance_technology_ids": [101, 102, 103],
         "age_saving_construction_exceptions": ["house", "granary", "storage_pit", "dock"],

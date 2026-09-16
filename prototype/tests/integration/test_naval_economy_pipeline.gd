@@ -1,5 +1,7 @@
 extends SceneTree
 
+const Commands := preload("res://scripts/commands.gd")
+const GameController := preload("res://scripts/game_controller.gd")
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
@@ -120,6 +122,11 @@ func verify_shore_fisherman_economy(catalog) -> void:
 	world.assign_command_gather([worker], int(deep_fish["id"]))
 	assert_equal(worker.get("task"), "idle", "land worker cannot gather deep-water fish")
 	assert_equal(worker.get("components", {}).get("order", {}).get("completion_reason"), "incompatible_gatherer", "incompatible resource domain is explicit")
+	var controller = GameController.new(world)
+	var incompatible_command = Commands.GatherCommand.new(0, [int(worker["id"])], int(deep_fish["id"]))
+	controller.enqueue_command(incompatible_command, true, 1)
+	controller.process_commands()
+	assert_equal(controller.get_command_result(incompatible_command.sequence_id).get("reason"), "incompatible_gatherer", "public gather command rejects an incompatible domain instead of accepting a no-op")
 	var food_before: int = world.get_resource_amount(1, 0)
 	world.assign_command_gather([worker], int(shore_fish["id"]))
 	assert_equal(worker.get("worker_role_source_unit_id"), 119, "shore fish activates original Fisherman task form 119")

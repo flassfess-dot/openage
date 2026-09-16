@@ -397,6 +397,8 @@ func _apply_gather(command) -> String:
 		return "resource_unavailable"
 	if workers.any(func(worker): return not simulation_world.resource_accessible_to_team(resource, int(worker.get("team", 0)))):
 		return "resource_not_owned"
+	if workers.any(func(worker): return not simulation_world.resource_allows_worker(resource, worker)):
+		return "incompatible_gatherer"
 	_detach_units_from_formations(selected)
 	simulation_world.assign_command_gather(workers, command.resource_id)
 	return ""

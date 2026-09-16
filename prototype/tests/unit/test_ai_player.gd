@@ -93,7 +93,7 @@ func _initialize() -> void:
 		{"id": 92, "team": 2, "kind": "town_center", "pos": Vector2(4, 4), "hp": 600.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("villager", ["worker"], {0: 50})], "research": [{"technology_id": 101, "accepted": false, "reason": "insufficient_resources", "cost": {0: 500}}]}},
 		{"id": 93, "team": 2, "kind": "barracks", "pos": Vector2(8, 4), "hp": 350.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("clubman", ["combatant"])], "research": []}},
 	]
-	var age_policy := {"minimum_workers_before_age_up": 6, "age_advance_technology_ids": [101, 102, 103], "worker_target": 8, "construction_priorities": ["dock"], "building_limits": {"dock": 1}, "age_saving_construction_exceptions": ["dock"], "age_saving_production_exceptions": ["scout_ship"]}
+	var age_policy := {"minimum_workers_before_age_up": 6, "age_advance_technology_ids": [101, 102, 103], "land_worker_target": 6, "water_worker_target": 2, "construction_priorities": ["dock"], "building_limits": {"dock": 1}, "age_saving_construction_exceptions": ["dock"], "age_saving_production_exceptions": ["scout_ship"]}
 	assert_equal(EconomicPlanner.plan(saving_snapshot, 5, 2, age_policy).size(), 0, "economic policy saves resources instead of continuously training through an age-up target")
 	saving_snapshot["units"][0]["command_options"] = {"build": [{"kind": "dock", "accepted": true, "cost": {1: 150}}]}
 	saving_snapshot["build_sites"] = {"dock": [Vector2(3.5, 8.5)]}
@@ -124,11 +124,11 @@ func _initialize() -> void:
 	var fishing_snapshot := snapshot_base()
 	fishing_snapshot["units"] = [worker(50, 2, Vector2(2, 8), "water")]
 	fishing_snapshot["resources"] = [
-		{"id": 81, "kind": "berries", "pos": Vector2(2.2, 8), "amount": 100, "allowed_gatherer_domains": ["land"]},
+		{"id": 81, "kind": "berries", "pos": Vector2(2.2, 8), "amount": 100},
 		{"id": 82, "kind": "deep_fish", "pos": Vector2(3.5, 8), "amount": 250, "allowed_gatherer_domains": ["water"]},
 	]
 	var fishing_commands: Array = AiPlayer.new({"team": 2}).collect_commands(fishing_snapshot, 1)
-	assert_equal(fishing_commands[0].resource_id, 82, "economic AI assigns Fishing Boat only to a domain-compatible fish resource")
+	assert_equal(fishing_commands[0].resource_id, 82, "economic AI treats resources without an explicit domain as land-only and assigns Fishing Boat to fish")
 
 	var naval_snapshot := snapshot_base()
 	naval_snapshot["units"] = [
@@ -348,7 +348,8 @@ func test_skirmish_policy_attack_control() -> void:
 	configured_policy["construction_priorities"] = ["house", "barracks"]
 	configured_policy["building_limits"] = {"house": 4, "barracks": 1}
 	configured_policy["housing_buffer"] = 2
-	configured_policy["worker_target"] = 8
+	configured_policy["land_worker_target"] = 8
+	configured_policy["water_worker_target"] = 2
 	configured_policy["minimum_workers_before_age_up"] = 6
 	configured_policy["age_advance_technology_ids"] = [101, 102, 103]
 	configured_policy["age_saving_construction_exceptions"] = ["house", "dock"]
@@ -362,6 +363,8 @@ func test_skirmish_policy_attack_control() -> void:
 	assert_equal(configured_player.economic_policy.get("age_saving_construction_exceptions"), ["house", "dock"], "skirmish AI preserves data-driven construction exceptions while saving for an age advance")
 	assert_equal(configured_player.economic_policy.get("age_saving_production_exceptions"), ["scout_ship"], "skirmish AI preserves kind-specific production exceptions while saving for an age advance")
 	assert_equal(configured_player.economic_policy.get("structure_gap_fallback_kinds"), ["house"], "skirmish AI preserves data-driven compact-site fallbacks")
+	assert_equal(int(configured_player.economic_policy.get("land_worker_target", 0)), 8, "land Villager target remains separate from population accounting")
+	assert_equal(int(configured_player.economic_policy.get("water_worker_target", 0)), 2, "Fishing Boat target remains separate from the land Villager target")
 	assert_equal(float(options.get("minimum_structure_gap", -1.0)), float(configured_policy.get("minimum_structure_gap", 0.0)), "skirmish AI forwards its structure clearance to the bounded site query")
 	assert_true(not bool(options.get("include_fog_cells", true)), "skirmish AI does not copy the full fog grid into every decision")
 	var worker_only := snapshot_base()
