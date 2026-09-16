@@ -35,12 +35,26 @@ AoE1 DE помогает сравнивать данные, AI, presentation и 
 
 ### E5
 
-1. Создать переносимый inventory command, принимающий путь параметром и сохраняющий только build, относительные пути, размеры и hashes.
+1. Создать переносимый inventory command, принимающий путь параметром и сохраняющий только build, относительные пути, размеры и hashes. **Выполнено E5-004:** `tools/ror_import/inventory_aoede_ai.py` также сохраняет производные AI/PER metrics и проверяет freshness через `--check`.
 2. Сделать трёхсторонний DAT diff `RoR ↔ empires-orig ↔ DE`, запрещающий тихую замену classic values.
 3. Нормализовать AI/PER в evidence ledger: build orders, attack delay, group sizing, retreat, defence, exploration и diplomacy-related параметры.
 4. Связать подтверждённые параметры с собственными AI policies и acceptance tests случайного матча.
 
 E5-002 отделил versioned skirmish settings от генератора, E5-003 закрепил собственные deterministic map profiles и машинные guarantees. Ни один preset не получает статус classic/DE parity из одного названия: `source_status` каталога остаётся `engine_contract_pending_ror_ui_calibration`, пока executable observations не подтвердят конкретные labels/dimensions/distributions. Отсутствие открытых DE random-map scripts не блокирует движок и не оправдывает копирование закрытого алгоритма. Следующая работа использует DE AI/PER только через переносимый evidence ledger и явный capability mapping.
+
+### E5-004 — переносимый AI/PER evidence ledger
+
+Команда:
+
+```text
+python tools/ror_import/inventory_aoede_ai.py --source <AoEDE-root> --output prototype/data/source_ai/aoede_build_97381_ai_evidence.json
+```
+
+`--check` повторно строит представление в памяти и завершается ошибкой, если committed ledger устарел. Абсолютный путь, verbatim build-order lines и игровые assets в output не попадают.
+
+Build 97381 даёт 146 AI profiles / 13 307 валидных структурных entries и 23 PER profiles / 2 389 strategic-number entries. Существующий capability map классифицирует 1 080 вхождений как реализованные, 61 как source-documented no-op и 1 248 как `pending`. Это количество записей во всех профилях, а не уникальных механик и не процент готовности AI. Три malformed source rows сохранены только как относительный путь, номер, причина и hash строки: два неизвестных opcode `UU`, одна испорченная числовая колонка. Они не исправляются догадкой.
+
+Ledger имеет роль `secondary_evidence_no_runtime_authority`. Runtime пока не читает его напрямую: E5-005 сначала вводит собственный versioned policy contract и acceptance criteria, а затем переносит только явно выбранные подтверждённые параметры.
 
 ### E6
 

@@ -1266,3 +1266,11 @@ ext_unit_id.
 - Launcher передаёт уже проверенный map dictionary в `main.tscn`; повторной генерации при старте нет. Definition+seed по-прежнему являются canonical save/replay identity.
 - Матрица `4 profile × 3 seed`, прежний random generator/bootstrap, settings/launcher, generated main scene и mixed-domain AI smoke проходят. Full suite/cache/export остаётся на E5 boundary; ресурсы не импортировались.
 - Source status остаётся честным: размеры/названия и статистика рельефа ещё не объявлены exact RoR. Следующий пакет E5-004 — classic/DE AI/PER evidence ledger и policy mapping.
+
+### Прогресс (2026-09-16, E5-004 — AoE DE AI/PER evidence)
+
+- Добавлен параметризованный read-only normalizer `inventory_aoede_ai.py`; локальный путь не записывается. Output содержит hashes, относительные paths, агрегаты build plans и strategic-number entries, но не verbatim последовательности `.AI`.
+- Зафиксирован ledger build 97381: 146 AI / 13 307 parsed entries; 23 PER / 2 389 entries. Общий capability map классифицирует occurrences как 1 080 implemented, 61 source-documented no-op и 1 248 pending.
+- Три source-owned anomalies не скрыты и не «исправлены»: два `UU` opcode и одна malformed numeric value представлены только причиной, line number и SHA-256 строки.
+- `--check` повторно строит ledger и подтвердил byte-identical output. Godot structural test проверяет portable paths, source role, pinned DAT/EXE hashes, counts и контрольные DEFAULT attack/naval параметры.
+- DE остаётся secondary evidence; runtime не читает ledger напрямую. Следующий пакет E5-005 — versioned skirmish AI policy contract, difficulty и явное parameter selection с fog-safe command acceptance.

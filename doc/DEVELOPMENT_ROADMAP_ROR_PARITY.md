@@ -679,3 +679,11 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Принятая generated map передаётся в `main.tscn` как immutable override, не вычисляясь второй раз. Definition+seed остаются единственным источником fingerprint и полностью воспроизводят карту.
 - Матрица четырёх профилей на seed `1/41721/99991`, прежний generator/bootstrap, launcher, generated main и mixed-domain AI smoke проходят. Exact RoR map labels/dimensions/statistical distribution остаются source-calibration gap, а не замаскированным parity claim.
 - Следующий пакет E5-004: переносимый classic/DE AI/PER ledger, capability mapping и data-driven skirmish AI policies; затем полный многосторонний AI acceptance match.
+
+### E5-004 — AoE DE AI/PER evidence без runtime authority (2026-09-16)
+
+- Переносимый `inventory_aoede_ai.py` принимает путь локальной установки параметром и пишет только build, относительные пути, hashes, структурные build-plan metrics и strategic-number records. `--check` доказывает freshness; абсолютный путь и verbatim build-order sequences отсутствуют.
+- Ledger build 97381 содержит 146 AI profiles / 13 307 валидных entries и 23 PER profiles / 2 389 entries. Через общий scenario-import semantics map получено 1 080 implemented occurrences, 61 documented no-op и 1 248 explicit pending.
+- Три повреждённые исходные строки не нормализованы догадкой: два неизвестных `UU` opcode и одна malformed числовая колонка сохранены hashed anomalies. Все source files имеют индивидуальные SHA-256.
+- Structural evidence test подтверждает build/hash/counts, переносимость путей, роль `secondary_evidence_no_runtime_authority` и контрольные DEFAULT values для initial attack delay, attack/naval group count.
+- Следующий пакет E5-005 создаёт собственные profiles/difficulty/policy adapters, использующие только явно выбранные evidence-backed параметры через существующие fog-safe snapshot и command pipeline.

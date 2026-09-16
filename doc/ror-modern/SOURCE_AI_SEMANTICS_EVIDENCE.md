@@ -177,4 +177,10 @@ ID 75 `SNGroupCommanderSelectionMethod` полностью определён п
 
 `prototype/data/parity/source_ai_scenario_runtime_ledger.json` является воспроизводимым доказательством общей исполнимой границы, а не заменой наблюдения оригинального AI. Для всех шести опубликованных миссий он хранит source SHA-256, 17 профилей, их pending-ID/directives и состав команд первого решения. Проверка загружает настоящую карту миссии, создаёт fog-safe snapshot для каждой команды AI, планирует на tick 1 и выполняет команды обычным `GameController`. Текущий baseline: 124 выпущенные команды, 124 принятые, 0 отклонённых.
 
+## AoE1 Definitive Edition: вторичный AI/PER ledger
+
+E5-004 добавил `prototype/data/source_ai/aoede_build_97381_ai_evidence.json`, воспроизводимо построенный `tools/ror_import/inventory_aoede_ai.py`. Он фиксирует hashes и производную структуру 146 `.AI` и 23 `.PER`, но не копирует verbatim build-order lines и не получает runtime authority. Каждое strategic-number вхождение использует тот же `strategic_number_runtime_semantics`, что scenario importer; поэтому новые DE ID не могут тихо считаться поддержанными.
+
+Сводка build 97381: 13 307 валидных build-order entries, 2 389 strategic-number entries; semantics occurrences — 1 080 implemented, 61 source-documented no-op, 1 248 pending. Три malformed AI rows остаются hashed anomalies. Значения вроде initial attack delay, group sizing, retreat, defence, naval groups и update cadence являются кандидатами для собственного E5 skirmish-policy contract, а не командами немедленно копировать поведение DE.
+
 Ledger не доказывает долгосрочную стратегию, выбор целей оригинальным executable или способность автономно выиграть каждую миссию. Поэтому он имеет статус `INTEGRATED`; workforce, targeting, `DEFAULT`, `Random` и ID 71/72/76 остаются перечисленными разрывами, а миссии не получают `PARITY` только из-за успешного первого такта.
