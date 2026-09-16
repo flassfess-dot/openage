@@ -26,9 +26,15 @@ static func build(map_type: Dictionary, size: Vector2i, starts: Array[Vector2]) 
 		"water_ratio": map_type.get("water_ratio", [0.0, 1.0]).duplicate(true),
 		"coast_fraction": float(map_type.get("coast_fraction", 0.12)),
 		"island_radius_fraction": float(map_type.get("island_radius_fraction", 0.12)),
-		"naval_start": {"dock_footprint_radius_cells": 1, "dock_surface_terrain_ids": [1, 2, 4, 22]},
+		"naval_start": {
+			"dock_footprint_radius_cells": 1,
+			"dock_surface_terrain_ids": [1, 2, 4, 22],
+			"resource_search_radius": 12.0,
+			"resource_minimum_clearance_cells": 2,
+			"resource_required_cells": 3,
+		},
 		"naval_resource_clusters": [
-			{"kind": "deep_fish", "count": 3, "radius": 2.5, "amount": 250, "placement_domain": "water", "minimum_domain_clearance_cells": 2, "water_offset": 6.0},
+			{"kind": "deep_fish", "count": 3, "radius": 2.5, "amount": 250, "placement_domain": "water", "minimum_domain_clearance_cells": 2, "water_offset": 6.0, "guarantee_radius": 12.0},
 		] if bool(map_type.get("requires_naval_starts", false)) else [],
 		"hills": hills,
 		"resource_clusters": clusters,

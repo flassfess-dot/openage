@@ -92,21 +92,31 @@ static func _seeded_skirmish_map(match_definition: Dictionary, size: Vector2i, s
 
 static func _naval_resource_clusters(zones: Array, templates: Array) -> Array:
 	var result: Array = []
-	for zone_value in zones:
-		var zone: Dictionary = zone_value
-		var dock_position := Vector2(zone.get("dock_position", Vector2.ZERO))
-		var water_staging := Vector2(zone.get("water_staging", dock_position))
-		var outward := (water_staging - dock_position).normalized()
-		if outward.length_squared() <= 0.000001:
-			outward = Vector2.LEFT
-		for template_value in templates:
-			var template: Dictionary = template_value
-			var cluster := template.duplicate(true)
-			var center := water_staging + outward * maxf(0.0, float(template.get("water_offset", 0.0)))
-			cluster["center"] = [center.x, center.y]
-			cluster["guarantee_team"] = int(zone.get("team", 0))
-			cluster.erase("water_offset")
-			result.append(cluster)
+	var maximum_count := 0
+	for template_value in templates:
+		maximum_count = maxi(maximum_count, int(template_value.get("count", 0)))
+	# Allocate one guaranteed resource per player per pass. This prevents an early
+	# naval start from consuming every valid open-water cell shared with a later one.
+	for resource_index in range(maximum_count):
+		for zone_value in zones:
+			var zone: Dictionary = zone_value
+			var dock_position := Vector2(zone.get("dock_position", Vector2.ZERO))
+			var water_staging := Vector2(zone.get("water_staging", dock_position))
+			var outward := (water_staging - dock_position).normalized()
+			if outward.length_squared() <= 0.000001:
+				outward = Vector2.LEFT
+			for template_value in templates:
+				var template: Dictionary = template_value
+				if resource_index >= int(template.get("count", 0)):
+					continue
+				var cluster := template.duplicate(true)
+				var center := water_staging + outward * maxf(0.0, float(template.get("water_offset", 0.0)))
+				cluster["center"] = [center.x, center.y]
+				cluster["count"] = 1
+				cluster["guarantee_team"] = int(zone.get("team", 0))
+				cluster["guarantee_origin"] = [water_staging.x, water_staging.y]
+				cluster.erase("water_offset")
+				result.append(cluster)
 	return result
 
 
@@ -165,15 +175,23 @@ static func _generate_naval_start_zones(players: Array, size: Vector2i, terrain_
 	var reserved_cells: Dictionary = {}
 	var footprint_radius_cells := maxi(0, int(settings.get("dock_footprint_radius_cells", 1)))
 	var allowed_surface_ids: Array = settings.get("dock_surface_terrain_ids", [1, 2, 4, 22])
+	var water_guarantee := {
+		"radius": maxf(0.0, float(settings.get("resource_search_radius", 0.0))),
+		"clearance_cells": maxi(0, int(settings.get("resource_minimum_clearance_cells", 0))),
+		"required_cells": maxi(0, int(settings.get("resource_required_cells", 0))),
+	}
+	if int(water_guarantee["required_cells"]) > 0:
+		water_guarantee["valid_cells"] = _domain_clearance_cells(size, terrain_ids, "water", int(water_guarantee["clearance_cells"]))
+		water_guarantee["capacity_cache"] = {}
 	for player_value in players:
 		var player: Dictionary = player_value
 		if int(player.get("team", 0)) <= 0:
 			continue
 		var start := _vector2(player.get("start", []))
-		var dock_position: Variant = _nearest_dock_anchor(start, size, terrain_ids, footprint_radius_cells, allowed_surface_ids, reserved_cells)
+		var dock_position: Variant = _nearest_dock_anchor(start, size, terrain_ids, footprint_radius_cells, allowed_surface_ids, reserved_cells, water_guarantee)
 		if not dock_position is Vector2:
 			continue
-		var staging_pair := _nearest_staging_pair(dock_position, size, terrain_ids, footprint_radius_cells)
+		var staging_pair := _nearest_staging_pair(dock_position, size, terrain_ids, footprint_radius_cells, water_guarantee, reserved_cells)
 		if staging_pair.is_empty():
 			continue
 		var zone := {
@@ -188,13 +206,13 @@ static func _generate_naval_start_zones(players: Array, size: Vector2i, terrain_
 	return result
 
 
-static func _nearest_dock_anchor(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, allowed_surface_ids: Array, reserved_cells: Dictionary) -> Variant:
+static func _nearest_dock_anchor(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, allowed_surface_ids: Array, reserved_cells: Dictionary, water_guarantee: Dictionary = {}) -> Variant:
 	var candidates: Array = []
 	for y in range(footprint_radius_cells, size.y - footprint_radius_cells):
 		for x in range(footprint_radius_cells, size.x - footprint_radius_cells):
 			var cell := Vector2i(x, y)
 			var position := Vector2(x + 0.5, y + 0.5)
-			if _dock_anchor_valid(position, size, terrain_ids, footprint_radius_cells, allowed_surface_ids, reserved_cells):
+			if _dock_anchor_valid(position, size, terrain_ids, footprint_radius_cells, allowed_surface_ids, reserved_cells, water_guarantee):
 				candidates.append(position)
 	if candidates.is_empty():
 		return null
@@ -208,7 +226,7 @@ static func _nearest_dock_anchor(origin: Vector2, size: Vector2i, terrain_ids: A
 	return Vector2(candidates[0])
 
 
-static func _dock_anchor_valid(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, allowed_surface_ids: Array, reserved_cells: Dictionary) -> bool:
+static func _dock_anchor_valid(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, allowed_surface_ids: Array, reserved_cells: Dictionary, water_guarantee: Dictionary = {}) -> bool:
 	var cell := Vector2i(floori(origin.x), floori(origin.y))
 	for y in range(cell.y - footprint_radius_cells, cell.y + footprint_radius_cells + 1):
 		for x in range(cell.x - footprint_radius_cells, cell.x + footprint_radius_cells + 1):
@@ -219,7 +237,7 @@ static func _dock_anchor_valid(origin: Vector2, size: Vector2i, terrain_ids: Arr
 				return false
 			if not _array_has_int(allowed_surface_ids, int(terrain_ids[footprint_cell.y * size.x + footprint_cell.x])):
 				return false
-	return not _nearest_staging_pair(origin, size, terrain_ids, footprint_radius_cells).is_empty()
+	return not _nearest_staging_pair(origin, size, terrain_ids, footprint_radius_cells, water_guarantee, reserved_cells).is_empty()
 
 
 static func _array_has_int(values: Array, expected: int) -> bool:
@@ -229,9 +247,14 @@ static func _array_has_int(values: Array, expected: int) -> bool:
 	return false
 
 
-static func _nearest_staging_pair(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int) -> Dictionary:
-	var land_candidates := _perimeter_domain_candidates(origin, size, terrain_ids, footprint_radius_cells, "land")
-	var water_candidates := _perimeter_domain_candidates(origin, size, terrain_ids, footprint_radius_cells, "water")
+static func _nearest_staging_pair(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, water_guarantee: Dictionary = {}, reserved_cells: Dictionary = {}) -> Dictionary:
+	var land_candidates := _perimeter_domain_candidates(origin, size, terrain_ids, footprint_radius_cells, "land", reserved_cells)
+	var water_candidates := _perimeter_domain_candidates(origin, size, terrain_ids, footprint_radius_cells, "water", reserved_cells)
+	var required_cells := maxi(0, int(water_guarantee.get("required_cells", 0)))
+	if required_cells > 0:
+		water_candidates = water_candidates.filter(func(candidate):
+			return _cached_domain_candidate_count_near(Vector2(candidate), water_guarantee, size) >= required_cells
+		)
 	if land_candidates.is_empty() or water_candidates.is_empty():
 		return {}
 	var pairs: Array = []
@@ -256,7 +279,7 @@ static func _nearest_staging_pair(origin: Vector2, size: Vector2i, terrain_ids: 
 	return {"land": pairs[0]["land"], "water": pairs[0]["water"]}
 
 
-static func _perimeter_domain_candidates(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, domain: String) -> Array:
+static func _perimeter_domain_candidates(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, domain: String, reserved_cells: Dictionary = {}) -> Array:
 	var center := Vector2i(floori(origin.x), floori(origin.y))
 	var perimeter_radius := footprint_radius_cells + 1
 	var candidates: Array = []
@@ -265,9 +288,39 @@ static func _perimeter_domain_candidates(origin: Vector2, size: Vector2i, terrai
 			if absi(x - center.x) != perimeter_radius and absi(y - center.y) != perimeter_radius:
 				continue
 			var cell := Vector2i(x, y)
-			if _cell_matches_domain(cell, size, terrain_ids, domain):
+			if not reserved_cells.has(cell) and _cell_matches_domain(cell, size, terrain_ids, domain):
 				candidates.append(Vector2(x + 0.5, y + 0.5))
 	return candidates
+
+
+static func _domain_clearance_cells(size: Vector2i, terrain_ids: Array[int], domain: String, clearance_cells: int) -> Dictionary:
+	var result: Dictionary = {}
+	for y in range(size.y):
+		for x in range(size.x):
+			var cell := Vector2i(x, y)
+			if _cell_matches_domain_with_clearance(cell, size, terrain_ids, domain, clearance_cells):
+				result[cell] = true
+	return result
+
+
+static func _cached_domain_candidate_count_near(origin: Vector2, guarantee: Dictionary, size: Vector2i) -> int:
+	var origin_cell := Vector2i(origin)
+	var cache: Dictionary = guarantee.get("capacity_cache", {})
+	if cache.has(origin_cell):
+		return int(cache[origin_cell])
+	var radius := maxf(0.0, float(guarantee.get("radius", 0.0)))
+	var valid_cells: Dictionary = guarantee.get("valid_cells", {})
+	var count := 0
+	for y in range(maxi(0, floori(origin.y - radius)), mini(size.y, ceili(origin.y + radius) + 1)):
+		for x in range(maxi(0, floori(origin.x - radius)), mini(size.x, ceili(origin.x + radius) + 1)):
+			var cell := Vector2i(x, y)
+			if (Vector2(cell) + Vector2(0.5, 0.5)).distance_to(origin) > radius + 0.0001:
+				continue
+			if valid_cells.has(cell):
+				count += 1
+	cache[origin_cell] = count
+	guarantee["capacity_cache"] = cache
+	return count
 
 
 static func _reserved_naval_cells(zones: Array, footprint_radius_cells: int) -> Dictionary:
@@ -346,7 +399,15 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 			position.y = clampf(position.y, 1.5, float(size.y) - 1.5)
 			var placement_domain := String(cluster.get("placement_domain", "land"))
 			var minimum_domain_clearance := maxi(0, int(cluster.get("minimum_domain_clearance_cells", 0)))
-			position = _nearest_domain(position, size, terrain_ids, placement_domain, occupied_cells, minimum_domain_clearance)
+			var guarantee_origin_values: Array = cluster.get("guarantee_origin", [])
+			var guarantee_radius := maxf(0.0, float(cluster.get("guarantee_radius", 0.0)))
+			if guarantee_origin_values.size() >= 2 and guarantee_radius > 0.0:
+				var bounded_position: Variant = _nearest_domain_within(position, _vector2(guarantee_origin_values), guarantee_radius, size, terrain_ids, placement_domain, occupied_cells, minimum_domain_clearance)
+				if not bounded_position is Vector2:
+					continue
+				position = bounded_position
+			else:
+				position = _nearest_domain(position, size, terrain_ids, placement_domain, occupied_cells, minimum_domain_clearance)
 			occupied_cells[Vector2i(floori(position.x), floori(position.y))] = true
 			resources.append({
 				"category": "resource",
@@ -397,6 +458,26 @@ static func _nearest_domain(position: Vector2, size: Vector2i, terrain_ids: Arra
 			)
 			return candidates[0]
 	return position
+
+
+static func _nearest_domain_within(position: Vector2, guarantee_origin: Vector2, maximum_distance: float, size: Vector2i, terrain_ids: Array[int], placement_domain: String, blocked_cells: Dictionary = {}, minimum_clearance_cells: int = 0) -> Variant:
+	var candidates: Array[Vector2] = []
+	for y in range(maxi(0, floori(guarantee_origin.y - maximum_distance)), mini(size.y, ceili(guarantee_origin.y + maximum_distance) + 1)):
+		for x in range(maxi(0, floori(guarantee_origin.x - maximum_distance)), mini(size.x, ceili(guarantee_origin.x + maximum_distance) + 1)):
+			var cell := Vector2i(x, y)
+			var candidate := Vector2(cell) + Vector2(0.5, 0.5)
+			if candidate.distance_to(guarantee_origin) > maximum_distance + 0.0001 or blocked_cells.has(cell):
+				continue
+			if _cell_matches_domain_with_clearance(cell, size, terrain_ids, placement_domain, minimum_clearance_cells):
+				candidates.append(candidate)
+	if candidates.is_empty():
+		return null
+	candidates.sort_custom(func(left: Vector2, right: Vector2):
+		var left_distance := position.distance_squared_to(left)
+		var right_distance := position.distance_squared_to(right)
+		return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and (left.y < right.y or (is_equal_approx(left.y, right.y) and left.x < right.x)))
+	)
+	return candidates[0]
 
 
 static func _cell_matches_domain_with_clearance(cell: Vector2i, size: Vector2i, terrain_ids: Array[int], placement_domain: String, minimum_clearance_cells: int) -> bool:

@@ -53,6 +53,8 @@ E5-006C2b closes autonomous generated-island transport landing. The AI uses only
 
 E5-006C2c proves naval combat can close a generated-map match without a special victory path. Both AI sides discover and attack through the normal presentation/command boundary; source projectile impacts, death removal, participant defeat and the common conquest rule produce the terminal result.
 
+E5-006C3 extends the generated naval contract to four and eight participants on both coastal and islands profiles. A naval start is accepted only when its Dock/staging pair has enough clearance-valid open water inside the resource guarantee radius. Naval resource clusters are allocated round-robin across teams and use bounded placement, preventing early starts from exhausting later starts or moving their guaranteed fish outside the audited radius. Clearance capacity is precomputed and cached during generation.
+
 ## Match controls
 
 Space pauses; comma/period change the fixed-tick speed; R restarts the same definition and seed; Shift+R submits resign; Escape closes the application. These inputs are presentation intents only and do not mutate simulation objects directly.
@@ -66,7 +68,7 @@ Space pauses; comma/period change the fixed-tick speed; R restarts the same defi
 - `test_ai_vs_ai_match.gd`: both sides receive their legal snapshots, issue accepted public commands and finish a deterministic unscripted conquest match.
 - `test_generated_skirmish_ai_acceptance.gd`: a generated inland opening reaches housing, Barracks/Granary, Tool Age and a policy-sized attack group through public commands.
 - `test_generated_skirmish_deterministic_outcome.gd`: a generated two-player inland match reaches conquest, then a fresh runtime replays the recorded public commands to an identical terminal tick, canonical hash and victory result.
-- `test_generated_naval_ai_acceptance.gd`, `test_generated_naval_economy_pipeline.gd`, `test_generated_transport_landing_pipeline.gd` and `test_generated_naval_combat_victory.gd`: autonomous islands discovery, generated Dock/Fishing Boat/Deep Fish/deposit, Transport embark/sail/landing and naval combat/conquest cycles.
+- `test_generated_naval_ai_acceptance.gd`, `test_generated_naval_economy_pipeline.gd`, `test_generated_transport_landing_pipeline.gd`, `test_generated_naval_combat_victory.gd` and `test_generated_multiplayer_naval_matrix.gd`: autonomous islands discovery, generated Dock/Fishing Boat/Deep Fish/deposit, Transport embark/sail/landing, naval combat/conquest and 4/8-player coastal/islands openings.
 - Full suite at integration: `108 passed, 0 failed`.
 
 I11 is `INTEGRATED`, not `PARITY`. Under the 2026-09-14 core-first rebaseline, E3 first revalidates the common gameplay command/AI boundary, E4 supplies the complete civilization content consumed by it, and E5 expands skirmish setup, random-map algorithms/biomes/fairness, economic/naval AI, difficulty and multi-team diplomacy. Long load/stability gates belong to E6. Scenario actions, imported RoR scenarios and campaigns are deliberately postponed to E7 so they consume a stable engine instead of driving it.

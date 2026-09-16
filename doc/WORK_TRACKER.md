@@ -1332,3 +1332,10 @@ ext_unit_id.
 - Оба AI легально обнаруживают противника через fog-safe snapshot и выдают принятые `AttackCommand`. Два корабля team 1 против одного корабля team 2 разрешают 36 source projectile 9 impacts; HP, смерть, удаление, defeat status и victory вычисляются общими системами.
 - Терминальный результат стабилен на tick 380: winner team 1, loser team 2, reason `conquest`. Соседние `test_naval_combat_pipeline.gd` и `test_victory_modes.gd` проходят.
 - Следующий пакет E5-006C3: 4/8-player coastal/islands matrix, затем единый E5 suite/cache/export.
+
+### Прогресс (2026-09-17, E5-006C3 — multiplayer naval matrix)
+
+- Новый integration gate строит четыре комбинации: 4p standard coastal, 4p standard islands, 8p large coastal и 8p large islands. Для каждой проверяются independent quality, полный bootstrap roster, Dock/staging для каждого team, три Deep Fish на старт, общий океан, profile-correct land connectivity и directed enemy relations.
+- Каждый AI-соперник получает собственный fog-safe snapshot, выдаёт хотя бы одну opening command и имеет хотя бы одну принятую команду после общего controller tick. Матч не завершается ошибочно при старте 4/8 участников.
+- Первичный 8p islands gate обнаружил отсутствие доступной рыбы у team 4. Генератор теперь отбирает Dock-зону с достаточной open-water capacity, кэширует clearance-cell/capacity расчёты и размещает bounded naval resources round-robin вместо исчерпания лучших клеток ранними командами.
+- Impact gates: generator, три-seed/four-profile quality, settings, bootstrap, 4/8 naval matrix, generated fishing и generated transport проходят. Полный suite/cache/export запускается следующим единым E5 boundary gate; ресурсы в этой итерации не импортировались.

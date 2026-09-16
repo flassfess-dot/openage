@@ -25,7 +25,7 @@
 7. **E7 — scenarios/campaigns:** triggers, scenario AI и последовательная публикация оставшихся кампаний. Первым сохранённым кандидатом остаётся `Reign of the Hittites`.
 8. **E8 — final parity/release:** итоговые original side-by-side, полный suite/cache validation/export и release candidate.
 
-E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. E5-001…E5-006B закрыли дипломатию, generated skirmish, четыре профиля случайных карт, DE evidence ledger, собственную difficulty-aware AI policy и первый полный детерминированный двухсторонний conquest с replay hash. E5-006C1 закрыл alliance-survivor victory и автономный islands bootstrap до первого управляемого Scout Ship. E5-006C2a закрыл discovery и полный generated fishing/deposit cycle. Текущая активная работа — остаток E5-006C2: transport landing, naval combat/victory и 4/8 сторон на coastal/islands. Кампанийный portfolio остаётся заморожен до прохождения E6.
+E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. E5-001…E5-006B закрыли дипломатию, generated skirmish, четыре профиля случайных карт, DE evidence ledger, собственную difficulty-aware AI policy и первый полный детерминированный двухсторонний conquest с replay hash. E5-006C1/C2/C3 закрыли alliance victory, островную экономику, транспортную высадку, морскую conquest victory и 4/8-player coastal/islands matrix. Функциональная часть E5 завершена; выполняется единый suite/cache/export boundary gate. Кампанийный portfolio остаётся заморожен до прохождения E6.
 
 ## 2. Статусы готовности
 
@@ -734,3 +734,10 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - На terrain/resources настоящего `compact / islands / seed 41721` создан минимальный ship-only conquest fixture через обычный bootstrap. Оба skirmish AI получают только fog-safe presentation, оба выдают принятые `AttackCommand`, и никакая сторона не получает прямой мутации боевого состояния.
 - Два Scout Ship против одного разрешают 36 попаданий оригинального projectile 9. После death lifecycle и purge проигравшая сторона теряет последнюю зачётную единицу, player registry отмечает поражение, а общий victory system завершает `conquest` в пользу team 1 на tick 380.
 - Source naval stats/projectile/blast vertical и все victory modes проходят рядом с новым generated acceptance. Следующий пакет E5-006C3 — 4/8-player coastal/islands matrix, затем единый E5 suite/cache/export.
+
+### E5-006C3 — 4/8-player coastal/islands matrix (2026-09-17)
+
+- Матрица `4 standard / 8 large x coastal / islands` проходит settings, deterministic generator, независимый quality gate, bootstrap, topology/component audit, diplomacy и первый настоящий public-command tick всех AI-соперников. Для 4 игроков принято по команде от трёх AI, для 8 — от семи.
+- Восьмиигровой islands seed выявил starvation четвёртого naval start. Контракт Dock-зоны теперь требует достаточное число клеток открытой воды в радиусе гарантии; clearance-valid water cells и их локальная ёмкость вычисляются один раз и кэшируются при генерации.
+- Naval resources выдаются round-robin: по одному ресурсу каждому старту за проход. Bounded placement не позволяет рыбе покинуть гарантийный радиус, даже если ближайшая желаемая клетка занята. Все четыре комбинации получают ровно три Deep Fish на игрока и минимум две доступные рядом с water staging.
+- Functional scope E5 закрыт. Следующая операция — единый boundary suite/cache/export; после успешного gate начинается E6 presentation/runtime stabilization и performance work.
