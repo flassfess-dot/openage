@@ -1325,3 +1325,10 @@ ext_unit_id.
 - Основные назначения пути, formation segments и reachability query передают реальный радиус юнита. Unit-test подтверждает, что маленькое судно проходит узкий водный канал, а крупное заранее получает unreachable вместо вечного `local_blocked`.
 - Impact gates: pathfinder/navigation service, generated transport landing, transport lifecycle, skirmish AI planner и длительный mixed-domain AI match проходят. Известные host-only ошибки `user://logs`/Windows certificate store неизменны; полный suite/cache/export и импорт ресурсов не запускались.
 - Следующий пакет: generated naval combat/victory, затем 4/8-player coastal/islands matrix.
+
+### Прогресс (2026-09-17, E5-006C2c — generated naval combat/victory)
+
+- Новый focused acceptance использует карту и ресурсы `compact/islands/41721`, но заменяет стартовый roster минимальной ship-only conquest конфигурацией через обычный bootstrap. Это изолирует морской исход от ещё не завершённой многокомпонентной экономики, не подменяя runtime-команды или боевую систему.
+- Оба AI легально обнаруживают противника через fog-safe snapshot и выдают принятые `AttackCommand`. Два корабля team 1 против одного корабля team 2 разрешают 36 source projectile 9 impacts; HP, смерть, удаление, defeat status и victory вычисляются общими системами.
+- Терминальный результат стабилен на tick 380: winner team 1, loser team 2, reason `conquest`. Соседние `test_naval_combat_pipeline.gd` и `test_victory_modes.gd` проходят.
+- Следующий пакет E5-006C3: 4/8-player coastal/islands matrix, затем единый E5 suite/cache/export.

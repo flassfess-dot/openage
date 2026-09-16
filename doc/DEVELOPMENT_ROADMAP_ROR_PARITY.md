@@ -728,3 +728,9 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Общий pathfinder и navigation-service теперь принимают радиус footprint. Поиск цели, A*, диагональные шаги, сглаживание, кэш и проверка достижимости используют один clearance contract; крупный корабль больше не получает формально разрешённый маршрут через воду, по которой его корпус физически пройти не может.
 - Новый unit-test различает проход для малого и крупного водного юнита через узкий канал. Связанные pathfinder/navigation, transport pipeline, skirmish planner и mixed-domain AI gates проходят.
 - Следующий пакет: generated naval combat/victory, затем 4/8-player coastal/islands matrix. Полный suite/cache/export остаётся на общей границе E5; ресурсы не переимпортировались.
+
+### E5-006C2c — generated naval combat and victory (2026-09-17)
+
+- На terrain/resources настоящего `compact / islands / seed 41721` создан минимальный ship-only conquest fixture через обычный bootstrap. Оба skirmish AI получают только fog-safe presentation, оба выдают принятые `AttackCommand`, и никакая сторона не получает прямой мутации боевого состояния.
+- Два Scout Ship против одного разрешают 36 попаданий оригинального projectile 9. После death lifecycle и purge проигравшая сторона теряет последнюю зачётную единицу, player registry отмечает поражение, а общий victory system завершает `conquest` в пользу team 1 на tick 380.
+- Source naval stats/projectile/blast vertical и все victory modes проходят рядом с новым generated acceptance. Следующий пакет E5-006C3 — 4/8-player coastal/islands matrix, затем единый E5 suite/cache/export.
