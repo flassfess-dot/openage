@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "source_status": "engine_contract_pending_ror_ui_calibration",
+  "player_count": {"minimum": 2, "maximum": 8},
+  "civilizations": [
+    {"id": 1, "name": "Египтяне"},
+    {"id": 2, "name": "Греки"},
+    {"id": 3, "name": "Вавилоняне"},
+    {"id": 4, "name": "Ассирийцы"},
+    {"id": 5, "name": "Минойцы"},
+    {"id": 6, "name": "Хетты"},
+    {"id": 7, "name": "Финикийцы"},
+    {"id": 8, "name": "Шумеры"},
+    {"id": 9, "name": "Персы"},
+    {"id": 10, "name": "Шан"},
+    {"id": 11, "name": "Ямато"},
+    {"id": 12, "name": "Чосон"},
+    {"id": 13, "name": "Римляне"},
+    {"id": 14, "name": "Карфагеняне"},
+    {"id": 15, "name": "Пальмирцы"},
+    {"id": 16, "name": "Македоняне"}
+  ],
+  "map_sizes": [
+    {"id": "compact", "name": "Компактная", "size": [48, 48]},
+    {"id": "standard", "name": "Стандартная", "size": [72, 72]},
+    {"id": "large", "name": "Большая", "size": [96, 96]},
+    {"id": "huge", "name": "Огромная", "size": [128, 128]},
+    {"id": "giant", "name": "Гигантская", "size": [200, 200]}
+  ],
+  "map_types": [
+    {"id": "grasslands", "name": "Материк", "generator_profile": "inland_v1"},
+    {"id": "coastal", "name": "Побережье", "generator_profile": "coastal_v1"}
+  ],
+  "resource_presets": [
+    {"id": "standard", "name": "Стандартные", "resources": {"food": 200, "wood": 200, "stone": 150, "gold": 0}},
+    {"id": "high", "name": "Высокие", "resources": {"food": 500, "wood": 500, "stone": 500, "gold": 500}},
+    {"id": "very_high", "name": "Очень высокие", "resources": {"food": 1000, "wood": 1000, "stone": 1000, "gold": 1000}}
+  ],
+  "starting_ages": [
+    {"id": "stone", "name": "Каменный век", "technology_id": 100},
+    {"id": "tool", "name": "Век орудий", "technology_id": 101},
+    {"id": "bronze", "name": "Бронзовый век", "technology_id": 102},
+    {"id": "iron", "name": "Железный век", "technology_id": 103}
+  ],
+  "population_limits": [25, 50, 75, 100, 200, 500],
+  "victory_modes": [
+    {"id": "conquest", "name": "Завоевание"},
+    {"id": "score_60", "name": "Счёт — 60 минут", "time_limit_seconds": 3600}
+  ]
+}

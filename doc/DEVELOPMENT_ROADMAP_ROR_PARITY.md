@@ -663,3 +663,11 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Катапфракт 283 и Armored Elephant 345 имеют явного канонического владельца при импорте сценариев, сохраняя одновременно upgrade presentation базовых линий. Полный аудит Rise of Rome: 6/6 миссий готовы; portfolio: 18/95 запускаются, 77 содержат явные blocking gaps, `PARITY` не заявлен.
 - Boundary gate: `A-006 suite: 197 passed, 0 failed`; cache validation — `0 errors, 181 source-owned warnings`; Windows PCK — `255789072` байта, SHA-256 `666372d82d8284ab8101bd5b2c42c72e38f12773a6e216bc1bf0f5c5d18b8f06`. Экспортированный `prototype_skirmish` стабильно работал 15 секунд без runtime/script errors.
 - E4 закрыт как `INTEGRATED`. Активная очередь переключена на E5: настройки skirmish и дипломатии, воспроизводимые сухопутные/водные random maps и полноценный AI-матч. Массовая оптимизация остаётся E6, кампании — E7.
+
+### E5-002 — единый контракт настроек skirmish (2026-09-16)
+
+- Версионированный каталог отделяет данные лобби от launcher и генератора: 2–8 слотов, все 16 цивилизаций, controller, независимые player colour/alliance, starting resources/age, population, map size/type/seed и victory.
+- `RoRSkirmishSettings` валидирует настройки до запуска и детерминированно строит обычный `MatchDefinition`. Совпавшие alliance IDs становятся взаимными отношениями; player identity не смешивается с принадлежностью к союзу.
+- Launcher создаёт generated match в памяти, а `main.tscn` использует тот же bootstrap/replay/save pipeline. Canonical fingerprint входит в `generated://skirmish/<hash>` и защищает quicksave от загрузки в другую конфигурацию.
+- Текущие map preset dimensions и generator profiles помечены `pending_ror_ui_calibration`. Это стабильный engine contract, но не ложное заявление exact RoR parity. E5-003 закрывает source evidence, наземные/водные типы, fairness/connectivity/resources и воспроизводимость.
+- Impact-gate: skirmish builder, registry/launcher, generated main scene, match definition и main HUD проходят. Полный suite/cache/export остаётся на границе E5; импорт ресурсов не выполнялся.

@@ -55,6 +55,7 @@ const HUD_TOP := InterfaceLayout.TOP_HEIGHT
 const HUD_BOTTOM := InterfaceLayout.BOTTOM_HEIGHT
 
 @export_file("*.json") var match_path: String = MatchDefinition.DEFAULT_PATH
+var match_definition_override: Dictionary = {}
 
 var view_offset := Vector2.ZERO
 var view_zoom := 1.0
@@ -122,7 +123,9 @@ func _ready() -> void:
 	font = ThemeDB.fallback_font
 	resource_catalog = ResourceCatalog.new()
 	resource_catalog.load()
-	match_definition = MatchDefinition.load_json(match_path)
+	match_definition = match_definition_override.duplicate(true) if not match_definition_override.is_empty() else MatchDefinition.load_json(match_path)
+	if not match_definition_override.is_empty():
+		match_definition["source_path"] = match_path
 	if not bool(match_definition.get("valid", false)):
 		push_error("Invalid match definition: %s" % [str(match_definition.get("errors", []))])
 		return

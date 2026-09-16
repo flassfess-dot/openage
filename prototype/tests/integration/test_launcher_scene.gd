@@ -1,5 +1,7 @@
 extends SceneTree
 
+const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
+
 var failures: Array[String] = []
 
 
@@ -8,7 +10,7 @@ func _initialize() -> void:
 	var launcher = scene.instantiate()
 	root.add_child(launcher)
 	await process_frame
-	assert_equal(launcher.match_selector.item_count, 10, "launcher lists the prototype and all nine campaign verticals")
+	assert_equal(launcher.match_selector.item_count, 11, "launcher lists the prototype, nine frozen campaign verticals, and custom skirmish")
 	assert_true(not launcher.match_selector.is_item_disabled(0), "prototype match is available")
 	assert_true(not launcher.match_selector.is_item_disabled(1), "first imported campaign match is available")
 	assert_true(not launcher.match_selector.is_item_disabled(2), "Pyrrhus campaign match is available")
@@ -19,6 +21,7 @@ func _initialize() -> void:
 	assert_true(not launcher.match_selector.is_item_disabled(7), "Sicily campaign match is available")
 	assert_true(not launcher.match_selector.is_item_disabled(8), "Mylae campaign match is available")
 	assert_true(not launcher.match_selector.is_item_disabled(9), "Tunes campaign match is available")
+	assert_true(not launcher.match_selector.is_item_disabled(10), "custom skirmish is available without a prebuilt match file")
 	launcher.match_selector.select(1)
 	launcher._refresh_selection(1)
 	assert_true(launcher.description_label.text.contains("Первая миссия"), "campaign selection exposes its launch description")
@@ -47,8 +50,14 @@ func _initialize() -> void:
 	launcher._refresh_selection(8)
 	assert_true(launcher.description_label.text.contains("артефактов"), "Mylae selection exposes its artifact objective")
 	assert_true(not launcher.start_button.disabled, "Mylae can be launched through the ordinary UI")
+	launcher.match_selector.select(10)
+	launcher._refresh_selection(10)
+	assert_true(launcher.settings_panel.visible, "custom skirmish exposes declarative settings")
+	assert_equal(launcher.player_controls.size(), 8, "all eight player slots are configurable")
+	var generated = SkirmishSettings.build(launcher._settings_from_controls())
+	assert_true(bool(generated.get("valid", false)), "launcher defaults produce a valid generated match")
 	launcher.free()
-	_finish("I12-020G launcher scene tests passed")
+	_finish("E5-002 launcher scene tests passed")
 
 
 func assert_true(value: bool, context: String) -> void:

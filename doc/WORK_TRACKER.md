@@ -1248,3 +1248,12 @@ ext_unit_id.
 - Окно дипломатии показывает для каждого активного иностранного игрока source-styled действия `СОЮЗ / НЕЙТР. / ВРАГ`; выбор создаёт команду, а UI хранит только pending presentation до следующего fixed tick.
 - Impact-gate: player registry, match definition/bootstrap, commands/replay, fog/snapshot, AI, combat awareness, HUD modal/main scene и новый end-to-end diplomacy pipeline — 12 проверок пройдены. Полный suite/cache/export остаётся на границе E5; ресурсы не импортировались.
 - Следующий пакет E5-002: декларативная схема настроек skirmish и launcher contract (civilization/controller/team/colour, resources, age, population, map size/type/seed и victory), затем random-map data requirements.
+
+### Прогресс (2026-09-16, E5-002 — настройки и generated skirmish)
+
+- Добавлен версионированный `settings_catalog.json`: все 16 цивилизаций, 2–8 player slots, controller, отдельные team/colour/alliance, resources, Stone/Tool/Bronze/Iron, population до 500, map size/type/seed и victory mode. Рабочие размеры явно помечены как pending source calibration.
+- `RoRSkirmishSettings` отклоняет неоднозначные настройки до старта и детерминированно строит общий `MatchDefinition`. Каждый игрок получает Town Center и трёх Villager; age/resources/population/alliance/victory проходят существующий bootstrap без skirmish-веток в симуляции.
+- Launcher получил экран настройки случайной игры. Generated definition передаётся в обычный `main.tscn`; путь-файл не создаётся, а canonical fingerprint образует `generated://skirmish/<hash>` для совместимости replay/save.
+- Pure builder, registry/launcher, generated main scene, match definition и main HUD impact-проверки проходят. Известные host-only ошибки записи `user://logs` и Windows certificate store неизменны. Полный suite/cache/export не запускались до границы E5; ресурсы не импортировались.
+- Отдельно зафиксированы честные gaps: восемь colour variants ещё не доведены до presentation parity; `inland_v1/coastal_v1` являются стартовыми профилями, а не уже доказанными алгоритмами RoR.
+- Следующий пакет E5-003: source-backed random-map requirements, портфель наземных/водных типов, spawn fairness, domain connectivity, resource guarantees и reproducibility; затем AI/PER evidence из classic/DE.

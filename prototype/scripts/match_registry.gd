@@ -72,6 +72,13 @@ const MATCHES := [
 		"path": "res://assets/generated/matches/battle-of-tunes.json",
 		"kind": "campaign",
 	},
+	{
+		"id": "custom_skirmish",
+		"title": "Настраиваемая случайная игра",
+		"subtitle": "2–8 игроков, цивилизации, союзы, эпоха, ресурсы, карта и условие победы",
+		"path": "",
+		"kind": "custom_skirmish",
+	},
 ]
 
 
@@ -79,7 +86,7 @@ static func entries() -> Array:
 	var result: Array = []
 	for value in MATCHES:
 		var entry: Dictionary = value.duplicate(true)
-		entry["available"] = FileAccess.file_exists(String(entry["path"]))
+		entry["available"] = String(entry.get("kind", "")) == "custom_skirmish" or FileAccess.file_exists(String(entry["path"]))
 		result.append(entry)
 	return result
 

@@ -40,6 +40,8 @@ AoE1 DE помогает сравнивать данные, AI, presentation и 
 3. Нормализовать AI/PER в evidence ledger: build orders, attack delay, group sizing, retreat, defence, exploration и diplomacy-related параметры.
 4. Связать подтверждённые параметры с собственными AI policies и acceptance tests случайного матча.
 
+E5-002 уже отделил versioned skirmish settings от генератора. Ни один preset не получает статус classic/DE parity из одного названия: `source_status` каталога остаётся `engine_contract_pending_ror_ui_calibration`, пока E5-003 не получит переносимые executable observations. DE AI/PER подключаются после map contract и не изменяют настройки или поведение автоматически.
+
 ### E6
 
 1. Профилировать `x1/x2/x4` decode/cache/memory/render стоимость отдельно от classic PCK.
