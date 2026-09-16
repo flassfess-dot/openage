@@ -721,3 +721,10 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - AI policy различает `land_worker_target` и `water_worker_target` только как цели состава. Villager и Fishing Boat по-прежнему расходуют единый authoritative population/housing pool.
 - Короткий `test_generated_naval_economy_pipeline.gd` проходит полный публичный цикл к tick 1750: train Fishing Boat, gather Deep Fish, 15 food carry, возврат и deposit в Dock. Длительный islands acceptance достигает автономных Dock/Scout Ship, обнаруживает generated fish и принимает два water orders к tick 6060.
 - Следующий пакет E5-006C2b: автономный Transport embark/sail/landing, затем naval combat/victory и 4/8-player coastal/islands matrix. Полный suite/cache/export остаётся на общей границе E5; ресурсы не переимпортировались.
+
+### E5-006C2b — generated transport landing (2026-09-17)
+
+- На `compact / islands / seed 41721` обычный skirmish AI через публичные `BoardCommand -> MoveCommand -> UnloadCommand` загружает двух сухопутных бойцов, пересекает воду и высаживает обоих на land component острова противника. Контрольный цикл завершается на tick 430 без прямой мутации cargo или задач юнитов.
+- Общий pathfinder и navigation-service теперь принимают радиус footprint. Поиск цели, A*, диагональные шаги, сглаживание, кэш и проверка достижимости используют один clearance contract; крупный корабль больше не получает формально разрешённый маршрут через воду, по которой его корпус физически пройти не может.
+- Новый unit-test различает проход для малого и крупного водного юнита через узкий канал. Связанные pathfinder/navigation, transport pipeline, skirmish planner и mixed-domain AI gates проходят.
+- Следующий пакет: generated naval combat/victory, затем 4/8-player coastal/islands matrix. Полный suite/cache/export остаётся на общей границе E5; ресурсы не переимпортировались.

@@ -12,6 +12,7 @@ func _initialize() -> void:
 	test_smoothing_and_cache()
 	test_blocked_destination_uses_nearest_cell()
 	test_same_cell_exact_endpoints_do_not_alias()
+	test_clearance_aware_route_avoids_narrow_shore()
 	test_simulation_routes_around_town_center()
 
 	if failures.is_empty():
@@ -65,6 +66,22 @@ func test_same_cell_exact_endpoints_do_not_alias() -> void:
 	var returned := finder.find_path(Vector2(6.28, 5.5), Vector2(6.0, 5.5))
 	assert_equal(first[first.size() - 1], Vector2(6.28, 5.5), "first exact same-cell endpoint")
 	assert_equal(returned[returned.size() - 1], Vector2(6.0, 5.5), "return exact same-cell endpoint")
+
+
+func test_clearance_aware_route_avoids_narrow_shore() -> void:
+	var grid = NavigationGrid.new(Vector2i(10, 8))
+	grid.configure_terrain(func(cell: Vector2i) -> String:
+		if cell.y in [0, 7] or cell.x in [0, 9]:
+			return "land"
+		if cell.y == 3 and cell.x not in [2, 7]:
+			return "land"
+		return "water"
+	)
+	var finder = Pathfinder.new(grid)
+	var small := finder.find_path(Vector2(2.5, 1.5), Vector2(7.5, 5.5), "water", -1, 0.2)
+	var large := finder.find_path(Vector2(2.5, 1.5), Vector2(7.5, 5.5), "water", -1, 0.75)
+	assert_true(not small.is_empty(), "small water unit can pass a one-cell channel")
+	assert_true(large.is_empty(), "large water unit rejects a channel narrower than its footprint")
 
 
 func test_simulation_routes_around_town_center() -> void:

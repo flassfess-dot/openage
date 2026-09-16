@@ -2947,7 +2947,7 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 		clamped_destination = destination_reservations.reserve(int(unit["id"]), clamped_destination, float(unit.get("footprint_radius", 0.3)), navigation_grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
 		unit["reserved_destination"] = clamped_destination
 	unit["destination"] = clamped_destination
-	var path_result := navigation_service.request_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "replan" if not unit.get("path", []).is_empty() else String(unit.get("task", "move")))
+	var path_result := navigation_service.request_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "replan" if not unit.get("path", []).is_empty() else String(unit.get("task", "move")), float(unit.get("footprint_radius", 0.3)))
 	unit["path_request_id"] = int(path_result["request_id"])
 	unit["path_status"] = String(path_result["status"])
 	unit["path_grid_revision"] = int(path_result["grid_revision"])
@@ -2979,7 +2979,7 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 	var combined: Array[Vector2] = []
 	var cursor: Vector2 = unit["pos"]
 	for target in targets:
-		var path_result := navigation_service.request_path(int(unit["id"]), cursor, Coordinates.clamp_world(target, map_size), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment")
+		var path_result := navigation_service.request_path(int(unit["id"]), cursor, Coordinates.clamp_world(target, map_size), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
 		unit["path_request_id"] = int(path_result["request_id"])
 		unit["path_status"] = String(path_result["status"])
 		unit["path_grid_revision"] = int(path_result["grid_revision"])
@@ -4010,7 +4010,7 @@ func can_unit_reach_entity(unit: Dictionary, target: Dictionary) -> bool:
 		return false
 	var start := Vector2(unit.get("pos", Vector2.ZERO))
 	var goal := Vector2(target.get("pos", Vector2.ZERO))
-	var route: Array[Vector2] = pathfinder.find_path(start, goal, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+	var route: Array[Vector2] = pathfinder.find_path(start, goal, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), float(unit.get("footprint_radius", 0.3)))
 	return not route.is_empty()
 
 

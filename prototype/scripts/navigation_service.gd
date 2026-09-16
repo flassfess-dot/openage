@@ -23,13 +23,13 @@ func clear_observations() -> void:
 	results_by_request.clear()
 
 
-func request_path(entity_id: int, start: Vector2, requested_goal: Vector2, movement_domain: String = "land", restriction_id: int = -1, purpose: String = "move") -> Dictionary:
+func request_path(entity_id: int, start: Vector2, requested_goal: Vector2, movement_domain: String = "land", restriction_id: int = -1, purpose: String = "move", clearance_radius: float = 0.0) -> Dictionary:
 	var request_id := next_request_id
 	next_request_id += 1
 	var grid_revision := int(pathfinder.grid.revision) if pathfinder != null and pathfinder.grid != null else -1
 	var path: Array[Vector2] = []
 	if pathfinder != null:
-		path = pathfinder.find_path(start, requested_goal, movement_domain, restriction_id)
+		path = pathfinder.find_path(start, requested_goal, movement_domain, restriction_id, clearance_radius)
 	var status := "resolved" if not path.is_empty() else "unreachable"
 	var result := {
 		"request_id": request_id,
@@ -40,6 +40,7 @@ func request_path(entity_id: int, start: Vector2, requested_goal: Vector2, movem
 		"resolved_goal": path[path.size() - 1] if not path.is_empty() else start,
 		"movement_domain": movement_domain,
 		"restriction_id": restriction_id,
+		"clearance_radius": clearance_radius,
 		"grid_revision": grid_revision,
 		"status": status,
 		"reason": "" if status == "resolved" else "no_path",

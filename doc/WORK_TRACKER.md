@@ -1317,3 +1317,11 @@ ext_unit_id.
 - AI policy переименовал двусмысленный `worker_target` в `land_worker_target` и добавил `water_worker_target`. Это независимые цели состава; Fishing Boat подтверждён в общем population/housing pool вместе с Villager и остальными юнитами.
 - `test_generated_naval_economy_pipeline.gd` завершает train/gather/deposit на tick 1750 и проверяет прирост food `1000 -> 1015`. `test_generated_naval_ai_acceptance.gd` завершает естественный Dock/Scout/discovery путь на tick 6060. Связанные profile/generator/bootstrap/policy/AI/naval-economy impact gates проходят; полный suite/cache/export и импорт ресурсов не запускались.
 - Следующий пакет E5-006C2b: autonomous transport landing; затем naval combat/victory и 4/8-player coastal/islands matrix.
+
+### Прогресс (2026-09-17, E5-006C2b — generated transport landing)
+
+- Добавлен generated-islands acceptance: skirmish AI видит противника только через presentation snapshot, загружает двух Clubman в Transport, выдаёт обычный water move и выгружает cargo на land component вражеского острова. Цепочка `board -> sail -> unload` завершается на tick 430.
+- Диагностика выявила расхождение двух навигационных контрактов: A* считал проходимой клетку по центру, а local movement справедливо отвергал её для полного радиуса корабля. `RoRPathfinder` и `RoRNavigationService` теперь проводят footprint radius через nearest-goal, A*, diagonal corner checks, smoothing, exact endpoint validation и cache key.
+- Основные назначения пути, formation segments и reachability query передают реальный радиус юнита. Unit-test подтверждает, что маленькое судно проходит узкий водный канал, а крупное заранее получает unreachable вместо вечного `local_blocked`.
+- Impact gates: pathfinder/navigation service, generated transport landing, transport lifecycle, skirmish AI planner и длительный mixed-domain AI match проходят. Известные host-only ошибки `user://logs`/Windows certificate store неизменны; полный suite/cache/export и импорт ресурсов не запускались.
+- Следующий пакет: generated naval combat/victory, затем 4/8-player coastal/islands matrix.

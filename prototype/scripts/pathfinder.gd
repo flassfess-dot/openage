@@ -22,25 +22,25 @@ func clear_cache() -> void:
 	cache_hits = 0
 
 
-func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: String = "land", restriction_id: int = -1) -> Array[Vector2]:
+func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2]:
 	var start := Vector2i(floori(start_world.x), floori(start_world.y))
 	var requested_goal := Vector2i(floori(goal_world.x), floori(goal_world.y))
-	var goal := nearest_walkable(requested_goal, movement_domain, restriction_id)
+	var goal := nearest_walkable(requested_goal, movement_domain, restriction_id, clearance_radius)
 	if goal.x < 0:
 		return []
 	# Exact endpoints matter even when both requests fall into the same cell.
 	# Without them a return-to-slot request can reuse an earlier contact point.
-	var key := "%d:%s:%d:%d:%d:%d:%d:%.4f:%.4f:%.4f:%.4f" % [grid.revision, movement_domain, restriction_id, start.x, start.y, goal.x, goal.y, start_world.x, start_world.y, goal_world.x, goal_world.y]
+	var key := "%d:%s:%d:%.4f:%d:%d:%d:%d:%.4f:%.4f:%.4f:%.4f" % [grid.revision, movement_domain, restriction_id, clearance_radius, start.x, start.y, goal.x, goal.y, start_world.x, start_world.y, goal_world.x, goal_world.y]
 	if cache.has(key):
 		cache_hits += 1
 		var cached_path: Array[Vector2] = []
 		cached_path.assign(cache[key])
 		return cached_path
-	var cells := find_cell_path(start, goal, movement_domain, restriction_id)
+	var cells := find_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
 	if cells.is_empty():
 		cache[key] = []
 		return []
-	var smoothed := smooth_cells(cells, movement_domain, restriction_id)
+	var smoothed := smooth_cells(cells, movement_domain, restriction_id, clearance_radius)
 	var result: Array[Vector2] = []
 	for index in range(1, smoothed.size()):
 		var cell: Vector2i = smoothed[index]
@@ -49,14 +49,14 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		var same_cell_destination := goal_world if goal == requested_goal else Vector2(goal) + Vector2(0.5, 0.5)
 		if start_world.distance_squared_to(same_cell_destination) > 0.0001:
 			result.append(same_cell_destination)
-	if goal == requested_goal and not result.is_empty():
+	if goal == requested_goal and not result.is_empty() and grid.is_position_walkable_for(goal_world, clearance_radius, movement_domain, restriction_id):
 		result[result.size() - 1] = goal_world
 	cache[key] = result.duplicate()
 	return result
 
 
-func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1) -> Array[Vector2i]:
-	if grid == null or not grid.contains(start) or not grid.contains(goal) or not grid.is_walkable_for(goal, movement_domain, restriction_id):
+func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
+	if grid == null or not grid.contains(start) or not grid.contains(goal) or not _cell_walkable(goal, movement_domain, restriction_id, clearance_radius):
 		return []
 	var frontier: Array = []
 	_frontier_push(frontier, {"cell": start, "score": 0.0, "cost": 0.0})
@@ -71,7 +71,7 @@ func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "
 			break
 		for direction in DIRECTIONS:
 			var next: Vector2i = current + direction
-			if not _can_step(current, next, movement_domain, restriction_id):
+			if not _can_step(current, next, movement_domain, restriction_id, clearance_radius):
 				continue
 			var step_cost := DIAGONAL_COST if direction.x != 0 and direction.y != 0 else CARDINAL_COST
 			var next_cost: float = float(cost_so_far[current]) + step_cost
@@ -137,7 +137,7 @@ func _frontier_less(left: Dictionary, right: Dictionary) -> bool:
 	return left_cell.y < right_cell.y or (left_cell.y == right_cell.y and left_cell.x < right_cell.x)
 
 
-func smooth_cells(path: Array[Vector2i], movement_domain: String = "land", restriction_id: int = -1) -> Array[Vector2i]:
+func smooth_cells(path: Array[Vector2i], movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
 	if path.size() <= 2:
 		return path.duplicate()
 	var result: Array[Vector2i] = [path[0]]
@@ -145,7 +145,7 @@ func smooth_cells(path: Array[Vector2i], movement_domain: String = "land", restr
 	while anchor < path.size() - 1:
 		var furthest := anchor + 1
 		for candidate in range(path.size() - 1, anchor, -1):
-			if line_walkable(path[anchor], path[candidate], movement_domain, restriction_id):
+			if line_walkable(path[anchor], path[candidate], movement_domain, restriction_id, clearance_radius):
 				furthest = candidate
 				break
 		result.append(path[furthest])
@@ -153,21 +153,21 @@ func smooth_cells(path: Array[Vector2i], movement_domain: String = "land", restr
 	return result
 
 
-func line_walkable(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1) -> bool:
+func line_walkable(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> bool:
 	var difference := goal - start
 	var steps := maxi(absi(difference.x), absi(difference.y))
 	var previous := start
 	for index in range(1, steps + 1):
 		var ratio := float(index) / float(steps)
 		var current := Vector2i(roundi(lerpf(start.x, goal.x, ratio)), roundi(lerpf(start.y, goal.y, ratio)))
-		if not _can_step(previous, current, movement_domain, restriction_id):
+		if not _can_step(previous, current, movement_domain, restriction_id, clearance_radius):
 			return false
 		previous = current
 	return true
 
 
-func nearest_walkable(requested: Vector2i, movement_domain: String = "land", restriction_id: int = -1) -> Vector2i:
-	if grid.contains(requested) and grid.is_walkable_for(requested, movement_domain, restriction_id):
+func nearest_walkable(requested: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Vector2i:
+	if grid.contains(requested) and _cell_walkable(requested, movement_domain, restriction_id, clearance_radius):
 		return requested
 	var maximum_radius := maxi(grid.size.x, grid.size.y)
 	for radius in range(1, maximum_radius + 1):
@@ -177,7 +177,7 @@ func nearest_walkable(requested: Vector2i, movement_domain: String = "land", res
 				if absi(x - requested.x) != radius and absi(y - requested.y) != radius:
 					continue
 				var cell := Vector2i(x, y)
-				if grid.contains(cell) and grid.is_walkable_for(cell, movement_domain, restriction_id):
+				if grid.contains(cell) and _cell_walkable(cell, movement_domain, restriction_id, clearance_radius):
 					candidates.append(cell)
 		if not candidates.is_empty():
 			candidates.sort_custom(func(left, right):
@@ -188,15 +188,21 @@ func nearest_walkable(requested: Vector2i, movement_domain: String = "land", res
 	return Vector2i(-1, -1)
 
 
-func _can_step(current: Vector2i, next: Vector2i, movement_domain: String = "land", restriction_id: int = -1) -> bool:
+func _can_step(current: Vector2i, next: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> bool:
 	if next == current:
 		return true
-	if not grid.contains(next) or not grid.is_walkable_for(next, movement_domain, restriction_id):
+	if not grid.contains(next) or not _cell_walkable(next, movement_domain, restriction_id, clearance_radius):
 		return false
 	var direction := next - current
 	if direction.x != 0 and direction.y != 0:
-		return grid.is_walkable_for(current + Vector2i(direction.x, 0), movement_domain, restriction_id) and grid.is_walkable_for(current + Vector2i(0, direction.y), movement_domain, restriction_id)
+		return _cell_walkable(current + Vector2i(direction.x, 0), movement_domain, restriction_id, clearance_radius) and _cell_walkable(current + Vector2i(0, direction.y), movement_domain, restriction_id, clearance_radius)
 	return true
+
+
+func _cell_walkable(cell: Vector2i, movement_domain: String, restriction_id: int, clearance_radius: float) -> bool:
+	if clearance_radius <= 0.0001:
+		return grid.is_walkable_for(cell, movement_domain, restriction_id)
+	return grid.is_position_walkable_for(Vector2(cell) + Vector2(0.5, 0.5), clearance_radius, movement_domain, restriction_id)
 
 
 func _heuristic(left: Vector2i, right: Vector2i) -> float:
