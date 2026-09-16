@@ -4,6 +4,9 @@ extends RefCounted
 const CATALOG_PATH := "res://data/skirmish/settings_catalog.json"
 const MatchDefinition := preload("res://scripts/match_definition.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
+const RandomMapContract := preload("res://scripts/random_map_contract.gd")
+const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
+const RandomMapQuality := preload("res://scripts/random_map_quality.gd")
 
 
 static func catalog() -> Dictionary:
@@ -113,6 +116,9 @@ static func normalize(source: Dictionary) -> Dictionary:
 		errors.append("skirmish_local_human_count_invalid")
 	elif human_team != 1:
 		errors.append("skirmish_local_human_team_invalid")
+	var size_entry := _entry(source_catalog.get("map_sizes", []), String(settings.get("map_size_id", "")))
+	if not size_entry.is_empty() and normalized_players.size() > int(size_entry.get("max_players", 8)):
+		errors.append("skirmish_map_player_capacity_exceeded")
 	settings["players"] = normalized_players
 	return {"valid": errors.is_empty(), "errors": errors, "settings": settings}
 
@@ -164,7 +170,7 @@ static func build(source: Dictionary) -> Dictionary:
 			"size": [size.x, size.y],
 			"seed": int(settings["seed"]),
 			"type_id": String(settings["map_type_id"]),
-			"generator": _generator_contract(String(map_type_entry.get("generator_profile", "inland_v1")), size, starts),
+			"generator": RandomMapContract.build(map_type_entry, size, starts),
 		},
 		"players": definition_players,
 		"entities": entities,
@@ -176,12 +182,18 @@ static func build(source: Dictionary) -> Dictionary:
 	var definition := MatchDefinition.normalize(raw_definition)
 	if not bool(definition.get("valid", false)):
 		return {"valid": false, "errors": definition.get("errors", []), "settings": settings, "definition": definition}
+	var map_data := RandomMapGenerator.generate(definition)
+	var map_quality := RandomMapQuality.inspect(definition, map_data)
+	if not bool(map_quality.get("valid", false)):
+		return {"valid": false, "errors": map_quality.get("errors", []), "settings": settings, "definition": definition, "map_data": map_data, "map_quality": map_quality}
 	var fingerprint := GameSaveArchive.fingerprint(definition)
 	return {
 		"valid": true,
 		"errors": [],
 		"settings": settings,
 		"definition": definition,
+		"map_data": map_data,
+		"map_quality": map_quality,
 		"identity": "generated://skirmish/%s" % fingerprint.left(24),
 	}
 
@@ -206,7 +218,7 @@ static func _start_positions(count: int, size: Vector2i, map_type: String) -> Ar
 	var result: Array[Vector2] = []
 	var center := Vector2(size) * 0.5
 	var radius := minf(float(size.x), float(size.y)) * 0.32
-	var minimum_margin := 8.0 if map_type == "coastal" else 5.0
+	var minimum_margin := maxf(8.0, mini(size.x, size.y) * 0.18) if map_type == "coastal" else 5.0
 	for index in range(count):
 		var angle := -PI * 0.5 + TAU * float(index) / float(maxi(1, count))
 		var point := center + Vector2(cos(angle), sin(angle)) * radius
@@ -214,24 +226,6 @@ static func _start_positions(count: int, size: Vector2i, map_type: String) -> Ar
 		point.y = clampf(point.y, minimum_margin, float(size.y) - 5.0)
 		result.append(point)
 	return result
-
-
-static func _generator_contract(profile: String, size: Vector2i, starts: Array[Vector2]) -> Dictionary:
-	var coastal := profile == "coastal_v1"
-	var clusters: Array = []
-	for start in starts:
-		clusters.append({"kind": "berries", "center": [start.x + 4.0, start.y], "count": 5, "radius": 1.2, "amount": 150})
-		clusters.append({"kind": "tree", "center": [start.x - 4.0, start.y + 1.0], "count": 10, "radius": 2.2, "amount": 75})
-		clusters.append({"kind": "stone_mine", "center": [start.x, start.y - 5.0], "count": 4, "radius": 1.0, "amount": 250})
-		clusters.append({"kind": "gold_mine", "center": [start.x + 2.0, start.y + 5.0], "count": 4, "radius": 1.0, "amount": 400})
-	return {
-		"type": "coastal_land",
-		"profile": profile,
-		"water_border": {"left": 3 if coastal else 0, "top": 3 if coastal else 0, "right": 0, "bottom": 0, "shore_width": 1, "land_terrain_id": 0},
-		"naval_start": {"dock_footprint_radius_cells": 1, "dock_surface_terrain_ids": [1, 2, 4, 22]},
-		"hills": [{"center": [size.x * 0.5, size.y * 0.5], "radius": maxi(3, mini(size.x, size.y) / 12), "maximum_elevation": 2}],
-		"resource_clusters": clusters,
-	}
 
 
 static func _alliances(players: Array) -> Array:

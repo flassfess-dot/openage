@@ -62,6 +62,7 @@ var view_zoom := 1.0
 var map_size := MAP_SIZE
 var map_seed := MAP_SEED
 var match_definition: Dictionary = {}
+var map_definition_override: Dictionary = {}
 var map_definition: Dictionary = {}
 var ai_players: Array = []
 var input_adapter := InputAdapter.new()
@@ -132,7 +133,7 @@ func _ready() -> void:
 	var environment_items: Array = match_definition.get("presentation_environment", []).duplicate(true)
 	environment_items.append_array(match_definition.get("static_obstructions", []))
 	environment_presentation_field.configure(environment_items)
-	map_definition = RandomMapGenerator.generate(match_definition)
+	map_definition = map_definition_override.duplicate(true) if not map_definition_override.is_empty() else RandomMapGenerator.generate(match_definition)
 	map_size = map_definition.get("size", MAP_SIZE)
 	map_seed = int(map_definition.get("seed", MAP_SEED))
 

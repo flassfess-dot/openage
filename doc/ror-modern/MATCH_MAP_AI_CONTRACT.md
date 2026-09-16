@@ -6,6 +6,19 @@
 
 `RoRRandomMapGenerator` is a pure seeded transformation from a normalized match definition to terrain cells, vertex heights and procedural resource placements. It never uses the global RNG. Equal definitions produce equal map dictionaries; changing the seed changes procedural placements while declarative geometry remains unchanged.
 
+E5-003 adds a versioned `seeded_skirmish_v1` boundary instead of teaching the launcher terrain rules. `RoRRandomMapContract` translates a catalogued profile into topology/resource/elevation requirements; `RoRRandomMapGenerator` materializes it; `RoRRandomMapQuality` independently audits the result before launch. The generated map dictionary is then handed to `main.tscn`, so a successful seed is not regenerated during scene startup.
+
+Current engine profiles are `inland_v1`, `highlands_v1`, `coastal_v1` and `islands_v1`. They guarantee:
+
+- every Town Center start is on land and all starts respect a size-relative separation;
+- inland/coastal starts share the required land component, while island starts each own a minimum viable land component;
+- water ratio stays inside the profile's declared interval;
+- every player receives nearby food, wood, stone and gold clusters;
+- every coastal/island player receives a deterministic legal dock footprint plus land/water staging cells;
+- identical match definition and seed produce an equal terrain/resource/naval-zone dictionary.
+
+Map sizes declare player capacity, preventing eight players from being forced onto the compact profile. These are stable engine guarantees, not a claim that current preset labels/dimensions or topology distributions already reproduce classic RoR. Their source status remains pending executable calibration.
+
 `RoRMatchBootstrap` is the only normal path that applies a match to `SimulationWorld`. It resets the world without legacy demo objects, configures terrain/elevation/navigation, players and civilizations, resources/housing, diplomacy, entities/objectives and victory rules. Restart reapplies the same map and produces stable entity IDs. `main.gd` no longer contains a hand-authored army/resource setup and draws/minimaps the active map size and seed.
 
 ## Player and diplomacy boundary
@@ -30,7 +43,7 @@ Space pauses; comma/period change the fixed-tick speed; R restarts the same defi
 
 ## Evidence and limits
 
-- `test_match_definition.gd`, `test_random_map_generator.gd`, `test_match_bootstrap.gd`.
+- `test_match_definition.gd`, `test_random_map_generator.gd`, `test_random_map_profiles.gd`, `test_match_bootstrap.gd`.
 - `test_ai_player.gd`, `test_ai_command_pipeline.gd`.
 - `test_player_registry.gd`, `test_resign_pipeline.gd` and replay round-trip coverage.
 - `test_ai_vs_ai_match.gd`: both sides receive their legal snapshots, issue accepted public commands and finish a deterministic unscripted conquest match.

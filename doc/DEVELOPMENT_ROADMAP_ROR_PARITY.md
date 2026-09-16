@@ -671,3 +671,11 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Launcher создаёт generated match в памяти, а `main.tscn` использует тот же bootstrap/replay/save pipeline. Canonical fingerprint входит в `generated://skirmish/<hash>` и защищает quicksave от загрузки в другую конфигурацию.
 - Текущие map preset dimensions и generator profiles помечены `pending_ror_ui_calibration`. Это стабильный engine contract, но не ложное заявление exact RoR parity. E5-003 закрывает source evidence, наземные/водные типы, fairness/connectivity/resources и воспроизводимость.
 - Impact-gate: skirmish builder, registry/launcher, generated main scene, match definition и main HUD проходят. Полный suite/cache/export остаётся на границе E5; импорт ресурсов не выполнялся.
+
+### E5-003 — воспроизводимые профили случайных карт (2026-09-16)
+
+- Каталог теперь публикует четыре engine profile: `inland_v1`, `highlands_v1`, `coastal_v1`, `islands_v1`. Launcher знает только их ID/названия; topology, hills, resources и naval requirements строит отдельный `RoRRandomMapContract`.
+- `RoRRandomMapQuality` проверяет карту до старта: land starts, size-relative separation, shared или per-island land component, water ratio, четыре вида стартовых ресурсов и legal dock/land/water staging для каждого игрока на водном профиле. Размеры имеют явную вместимость 4/6/8 игроков.
+- Принятая generated map передаётся в `main.tscn` как immutable override, не вычисляясь второй раз. Definition+seed остаются единственным источником fingerprint и полностью воспроизводят карту.
+- Матрица четырёх профилей на seed `1/41721/99991`, прежний generator/bootstrap, launcher, generated main и mixed-domain AI smoke проходят. Exact RoR map labels/dimensions/statistical distribution остаются source-calibration gap, а не замаскированным parity claim.
+- Следующий пакет E5-004: переносимый classic/DE AI/PER ledger, capability mapping и data-driven skirmish AI policies; затем полный многосторонний AI acceptance match.

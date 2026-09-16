@@ -31,7 +31,7 @@ Builder детерминированно создаёт:
 ## Явные границы следующего пакета
 
 - `colour_index` уже является независимой частью player data, но полный набор восьми source palette variants в presentation — отдельная проверяемая работа E5/E8; выбор цвета не считается визуально завершённым только из-за наличия поля.
-- `inland_v1` и `coastal_v1` дают рабочую детерминированную основу. Распределение terrain/resources, честные spawn distances, водная связность, map-type portfolio и source калибровка принадлежат E5-003.
+- E5-003 добавил `inland_v1`, `highlands_v1`, `coastal_v1` и `islands_v1` с автоматическими spawn/resource/connectivity/naval guarantees. Exact RoR preset dimensions, названия и статистическое распределение terrain всё ещё требуют source-калибровки; рабочий engine contract не выдаётся за классический алгоритм.
 - AI использует существующий общий policy contract. Нормализация classic/DE AI/PER evidence и полноценный долгий AI-матч идут после E5-003.
 - Campaign definitions не переводятся в эту схему и остаются замороженными до E7.
 

@@ -25,6 +25,7 @@ func _initialize() -> void:
 	assert_equal(int(definition.get("players", [])[0].get("starting_age_technology_id", -1)), 100, "Stone Age is represented by the authoritative age technology")
 	assert_equal(int(definition.get("players", [])[0].get("population_limit", -1)), 50, "population limit reaches the match definition")
 	assert_true(String(first.get("identity", "")).begins_with("generated://skirmish/"), "generated matches have a stable non-file identity")
+	assert_true(bool(first.get("map_quality", {}).get("valid", false)), "default map passes generation guarantees before launch")
 
 	var team_settings := defaults.duplicate(true)
 	team_settings["players"][1]["alliance_id"] = 1
@@ -58,6 +59,14 @@ func _initialize() -> void:
 	assert_true(not bool(rejected.get("valid", true)), "ambiguous settings are rejected before launch")
 	assert_true(rejected.get("errors", []).has("skirmish_player_color_invalid:1"), "duplicate player colour has a stable error")
 	assert_true(rejected.get("errors", []).has("skirmish_local_human_count_invalid"), "a local match requires exactly one human")
+
+	var overcrowded := defaults.duplicate(true)
+	overcrowded["map_size_id"] = "compact"
+	for index in range(8):
+		overcrowded["players"][index]["enabled"] = true
+		overcrowded["players"][index]["controller"] = "human" if index == 0 else "ai"
+	var overcrowded_result := SkirmishSettings.build(overcrowded)
+	assert_true(overcrowded_result.get("errors", []).has("skirmish_map_player_capacity_exceeded"), "map capacity rejects crowded starts before generation")
 
 	_finish("E5-002 skirmish settings tests passed")
 

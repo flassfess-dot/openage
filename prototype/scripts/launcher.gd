@@ -150,6 +150,7 @@ func _launch_custom_skirmish() -> void:
 	var game = GAME_SCENE.instantiate()
 	game.match_path = String(last_generated_match["identity"])
 	game.match_definition_override = last_generated_match["definition"].duplicate(true)
+	game.map_definition_override = last_generated_match["map_data"].duplicate(true)
 	get_tree().root.add_child(game)
 	get_tree().current_scene = game
 	queue_free()

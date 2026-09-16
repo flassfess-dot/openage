@@ -9,6 +9,8 @@ static func generate(match_definition: Dictionary) -> Dictionary:
 	var generator: Dictionary = map.get("generator", {})
 	if String(generator.get("type", "")) == "fixed_source":
 		return _fixed_source_map(size, seed, generator)
+	if String(generator.get("type", "")) == "seeded_skirmish_v1":
+		return _seeded_skirmish_map(match_definition, size, seed, generator)
 	var water_border: Dictionary = generator.get("water_border", {})
 	var shore_width := maxi(0, int(water_border.get("shore_width", 1)))
 	var terrain_ids: Array[int] = []
@@ -42,6 +44,76 @@ static func generate(match_definition: Dictionary) -> Dictionary:
 		"naval_start_zones": naval_start_zones,
 		"reserved_foundation_cells": reserved_foundation_cells,
 	}
+
+
+static func _seeded_skirmish_map(match_definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary) -> Dictionary:
+	var starts: Array[Vector2] = []
+	for player_value in match_definition.get("players", []):
+		starts.append(_vector2(player_value.get("start", [])))
+	var terrain_ids: Array[int] = []
+	terrain_ids.resize(size.x * size.y)
+	var topology := String(generator.get("topology", "inland"))
+	for y in range(size.y):
+		for x in range(size.x):
+			terrain_ids[y * size.x + x] = 1 if _seeded_water_cell(Vector2i(x, y), size, starts, topology, generator, seed) else 0
+	_apply_shore_band(terrain_ids, size)
+	var naval_start_settings: Dictionary = generator.get("naval_start", {})
+	var naval_start_zones: Array = []
+	if bool(generator.get("requires_naval_starts", false)):
+		naval_start_zones = _generate_naval_start_zones(match_definition.get("players", []), size, terrain_ids, naval_start_settings)
+	var reserved_naval_cells := _reserved_naval_cells(naval_start_zones, maxi(0, int(naval_start_settings.get("dock_footprint_radius_cells", 1))))
+	var reserved_foundation_cells: Array = reserved_naval_cells.keys()
+	reserved_foundation_cells.sort_custom(func(left, right):
+		var left_cell := Vector2i(left)
+		var right_cell := Vector2i(right)
+		return left_cell.y < right_cell.y or (left_cell.y == right_cell.y and left_cell.x < right_cell.x)
+	)
+	var vertex_levels: Array[int] = []
+	vertex_levels.resize((size.x + 1) * (size.y + 1))
+	vertex_levels.fill(0)
+	for hill_value in generator.get("hills", []):
+		_apply_hill(vertex_levels, size, hill_value)
+	return {
+		"size": size,
+		"seed": seed,
+		"terrain_ids": terrain_ids,
+		"vertex_levels": vertex_levels,
+		"resources": _generate_resource_clusters(generator.get("resource_clusters", []), size, seed, terrain_ids, reserved_naval_cells),
+		"naval_start_zones": naval_start_zones,
+		"reserved_foundation_cells": reserved_foundation_cells,
+	}
+
+
+static func _seeded_water_cell(cell: Vector2i, size: Vector2i, starts: Array[Vector2], topology: String, generator: Dictionary, seed: int) -> bool:
+	if topology in ["inland", "highlands"]:
+		return false
+	var jitter := (float(_cell_hash(cell, seed)) / 2147483647.0 - 0.5) * 4.0
+	if topology == "coastal":
+		var width := mini(size.x, size.y) * float(generator.get("coast_fraction", 0.12))
+		return float(cell.x) < width + jitter or float(cell.y) < width - jitter * 0.5
+	if topology == "islands":
+		var radius := maxf(7.0, mini(size.x, size.y) * float(generator.get("island_radius_fraction", 0.12)))
+		var point := Vector2(cell) + Vector2(0.5, 0.5)
+		for start in starts:
+			if point.distance_to(start) <= radius + jitter * 0.35:
+				return false
+		var center := Vector2(size) * 0.5
+		return point.distance_to(center) > radius * 0.65 + jitter * 0.2
+	return false
+
+
+static func _apply_shore_band(terrain_ids: Array[int], size: Vector2i) -> void:
+	var water_mask := terrain_ids.duplicate()
+	for y in range(size.y):
+		for x in range(size.x):
+			var index := y * size.x + x
+			if int(water_mask[index]) in [1, 22]:
+				continue
+			for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+				var neighbor: Vector2i = Vector2i(x, y) + Vector2i(offset)
+				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y and int(water_mask[neighbor.y * size.x + neighbor.x]) in [1, 22]:
+					terrain_ids[index] = 2
+					break
 
 
 static func _fixed_source_map(size: Vector2i, seed: int, generator: Dictionary) -> Dictionary:

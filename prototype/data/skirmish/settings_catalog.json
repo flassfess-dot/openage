@@ -21,15 +21,17 @@
     {"id": 16, "name": "Македоняне"}
   ],
   "map_sizes": [
-    {"id": "compact", "name": "Компактная", "size": [48, 48]},
-    {"id": "standard", "name": "Стандартная", "size": [72, 72]},
-    {"id": "large", "name": "Большая", "size": [96, 96]},
-    {"id": "huge", "name": "Огромная", "size": [128, 128]},
-    {"id": "giant", "name": "Гигантская", "size": [200, 200]}
+    {"id": "compact", "name": "Компактная", "size": [48, 48], "max_players": 4},
+    {"id": "standard", "name": "Стандартная", "size": [72, 72], "max_players": 6},
+    {"id": "large", "name": "Большая", "size": [96, 96], "max_players": 8},
+    {"id": "huge", "name": "Огромная", "size": [128, 128], "max_players": 8},
+    {"id": "giant", "name": "Гигантская", "size": [200, 200], "max_players": 8}
   ],
   "map_types": [
-    {"id": "grasslands", "name": "Материк", "generator_profile": "inland_v1"},
-    {"id": "coastal", "name": "Побережье", "generator_profile": "coastal_v1"}
+    {"id": "grasslands", "name": "Материк", "generator_profile": "inland_v1", "topology": "inland", "requires_shared_land": true, "requires_naval_starts": false, "water_ratio": [0.0, 0.02]},
+    {"id": "highlands", "name": "Нагорье", "generator_profile": "highlands_v1", "topology": "highlands", "requires_shared_land": true, "requires_naval_starts": false, "water_ratio": [0.0, 0.02]},
+    {"id": "coastal", "name": "Побережье", "generator_profile": "coastal_v1", "topology": "coastal", "requires_shared_land": true, "requires_naval_starts": true, "coast_fraction": 0.12, "water_ratio": [0.12, 0.30]},
+    {"id": "islands", "name": "Острова", "generator_profile": "islands_v1", "topology": "islands", "requires_shared_land": false, "requires_naval_starts": true, "island_radius_fraction": 0.12, "water_ratio": [0.25, 0.92]}
   ],
   "resource_presets": [
     {"id": "standard", "name": "Стандартные", "resources": {"food": 200, "wood": 200, "stone": 150, "gold": 0}},

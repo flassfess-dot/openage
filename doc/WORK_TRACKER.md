@@ -1257,3 +1257,12 @@ ext_unit_id.
 - Pure builder, registry/launcher, generated main scene, match definition и main HUD impact-проверки проходят. Известные host-only ошибки записи `user://logs` и Windows certificate store неизменны. Полный suite/cache/export не запускались до границы E5; ресурсы не импортировались.
 - Отдельно зафиксированы честные gaps: восемь colour variants ещё не доведены до presentation parity; `inland_v1/coastal_v1` являются стартовыми профилями, а не уже доказанными алгоритмами RoR.
 - Следующий пакет E5-003: source-backed random-map requirements, портфель наземных/водных типов, spawn fairness, domain connectivity, resource guarantees и reproducibility; затем AI/PER evidence из classic/DE.
+
+### Прогресс (2026-09-16, E5-003 — random-map contract и quality gate)
+
+- Map catalog расширен профилями `Материк / Нагорье / Побережье / Острова`. Отдельный contract builder владеет topology/elevation/resource/naval requirements; launcher и simulation не содержат веток по названию карты.
+- Новый seed-driven generator создаёт устойчивые coastline/island masks, shore band, hills, стартовые ресурсные кластеры и legal dock zones. Inland/highlands не получают искусственных водных стартов.
+- Независимый quality gate до запуска проверяет start-on-land, дистанции, shared/per-island connectivity, water ratio, minimum land area, food/wood/stone/gold для каждого игрока и dock+staging для водных профилей. Compact/standard/large sizes ограничивают допустимые 4/6/8 slots.
+- Launcher передаёт уже проверенный map dictionary в `main.tscn`; повторной генерации при старте нет. Definition+seed по-прежнему являются canonical save/replay identity.
+- Матрица `4 profile × 3 seed`, прежний random generator/bootstrap, settings/launcher, generated main scene и mixed-domain AI smoke проходят. Full suite/cache/export остаётся на E5 boundary; ресурсы не импортировались.
+- Source status остаётся честным: размеры/названия и статистика рельефа ещё не объявлены exact RoR. Следующий пакет E5-004 — classic/DE AI/PER evidence ledger и policy mapping.

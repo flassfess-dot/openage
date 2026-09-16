@@ -21,6 +21,7 @@ func _initialize() -> void:
 	var game = scene.instantiate()
 	game.match_path = String(built["identity"])
 	game.match_definition_override = built["definition"].duplicate(true)
+	game.map_definition_override = built["map_data"].duplicate(true)
 	root.add_child(game)
 	await process_frame
 	await process_frame
