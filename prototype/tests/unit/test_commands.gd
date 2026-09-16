@@ -54,6 +54,10 @@ func test_command_payloads_are_owned() -> void:
 	assert_equal(trade_resource.params, {"resource_type_id": 2}, "trade input resource is serializable command data")
 	var trade = Commands.TradeCommand.new(23, [15, 16], 45)
 	assert_equal(trade.params, {"target_dock_id": 45}, "trade route target is serializable command data")
+	var diplomacy = Commands.DiplomacyCommand.new(24, 3, "neutral")
+	assert_equal(diplomacy.params, {"target_team": 3, "relation": "neutral"}, "directed diplomacy is serializable command data")
+	assert_true(Commands.is_valid_diplomacy_relation("ally") and Commands.is_valid_diplomacy_relation("neutral") and Commands.is_valid_diplomacy_relation("enemy"), "all source diplomacy relations are accepted")
+	assert_true(not Commands.is_valid_diplomacy_relation("peace"), "unknown diplomacy relation is rejected")
 
 
 func test_controller_assigns_unique_envelopes() -> void:

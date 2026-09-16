@@ -33,15 +33,19 @@ func ensure_player(player_id: int) -> void:
 
 
 func set_alliance(first_player: int, second_player: int, allied: bool = true) -> void:
-	ensure_player(first_player)
-	ensure_player(second_player)
-	if allied:
-		allies_by_player[first_player][second_player] = true
-		allies_by_player[second_player][first_player] = true
+	set_relation(first_player, second_player, allied)
+	set_relation(second_player, first_player, allied)
+
+
+func set_relation(observer_player: int, source_player: int, allied: bool = true) -> void:
+	ensure_player(observer_player)
+	ensure_player(source_player)
+	if observer_player == source_player:
+		allies_by_player[observer_player][source_player] = true
+	elif allied:
+		allies_by_player[observer_player][source_player] = true
 	else:
-		if first_player != second_player:
-			allies_by_player[first_player].erase(second_player)
-			allies_by_player[second_player].erase(first_player)
+		allies_by_player[observer_player].erase(source_player)
 	revision += 1
 
 

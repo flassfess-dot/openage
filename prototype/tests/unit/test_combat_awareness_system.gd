@@ -8,6 +8,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	test_stance_rules()
+	test_neutral_autonomous_targeting()
 	if failures.is_empty():
 		print("I6-002 combat awareness stance tests passed")
 		quit(0)
@@ -62,6 +63,32 @@ func configure_awareness(unit: Dictionary, stance: String, sight: float) -> void
 	unit["components"]["vision"]["enabled"] = true
 
 
+func test_neutral_autonomous_targeting() -> void:
+	var world = open_world()
+	world.configure_players([
+		{"team": 1, "controller": "human", "civilization_id": 13},
+		{"team": 2, "controller": "ai", "civilization_id": 1},
+	])
+	var observer: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	var worker: Dictionary = world.add_unit(2, "villager", Vector2(4.8, 4.0), false)
+	var soldier: Dictionary = world.add_unit(2, "clubman", Vector2(5.2, 4.0), false)
+	observer["behavior_tags"] = ["military", "combatant"]
+	worker["behavior_tags"] = ["worker", "combatant"]
+	soldier["behavior_tags"] = ["military", "combatant"]
+	configure_awareness(observer, "aggressive", 6.0)
+	configure_awareness(worker, "passive", 6.0)
+	configure_awareness(soldier, "passive", 6.0)
+	assert_true(world.set_diplomacy_relation(1, 2, "neutral"), "directed neutral relation is accepted")
+	world.update_fog_of_war()
+	var awareness := CombatAwarenessSystem.new()
+	var commands := awareness.collect_commands(world, 1)
+	assert_equal(commands.size(), 1, "neutral military remains an autonomous local threat")
+	assert_equal(commands[0].target_entity_id, int(soldier["id"]), "neutral worker is skipped in favour of military")
+	soldier["hp"] = 0.0
+	assert_equal(awareness.collect_commands(world, 2).size(), 0, "neutral worker is never acquired autonomously")
+	assert_equal(world.team_relation(2, 1), "enemy", "neutral stance does not mutate the reverse player relation")
+
+
 func open_world():
 	var world = SimulationWorld.new(Vector2i(20, 20))
 	world.navigation_grid.configure_terrain(func(_cell): return "grass")
@@ -71,3 +98,8 @@ func open_world():
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
+
+
+func assert_true(value: bool, context: String) -> void:
+	if not value:
+		failures.append("%s: expected true" % context)

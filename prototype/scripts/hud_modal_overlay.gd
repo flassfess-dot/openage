@@ -6,6 +6,7 @@ signal save_requested
 signal load_requested
 signal resign_requested
 signal launcher_requested
+signal diplomacy_relation_requested(target_team: int, relation: String)
 
 const MODE_NONE := ""
 const MODE_MENU := "menu"
@@ -29,6 +30,7 @@ var resign_button: Button
 var launcher_button: Button
 var diplomacy_close_button: Button
 var menu_status: Label
+var diplomacy_relation_buttons: Dictionary = {}
 
 
 func _init() -> void:
@@ -144,7 +146,7 @@ func _build_interface() -> void:
 	var diplomacy_column := _panel_column(diplomacy_panel)
 	diplomacy_column.add_child(_heading("ДИПЛОМАТИЯ"))
 	var note := Label.new()
-	note.text = "Текущие отношения игроков"
+	note.text = "Выберите отношение к каждому игроку"
 	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	note.add_theme_font_size_override("font_size", 13)
 	note.add_theme_color_override("font_color", Color("c9b98e"))
@@ -162,9 +164,11 @@ func _build_interface() -> void:
 func _rebuild_diplomacy_rows() -> void:
 	for child in diplomacy_rows.get_children():
 		child.queue_free()
+	diplomacy_relation_buttons.clear()
 	var state: Dictionary = latest_snapshot.get("player_state", {})
 	var own_team := int(state.get("team", match_definition.get("local_team", 1)))
 	var allies: Array = state.get("allies", [own_team])
+	var relations: Dictionary = state.get("relations", {})
 	var players: Array = state.get("players", match_definition.get("players", []))
 	if players.is_empty():
 		diplomacy_rows.add_child(_row_label("Нет других активных игроков", Color("dfd0aa")))
@@ -174,28 +178,67 @@ func _rebuild_diplomacy_rows() -> void:
 		var team := int(player.get("team", 0))
 		if team <= 0:
 			continue
-		var relation := "ВЫ" if team == own_team else ("СОЮЗНИК" if team in allies else "ПРОТИВНИК")
-		var relation_color := Color("f0d782") if team == own_team else (Color("85cf80") if team in allies else Color("e57b68"))
+		var relation := "ally" if team in allies else "enemy"
+		if relations.has(team):
+			relation = String(relations[team])
 		var definition := _player_definition(team)
 		var civilization_id := int(player.get("civilization_id", definition.get("civilization_id", -1)))
 		var controller := String(player.get("controller", definition.get("controller", "ai")))
 		var status := _status_label(String(player.get("status", "active")))
 		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 12)
+		row.add_theme_constant_override("separation", 7)
 		var identity := _row_label("Игрок %d   ·   %s" % [team, _civilization_name(civilization_id)], Color("efe2c0"))
 		identity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(identity)
 		var control_label := _row_label("ЧЕЛОВЕК" if controller == "human" else "КОМПЬЮТЕР", Color("b9aa85"))
-		control_label.custom_minimum_size.x = 105
+		control_label.custom_minimum_size.x = 82
 		row.add_child(control_label)
 		var status_label := _row_label(status, Color("b9aa85"))
-		status_label.custom_minimum_size.x = 85
+		status_label.custom_minimum_size.x = 72
 		row.add_child(status_label)
-		var relation_label := _row_label(relation, relation_color)
-		relation_label.custom_minimum_size.x = 105
-		relation_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		row.add_child(relation_label)
+		if team == own_team:
+			var own_label := _row_label("ВЫ", Color("f0d782"))
+			own_label.custom_minimum_size.x = 170
+			own_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			row.add_child(own_label)
+		else:
+			var controls := HBoxContainer.new()
+			controls.add_theme_constant_override("separation", 2)
+			var team_buttons: Dictionary = {}
+			for relation_name in ["ally", "neutral", "enemy"]:
+				var button := _relation_button(team, relation_name, relation == relation_name)
+				button.disabled = String(player.get("status", "active")) != "active"
+				team_buttons[relation_name] = button
+				controls.add_child(button)
+			diplomacy_relation_buttons[team] = team_buttons
+			row.add_child(controls)
 		diplomacy_rows.add_child(row)
+
+
+func _relation_button(team: int, relation: String, selected: bool) -> Button:
+	var button := _action_button({"ally": "СОЮЗ", "neutral": "НЕЙТР.", "enemy": "ВРАГ"}.get(relation, relation.to_upper()))
+	button.custom_minimum_size = Vector2(55, 20)
+	button.toggle_mode = true
+	button.button_pressed = selected
+	button.tooltip_text = {"ally": "Не атаковать; получать союзный обзор", "neutral": "Автоматически атаковать войска и здания, но не рабочих", "enemy": "Атаковать все допустимые цели"}.get(relation, "")
+	_apply_source_button_style(button)
+	button.pressed.connect(func():
+		_set_pending_relation(team, relation)
+		diplomacy_relation_requested.emit(team, relation)
+	)
+	return button
+
+
+func _set_pending_relation(team: int, relation: String) -> void:
+	var state: Dictionary = latest_snapshot.get("player_state", {})
+	var relations: Dictionary = state.get("relations", {}).duplicate(true)
+	relations[team] = relation
+	state["relations"] = relations
+	latest_snapshot["player_state"] = state
+	var team_buttons: Dictionary = diplomacy_relation_buttons.get(team, {})
+	for relation_name in team_buttons:
+		var button: Button = team_buttons[relation_name]
+		button.button_pressed = String(relation_name) == relation
 
 
 func _player_definition(team: int) -> Dictionary:

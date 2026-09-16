@@ -26,6 +26,7 @@ func _initialize() -> void:
 	overlay.set_snapshot({"player_state": {
 		"team": 1,
 		"allies": [1, 3],
+		"relations": {1: "ally", 2: "enemy", 3: "ally"},
 		"players": [
 			{"team": 1, "controller": "human", "civilization_id": 13, "status": "active"},
 			{"team": 2, "controller": "ai", "civilization_id": 1, "status": "active"},
@@ -54,10 +55,18 @@ func _initialize() -> void:
 	assert_equal(overlay.diplomacy_rows.get_child_count(), 3, "diplomacy lists every public player exactly once")
 	var text := collect_text(overlay.diplomacy_rows)
 	assert_true(text.contains("ВЫ"), "local player is identified")
-	assert_true(text.contains("ПРОТИВНИК"), "enemy relation is visible")
-	assert_true(text.contains("СОЮЗНИК"), "ally relation is visible")
+	assert_true(text.contains("ВРАГ"), "enemy relation control is visible")
+	assert_true(text.contains("СОЮЗ"), "ally relation control is visible")
+	assert_true(text.contains("НЕЙТР."), "neutral relation control is visible")
 	assert_true(text.contains("ПОБЕЖДЁН"), "public player status is visible")
 	assert_true(text.contains("Римляне"), "civilization uses the imported source localization")
+	assert_true(overlay.diplomacy_relation_buttons.has(2), "active foreign player owns diplomacy controls")
+	assert_true(overlay.diplomacy_relation_buttons[3]["enemy"].disabled, "defeated player relation cannot be changed")
+	var requested := []
+	overlay.diplomacy_relation_requested.connect(func(team: int, relation: String): requested.append([team, relation]))
+	overlay.diplomacy_relation_buttons[2]["neutral"].emit_signal("pressed")
+	assert_equal(requested, [[2, "neutral"]], "relation control emits a directed user request")
+	assert_true(overlay.diplomacy_relation_buttons[2]["neutral"].button_pressed, "pending relation is reflected without mutating simulation state")
 	viewport.free()
 
 	if failures.is_empty():
@@ -72,6 +81,8 @@ func _initialize() -> void:
 func collect_text(node: Node) -> String:
 	var result := ""
 	if node is Label:
+		result += node.text + "\n"
+	elif node is Button:
 		result += node.text + "\n"
 	for child in node.get_children():
 		result += collect_text(child)

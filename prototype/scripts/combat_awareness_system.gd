@@ -41,6 +41,7 @@ func collect_commands(world, tick: int) -> Array:
 			"assigned_attackers": assigned,
 			"visibility": func(team: int, entity: Dictionary): return world.is_entity_visible_to(team, entity),
 			"alliance": func(first_team: int, second_team: int): return world.are_teams_allied(first_team, second_team),
+			"hostility": func(observer: Dictionary, entity: Dictionary): return world.can_autonomously_target(observer, entity),
 			"reachability": func(observer: Dictionary, entity: Dictionary): return world.can_unit_reach_entity(observer, entity),
 		}
 		if bool(unit.get("attack_autonomous", false)):
@@ -111,6 +112,8 @@ func _target_remains_valid(world, unit: Dictionary, target: Variant) -> bool:
 	if target == null or float(target.get("hp", 0.0)) <= 0.0:
 		return false
 	if world.are_teams_allied(int(unit.get("team", 0)), int(target.get("team", 0))):
+		return false
+	if bool(unit.get("attack_autonomous", false)) and not world.can_autonomously_target(unit, target):
 		return false
 	if not world.is_entity_visible_to(int(unit.get("team", 0)), target):
 		return false

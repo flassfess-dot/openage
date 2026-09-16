@@ -72,6 +72,46 @@ static func normalize(source: Dictionary) -> Dictionary:
 	if human_teams.size() > 1:
 		errors.append("multiple_local_humans_unsupported")
 
+	var normalized_alliances: Array = []
+	for alliance_value in result.get("alliances", []):
+		if not alliance_value is Array or alliance_value.size() < 2:
+			errors.append("alliance_pair_invalid")
+			continue
+		var first_team := int(alliance_value[0])
+		var second_team := int(alliance_value[1])
+		if first_team == second_team or not teams.has(first_team) or not teams.has(second_team):
+			errors.append("alliance_player_invalid:%d:%d" % [first_team, second_team])
+			continue
+		normalized_alliances.append([first_team, second_team])
+	result["alliances"] = normalized_alliances
+
+	var normalized_diplomacy: Array = []
+	var diplomacy_pairs: Dictionary = {}
+	for relation_value in result.get("diplomacy", []):
+		if not relation_value is Dictionary:
+			errors.append("diplomacy_entry_invalid")
+			continue
+		var relation_entry: Dictionary = relation_value.duplicate(true)
+		var source_team := int(relation_entry.get("source_team", 0))
+		var target_team := int(relation_entry.get("target_team", 0))
+		var relation := String(relation_entry.get("relation", ""))
+		var pair_key := "%d:%d" % [source_team, target_team]
+		if source_team == target_team or not teams.has(source_team) or not teams.has(target_team):
+			errors.append("diplomacy_player_invalid:%s" % pair_key)
+			continue
+		if relation not in ["ally", "neutral", "enemy"]:
+			errors.append("diplomacy_relation_invalid:%s" % pair_key)
+			continue
+		if diplomacy_pairs.has(pair_key):
+			errors.append("diplomacy_pair_duplicate:%s" % pair_key)
+			continue
+		diplomacy_pairs[pair_key] = true
+		relation_entry["source_team"] = source_team
+		relation_entry["target_team"] = target_team
+		relation_entry["relation"] = relation
+		normalized_diplomacy.append(relation_entry)
+	result["diplomacy"] = normalized_diplomacy
+
 	for entity_value in result.get("entities", []):
 		var entity: Dictionary = entity_value
 		var category := String(entity.get("category", ""))

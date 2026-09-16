@@ -18,6 +18,7 @@ func _initialize() -> void:
 	test_legacy_replay_envelope_migration(catalog)
 	test_cancel_production_round_trip()
 	test_resign_round_trip()
+	test_diplomacy_round_trip()
 	test_transport_commands_round_trip()
 	test_trade_commands_round_trip()
 	test_mismatch_detection(catalog)
@@ -154,6 +155,21 @@ func test_resign_round_trip() -> void:
 	assert_equal(restored.command_type(), "resign", "resign command type round-trips")
 	assert_equal(restored.issuer_id, 2, "resign issuer round-trips")
 	assert_equal(restored.sequence_id, 8, "resign envelope round-trips")
+
+
+func test_diplomacy_round_trip() -> void:
+	var recorder := ReplaySystem.new()
+	recorder.begin(916)
+	var command = Commands.DiplomacyCommand.new(5, 3, "neutral")
+	command.assign_envelope(1, 13)
+	recorder.record_command(command)
+	var loaded := ReplaySystem.new()
+	assert_true(loaded.load_json(recorder.to_json()), "diplomacy replay loads")
+	var restored = loaded.commands_through_tick(5)[0]
+	assert_equal(restored.command_type(), "diplomacy", "diplomacy command type round-trips")
+	assert_equal(restored.target_team, 3, "diplomacy target team round-trips")
+	assert_equal(restored.relation, "neutral", "diplomacy relation round-trips")
+	assert_equal(restored.issuer_id, 1, "diplomacy issuer round-trips")
 
 
 func test_transport_commands_round_trip() -> void:

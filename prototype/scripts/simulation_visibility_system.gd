@@ -38,6 +38,11 @@ func set_alliance(first_team: int, second_team: int, allied: bool = true) -> voi
 	visibility_dirty = true
 
 
+func set_relation(observer_team: int, source_team: int, allied: bool = true) -> void:
+	fog.set_relation(observer_team, source_team, allied)
+	visibility_dirty = true
+
+
 func _source_signature(units: Array, buildings: Array) -> Array:
 	var result: Array = []
 	for entity_value in units + buildings:

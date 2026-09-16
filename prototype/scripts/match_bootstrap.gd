@@ -28,6 +28,13 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 		var alliance: Array = alliance_value
 		if alliance.size() >= 2:
 			world.set_alliance(int(alliance[0]), int(alliance[1]), true)
+	for relation_value in definition.get("diplomacy", []):
+		var relation: Dictionary = relation_value
+		world.set_diplomacy_relation(
+			int(relation.get("source_team", 0)),
+			int(relation.get("target_team", 0)),
+			String(relation.get("relation", "enemy"))
+		)
 	world.configure_scenario_definition(definition.get("scenario_definition", {}))
 	world.configure_victory_rules(definition.get("victory_rules", [{"type": "conquest"}]))
 

@@ -57,6 +57,36 @@ func _initialize() -> void:
 	assert_true(invalid_technology_contract.get("errors", []).has("player_disabled_technology_age_invalid:1"), "disabled age nodes accept only classic age technologies")
 	assert_true(invalid_technology_contract.get("errors", []).has("player_disabled_technology_building_invalid:1"), "disabled building nodes require a source object")
 
+	var directed_diplomacy := MatchDefinition.normalize({
+		"map": {"size": [24, 24]},
+		"players": [
+			{"team": 1, "controller": "human", "civilization_id": 13, "start": [2, 2]},
+			{"team": 2, "controller": "ai", "civilization_id": 1, "start": [20, 20]},
+			{"team": 3, "controller": "ai", "civilization_id": 4, "start": [12, 20]},
+		],
+		"alliances": [[1, 3]],
+		"diplomacy": [
+			{"source_team": 1, "target_team": 2, "relation": "neutral"},
+			{"source_team": 2, "target_team": 1, "relation": "enemy"},
+		],
+	})
+	assert_true(bool(directed_diplomacy.get("valid", false)), "directed diplomacy and legacy mutual alliances coexist")
+	assert_equal(directed_diplomacy.get("diplomacy", []).size(), 2, "both directed relation rows survive normalization")
+
+	var invalid_diplomacy := MatchDefinition.normalize({
+		"map": {"size": [24, 24]},
+		"players": [
+			{"team": 1, "controller": "human", "civilization_id": 13, "start": [2, 2]},
+			{"team": 2, "controller": "ai", "civilization_id": 1, "start": [20, 20]},
+		],
+		"diplomacy": [
+			{"source_team": 1, "target_team": 1, "relation": "ally"},
+			{"source_team": 1, "target_team": 2, "relation": "peace"},
+		],
+	})
+	assert_true(invalid_diplomacy.get("errors", []).has("diplomacy_player_invalid:1:1"), "self diplomacy is rejected")
+	assert_true(invalid_diplomacy.get("errors", []).has("diplomacy_relation_invalid:1:2"), "unknown diplomacy relation is rejected")
+
 	if failures.is_empty():
 		print("I11-001 match definition tests passed")
 		quit(0)

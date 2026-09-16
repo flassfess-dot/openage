@@ -9,6 +9,7 @@ func query(observer: Dictionary, candidates: Array, options: Dictionary = {}) ->
 	var query_range := maxf(0.0, float(options.get("range", observer.get("acquisition_range", 0.0))))
 	var visibility: Callable = options.get("visibility", Callable())
 	var alliance: Callable = options.get("alliance", Callable())
+	var hostility: Callable = options.get("hostility", Callable())
 	var reachability: Callable = options.get("reachability", Callable())
 	var target_filter: Callable = options.get("target_filter", Callable())
 	var assigned_attackers: Dictionary = options.get("assigned_attackers", {})
@@ -26,6 +27,8 @@ func query(observer: Dictionary, candidates: Array, options: Dictionary = {}) ->
 		if candidate_team <= 0 or candidate_team == observer_team:
 			continue
 		if alliance.is_valid() and bool(alliance.call(observer_team, candidate_team)):
+			continue
+		if hostility.is_valid() and not bool(hostility.call(observer, candidate)):
 			continue
 		if visibility.is_valid() and not bool(visibility.call(observer_team, candidate)):
 			continue

@@ -5,6 +5,10 @@ const ACTIVE := "active"
 const RESIGNED := "resigned"
 const DEFEATED := "defeated"
 const VICTORIOUS := "victorious"
+const ALLY := "ally"
+const NEUTRAL := "neutral"
+const ENEMY := "enemy"
+const VALID_RELATIONS := [ALLY, NEUTRAL, ENEMY]
 
 var players: Dictionary = {}
 var relations: Dictionary = {}
@@ -31,20 +35,20 @@ func configure(definitions: Array) -> void:
 			"civilization_id": int(definition.get("civilization_id", 13)),
 			"status": ACTIVE,
 		}
-		relations[team] = {team: "ally"}
+		relations[team] = {team: ALLY}
 
 
 func ensure(team: int, civilization_id: int = 13, controller: String = "unknown") -> void:
 	if team <= 0 or players.has(team):
 		return
 	players[team] = {"team": team, "controller": controller, "civilization_id": civilization_id, "status": ACTIVE}
-	relations[team] = {team: "ally"}
+	relations[team] = {team: ALLY}
 
 
 func reset_match() -> void:
 	reset_statuses()
 	for team in players:
-		relations[team] = {int(team): "ally"}
+		relations[team] = {int(team): ALLY}
 
 
 func reset_statuses() -> void:
@@ -62,13 +66,34 @@ func set_relation(first_team: int, second_team: int, relation: String) -> void:
 		return
 	ensure(first_team)
 	ensure(second_team)
-	var normalized := relation if relation in ["ally", "enemy", "neutral"] else "enemy"
+	var normalized := relation if relation in VALID_RELATIONS else ENEMY
+	if first_team == second_team:
+		normalized = ALLY
 	relations[first_team][second_team] = normalized
-	relations[second_team][first_team] = normalized
+
+
+func set_mutual_relation(first_team: int, second_team: int, relation: String) -> void:
+	set_relation(first_team, second_team, relation)
+	set_relation(second_team, first_team, relation)
+
+
+func relation(first_team: int, second_team: int) -> String:
+	if first_team <= 0 or second_team <= 0:
+		return ENEMY
+	if first_team == second_team:
+		return ALLY
+	return String(relations.get(first_team, {}).get(second_team, ENEMY))
+
+
+func relations_for(team: int) -> Dictionary:
+	var result: Dictionary = {}
+	for other_team in all_teams():
+		result[other_team] = relation(team, other_team)
+	return result
 
 
 func are_allied(first_team: int, second_team: int) -> bool:
-	return first_team > 0 and second_team > 0 and String(relations.get(first_team, {}).get(second_team, "enemy")) == "ally"
+	return relation(first_team, second_team) == ALLY
 
 
 func resign(team: int) -> bool:

@@ -71,3 +71,5 @@ RoR расширяется законченными вертикальными �
 2. На E5 закрыть настройки skirmish/дипломатии, data requirements случайных сухопутных/водных карт и полноценный AI-матч.
 3. На E6 выполнить профиль и оптимизацию 500 юнитов на игрока и карт ×4 с сохранением запаса для новых механик.
 4. После E6 возобновить scenarios/campaigns с `Reign of the Hittites` по сохранённой portfolio matrix.
+
+AoE1 Definitive Edition является отдельным `aoede-reference`, а не content wave. Byte-identical `Data/empires-orig.dat` разрешён как резерв оригинального DAT; DE `empires.dat`, AI/PER, UI и SLP `x1/x2/x4` служат evidence и не меняют roster/status автоматически. Любое будущее использование DE-ресурса требует своего source hash, cache namespace и явного opt-in; исходные файлы не коммитятся и не распространяются.

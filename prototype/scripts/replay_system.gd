@@ -191,6 +191,8 @@ func command_from_record(record: Dictionary):
 			command = Commands.HoldCommand.new(tick, ids)
 		"stop":
 			command = Commands.StopCommand.new(tick, ids)
+		"diplomacy":
+			command = Commands.DiplomacyCommand.new(tick, int(params.get("target_team", -1)), String(params.get("relation", "enemy")))
 		"resign":
 			command = Commands.ResignCommand.new(tick)
 	if command != null:

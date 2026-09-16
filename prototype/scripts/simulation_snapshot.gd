@@ -290,6 +290,7 @@ static func _presentation_player_state(world, observer_team: int) -> Dictionary:
 	return {
 		"team": observer_team,
 		"allies": world.get_allied_teams(observer_team),
+		"relations": world.get_team_relations(observer_team),
 		"status": world.player_registry.status(observer_team),
 		"players": world.player_registry.public_states(),
 		"food": int(world.get_resource_amount(observer_team, 0)),

@@ -206,10 +206,25 @@ func set_team_civilization(team: int, civilization_id: int) -> void:
 
 
 func set_alliance(first_team: int, second_team: int, allied: bool = true) -> void:
-	player_registry.set_relation(first_team, second_team, "ally" if allied else "enemy")
+	player_registry.set_mutual_relation(first_team, second_team, "ally" if allied else "enemy")
 	visibility_system.set_alliance(first_team, second_team, allied)
 	if not is_bulk_loading():
 		update_fog_of_war()
+
+
+func set_diplomacy_relation(source_team: int, target_team: int, relation: String) -> bool:
+	if source_team <= 0 or target_team <= 0 or source_team == target_team:
+		return false
+	if not player_registry.players.has(source_team) or not player_registry.players.has(target_team):
+		return false
+	if relation not in PlayerRegistry.VALID_RELATIONS:
+		return false
+	player_registry.set_relation(source_team, target_team, relation)
+	visibility_system.set_relation(source_team, target_team, relation == PlayerRegistry.ALLY)
+	if not is_bulk_loading():
+		update_fog_of_war()
+		_emit_domain_event("diplomacy_changed", {"source_team": source_team, "target_team": target_team, "relation": relation})
+	return true
 
 
 func configure_players(definitions: Array) -> void:
@@ -3852,8 +3867,30 @@ func are_teams_allied(first_team: int, second_team: int) -> bool:
 	return player_registry.are_allied(first_team, second_team)
 
 
+func team_relation(first_team: int, second_team: int) -> String:
+	return player_registry.relation(first_team, second_team)
+
+
 func get_allied_teams(team: int) -> Array[int]:
 	return player_registry.allied_teams(team)
+
+
+func get_team_relations(team: int) -> Dictionary:
+	return player_registry.relations_for(team)
+
+
+func can_autonomously_target(observer: Dictionary, candidate: Dictionary) -> bool:
+	var observer_team := int(observer.get("team", 0))
+	var candidate_team := int(candidate.get("team", 0))
+	var relation := team_relation(observer_team, candidate_team)
+	if relation == PlayerRegistry.ENEMY:
+		return true
+	if relation != PlayerRegistry.NEUTRAL:
+		return false
+	if entity_is_static(candidate):
+		return true
+	var tags: Array = candidate.get("behavior_tags", [])
+	return "military" in tags or ("combatant" in tags and "worker" not in tags)
 
 
 func resign_team(team: int) -> bool:

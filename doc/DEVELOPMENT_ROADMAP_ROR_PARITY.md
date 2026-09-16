@@ -25,7 +25,7 @@
 7. **E7 — scenarios/campaigns:** triggers, scenario AI и последовательная публикация оставшихся кампаний. Первым сохранённым кандидатом остаётся `Reign of the Hittites`.
 8. **E8 — final parity/release:** итоговые original side-by-side, полный suite/cache validation/export и release candidate.
 
-E1/E2 и E3 закрыты 2026-09-15 как стабильный `INTEGRATED` baseline. Gameplay core проходит непрерывный controlled skirmish, replay/save state matrix и полный boundary gate. Текущая активная работа — E4: полный data-driven охват цивилизаций, roster, технологий, бонусов, ограничений, graphics и audio. Кампанийный portfolio остаётся заморожен.
+E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. Текущая активная работа — E5: направленная дипломатия, настройки skirmish, случайные карты и полноценный AI-матч. Кампанийный portfolio остаётся заморожен до прохождения E6.
 
 ## 2. Статусы готовности
 
@@ -67,6 +67,8 @@ Godot-сцена отображает снимок и отправляет ко�
 - Импорт по умолчанию инкрементальный: новый запрос добавляет отсутствующие ресурсы и зависимости; byte-identical outputs не переписываются.
 - Изменение локального декодера инвалидирует только принадлежащие ему записи. Полная перепаковка разрешена при несовместимом cache schema, общем изменении SLP/palette/alpha либо явном clean-rebuild.
 - Обычный запуск и сборка с готовым manifest не конвертируют неизменившиеся ресурсы.
+- Источники имеют явный authority: RoR 1.1 определяет classic parity; AoE1 DE используется как отдельный secondary reference. Byte-identical `empires-orig.dat` может резервировать классический DAT, но DE balance/UI/AI не перезаписывают RoR без документированного решения.
+- AoE1 DE индексируется read-only по build и hashes. Его DAT diff, AI/PER, palettes/player colours и `x1/x2/x4` SLP получают отдельные отчёты и cache namespace; абсолютный путь и игровые ресурсы не входят в Git или распространяемый пакет.
 
 ### Контракты систем
 

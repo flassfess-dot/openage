@@ -221,6 +221,8 @@ func _dispatch_command(command) -> Dictionary:
 			rejection_reason = _apply_stance(command)
 		"stop", "hold":
 			rejection_reason = _apply_halt(command)
+		"diplomacy":
+			rejection_reason = _apply_diplomacy(command)
 		"resign":
 			rejection_reason = _apply_resign(command)
 	if rejection_reason.is_empty():
@@ -519,6 +521,20 @@ func _apply_resign(command) -> String:
 	if int(command.issuer_id) <= 0:
 		return "invalid_issuer"
 	return "" if simulation_world.resign_team(int(command.issuer_id)) else "player_not_active"
+
+
+func _apply_diplomacy(command) -> String:
+	var issuer := int(command.issuer_id)
+	if issuer <= 0:
+		return "invalid_issuer"
+	if int(command.target_team) == issuer:
+		return "diplomacy_self_target"
+	if not simulation_world.player_registry.players.has(int(command.target_team)):
+		return "diplomacy_player_missing"
+	if not RoRCommands.is_valid_diplomacy_relation(String(command.relation)):
+		return "diplomacy_relation_invalid"
+	return "" if simulation_world.set_diplomacy_relation(issuer, int(command.target_team), String(command.relation)) else "diplomacy_rejected"
+
 
 func _apply_stance(command) -> String:
 	var selected = _units_for_ids(command.unit_ids, command.issuer_id)

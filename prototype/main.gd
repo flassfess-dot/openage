@@ -181,6 +181,7 @@ func _ready() -> void:
 	hud_modal_overlay.load_requested.connect(_load_quick_game)
 	hud_modal_overlay.resign_requested.connect(_resign_from_hud_modal)
 	hud_modal_overlay.launcher_requested.connect(_return_to_launcher)
+	hud_modal_overlay.diplomacy_relation_requested.connect(_change_diplomacy_from_hud)
 	scenario_overlay = ScenarioOverlay.new()
 	add_child(scenario_overlay)
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
@@ -583,6 +584,14 @@ func handle_input_action(action: Dictionary) -> void:
 
 func _show_diplomacy_summary() -> void:
 	_open_hud_modal(HUDModalOverlay.MODE_DIPLOMACY)
+
+
+func _change_diplomacy_from_hud(target_team: int, relation: String) -> void:
+	if game_controller == null or not RoRCommands.is_valid_diplomacy_relation(relation):
+		return
+	var command = RoRCommands.DiplomacyCommand.new(game_controller.tick_index + 1, target_team, relation)
+	game_controller.enqueue_command(command, true, PLAYER_TEAM)
+	command_feedback_router.register(command, "Дипломатия изменена", "", null)
 
 
 func _toggle_game_menu() -> void:

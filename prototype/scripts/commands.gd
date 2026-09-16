@@ -1,6 +1,7 @@
 class_name RoRCommands
 
 const STANCE_ORDER := ["aggressive", "defensive", "stand_ground", "passive"]
+const DIPLOMACY_RELATIONS := ["ally", "neutral", "enemy"]
 
 
 static func is_valid_stance(value: String) -> bool:
@@ -10,6 +11,10 @@ static func is_valid_stance(value: String) -> bool:
 static func next_stance(current: String) -> String:
 	var index := STANCE_ORDER.find(current)
 	return STANCE_ORDER[(index + 1) % STANCE_ORDER.size()] if index >= 0 else STANCE_ORDER[0]
+
+
+static func is_valid_diplomacy_relation(value: String) -> bool:
+	return value in DIPLOMACY_RELATIONS
 
 class Command:
 	var tick: int
@@ -283,6 +288,19 @@ class StopCommand extends Command:
 
 	func command_type() -> String:
 		return "stop"
+
+
+class DiplomacyCommand extends Command:
+	var target_team: int
+	var relation: String
+
+	func _init(command_tick: int, requested_target_team: int, requested_relation: String) -> void:
+		super(command_tick, [], {"target_team": requested_target_team, "relation": requested_relation})
+		target_team = requested_target_team
+		relation = requested_relation
+
+	func command_type() -> String:
+		return "diplomacy"
 
 
 class ResignCommand extends Command:

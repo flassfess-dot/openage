@@ -1233,3 +1233,18 @@ ext_unit_id.
 - Пересчитаны обе кампанийные матрицы: Rise of Rome — 6/6 ready; весь установленный portfolio — 14 кампаний, 95 миссий, 18 launcher-ready и 77 explicit blocked. Аудиторы и cache validator принимают явный Python runtime, не завися от Windows App Execution Alias.
 - Полный gate: `A-006 suite: 197 passed, 0 failed`; validation `0 errors / 181 warnings`; Windows PCK `255789072` байта, SHA-256 `666372d82d8284ab8101bd5b2c42c72e38f12773a6e216bc1bf0f5c5d18b8f06`; packaged `prototype_skirmish` smoke — процесс стабилен 15 секунд, script/runtime errors отсутствуют.
 - E4 закрыт как `INTEGRATED`. Активная очередь — E5: skirmish settings/diplomacy, random-map data requirements и полноценный AI-матч; E6 сохраняет нагрузочные цели 500 юнитов на игрока и карты ×4, E7 — размороженные кампании.
+
+### Прогресс (2026-09-16, E5-000 — подключение AoE1 DE как secondary reference)
+
+- Проинвентаризирована локальная Steam-копия build `97381` без изменения её файлов. Обнаружены три DAT, 146 читаемых AI build plans, 23 PER-профиля, 10 кампаний, 25 multiplayer scenarios, 3039 SLP с вариантами `x1/x2/x4`, отдельные UI/palettes/player colours/sounds/localization.
+- `Data/empires-orig.dat` имеет SHA-256 `d47c59d9ecaf5b83b467c647a69d28eced6a0dc5b2fa873e930c86136df5eb9d` и byte-identical закреплённому RoR 1.1 DAT. DE `empires.dat` и `empires_classic.dat` остаются comparative evidence, не новым authority.
+- Введён плановый профиль `aoede-reference`: read-only inventory, versioned hashes, отдельный cache namespace, отсутствие абсолютного пути/исходных Microsoft assets в Git. E5 использует AI/PER и diplomacy/skirmish observations; E6 — scale/render evidence; E7 — scenario packages.
+
+### Прогресс (2026-09-16, E5-001 — направленная дипломатия)
+
+- `PlayerRegistry` хранит независимое отношение каждого игрока к каждому: `ally`, `neutral`, `enemy`. Legacy `alliances` остаются взаимными, а match definition дополнительно принимает валидируемые направленные записи `diplomacy`.
+- Новый `DiplomacyCommand` проходит общий command/result/event/replay/canonical pipeline. Presentation snapshot выдаёт полную строку отношений наблюдателя; directed ally vision не меняет обратную сторону.
+- Neutral semantics отделена от enemy: автономный бой может реагировать на нейтральные войска и здания, но не захватывает рабочих; явная атака остаётся допустимой. Strategic AI не выбирает нейтрала целью войны. Союзная цель защищена авторитетной проверкой.
+- Окно дипломатии показывает для каждого активного иностранного игрока source-styled действия `СОЮЗ / НЕЙТР. / ВРАГ`; выбор создаёт команду, а UI хранит только pending presentation до следующего fixed tick.
+- Impact-gate: player registry, match definition/bootstrap, commands/replay, fog/snapshot, AI, combat awareness, HUD modal/main scene и новый end-to-end diplomacy pipeline — 12 проверок пройдены. Полный suite/cache/export остаётся на границе E5; ресурсы не импортировались.
+- Следующий пакет E5-002: декларативная схема настроек skirmish и launcher contract (civilization/controller/team/colour, resources, age, population, map size/type/seed и victory), затем random-map data requirements.
