@@ -24,6 +24,14 @@ func _initialize() -> void:
 	assert_equal(definition.get("entities", []).size(), 8, "each player starts with a town center and three villagers")
 	assert_equal(int(definition.get("players", [])[0].get("starting_age_technology_id", -1)), 100, "Stone Age is represented by the authoritative age technology")
 	assert_equal(int(definition.get("players", [])[0].get("population_limit", -1)), 50, "population limit reaches the match definition")
+	var human_ai: Dictionary = definition.get("players", [])[0].get("ai", {})
+	var opponent_ai: Dictionary = definition.get("players", [])[1].get("ai", {})
+	assert_true(not bool(human_ai.get("enabled", true)), "the local human retains the shared policy data without activating AI")
+	assert_true(bool(opponent_ai.get("enabled", false)), "the AI player is enabled through the generated definition")
+	assert_equal(String(opponent_ai.get("profile", "")), "skirmish_policy_v1", "generated skirmish selects the versioned AI policy")
+	assert_equal(String(opponent_ai.get("difficulty_id", "")), "standard", "default AI difficulty reaches every generated player")
+	assert_equal(int(opponent_ai.get("initial_attack_delay_ticks", 0)), 40, "generated player receives the policy attack delay")
+	assert_equal(int(opponent_ai.get("minimum_attack_group_size", 0)), 3, "generated player receives the policy group threshold")
 	assert_true(String(first.get("identity", "")).begins_with("generated://skirmish/"), "generated matches have a stable non-file identity")
 	assert_true(bool(first.get("map_quality", {}).get("valid", false)), "default map passes generation guarantees before launch")
 
@@ -37,6 +45,7 @@ func _initialize() -> void:
 	large_settings["map_type_id"] = "coastal"
 	large_settings["resource_preset_id"] = "high"
 	large_settings["starting_age_id"] = "bronze"
+	large_settings["ai_difficulty_id"] = "hard"
 	large_settings["population_limit"] = 500
 	large_settings["victory_mode_id"] = "score_60"
 	for index in range(8):
@@ -50,6 +59,7 @@ func _initialize() -> void:
 	assert_equal(int(large_definition.get("players", [])[7].get("color_index", -1)), 8, "player colour is independent explicit data")
 	assert_equal(int(large_definition.get("players", [])[0].get("starting_resources", {}).get("gold", -1)), 500, "resource preset reaches every player")
 	assert_equal(int(large_definition.get("players", [])[0].get("starting_age_technology_id", -1)), 102, "starting age reaches every player")
+	assert_equal(int(large_definition.get("players", [])[7].get("ai", {}).get("military_interval_ticks", 0)), 10, "selected hard AI cadence reaches generated opponents")
 	assert_equal(String(large_definition.get("victory_rules", [])[0].get("type", "")), "score", "victory selection reaches the runtime rule")
 
 	var invalid := defaults.duplicate(true)

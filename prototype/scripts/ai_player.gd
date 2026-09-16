@@ -17,6 +17,11 @@ var military_interval: int
 var formation_name: String
 var profile: String
 var source_contract: Dictionary
+var initial_attack_delay: int
+var attack_separation: int
+var minimum_attack_group_size: int
+var maximum_attack_group_size: int
+var enemy_response_distance: float
 var last_economic_tick: int = -1
 var last_military_tick: int = -1
 var last_attack_tick: int = -1
@@ -37,6 +42,11 @@ func _init(player_definition: Dictionary) -> void:
 	military_interval = maxi(1, int(settings.get("military_interval_ticks", 40)))
 	formation_name = String(settings.get("formation", "RECTANGLE"))
 	profile = String(settings.get("profile", "skirmish"))
+	initial_attack_delay = maxi(0, int(settings.get("initial_attack_delay_ticks", 0)))
+	attack_separation = maxi(0, int(settings.get("attack_separation_ticks", 0)))
+	minimum_attack_group_size = maxi(1, int(settings.get("minimum_attack_group_size", 1)))
+	maximum_attack_group_size = maxi(minimum_attack_group_size, int(settings.get("maximum_attack_group_size", 9999)))
+	enemy_response_distance = maxf(0.0, float(settings.get("enemy_response_distance", 0.0)))
 	source_contract = player_definition.get("source_ai", {}).duplicate(true)
 	source_city_plan = SourceCityPlan.new(team)
 
@@ -116,10 +126,30 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 	if last_military_tick < 0 or next_tick - last_military_tick >= military_interval:
 		var goal := StrategicPlanner.choose_goal(snapshot, team, decision_index)
 		decision_index += 1
-		result.append_array(TacticalPlanner.plan(snapshot, next_tick, team, goal, formation_name))
-		result.append_array(TransportPlanner.plan(snapshot, next_tick, team, goal, formation_name))
+		var attack_allowed := true
+		if profile == "skirmish_policy_v1" and String(goal.get("type", "")) == "attack":
+			var responding := _target_threatens_owned_position(snapshot, Vector2(goal.get("position", Vector2.ZERO)))
+			attack_allowed = responding or (next_tick >= initial_attack_delay and (last_attack_tick < 0 or next_tick - last_attack_tick >= attack_separation))
+		var tactical_commands: Array = []
+		if attack_allowed:
+			tactical_commands = TacticalPlanner.plan(snapshot, next_tick, team, goal, formation_name, minimum_attack_group_size, maximum_attack_group_size)
+			result.append_array(tactical_commands)
+			result.append_array(TransportPlanner.plan(snapshot, next_tick, team, goal, formation_name))
+		if String(goal.get("type", "")) == "attack" and not tactical_commands.is_empty():
+			last_attack_tick = next_tick
 		last_military_tick = next_tick
 	return result
+
+
+func _target_threatens_owned_position(snapshot: Dictionary, target_position: Vector2) -> bool:
+	if enemy_response_distance <= 0.0:
+		return false
+	for category in ["buildings", "units"]:
+		for entity_value in snapshot.get(category, []):
+			var entity: Dictionary = entity_value
+			if int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0 and Vector2(entity.get("pos", Vector2.ZERO)).distance_to(target_position) <= enemy_response_distance:
+				return true
+	return false
 
 
 func presentation_options() -> Dictionary:

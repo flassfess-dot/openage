@@ -25,7 +25,7 @@
 7. **E7 — scenarios/campaigns:** triggers, scenario AI и последовательная публикация оставшихся кампаний. Первым сохранённым кандидатом остаётся `Reign of the Hittites`.
 8. **E8 — final parity/release:** итоговые original side-by-side, полный suite/cache validation/export и release candidate.
 
-E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. Текущая активная работа — E5: направленная дипломатия, настройки skirmish, случайные карты и полноценный AI-матч. Кампанийный portfolio остаётся заморожен до прохождения E6.
+E1–E4 закрыты как стабильный `INTEGRATED` baseline. Все 16 цивилизаций и 41 общая roster-линия прошли единый вертикальный контракт. E5-001…E5-005 закрыли дипломатию, generated skirmish, четыре профиля случайных карт, DE evidence ledger и собственную difficulty-aware AI policy. Текущая активная работа — многосторонняя acceptance-матрица E5-006. Кампанийный portfolio остаётся заморожен до прохождения E6.
 
 ## 2. Статусы готовности
 
@@ -687,3 +687,12 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Три повреждённые исходные строки не нормализованы догадкой: два неизвестных `UU` opcode и одна malformed числовая колонка сохранены hashed anomalies. Все source files имеют индивидуальные SHA-256.
 - Structural evidence test подтверждает build/hash/counts, переносимость путей, роль `secondary_evidence_no_runtime_authority` и контрольные DEFAULT values для initial attack delay, attack/naval group count.
 - Следующий пакет E5-005 создаёт собственные profiles/difficulty/policy adapters, использующие только явно выбранные evidence-backed параметры через существующие fog-safe snapshot и command pipeline.
+
+### E5-005 — собственная политика AI и сложности (2026-09-16)
+
+- `skirmish_policies.json` является компактным engine-owned контрактом. Он хранит runtime-поля отдельно от secondary evidence: относительный путь и SHA-256 `RANDOM MAP.PER`, шесть явно выбранных source IDs и прозрачное преобразование секунд в fixed ticks.
+- `easy/standard/hard` меняют частоту экономики и тактики, начальную задержку, интервал между атаками, границы размера отряда и радиус оборонной реакции. Launcher получает список сложностей из самого policy catalog, поэтому UI не дублирует его как второй источник истины.
+- Generated match передаёт policy каждому игроку; у человека она выключена, у AI включена. Runtime читает только уже разрешённый policy contract, не локальную Steam-папку и не полный DE ledger.
+- Тактический слой детерминированно сортирует бойцов, не отправляет недоукомплектованные группы, ограничивает крупные группы и допускает ранний ответ на видимую угрозу своим объектам. Все решения по-прежнему проходят fog-safe snapshot и обычные replayable команды.
+- Impact-gate прошёл для policy/evidence, builder, launcher, AI player, command pipeline, generated main и прежнего AI-vs-AI smoke. Полный suite/cache/export остаётся на границе E5; ресурсы не импортировались.
+- Следующий пакет E5-006: generated acceptance-матрица 2/4/8 игроков на наземных и водных профилях. Она должна доказать самостоятельную экономику, развитие, сухопутные/морские столкновения, дипломатию, victory и детерминированный итог либо выявить первый конкретный разрыв AI.

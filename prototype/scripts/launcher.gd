@@ -199,6 +199,7 @@ func _build_skirmish_settings_panel() -> Control:
 	setting_controls["map_type_id"] = _add_catalog_option(general, "Тип карты", skirmish_catalog.get("map_types", []), "grasslands")
 	setting_controls["resource_preset_id"] = _add_catalog_option(general, "Ресурсы", skirmish_catalog.get("resource_presets", []), "standard")
 	setting_controls["starting_age_id"] = _add_catalog_option(general, "Начальная эпоха", skirmish_catalog.get("starting_ages", []), "stone")
+	setting_controls["ai_difficulty_id"] = _add_catalog_option(general, "Сложность AI", skirmish_catalog.get("ai_difficulties", []), "standard")
 	setting_controls["victory_mode_id"] = _add_catalog_option(general, "Победа", skirmish_catalog.get("victory_modes", []), "conquest")
 	setting_controls["population_limit"] = _add_value_option(general, "Лимит населения", skirmish_catalog.get("population_limits", []), 50)
 	var seed_label := Label.new()
@@ -321,7 +322,7 @@ func _on_player_count_changed(value: float) -> void:
 
 func _settings_from_controls() -> Dictionary:
 	var result := SkirmishSettings.default_settings()
-	for key in ["map_size_id", "map_type_id", "resource_preset_id", "starting_age_id", "victory_mode_id", "population_limit"]:
+	for key in ["map_size_id", "map_type_id", "resource_preset_id", "starting_age_id", "ai_difficulty_id", "victory_mode_id", "population_limit"]:
 		var option: OptionButton = setting_controls[key]
 		result[key] = option.get_item_metadata(option.selected)
 	result["seed"] = roundi(float(setting_controls["seed"].value))

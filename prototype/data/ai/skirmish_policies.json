@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "status": "engine_owned_policy_with_secondary_evidence",
+  "ticks_per_second": 20,
+  "profiles": [
+    {
+      "id": "random_map_balanced",
+      "name": "Сбалансированный",
+      "source_evidence": {
+        "source_role": "secondary_evidence_no_runtime_authority",
+        "relative_path": "CP_AI/PER/RANDOM MAP.PER",
+        "sha256": "f8de47add86018854ce423f39cad1450d5ddd07aba8d34431b48d783733d225d",
+        "selected_parameters": [
+          {"source_id": 16, "source_value": 3, "runtime_field": "minimum_attack_group_size", "conversion": "identity"},
+          {"source_id": 26, "source_value": 20, "runtime_field": "maximum_attack_group_size", "conversion": "identity"},
+          {"source_id": 46, "source_value": 8, "runtime_field": "attack_separation_ticks", "conversion": "seconds_to_ticks"},
+          {"source_id": 88, "source_value": 1, "runtime_field": "military_interval_ticks", "conversion": "seconds_to_ticks"},
+          {"source_id": 104, "source_value": 2, "runtime_field": "initial_attack_delay_ticks", "conversion": "seconds_to_ticks"},
+          {"source_id": 20, "source_value": 22, "runtime_field": "enemy_response_distance", "conversion": "identity"}
+        ]
+      },
+      "runtime": {
+        "economic_interval_ticks": 20,
+        "military_interval_ticks": 20,
+        "initial_attack_delay_ticks": 40,
+        "attack_separation_ticks": 160,
+        "minimum_attack_group_size": 3,
+        "maximum_attack_group_size": 20,
+        "enemy_response_distance": 22.0,
+        "formation": "RECTANGLE"
+      }
+    }
+  ],
+  "difficulties": [
+    {
+      "id": "easy",
+      "name": "Лёгкая",
+      "overrides": {
+        "economic_interval_ticks": 30,
+        "military_interval_ticks": 40,
+        "initial_attack_delay_ticks": 120,
+        "attack_separation_ticks": 240,
+        "minimum_attack_group_size": 3,
+        "maximum_attack_group_size": 12,
+        "enemy_response_distance": 18.0
+      }
+    },
+    {"id": "standard", "name": "Стандартная", "overrides": {}},
+    {
+      "id": "hard",
+      "name": "Сложная",
+      "overrides": {
+        "economic_interval_ticks": 10,
+        "military_interval_ticks": 10,
+        "initial_attack_delay_ticks": 20,
+        "attack_separation_ticks": 80,
+        "minimum_attack_group_size": 4,
+        "maximum_attack_group_size": 24,
+        "enemy_response_distance": 26.0
+      }
+    }
+  ]
+}

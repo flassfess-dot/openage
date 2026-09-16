@@ -1274,3 +1274,11 @@ ext_unit_id.
 - Три source-owned anomalies не скрыты и не «исправлены»: два `UU` opcode и одна malformed numeric value представлены только причиной, line number и SHA-256 строки.
 - `--check` повторно строит ledger и подтвердил byte-identical output. Godot structural test проверяет portable paths, source role, pinned DAT/EXE hashes, counts и контрольные DEFAULT attack/naval параметры.
 - DE остаётся secondary evidence; runtime не читает ledger напрямую. Следующий пакет E5-005 — versioned skirmish AI policy contract, difficulty и явное parameter selection с fog-safe command acceptance.
+
+### Прогресс (2026-09-16, E5-005 — engine-owned skirmish AI policy)
+
+- Добавлен `skirmish_policies.json` версии 1. Он не копирует build order и не читает Steam-папку: выбранные ID 16/20/26/46/88/104 привязаны к относительному пути и SHA-256 `RANDOM MAP.PER`, а runtime-поля принадлежат нашему движку.
+- Launcher получил единственный общий выбор `Лёгкая / Стандартная / Сложная`. Список и overrides принадлежат policy catalog; generated match сохраняет resolved policy для каждого игрока и включает AI только для соответствующих controller slots.
+- `RoRAiPlayer` исполняет initial attack delay, attack separation и defensive response. Tactical planner сортирует ID, ждёт minimum group и обрезает maximum group, не меняя legacy/source-campaign profiles и не обходя public command/replay pipeline.
+- Проверки policy-to-ledger, settings, launcher, AI behavior, command pipeline, generated main и прежний AI-vs-AI smoke проходят. Известные host-only ошибки `user://logs`/Windows certificate store неизменны. Полный suite/cache/export отложен до границы E5; импорт ресурсов не выполнялся.
+- Следующий пакет E5-006 — воспроизводимая generated-матрица 2/4/8 игроков на inland/highlands/coastal/islands: экономика и эпохи, наземная/морская война, diplomacy/victory, deterministic replay outcome и фиксация первого реального strategic gap.

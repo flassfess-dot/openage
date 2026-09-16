@@ -4,7 +4,7 @@ extends RefCounted
 const Commands := preload("res://scripts/commands.gd")
 
 
-static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, formation_name: String = "RECTANGLE") -> Array:
+static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, formation_name: String = "RECTANGLE", minimum_group_size: int = 1, maximum_group_size: int = 9999) -> Array:
 	if int(snapshot.get("observer_team", -1)) != team:
 		return []
 	var fighters: Array = snapshot.get("units", []).filter(func(entity):
@@ -25,6 +25,11 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 	for domain_value in domains:
 		var domain := String(domain_value)
 		var group: Array = groups[domain]
+		group.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+		if String(goal.get("type", "wait")) == "attack" and group.size() < maxi(1, minimum_group_size):
+			continue
+		if group.size() > maxi(1, maximum_group_size):
+			group = group.slice(0, maxi(1, maximum_group_size))
 		var ids: Array[int] = []
 		var center := Vector2.ZERO
 		for fighter in group:

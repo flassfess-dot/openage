@@ -7,6 +7,7 @@ const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 const RandomMapContract := preload("res://scripts/random_map_contract.gd")
 const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
 const RandomMapQuality := preload("res://scripts/random_map_quality.gd")
+const SkirmishAiPolicy := preload("res://scripts/skirmish_ai_policy.gd")
 
 
 static func catalog() -> Dictionary:
@@ -16,6 +17,7 @@ static func catalog() -> Dictionary:
 	if not parsed is Dictionary:
 		return {"valid": false, "errors": ["skirmish_catalog_invalid"]}
 	var result: Dictionary = parsed
+	result["ai_difficulties"] = SkirmishAiPolicy.difficulty_entries()
 	result["valid"] = int(result.get("schema_version", 0)) == 1
 	result["errors"] = [] if bool(result["valid"]) else ["skirmish_catalog_schema_unsupported"]
 	return result
@@ -40,6 +42,7 @@ static func default_settings() -> Dictionary:
 		"resource_preset_id": "standard",
 		"starting_age_id": "stone",
 		"population_limit": 50,
+		"ai_difficulty_id": "standard",
 		"victory_mode_id": "conquest",
 		"players": slots,
 	}
@@ -61,6 +64,7 @@ static func normalize(source: Dictionary) -> Dictionary:
 	_validate_catalog_reference(settings, source_catalog, "map_type_id", "map_types", errors)
 	_validate_catalog_reference(settings, source_catalog, "resource_preset_id", "resource_presets", errors)
 	_validate_catalog_reference(settings, source_catalog, "starting_age_id", "starting_ages", errors)
+	_validate_catalog_reference(settings, source_catalog, "ai_difficulty_id", "ai_difficulties", errors)
 	_validate_catalog_reference(settings, source_catalog, "victory_mode_id", "victory_modes", errors)
 	if not _array_has_int(source_catalog.get("population_limits", []), int(settings.get("population_limit", 0))):
 		errors.append("skirmish_population_limit_invalid")
@@ -134,6 +138,9 @@ static func build(source: Dictionary) -> Dictionary:
 	var resource_entry := _entry(source_catalog.get("resource_presets", []), String(settings["resource_preset_id"]))
 	var age_entry := _entry(source_catalog.get("starting_ages", []), String(settings["starting_age_id"]))
 	var victory_entry := _entry(source_catalog.get("victory_modes", []), String(settings["victory_mode_id"]))
+	var ai_policy := SkirmishAiPolicy.resolve("random_map_balanced", String(settings["ai_difficulty_id"]))
+	if not bool(ai_policy.get("valid", false)):
+		return {"valid": false, "errors": ai_policy.get("errors", []), "settings": settings}
 	var size_values: Array = size_entry.get("size", [72, 72])
 	var size := Vector2i(int(size_values[0]), int(size_values[1]))
 	var starts := _start_positions(settings["players"].size(), size, String(settings["map_type_id"]))
@@ -155,7 +162,7 @@ static func build(source: Dictionary) -> Dictionary:
 			"starting_resources": resource_entry.get("resources", {}).duplicate(true),
 			"starting_age_technology_id": int(age_entry.get("technology_id", 100)),
 			"starting_technology_mode": "age_start",
-			"ai": {"enabled": String(slot["controller"]) == "ai", "economic_interval_ticks": 20, "military_interval_ticks": 40, "formation": "RECTANGLE"},
+			"ai": _player_ai_settings(ai_policy, String(slot["controller"]) == "ai"),
 		})
 		entities.append({"category": "building", "team": team, "kind": "town_center", "position": start})
 		for offset in [Vector2(-1.1, 1.4), Vector2(0.0, 1.7), Vector2(1.1, 1.4)]:
@@ -241,3 +248,11 @@ static func _victory_rules(entry: Dictionary) -> Array:
 	if String(entry.get("id", "conquest")) == "score_60":
 		return [{"type": "score", "score_limit": 0, "time_limit_seconds": int(entry.get("time_limit_seconds", 3600))}]
 	return [{"type": "conquest"}]
+
+
+static func _player_ai_settings(policy: Dictionary, enabled: bool) -> Dictionary:
+	var result := policy.duplicate(true)
+	result.erase("valid")
+	result.erase("errors")
+	result["enabled"] = enabled
+	return result

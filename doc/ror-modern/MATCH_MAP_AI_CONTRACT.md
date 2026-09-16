@@ -37,6 +37,10 @@ An `RoRAiPlayer` never owns or reads `SimulationWorld`. It receives only `Simula
 
 AI commands use the normal controller queue, issuer/ownership checks, results, events and replay recording. Cadences prevent duplicate decisions when several render frames precede one fixed tick. A terminal AI produces no further commands.
 
+E5-005 adds a separate engine-owned `skirmish_policy_v1` contract. The launcher selects `easy`, `standard` or `hard`; the generated match records the resolved cadence, initial attack delay, attack separation, minimum/maximum group size and defensive response distance. The policy contains a pinned relative path/hash and six explicitly selected values from the AoE DE build 97381 evidence ledger, but neither the DE installation nor the full ledger is read by the match runtime. DE remains secondary evidence, not executable authority.
+
+The tactical planner sorts eligible fighters by stable entity ID, waits for the minimum force, caps the issued group and sends only public attack commands. The opening delay and regroup interval can be bypassed only when a visible enemy lies within the configured response distance of a living owned unit or building. This extension applies only to generated skirmish AI; legacy and source-campaign profiles retain their existing behavior.
+
 ## Match controls
 
 Space pauses; comma/period change the fixed-tick speed; R restarts the same definition and seed; Shift+R submits resign; Escape closes the application. These inputs are presentation intents only and do not mutate simulation objects directly.
@@ -45,6 +49,7 @@ Space pauses; comma/period change the fixed-tick speed; R restarts the same defi
 
 - `test_match_definition.gd`, `test_random_map_generator.gd`, `test_random_map_profiles.gd`, `test_match_bootstrap.gd`.
 - `test_ai_player.gd`, `test_ai_command_pipeline.gd`.
+- `test_skirmish_ai_policy.gd`, `test_skirmish_settings.gd`, `test_launcher_scene.gd` and `test_generated_skirmish_main_scene.gd` cover evidence pinning, difficulty resolution and generated-match propagation.
 - `test_player_registry.gd`, `test_resign_pipeline.gd` and replay round-trip coverage.
 - `test_ai_vs_ai_match.gd`: both sides receive their legal snapshots, issue accepted public commands and finish a deterministic unscripted conquest match.
 - Full suite at integration: `108 passed, 0 failed`.

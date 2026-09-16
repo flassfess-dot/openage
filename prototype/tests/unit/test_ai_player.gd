@@ -99,6 +99,7 @@ func _initialize() -> void:
 
 	test_fleet_production_and_trade_routes()
 	test_transport_planner_phases()
+	test_skirmish_policy_attack_control()
 
 	if failures.is_empty():
 		print("I11-004 legal-knowledge AI player tests passed")
@@ -182,6 +183,57 @@ func test_transport_planner_phases() -> void:
 	commands = TransportPlanner.plan(landing, 7, 2, goal, "LINE")
 	assert_equal(commands[0].command_type(), "unload", "transport unloads only after reaching the target coast")
 	assert_equal(commands[0].target, Vector2(10.5, 10.5), "landing target stays on known land")
+
+
+func test_skirmish_policy_attack_control() -> void:
+	var policy := {
+		"enabled": true,
+		"profile": "skirmish_policy_v1",
+		"economic_interval_ticks": 1,
+		"military_interval_ticks": 1,
+		"initial_attack_delay_ticks": 10,
+		"attack_separation_ticks": 8,
+		"minimum_attack_group_size": 3,
+		"maximum_attack_group_size": 3,
+		"enemy_response_distance": 2.0,
+	}
+	var distant := snapshot_base()
+	distant["units"] = [
+		fighter(20, 2, Vector2(4, 4)),
+		fighter(21, 2, Vector2(4, 5)),
+		fighter(22, 2, Vector2(5, 4)),
+		fighter(10, 1, Vector2(20, 20)),
+	]
+	var delayed_player = AiPlayer.new({"team": 2, "ai": policy})
+	assert_equal(delayed_player.collect_commands(distant, 1).size(), 0, "skirmish AI respects its initial attack delay")
+	var released: Array = delayed_player.collect_commands(distant, 10)
+	assert_equal(released.size(), 1, "skirmish AI attacks after its initial delay")
+	assert_equal(released[0].unit_ids, [20, 21, 22], "eligible attack group is deterministic")
+	assert_equal(delayed_player.collect_commands(distant, 11).size(), 0, "skirmish AI respects separation between attack orders")
+
+	var understrength := distant.duplicate(true)
+	understrength["units"] = [fighter(20, 2, Vector2(4, 4)), fighter(21, 2, Vector2(4, 5)), fighter(10, 1, Vector2(20, 20))]
+	var immediate_policy := policy.duplicate(true)
+	immediate_policy["initial_attack_delay_ticks"] = 0
+	var understrength_player = AiPlayer.new({"team": 2, "ai": immediate_policy})
+	assert_equal(understrength_player.collect_commands(understrength, 1).size(), 0, "undersized groups wait instead of trickling into combat")
+
+	var capped := distant.duplicate(true)
+	capped["units"].insert(3, fighter(23, 2, Vector2(5, 5)))
+	var capped_policy := immediate_policy.duplicate(true)
+	capped_policy["minimum_attack_group_size"] = 1
+	capped_policy["maximum_attack_group_size"] = 2
+	var capped_commands: Array = AiPlayer.new({"team": 2, "ai": capped_policy}).collect_commands(capped, 1)
+	assert_equal(capped_commands[0].unit_ids, [20, 21], "oversized groups are capped by stable unit ID")
+
+	var threatened := snapshot_base()
+	threatened["units"] = [fighter(20, 2, Vector2(4, 4)), fighter(10, 1, Vector2(5, 4))]
+	var response_policy := policy.duplicate(true)
+	response_policy["minimum_attack_group_size"] = 1
+	response_policy["enemy_response_distance"] = 3.0
+	var response_commands: Array = AiPlayer.new({"team": 2, "ai": response_policy}).collect_commands(threatened, 1)
+	assert_equal(response_commands.size(), 1, "nearby enemy bypasses the opening delay for defense")
+	assert_equal(response_commands[0].command_type(), "attack", "defensive response uses the ordinary authoritative attack command")
 
 
 func train_option(kind: String, tags: Array) -> Dictionary:

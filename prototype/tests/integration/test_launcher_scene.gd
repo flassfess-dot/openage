@@ -54,8 +54,10 @@ func _initialize() -> void:
 	launcher._refresh_selection(10)
 	assert_true(launcher.settings_panel.visible, "custom skirmish exposes declarative settings")
 	assert_equal(launcher.player_controls.size(), 8, "all eight player slots are configurable")
+	assert_true(launcher.setting_controls.has("ai_difficulty_id"), "custom skirmish exposes the policy-owned AI difficulty selector")
 	var generated = SkirmishSettings.build(launcher._settings_from_controls())
 	assert_true(bool(generated.get("valid", false)), "launcher defaults produce a valid generated match")
+	assert_equal(String(generated.get("definition", {}).get("players", [])[1].get("ai", {}).get("difficulty_id", "")), "standard", "launcher difficulty reaches the generated AI player")
 	launcher.free()
 	_finish("E5-002 launcher scene tests passed")
 
