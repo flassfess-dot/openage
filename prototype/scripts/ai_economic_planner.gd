@@ -4,20 +4,66 @@ extends RefCounted
 const Commands := preload("res://scripts/commands.gd")
 
 
-static func plan(snapshot: Dictionary, tick: int, team: int) -> Array:
+static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary = {}) -> Array:
 	if int(snapshot.get("observer_team", -1)) != team:
 		return []
 	var commands: Array = []
 	var own_units: Array = snapshot.get("units", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
 	var idle_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("task", "idle")) == "idle")
-	var own_buildings: Array = snapshot.get("buildings", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0 and String(entity.get("state", "complete")) == "complete")
+	var own_structures: Array = snapshot.get("buildings", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
+	var own_buildings: Array = own_structures.filter(func(entity): return String(entity.get("state", "complete")) == "complete")
+	var land_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("movement_domain", "land")) == "land")
+	var land_worker_count := land_workers.size()
+	var age_intent := _age_advance_intent(own_buildings, snapshot.get("player_state", {}), policy, land_worker_count, tick)
+	var suppress_production := bool(age_intent.get("saving", false)) or age_intent.has("command")
+	var suppress_construction := bool(age_intent.get("block_construction", false)) or age_intent.has("command")
+	if age_intent.has("command"):
+		commands.append(age_intent["command"])
 	commands.append_array(_plan_idle_trade(snapshot, tick, team, own_units, own_buildings))
 	var committed_workers: Dictionary = {}
+	var active_foundations: Array = own_structures.filter(func(entity): return String(entity.get("state", "complete")) == "foundation")
+	active_foundations.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	var foundation_has_assigned_worker := false
+	if not active_foundations.is_empty():
+		var active_foundation_id := int(active_foundations[0].get("id", -1))
+		foundation_has_assigned_worker = own_units.any(func(unit): return String(unit.get("task", "")) == "build" and int(unit.get("target_building_id", -1)) == active_foundation_id)
+	if not active_foundations.is_empty() and not land_workers.is_empty() and int(active_foundations[0].get("builder_count", 0)) == 0 and not foundation_has_assigned_worker:
+		var foundation: Dictionary = active_foundations[0]
+		var builder_candidates: Array = land_workers.duplicate()
+		builder_candidates.sort_custom(func(left, right):
+			var left_stuck := 1 if String(left.get("diagnostic_reason", "")).begins_with("stuck_") else 0
+			var right_stuck := 1 if String(right.get("diagnostic_reason", "")).begins_with("stuck_") else 0
+			if left_stuck != right_stuck:
+				return left_stuck < right_stuck
+			var left_idle := 0 if String(left.get("task", "idle")) == "idle" else 1
+			var right_idle := 0 if String(right.get("task", "idle")) == "idle" else 1
+			if left_idle != right_idle:
+				return left_idle < right_idle
+			var left_distance := Vector2(left.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(foundation.get("pos", Vector2.ZERO)))
+			var right_distance := Vector2(right.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(foundation.get("pos", Vector2.ZERO)))
+			return left_distance < right_distance if not is_equal_approx(left_distance, right_distance) else int(left.get("id", -1)) < int(right.get("id", -1))
+		)
+		if not builder_candidates.is_empty():
+			var builder: Dictionary = builder_candidates[0]
+			var builder_id := int(builder.get("id", -1))
+			commands.append(Commands.BuildCommand.new(tick, [builder_id], String(foundation.get("kind", "")), Vector2(foundation.get("pos", Vector2.ZERO))))
+			committed_workers[builder_id] = true
 	var site_kinds: Array = snapshot.get("build_sites", {}).keys()
-	site_kinds.sort()
+	_sort_build_kinds(site_kinds, policy.get("construction_priorities", []))
 	for kind_value in site_kinds:
+		if not active_foundations.is_empty():
+			break
 		var kind := String(kind_value)
-		if own_buildings.any(func(building): return String(building.get("kind", "")) == kind):
+		if suppress_construction and kind != "house":
+			continue
+		var limit := int(policy.get("building_limits", {}).get(kind, 1))
+		var same_kind := own_structures.filter(func(building): return String(building.get("kind", "")) == kind)
+		var existing_count := same_kind.size()
+		if limit <= 0 or existing_count >= limit:
+			continue
+		if same_kind.any(func(building): return String(building.get("state", "complete")) != "complete"):
+			continue
+		if kind == "house" and not _needs_housing(snapshot.get("player_state", {}), int(policy.get("housing_buffer", 0))):
 			continue
 		var sites: Array = snapshot.get("build_sites", {}).get(kind, [])
 		var candidates: Array = []
@@ -30,6 +76,8 @@ static func plan(snapshot: Dictionary, tick: int, team: int) -> Array:
 				continue
 			for site_value in sites:
 				var site := Vector2(site_value)
+				if not _site_preserves_structure_gap(site, kind, worker, own_structures, float(policy.get("minimum_structure_gap", 0.0))):
+					continue
 				candidates.append({"worker": worker, "site": site, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(site)})
 		candidates.sort_custom(func(left, right):
 			if not is_equal_approx(float(left["distance"]), float(right["distance"])):
@@ -47,6 +95,13 @@ static func plan(snapshot: Dictionary, tick: int, team: int) -> Array:
 		var building: Dictionary = building_value
 		if bool(building.get("harvestable", false)) and int(building.get("team", 0)) == team and int(building.get("amount", 0)) > 0:
 			resources.append(building)
+	var age_resource_types: Array = []
+	if bool(age_intent.get("saving", false)):
+		for resource_type_value in age_intent.get("cost", {}).keys():
+			age_resource_types.append(int(resource_type_value))
+		var age_resources := resources.filter(func(resource): return int(resource.get("resource_type_id", -1)) in age_resource_types)
+		if not age_resources.is_empty():
+			resources = age_resources
 	if not idle_workers.is_empty() and not resources.is_empty():
 		var pairs: Array = []
 		for worker_value in idle_workers:
@@ -73,17 +128,90 @@ static func plan(snapshot: Dictionary, tick: int, team: int) -> Array:
 		var building: Dictionary = building_value
 		if not building.get("production_queue", []).is_empty():
 			continue
+		if suppress_production:
+			continue
 		var train_options: Array = building.get("command_options", {}).get("train", [])
 		var enabled := train_options.filter(func(option): return bool(option.get("accepted", false)))
+		var worker_target := int(policy.get("worker_target", 0))
+		if worker_target > 0 and land_worker_count >= worker_target:
+			enabled = enabled.filter(func(option): return String(option.get("kind", "")) != "villager" and "worker" not in option.get("behavior_tags", []))
+		var research_options: Array = building.get("command_options", {}).get("research", [])
+		var available_research := research_options.filter(func(option): return bool(option.get("accepted", false)))
 		if not enabled.is_empty():
 			var preferred: Dictionary = _preferred_unit(enabled, own_units, building, snapshot, team)
 			commands.append(Commands.TrainCommand.new(tick, [int(building.get("id", -1))], String(preferred.get("kind", "")), team, Vector2(building.get("rally_point", building.get("pos", Vector2.ZERO)))))
 			continue
-		var research_options: Array = building.get("command_options", {}).get("research", [])
-		var available_research := research_options.filter(func(option): return bool(option.get("accepted", false)))
 		if not available_research.is_empty():
 			commands.append(Commands.ResearchCommand.new(tick, [int(building.get("id", -1))], String.num_int64(int(available_research[0].get("technology_id", -1)))))
 	return commands
+
+
+static func _age_advance_intent(buildings: Array, player_state: Dictionary, policy: Dictionary, worker_count: int, tick: int) -> Dictionary:
+	var minimum_workers := int(policy.get("minimum_workers_before_age_up", 0))
+	if minimum_workers <= 0 or worker_count < minimum_workers:
+		return {}
+	var current_age := int(player_state.get("age", 100))
+	var age_ids: Array = policy.get("age_advance_technology_ids", []).duplicate()
+	age_ids.sort()
+	var target_technology_id := -1
+	for value in age_ids:
+		var technology_id := int(value)
+		if technology_id > current_age:
+			target_technology_id = technology_id
+			break
+	if target_technology_id < 0:
+		return {}
+	for building_value in buildings:
+		var building: Dictionary = building_value
+		if not building.get("production_queue", []).is_empty():
+			continue
+		for option_value in building.get("command_options", {}).get("research", []):
+			var option: Dictionary = option_value
+			if int(option.get("technology_id", -1)) != target_technology_id:
+				continue
+			if bool(option.get("accepted", false)):
+				return {"command": Commands.ResearchCommand.new(tick, [int(building.get("id", -1))], String.num_int64(target_technology_id)), "saving": false}
+			var reason := String(option.get("reason", ""))
+			if reason in ["insufficient_resources", "missing_prerequisites"]:
+				return {"saving": true, "block_construction": reason == "insufficient_resources", "technology_id": target_technology_id, "cost": option.get("cost", {}).duplicate(true)}
+	return {}
+
+
+static func _site_preserves_structure_gap(site: Vector2, kind: String, worker: Dictionary, structures: Array, minimum_gap: float) -> bool:
+	if minimum_gap <= 0.0:
+		return true
+	var new_radius := 1.0
+	for option_value in worker.get("command_options", {}).get("build", []):
+		var option: Dictionary = option_value
+		if String(option.get("kind", "")) == kind:
+			new_radius = maxf(0.5, float(option.get("footprint_radius", 1.0)))
+			break
+	for building_value in structures:
+		var building: Dictionary = building_value
+		var existing_radius := maxf(0.5, float(building.get("footprint_radius", 1.0)))
+		var clearance := new_radius + existing_radius + minimum_gap
+		if site.distance_squared_to(Vector2(building.get("pos", Vector2.ZERO))) < clearance * clearance:
+			return false
+	return true
+
+
+static func _sort_build_kinds(kinds: Array, priorities: Array) -> void:
+	var order: Dictionary = {}
+	for index in range(priorities.size()):
+		order[String(priorities[index])] = index
+	kinds.sort_custom(func(left, right):
+		var left_id := String(left)
+		var right_id := String(right)
+		var left_order := int(order.get(left_id, 1000000))
+		var right_order := int(order.get(right_id, 1000000))
+		return left_order < right_order if left_order != right_order else left_id < right_id
+	)
+
+
+static func _needs_housing(player_state: Dictionary, buffer: int) -> bool:
+	var used := int(player_state.get("population", 0)) + int(player_state.get("population_reserved", 0))
+	var cap := mini(int(player_state.get("population_cap", 0)), int(player_state.get("population_limit", 0)))
+	return cap - used <= maxi(0, buffer)
 
 
 static func _resource_allows_worker(resource: Dictionary, worker: Dictionary) -> bool:

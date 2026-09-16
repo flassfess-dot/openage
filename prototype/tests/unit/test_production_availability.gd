@@ -71,8 +71,10 @@ func test_unknown_runtime_type_is_rejected(catalog) -> void:
 
 func test_local_ai_build_sites(catalog) -> void:
 	var world = configured_world(catalog)
-	world.add_unit(1, "villager", Vector2(12.5, 12.5), false)
+	var worker: Dictionary = world.add_unit(1, "villager", Vector2(12.5, 12.5), false)
 	world.update_fog_of_war()
+	assert_true(not world.can_place_foundation(1, "house", Vector2(worker["pos"])), "a foundation cannot trap a living unit inside its occupied cells")
+	assert_equal(world.last_build_failure, "occupied_by_unit", "unit overlap has a stable placement rejection")
 	var sites: Array = world.get_local_build_sites(1, ["house"], 2).get("house", [])
 	assert_equal(sites.size(), 2, "local AI placement returns the requested bounded number of House sites")
 	for site_value in sites:

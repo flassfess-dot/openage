@@ -2115,6 +2115,8 @@ func get_build_options(team: int) -> Array:
 		if reason == "building_unavailable":
 			continue
 		var cost := building_cost(kind, team)
+		var option_footprint := Footprint.building(unit_stats(kind), Vector2.ZERO)
+		var option_half_size := Vector2(option_footprint.get("half_size", Vector2.ONE))
 		if reason.is_empty() and not can_afford_resource_cost(team, cost):
 			reason = "insufficient_resources"
 		result.append({
@@ -2124,6 +2126,7 @@ func get_build_options(team: int) -> Array:
 			"button_id": int(interface.get("button_id", -1)),
 			"cost": cost.duplicate(true),
 			"duration": float(source.get("production", {}).get("creation_time", unit_stats(kind).get("creation_time", 0.0))),
+			"footprint_radius": maxf(option_half_size.x, option_half_size.y),
 			"accepted": reason.is_empty(),
 			"reason": reason,
 		})
@@ -2188,7 +2191,7 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 			seen_cells[preferred_cell] = true
 			if visibility_system.state_at_world(team, preferred_position) == FogOfWar.UNKNOWN:
 				continue
-			if can_place_foundation(team, kind, preferred_position):
+			if can_place_foundation(team, kind, preferred_position) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
 				sites.append(preferred_position)
 				if sites.size() >= maximum_per_kind:
 					break
@@ -2209,7 +2212,7 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 							continue
 						seen_cells[cell] = true
 						var position := Vector2(cell) + Vector2(0.5, 0.5)
-						if can_place_foundation(team, kind, position):
+						if can_place_foundation(team, kind, position) and worker_can_reach_foundation(worker, kind, position):
 							sites.append(position)
 							if sites.size() >= maximum_per_kind:
 								break
@@ -2251,6 +2254,14 @@ func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
 			if cell in building.get("occupied_cells", []):
 				last_build_failure = "blocked_or_sloped"
 				return false
+	var occupied_cells: Array = footprint.get("occupied_cells", [])
+	for unit in units:
+		if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)):
+			continue
+		var unit_cell := Vector2i(floori(float(unit.get("pos", Vector2.ZERO).x)), floori(float(unit.get("pos", Vector2.ZERO).y)))
+		if unit_cell in occupied_cells:
+			last_build_failure = "occupied_by_unit"
+			return false
 	if visibility_system.state_at_world(team, position) == FogOfWar.UNKNOWN:
 		last_build_failure = "unexplored"
 		return false
@@ -2328,6 +2339,24 @@ func foundation_has_required_domain_access(footprint: Dictionary, placement: Dic
 		if not found.has(String(domain_value)):
 			return false
 	return true
+
+
+func worker_can_reach_foundation(worker: Dictionary, kind: String, position: Vector2) -> bool:
+	var footprint := Footprint.building(unit_stats(kind), position)
+	var occupied: Array = footprint.get("occupied_cells", [])
+	var preview := {"pos": position, "footprint": footprint}
+	var domain := String(worker.get("movement_domain", "land"))
+	var restriction := int(worker.get("terrain_restriction", -1))
+	for candidate in building_perimeter_candidates(worker, preview):
+		if not navigation_grid.is_position_walkable_for(candidate, float(worker.get("footprint_radius", 0.3)), domain, restriction):
+			continue
+		var path: Array[Vector2] = pathfinder.find_path(Vector2(worker.get("pos", Vector2.ZERO)), candidate, domain, restriction)
+		if path.is_empty():
+			continue
+		var crosses_future_footprint := path.any(func(point): return Vector2i(floori(point.x), floori(point.y)) in occupied)
+		if not crosses_future_footprint:
+			return true
+	return false
 
 
 func place_foundation(team: int, kind: String, position: Vector2, workers: Array = []) -> Variant:
@@ -2681,6 +2710,9 @@ func reserve_building_approach_slot(worker: Dictionary, building: Dictionary) ->
 		var slot_index := posmod(int(worker["id"]) + offset, candidates.size())
 		var candidate: Vector2 = candidates[slot_index]
 		if not navigation_grid.is_position_walkable_for(candidate, float(worker.get("footprint_radius", 0.3)), String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1))):
+			continue
+		var route: Array[Vector2] = pathfinder.find_path(Vector2(worker.get("pos", Vector2.ZERO)), candidate, String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1)))
+		if route.is_empty():
 			continue
 		if reservations.values().any(func(existing): return Vector2(existing).distance_squared_to(candidate) < 0.09):
 			continue

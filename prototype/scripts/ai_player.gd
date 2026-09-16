@@ -22,6 +22,8 @@ var attack_separation: int
 var minimum_attack_group_size: int
 var maximum_attack_group_size: int
 var enemy_response_distance: float
+var use_workers_in_attack_groups: bool
+var economic_policy: Dictionary
 var last_economic_tick: int = -1
 var last_military_tick: int = -1
 var last_attack_tick: int = -1
@@ -47,6 +49,16 @@ func _init(player_definition: Dictionary) -> void:
 	minimum_attack_group_size = maxi(1, int(settings.get("minimum_attack_group_size", 1)))
 	maximum_attack_group_size = maxi(minimum_attack_group_size, int(settings.get("maximum_attack_group_size", 9999)))
 	enemy_response_distance = maxf(0.0, float(settings.get("enemy_response_distance", 0.0)))
+	use_workers_in_attack_groups = bool(settings.get("use_workers_in_attack_groups", true))
+	economic_policy = {
+		"construction_priorities": settings.get("construction_priorities", []).duplicate(),
+		"building_limits": settings.get("building_limits", {}).duplicate(true),
+		"housing_buffer": maxi(0, int(settings.get("housing_buffer", 0))),
+		"worker_target": maxi(0, int(settings.get("worker_target", 0))),
+		"minimum_workers_before_age_up": maxi(0, int(settings.get("minimum_workers_before_age_up", 0))),
+		"age_advance_technology_ids": settings.get("age_advance_technology_ids", []).duplicate(),
+		"minimum_structure_gap": maxf(0.0, float(settings.get("minimum_structure_gap", 0.0))),
+	}
 	source_contract = player_definition.get("source_ai", {}).duplicate(true)
 	source_city_plan = SourceCityPlan.new(team)
 
@@ -121,7 +133,7 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 			last_military_tick = next_tick
 		return result
 	if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
-		result.append_array(EconomicPlanner.plan(snapshot, next_tick, team))
+		result.append_array(EconomicPlanner.plan(snapshot, next_tick, team, economic_policy))
 		last_economic_tick = next_tick
 	if last_military_tick < 0 or next_tick - last_military_tick >= military_interval:
 		var goal := StrategicPlanner.choose_goal(snapshot, team, decision_index)
@@ -132,7 +144,7 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 			attack_allowed = responding or (next_tick >= initial_attack_delay and (last_attack_tick < 0 or next_tick - last_attack_tick >= attack_separation))
 		var tactical_commands: Array = []
 		if attack_allowed:
-			tactical_commands = TacticalPlanner.plan(snapshot, next_tick, team, goal, formation_name, minimum_attack_group_size, maximum_attack_group_size)
+			tactical_commands = TacticalPlanner.plan(snapshot, next_tick, team, goal, formation_name, minimum_attack_group_size, maximum_attack_group_size, use_workers_in_attack_groups)
 			result.append_array(tactical_commands)
 			result.append_array(TransportPlanner.plan(snapshot, next_tick, team, goal, formation_name))
 		if String(goal.get("type", "")) == "attack" and not tactical_commands.is_empty():
@@ -198,6 +210,20 @@ func presentation_options() -> Dictionary:
 			"build_site_search_radius": source_city_plan.recommended_search_radius() if source_city_plan != null and source_city_plan.enabled else 12,
 			"preferred_build_sites": preferred_build_sites,
 			"strict_preferred_build_site_kinds": strict_preferred_build_site_kinds,
+		}
+	if profile == "skirmish_policy_v1":
+		return {
+			"compact_entities": true,
+			"include_navigation": true,
+			"include_build_sites": false,
+			"include_fog_cells": false,
+			"include_projectiles": false,
+			"include_scenario": false,
+			"include_worker_command_options": false,
+			"requested_build_site_kinds": economic_policy.get("construction_priorities", []).duplicate(),
+			"planning_technology_ids": economic_policy.get("age_advance_technology_ids", []).duplicate(),
+			"maximum_build_sites_per_kind": 12,
+			"build_site_search_radius": 12,
 		}
 	return {}
 

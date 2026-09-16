@@ -26,17 +26,21 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var include_worker_command_options := bool(options.get("include_worker_command_options", true))
 	var requested_production_only := bool(options.get("requested_production_only", false))
 	var production_requests: Array = options.get("production_requests", [])
+	var planning_technology_ids: Array = options.get("planning_technology_ids", [])
 	var requested_build_site_kinds: Array = options.get("requested_build_site_kinds", [])
 	var maximum_build_sites_per_kind := maxi(1, int(options.get("maximum_build_sites_per_kind", 4)))
 	var build_site_search_radius := maxi(1, int(options.get("build_site_search_radius", 12)))
 	var preferred_build_sites: Dictionary = options.get("preferred_build_sites", {})
 	var strict_preferred_build_site_kinds: Array = options.get("strict_preferred_build_site_kinds", [])
 	var requested_build_options: Array = []
+	var available_requested_build_site_kinds: Array = []
 	if observer_team > 0 and not requested_build_site_kinds.is_empty():
 		for option_value in world.get_build_options(observer_team):
 			var option: Dictionary = option_value
 			if String(option.get("kind", "")) in requested_build_site_kinds:
 				requested_build_options.append(option)
+				if bool(option.get("accepted", false)):
+					available_requested_build_site_kinds.append(String(option.get("kind", "")))
 	var units: Array = []
 	for unit in world.get_units():
 		if observer_team <= 0 or world.is_entity_visible_to(observer_team, unit):
@@ -65,6 +69,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 			if world.trade_system.is_trade_dock(building):
 				presentation_building["trade"] = world.trade_system.presentation_for_dock(building)
 			if observer_team > 0 and int(building.get("team", 0)) == observer_team:
+				presentation_building["builder_count"] = building.get("builders", {}).size()
 				if requested_production_only:
 					presentation_building["command_options"] = _requested_production_options(world, building, observer_team, production_requests)
 				else:
@@ -72,6 +77,8 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 						"train": world.get_unit_production_options(int(building.get("id", -1)), observer_team),
 						"research": world.get_research_options(int(building.get("id", -1)), observer_team),
 					}
+				if not planning_technology_ids.is_empty():
+					_append_planning_research_options(world, presentation_building, building, observer_team, planning_technology_ids)
 			buildings.append(presentation_building)
 	var projectiles: Array = []
 	if include_projectiles:
@@ -82,7 +89,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	if observer_team > 0 and not requested_build_site_kinds.is_empty():
 		build_sites = world.get_local_build_sites(
 			observer_team,
-			requested_build_site_kinds,
+			available_requested_build_site_kinds,
 			maximum_build_sites_per_kind,
 			build_site_search_radius,
 			preferred_build_sites,
@@ -204,7 +211,7 @@ static func _compact_ai_entity(entity: Dictionary) -> Dictionary:
 	var result: Dictionary = {}
 	for key in [
 		"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
-		"pos", "hp", "state", "task", "target_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
+		"pos", "hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
 		"resource_type_id", "harvestable", "footprint_radius", "rally_point", "attack_range",
 	]:
 		if entity.has(key):
@@ -251,6 +258,25 @@ static func _requested_production_options(world, building: Dictionary, team: int
 				result["research"].append(world.get_research_availability(building_id, team, technology_id))
 				seen_technologies[technology_id] = true
 	return result
+
+
+static func _append_planning_research_options(world, presentation_building: Dictionary, source_building: Dictionary, team: int, technology_ids: Array) -> void:
+	var command_options: Dictionary = presentation_building.get("command_options", {})
+	var research_options: Array = command_options.get("research", [])
+	var known: Dictionary = {}
+	for option_value in research_options:
+		known[int(option_value.get("technology_id", -1))] = true
+	for technology_id_value in technology_ids:
+		var technology_id := int(technology_id_value)
+		if technology_id <= 0 or known.has(technology_id):
+			continue
+		var option: Dictionary = world.get_research_availability(int(source_building.get("id", -1)), team, technology_id)
+		if String(option.get("reason", "")) in ["wrong_research_location", "invalid_research_building", "technology_disabled", "already_researched", "already_researching"]:
+			continue
+		research_options.append(option)
+		known[technology_id] = true
+	command_options["research"] = research_options
+	presentation_building["command_options"] = command_options
 
 
 static func _sort_entity_copies(source: Array) -> Array:

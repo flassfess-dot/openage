@@ -23,6 +23,12 @@ func _initialize() -> void:
 	assert_equal(int(standard.get("minimum_attack_group_size", 0)), 3, "source-backed minimum attack group reaches runtime")
 	assert_equal(int(standard.get("maximum_attack_group_size", 0)), 20, "source-backed maximum attack group reaches runtime")
 	assert_equal(float(standard.get("enemy_response_distance", 0.0)), 22.0, "source-backed defensive response distance reaches runtime")
+	assert_equal(standard.get("construction_priorities", [])[0], "house", "engine-owned economy protects population capacity first")
+	assert_equal(int(standard.get("building_limits", {}).get("house", 0)), 4, "engine-owned economy can add multiple houses")
+	assert_equal(int(standard.get("worker_target", 0)), 8, "engine-owned economy has an explicit workforce target")
+	assert_equal(standard.get("age_advance_technology_ids", []).map(func(value): return int(value)), [101, 102, 103], "engine-owned economy names the authoritative age technologies")
+	assert_equal(float(standard.get("minimum_structure_gap", -1.0)), 1.0, "engine-owned placement preserves a navigation lane between structures")
+	assert_true(not bool(standard.get("use_workers_in_attack_groups", true)), "engine-owned economy keeps workers out of ordinary attack groups")
 
 	var easy := SkirmishAiPolicy.resolve("random_map_balanced", "easy")
 	var hard := SkirmishAiPolicy.resolve("random_map_balanced", "hard")

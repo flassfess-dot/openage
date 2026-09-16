@@ -41,6 +41,10 @@ E5-005 adds a separate engine-owned `skirmish_policy_v1` contract. The launcher 
 
 The tactical planner sorts eligible fighters by stable entity ID, waits for the minimum force, caps the issued group and sends only public attack commands. The opening delay and regroup interval can be bypassed only when a visible enemy lies within the configured response distance of a living owned unit or building. This extension applies only to generated skirmish AI; legacy and source-campaign profiles retain their existing behavior.
 
+E5-006A extends the same policy with an engine-owned opening economy. Construction priorities and limits, housing reserve, worker target, age technology IDs and minimum structure clearance are policy data rather than planner constants. The AI sees authoritative command availability and research costs through its own presentation snapshot; future age planning exposes no enemy or map state. It serializes foundations, uses only reachable approach sites, can replace a failed builder, saves the required source resources and never recruits workers into an ordinary strike group.
+
+A building centre is the default "no rally point" sentinel. Produced units remain at a valid exit slot unless a real rally point was set. A fighter whose previous destination was unreachable receives an individual move to the nearest observer-known navigation point; healthy members keep their strategic group order.
+
 ## Match controls
 
 Space pauses; comma/period change the fixed-tick speed; R restarts the same definition and seed; Shift+R submits resign; Escape closes the application. These inputs are presentation intents only and do not mutate simulation objects directly.
@@ -52,6 +56,7 @@ Space pauses; comma/period change the fixed-tick speed; R restarts the same defi
 - `test_skirmish_ai_policy.gd`, `test_skirmish_settings.gd`, `test_launcher_scene.gd` and `test_generated_skirmish_main_scene.gd` cover evidence pinning, difficulty resolution and generated-match propagation.
 - `test_player_registry.gd`, `test_resign_pipeline.gd` and replay round-trip coverage.
 - `test_ai_vs_ai_match.gd`: both sides receive their legal snapshots, issue accepted public commands and finish a deterministic unscripted conquest match.
+- `test_generated_skirmish_ai_acceptance.gd`: a generated inland opening reaches housing, Barracks/Granary, Tool Age and a policy-sized attack group through public commands.
 - Full suite at integration: `108 passed, 0 failed`.
 
 I11 is `INTEGRATED`, not `PARITY`. Under the 2026-09-14 core-first rebaseline, E3 first revalidates the common gameplay command/AI boundary, E4 supplies the complete civilization content consumed by it, and E5 expands skirmish setup, random-map algorithms/biomes/fairness, economic/naval AI, difficulty and multi-team diplomacy. Long load/stability gates belong to E6. Scenario actions, imported RoR scenarios and campaigns are deliberately postponed to E7 so they consume a stable engine instead of driving it.

@@ -165,8 +165,8 @@ static func build(source: Dictionary) -> Dictionary:
 			"ai": _player_ai_settings(ai_policy, String(slot["controller"]) == "ai"),
 		})
 		entities.append({"category": "building", "team": team, "kind": "town_center", "position": start})
-		for offset in [Vector2(-1.1, 1.4), Vector2(0.0, 1.7), Vector2(1.1, 1.4)]:
-			entities.append({"category": "unit", "team": team, "kind": "villager", "position": start + offset, "selected": team == 1})
+		for position in _starting_villager_positions(start, size):
+			entities.append({"category": "unit", "team": team, "kind": "villager", "position": position, "selected": team == 1})
 
 	var raw_definition := {
 		"schema_version": 1,
@@ -233,6 +233,19 @@ static func _start_positions(count: int, size: Vector2i, map_type: String) -> Ar
 		point.y = clampf(point.y, minimum_margin, float(size.y) - 5.0)
 		result.append(point)
 	return result
+
+
+static func _starting_villager_positions(start: Vector2, size: Vector2i) -> Array[Vector2]:
+	var inward := (Vector2(size) * 0.5 - start).normalized()
+	if inward.length_squared() <= 0.000001:
+		inward = Vector2.DOWN
+	var side := Vector2(-inward.y, inward.x)
+	var forward_distance := 3.25
+	return [
+		start + inward * forward_distance - side * 1.1,
+		start + inward * (forward_distance + 0.3),
+		start + inward * forward_distance + side * 1.1,
+	]
 
 
 static func _alliances(players: Array) -> Array:

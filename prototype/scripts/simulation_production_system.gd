@@ -267,13 +267,13 @@ func _research_availability(building: Variant, team: int, technology_id: int) ->
 	if expected_location >= 0 and not lineage.has(expected_location):
 		result["reason"] = "wrong_research_location"
 		return result
+	var cost: Dictionary = world.technology_system.research_cost(team, technology_id)
+	result["cost"] = cost.duplicate(true)
+	result["duration"] = world.technology_system.research_time(team, technology_id)
 	var rule_reason: String = world.technology_system.can_research(team, technology_id, expected_location)
 	if not rule_reason.is_empty():
 		result["reason"] = rule_reason
 		return result
-	var cost: Dictionary = world.technology_system.research_cost(team, technology_id)
-	result["cost"] = cost.duplicate(true)
-	result["duration"] = world.technology_system.research_time(team, technology_id)
 	if building.get("production_queue", []).size() >= 15:
 		result["reason"] = "queue_full"
 		return result
@@ -348,7 +348,10 @@ func _complete_unit(building: Dictionary, queue: Array, order: Dictionary) -> vo
 		"unit_kind": String(order["kind"]),
 	})
 	var rally: Vector2 = building.get("rally_point", building["pos"])
-	if trained["pos"].distance_squared_to(rally) > 0.04:
+	# The source game leaves a newly trained unit at its valid exit slot until
+	# the player sets a rally point. A building's own (blocked) center is our
+	# sentinel for that default and must never become a movement destination.
+	if rally.distance_squared_to(Vector2(building["pos"])) > 0.04 and trained["pos"].distance_squared_to(rally) > 0.04:
 		world.assign_command_move([trained], rally)
 	_sync_queue(building, queue)
 

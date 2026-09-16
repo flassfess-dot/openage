@@ -71,3 +71,27 @@ static func _validate_runtime(runtime: Dictionary, errors: Array[String]) -> voi
 		errors.append("skirmish_ai_policy_group_range_invalid")
 	if float(runtime.get("enemy_response_distance", 0.0)) <= 0.0:
 		errors.append("skirmish_ai_policy_field_invalid:enemy_response_distance")
+	var priorities = runtime.get("construction_priorities", [])
+	var limits = runtime.get("building_limits", {})
+	if not priorities is Array or priorities.is_empty():
+		errors.append("skirmish_ai_policy_construction_priorities_invalid")
+	if not limits is Dictionary:
+		errors.append("skirmish_ai_policy_building_limits_invalid")
+	else:
+		for kind_value in priorities:
+			var kind := String(kind_value)
+			if kind.is_empty() or int(limits.get(kind, 0)) <= 0:
+				errors.append("skirmish_ai_policy_building_limit_invalid:%s" % kind)
+	if int(runtime.get("housing_buffer", -1)) < 0:
+		errors.append("skirmish_ai_policy_field_invalid:housing_buffer")
+	if int(runtime.get("worker_target", 0)) <= 0:
+		errors.append("skirmish_ai_policy_field_invalid:worker_target")
+	if int(runtime.get("minimum_workers_before_age_up", 0)) <= 0:
+		errors.append("skirmish_ai_policy_field_invalid:minimum_workers_before_age_up")
+	var age_advance_ids = runtime.get("age_advance_technology_ids", [])
+	if not age_advance_ids is Array or age_advance_ids.is_empty() or age_advance_ids.any(func(value): return int(value) <= 0):
+		errors.append("skirmish_ai_policy_field_invalid:age_advance_technology_ids")
+	if float(runtime.get("minimum_structure_gap", -1.0)) < 0.0:
+		errors.append("skirmish_ai_policy_field_invalid:minimum_structure_gap")
+	if not runtime.has("use_workers_in_attack_groups") or not runtime["use_workers_in_attack_groups"] is bool:
+		errors.append("skirmish_ai_policy_field_invalid:use_workers_in_attack_groups")

@@ -48,6 +48,41 @@ func _initialize() -> void:
 	assert_equal(economy_commands[0].command_type(), "gather", "economic layer uses public gather command")
 	assert_equal(economy_commands[0].resource_id, 80, "economic layer can only choose resource present in snapshot")
 
+	var resume_snapshot := snapshot_base()
+	resume_snapshot["units"] = [worker(41, 2, Vector2(3, 3))]
+	resume_snapshot["buildings"] = [{"id": 90, "team": 2, "kind": "barracks", "pos": Vector2(5, 3), "hp": 20.0, "state": "foundation", "production_queue": []}]
+	var resume_commands := EconomicPlanner.plan(resume_snapshot, 2, 2, {"construction_priorities": ["house", "barracks"]})
+	assert_equal(resume_commands.size(), 1, "economic policy resumes an existing foundation before placing another building")
+	assert_equal(resume_commands[0].command_type(), "build", "foundation recovery uses the ordinary public build command")
+	assert_equal(resume_commands[0].target, Vector2(5, 3), "foundation recovery targets the existing site exactly")
+	resume_snapshot["buildings"][0]["builder_count"] = 1
+	assert_equal(EconomicPlanner.plan(resume_snapshot, 3, 2, {"construction_priorities": ["house", "barracks"]}).size(), 0, "economic policy does not spam a foundation that already has an active builder")
+
+	var spaced_snapshot := snapshot_base()
+	var spaced_worker := worker(42, 2, Vector2(5, 7))
+	spaced_worker["command_options"] = {"build": [{"kind": "house", "accepted": true, "footprint_radius": 1.0}]}
+	spaced_snapshot["units"] = [spaced_worker]
+	spaced_snapshot["buildings"] = [{"id": 91, "team": 2, "kind": "town_center", "pos": Vector2(5, 5), "hp": 600.0, "state": "complete", "footprint_radius": 1.0, "production_queue": [], "command_options": {"train": [], "research": []}}]
+	spaced_snapshot["build_sites"] = {"house": [Vector2(6.5, 5), Vector2(9, 5)]}
+	var spaced_commands := EconomicPlanner.plan(spaced_snapshot, 4, 2, {"construction_priorities": ["house"], "building_limits": {"house": 1}, "minimum_structure_gap": 1.0})
+	assert_equal(spaced_commands.size(), 1, "economic policy finds a construction site outside the protected navigation lane")
+	assert_equal(spaced_commands[0].target, Vector2(9, 5), "economic policy rejects a site that packs structures too tightly")
+
+	var saving_snapshot := snapshot_base()
+	for worker_id in range(100, 106):
+		saving_snapshot["units"].append(worker(worker_id, 2, Vector2(worker_id - 96, 4)))
+	saving_snapshot["player_state"]["age"] = 100
+	saving_snapshot["buildings"] = [
+		{"id": 92, "team": 2, "kind": "town_center", "pos": Vector2(4, 4), "hp": 600.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("villager", ["worker"])], "research": [{"technology_id": 101, "accepted": false, "reason": "insufficient_resources"}]}},
+		{"id": 93, "team": 2, "kind": "barracks", "pos": Vector2(8, 4), "hp": 350.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("clubman", ["combatant"])], "research": []}},
+	]
+	var age_policy := {"minimum_workers_before_age_up": 6, "age_advance_technology_ids": [101, 102, 103], "worker_target": 8}
+	assert_equal(EconomicPlanner.plan(saving_snapshot, 5, 2, age_policy).size(), 0, "economic policy saves resources instead of continuously training through an age-up target")
+	saving_snapshot["buildings"][0]["command_options"]["research"][0] = {"technology_id": 101, "accepted": true, "reason": ""}
+	var age_commands := EconomicPlanner.plan(saving_snapshot, 6, 2, age_policy)
+	assert_equal(age_commands.size(), 1, "economic policy reserves one decision for the age advance")
+	assert_equal(age_commands[0].command_type(), "research", "age advance uses the ordinary public research command")
+
 	var fishing_snapshot := snapshot_base()
 	fishing_snapshot["units"] = [worker(50, 2, Vector2(2, 8), "water")]
 	fishing_snapshot["resources"] = [
@@ -225,6 +260,17 @@ func test_skirmish_policy_attack_control() -> void:
 	capped_policy["maximum_attack_group_size"] = 2
 	var capped_commands: Array = AiPlayer.new({"team": 2, "ai": capped_policy}).collect_commands(capped, 1)
 	assert_equal(capped_commands[0].unit_ids, [20, 21], "oversized groups are capped by stable unit ID")
+	var stranded := fighter(24, 2, Vector2(6, 5))
+	stranded["diagnostic_reason"] = "no_path"
+	var recovery_snapshot := snapshot_base()
+	recovery_snapshot["units"] = [stranded, fighter(25, 2, Vector2(7, 5))]
+	recovery_snapshot["navigation"] = {"land": [Vector2(6.5, 5), Vector2(9, 5)], "water": []}
+	var recovery_goal := {"type": "explore", "positions_by_domain": {"land": Vector2(9, 5)}}
+	var recovery_commands := TacticalPlanner.plan(recovery_snapshot, 12, 2, recovery_goal, "LINE")
+	assert_equal(recovery_commands.size(), 2, "tactical planner separates local recovery from the healthy attack group")
+	assert_equal(recovery_commands[0].unit_ids, [24], "known unreachable unit receives an individual local recovery order")
+	assert_equal(recovery_commands[0].target, Vector2(6.5, 5), "recovery uses the nearest observer-known walkable point")
+	assert_equal(recovery_commands[1].unit_ids, [25], "healthy unit keeps the strategic group order")
 
 	var threatened := snapshot_base()
 	threatened["units"] = [fighter(20, 2, Vector2(4, 4)), fighter(10, 1, Vector2(5, 4))]
@@ -234,6 +280,26 @@ func test_skirmish_policy_attack_control() -> void:
 	var response_commands: Array = AiPlayer.new({"team": 2, "ai": response_policy}).collect_commands(threatened, 1)
 	assert_equal(response_commands.size(), 1, "nearby enemy bypasses the opening delay for defense")
 	assert_equal(response_commands[0].command_type(), "attack", "defensive response uses the ordinary authoritative attack command")
+
+	var configured_policy := policy.duplicate(true)
+	configured_policy["construction_priorities"] = ["house", "barracks"]
+	configured_policy["building_limits"] = {"house": 4, "barracks": 1}
+	configured_policy["housing_buffer"] = 2
+	configured_policy["worker_target"] = 8
+	configured_policy["minimum_workers_before_age_up"] = 6
+	configured_policy["age_advance_technology_ids"] = [101, 102, 103]
+	configured_policy["use_workers_in_attack_groups"] = false
+	var configured_player = AiPlayer.new({"team": 2, "ai": configured_policy})
+	var options: Dictionary = configured_player.presentation_options()
+	assert_equal(options.get("requested_build_site_kinds"), ["house", "barracks"], "skirmish AI requests only policy-owned construction knowledge")
+	assert_equal(options.get("planning_technology_ids"), [101, 102, 103], "skirmish AI requests authoritative future age costs without exposing hidden world state")
+	assert_true(not bool(options.get("include_fog_cells", true)), "skirmish AI does not copy the full fog grid into every decision")
+	var worker_only := snapshot_base()
+	var armed_worker := worker(40, 2, Vector2(4, 4))
+	armed_worker["combat_enabled"] = true
+	armed_worker["behavior_tags"] = ["combatant", "worker"]
+	worker_only["units"] = [armed_worker, fighter(10, 1, Vector2(6, 4))]
+	assert_equal(configured_player.collect_commands(worker_only, 1).size(), 0, "skirmish tactical policy never pulls an economic worker into its attack group")
 
 
 func train_option(kind: String, tags: Array) -> Dictionary:

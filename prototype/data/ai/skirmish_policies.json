@@ -27,7 +27,39 @@
         "minimum_attack_group_size": 3,
         "maximum_attack_group_size": 20,
         "enemy_response_distance": 22.0,
-        "formation": "RECTANGLE"
+        "formation": "RECTANGLE",
+        "use_workers_in_attack_groups": false,
+        "construction_priorities": [
+          "house",
+          "barracks",
+          "granary",
+          "storage_pit",
+          "archery_range",
+          "stable",
+          "market",
+          "government_center",
+          "temple",
+          "siege_workshop",
+          "dock"
+        ],
+        "building_limits": {
+          "house": 4,
+          "barracks": 1,
+          "granary": 1,
+          "storage_pit": 1,
+          "archery_range": 1,
+          "stable": 1,
+          "market": 1,
+          "government_center": 1,
+          "temple": 1,
+          "siege_workshop": 1,
+          "dock": 1
+        },
+        "housing_buffer": 2,
+        "worker_target": 8,
+        "minimum_workers_before_age_up": 6,
+        "age_advance_technology_ids": [101, 102, 103],
+        "minimum_structure_gap": 1.0
       }
     }
   ],

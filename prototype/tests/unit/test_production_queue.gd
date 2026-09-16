@@ -11,6 +11,7 @@ func _initialize() -> void:
 	catalog.load_generated_data()
 	test_original_production_contract(catalog)
 	test_queue_completion_and_rally(catalog)
+	test_default_rally_keeps_valid_exit(catalog)
 	test_cancel_and_population_cap(catalog)
 
 	if failures.is_empty():
@@ -83,6 +84,17 @@ func test_cancel_and_population_cap(catalog) -> void:
 	assert_equal(world.enqueue_unit_production(int(building["id"]), 1, "clubman"), null, "population cap rejects queue request")
 	assert_equal(world.last_production_failure, "population_cap", "population failure is explicit")
 	assert_equal(world.get_food(), food_before, "failed population check does not reserve resources")
+
+
+func test_default_rally_keeps_valid_exit(catalog) -> void:
+	var world = original_world(catalog)
+	world.food = 500
+	var building: Dictionary = world.add_building(702, "town_center", Vector2(10.0, 10.0), 1)
+	assert_true(world.enqueue_unit_production(int(building["id"]), 1, "clubman") != null, "default-rally production enters the queue")
+	world.update_production(26.0)
+	var trained: Dictionary = world.get_units()[0]
+	assert_equal(trained.get("task"), "idle", "default rally leaves the trained unit at its valid exit slot")
+	assert_equal(trained.get("diagnostic_reason"), "", "default rally never orders a path into the blocked building center")
 
 
 func original_world(catalog):
