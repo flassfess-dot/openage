@@ -9,6 +9,7 @@ func _initialize() -> void:
 	test_large_footprint_is_inserted_into_every_cell()
 	test_queries_are_unique_filtered_and_stable()
 	test_external_neighbor_query_excludes_shared_formation()
+	test_mobile_index_uses_insert_snapshot_and_exact_footprint()
 
 	if failures.is_empty():
 		print("N-002 spatial hash tests passed")
@@ -25,6 +26,10 @@ func test_large_footprint_is_inserted_into_every_cell() -> void:
 	index.insert(building, building["pos"], 1.25, "obstacle")
 	assert_equal(index.query_circle(Vector2(0.8, 2.0), 0.01, "obstacle"), [building], "large footprint reaches neighbor bucket")
 	assert_equal(index.query_circle(Vector2(3.2, 2.0), 0.01, "obstacle"), [building], "large footprint reaches opposite bucket")
+	var large_unit := {"id": 21, "pos": Vector2(2.0, 2.0), "hp": 20.0, "footprint_radius": 1.25, "minimum_clearance": 0.04}
+	index.insert(large_unit, large_unit["pos"], large_unit["footprint_radius"], "unit")
+	assert_equal(index.query_circle(Vector2(0.8, 2.0), 0.01, "unit"), [large_unit], "center-indexed unit query expands by maximum footprint")
+	assert_equal(index.query_aabb(Rect2(0.7, 1.9, 0.2, 0.2), "unit"), [large_unit], "center-indexed unit AABB retains footprint overlap")
 
 
 func test_queries_are_unique_filtered_and_stable() -> void:
@@ -41,6 +46,8 @@ func test_queries_are_unique_filtered_and_stable() -> void:
 	var reusable: Array = [resource]
 	index.query_neighbors_into(first, 1.5, "unit", reusable)
 	assert_equal(reusable, [second], "reusable neighbor query preserves result and clears prior contents")
+	index.query_neighbors_into(first, 1.5, "", reusable)
+	assert_equal(reusable, [resource, second], "empty-category neighbor query preserves mixed-category contract")
 	var exact_radius := index.movement_neighbor_radius(first)
 	assert_equal(index.query_neighbors(first, exact_radius, "unit"), [second], "derived movement radius retains avoidance neighbor")
 
@@ -55,6 +62,16 @@ func test_external_neighbor_query_excludes_shared_formation() -> void:
 	var result: Array = []
 	index.query_external_neighbors_into(source, 1.0, 8, result)
 	assert_equal(result, [outsider], "shared formation is excluded while outsider remains")
+
+
+func test_mobile_index_uses_insert_snapshot_and_exact_footprint() -> void:
+	var index = SpatialHash.new(1.0)
+	var touching := {"id": 4, "pos": Vector2(3.15, 2.0), "footprint_radius": 0.2, "minimum_clearance": 0.04}
+	var outside := {"id": 8, "pos": Vector2(3.25, 2.0), "footprint_radius": 0.2, "minimum_clearance": 0.04}
+	index.insert(touching, touching["pos"], touching["footprint_radius"], "unit")
+	index.insert(outside, outside["pos"], outside["footprint_radius"], "unit")
+	touching["pos"] = Vector2(20.0, 20.0)
+	assert_equal(index.query_circle(Vector2(2.0, 2.0), 1.0, "unit"), [touching], "mobile query uses the fixed-tick insertion snapshot and exact radius")
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:

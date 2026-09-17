@@ -269,7 +269,7 @@ ext_unit_id.
   - `test_footprints.gd`.
 
 - N-002 завершена:
-  - spatial hash регистрирует footprint во всех пересекаемых ячейках и дедуплицирует результаты;
+  - статический spatial hash регистрирует footprint во всех пересекаемых ячейках; мобильный индекс хранит юнит один раз по центру и расширяет точный запрос на максимальный радиус без потери footprint-overlap;
   - доступны стабильные circle, AABB, neighbor, category-запросы для выбора, столкновений, целей и препятствий;
   - локальное раздвижение больше не перебирает весь список юнитов;
   - `test_spatial_hash_queries.gd`.
@@ -1393,3 +1393,10 @@ ext_unit_id.
 - Консервативный group-level AABB broad phase проверяет другие группы и одиночные юниты. Изолированный открытый строй не сканирует собственных участников и использует прямую translation; при внешнем контакте остаётся external avoidance, при деформации следующий такт автоматически возвращает полный per-unit path. Revision навигационной карты удаляет открытый envelope.
 - `formation_shared_motion/isolated` являются только runtime hints и исключены из canonical/presentation snapshots. Новый integration test проверяет 13 тактов неизменного spacing, отсутствие overlap, появление внешнего юнита и изменение navigation revision. Итоговый impact-gate охватывает cohesion/spatial/local movement, formation scenarios/interaction, shared integration, navigation pipeline, replay, component/snapshot и save/load.
 - Длинный `3+20` baseline: `2×500` p50/p95/max `50,16 / 62,63 / 90,20` мс; `8×500` — `237,18 / 256,86 / 346,41` мс. На 4000 юнитах `unit_orders` p95 `147,68` мс, cohesion `33,52`, neighbor `20,13`, local calculation `8,22`, integration `39,71`; счётчик подтверждает 80 000 shared/isolated member-ticks. Бюджет 50 мс и 30% резерв ещё не достигнут.
+
+### Прогресс (2026-09-18, E6-006 — специализированный mobile spatial index)
+
+- Mobile storage отделён от редких статических категорий: юнит регистрируется одним integer slot в bucket, а entity/position/radius хранятся отдельными массивами. Это удаляет per-unit item Dictionary, повтор footprint по нескольким ячейкам и generation de-duplication из каждого neighbor query.
+- Circle/AABB/neighbor запросы расширяют bucket range на максимальный mobile radius, затем применяют прежнюю точную проверку с собственным радиусом кандидата и stable-ID sorting. Insert snapshot позиции сохранён явно, поэтому перемещение уже обработанного юнита не меняет соседей ещё не обработанного в том же такте.
+- Прямой contract проверяет large footprint, boundary inclusion/exclusion, snapshot position, selection-запись без runtime-полей, reusable buffer и external formation filtering. Пройдены navigation stress, autonomous combat, pointer, shared formation и deterministic replay gates.
+- `8×500 / 3+20` shared march: p50/p95/max `216,94 / 236,04 / 240,05` мс, spatial `15,17`, neighbor `18,62`. Formation assemble: `280,82 / 304,82 / 325,22` мс, spatial `11,45`, neighbor `64,11`. Свежий A/B с commit `26b1fa38` имеет тот же canonical hash `5dea1e…78ba`; E6 остаётся открытым.
