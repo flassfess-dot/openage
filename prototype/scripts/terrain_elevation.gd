@@ -29,6 +29,7 @@ const SLOPE_BY_CORNER_MASK := {
 
 var size: Vector2i
 var vertex_levels: Dictionary = {}
+var nonzero_vertex_count: int = 0
 
 
 func _init(map_size: Vector2i = Vector2i.ONE) -> void:
@@ -38,15 +39,23 @@ func _init(map_size: Vector2i = Vector2i.ONE) -> void:
 
 func clear(level: int = 0) -> void:
 	vertex_levels.clear()
+	var safe_level := maxi(0, level)
+	nonzero_vertex_count = (size.x + 1) * (size.y + 1) if safe_level > 0 else 0
 	for y in range(size.y + 1):
 		for x in range(size.x + 1):
-			vertex_levels[Vector2i(x, y)] = maxi(0, level)
+			vertex_levels[Vector2i(x, y)] = safe_level
 
 
 func set_vertex(vertex: Vector2i, level: int) -> void:
 	if vertex.x < 0 or vertex.y < 0 or vertex.x > size.x or vertex.y > size.y:
 		return
-	vertex_levels[vertex] = maxi(0, level)
+	var previous := int(vertex_levels.get(vertex, 0))
+	var next := maxi(0, level)
+	if previous <= 0 and next > 0:
+		nonzero_vertex_count += 1
+	elif previous > 0 and next <= 0:
+		nonzero_vertex_count -= 1
+	vertex_levels[vertex] = next
 
 
 func vertex_elevation(vertex: Vector2i) -> int:
@@ -92,6 +101,8 @@ func cell_profile(cell: Vector2i) -> Dictionary:
 
 
 func elevation_at_world(world: Vector2) -> float:
+	if nonzero_vertex_count == 0:
+		return 0.0
 	var clamped := Vector2(
 		clampf(world.x, 0.0, float(size.x) - 0.0001),
 		clampf(world.y, 0.0, float(size.y) - 0.0001)

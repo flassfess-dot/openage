@@ -56,6 +56,7 @@ var movement_neighbor_query_microseconds: int = 0
 var movement_local_calculation_microseconds: int = 0
 var movement_integration_microseconds: int = 0
 var movement_arrival_microseconds: int = 0
+var movement_neighbor_buffer: Array = []
 
 var entity_id_sequence := EntityIds.new()
 var spatial_index := SpatialHash.new(2.0)
@@ -1352,7 +1353,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		):
 			EntityComponents.sync_stable_idle_tick(unit)
 		else:
-			EntityComponents.sync_dynamic(unit)
+			EntityComponents.sync_runtime_unit(unit)
 		if probe != null:
 			component_sync_microseconds += Time.get_ticks_usec() - phase_started
 	if probe != null:
@@ -1653,12 +1654,12 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		return false
 
 	var start_position: Vector2 = unit["pos"]
-	var search_radius := float(unit.get("footprint_radius", 0.3)) + 1.0
-	var neighbors := spatial_index.query_neighbors(unit, search_radius, "unit")
+	var search_radius := spatial_index.movement_neighbor_radius(unit)
+	spatial_index.query_neighbors_into(unit, search_radius, "unit", movement_neighbor_buffer)
 	if probe != null:
 		movement_neighbor_query_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
-	var movement_reason := LocalMovement.calculate_into(unit, unit["target"], neighbors, navigation_grid, delta)
+	var movement_reason := LocalMovement.calculate_runtime_unit_into(unit, unit["target"], movement_neighbor_buffer, navigation_grid, delta)
 	if probe != null:
 		movement_local_calculation_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
@@ -1814,25 +1815,47 @@ func find_combat_target(id: int) -> Variant:
 
 func get_combat_targets() -> Array:
 	var result: Array = []
+	var last_id := -9223372036854775807
+	var already_sorted := true
 	for unit in units:
 		if float(unit.get("hp", 0.0)) > 0.0 and not entity_has_behavior_tag(unit, "noncombat_target"):
+			var unit_id := int(unit["id"])
+			if unit_id < last_id:
+				already_sorted = false
+			last_id = unit_id
 			result.append(unit)
 	for building in buildings:
 		if float(building.get("hp", 0.0)) > 0.0:
+			var building_id := int(building["id"])
+			if building_id < last_id:
+				already_sorted = false
+			last_id = building_id
 			result.append(building)
-	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	if not already_sorted:
+		result.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
 	return result
 
 
 func get_combat_attackers() -> Array:
 	var result: Array = []
+	var last_id := -9223372036854775807
+	var already_sorted := true
 	for unit in units:
 		if float(unit.get("hp", 0.0)) > 0.0 and bool(unit.get("combat_enabled", false)):
+			var unit_id := int(unit["id"])
+			if unit_id < last_id:
+				already_sorted = false
+			last_id = unit_id
 			result.append(unit)
 	for building in buildings:
 		if float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "complete")) == "complete" and bool(building.get("combat_enabled", false)):
+			var building_id := int(building["id"])
+			if building_id < last_id:
+				already_sorted = false
+			last_id = building_id
 			result.append(building)
-	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	if not already_sorted:
+		result.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
 	return result
 
 func find_resource(id: int) -> Variant:

@@ -766,3 +766,10 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - На полностью открытом общем envelope маршрут группы проверяется один раз и регистрирует эквивалентные индивидуальные navigation results. Препятствия, края, несовместимые домены и сдвинутые endpoints безусловно используют прежний footprint-aware индивидуальный поиск. Это реализует целевой контракт общего пути на марше без потери индивидуального уточнения.
 - `2×500`: command `8209 → 815` мс, tick p95 `196,86 → 141,70` мс. `8×500`: command `17041 → 5441` мс, tick p95 `947,27 → 757,65` мс. Canonical hashes каждой пары совпали.
 - Следующий владелец — активный `unit_orders`, а не A*: group task dispatch, local avoidance/neighbor queries, integration и component projection. E6 gate остаётся открытым; детальный baseline хранится в `doc/ror-modern/PERFORMANCE_BASELINE_E6.md`.
+
+### E6-003 — exact active-tick hot path (2026-09-17)
+
+- Без изменения fixed-tick cadence и gameplay результата устранены лишний радиус neighbor query, повторные buffers/de-dup allocations, default lookups полной unit schema, per-member cohesion dictionaries и per-group full-world reconciliation scans.
+- Flat elevation, passive combat-awareness и уже упорядоченные combat rosters получили доказуемые early exits. Неплоский рельеф, активные стойки и смешанный ID-порядок используют полный прежний контракт.
+- Formation march p95: `2×500 141,70 → 94,86` мс; `8×500 757,65 → 518,63` мс. Hashes `f8a079…8652` и `370791…8b11` совпадают до/после.
+- Следующая работа не маскирует стоимость снижением частоты всей симуляции: дальний group-motion owner отделяется от ближней индивидуальной коррекции; затем профилируются combat/gather/AI и visible render/fog/HUD owners.

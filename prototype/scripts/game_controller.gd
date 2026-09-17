@@ -679,7 +679,7 @@ func update_formation_group_members(group_id: int, requested_member_ids: Array[i
 			if current_group_id >= 0 and current_group_id != group_id:
 				affected_groups[current_group_id] = true
 			unit["formation_group_id"] = group_id
-	_reconcile_formation_group(group_id)
+	_reconcile_formation_group(group_id, requested_member_ids)
 	for affected_group_id in affected_groups.keys():
 		_reconcile_formation_group(int(affected_group_id))
 
@@ -689,19 +689,25 @@ func reconcile_formation_groups() -> void:
 	for group_id in group_ids:
 		_reconcile_formation_group(int(group_id))
 
-func _reconcile_formation_group(group_id: int) -> void:
+func _reconcile_formation_group(group_id: int, requested_member_ids: Variant = null) -> void:
 	if not formation_groups.has(group_id):
 		return
 	var group = formation_groups[group_id]
 	var members: Array = []
-	for unit in simulation_world.get_units():
+	var candidate_ids: Array = group.member_ids
+	if requested_member_ids is Array:
+		candidate_ids = requested_member_ids.duplicate()
+		candidate_ids.sort()
+	for member_id_value in candidate_ids:
+		var unit = simulation_world.find_unit(int(member_id_value))
+		if unit == null:
+			continue
 		if int(unit.get("formation_group_id", -1)) != group_id:
 			continue
 		if float(unit.get("hp", 0.0)) <= 0.0:
 			_clear_unit_formation(unit)
 		else:
 			members.append(unit)
-	members.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
 	if members.is_empty():
 		_set_group_lifecycle_state(group, FormationLifecycle.DISBAND, "no_members")
 		formation_groups.erase(group_id)

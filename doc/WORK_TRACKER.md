@@ -1369,3 +1369,11 @@ ext_unit_id.
 - Destination reservation теперь начинает с желаемой точки и расширяет поиск кольцами. Spatial-neighbor query и local movement избавлены от доказанных промежуточных allocations, сохранив стабильную ID-сортировку и прежний порядок floating-point операций.
 - На `2×500 / 400×400` command phase уменьшена `8209 → 815` мс, active fixed-tick p95 `196,86 → 141,70` мс. На `8×500` command phase `17041 → 5441` мс, tick p95 `947,27 → 757,65` мс. Canonical hashes до/после совпадают (`f8a079…8652` и `370791…8b11`).
 - Прямые formation/navigation/spatial/local-movement/fixed-tick/replay gates проходят; полный suite/export остаётся на границе E6. Следующий measured owner — обработка активного группового движения внутри `unit_orders`: task dispatch, neighbor query, local calculation, component projection/sync и integration. Общий путь уже не подменяется 4000 независимыми A*.
+
+### Прогресс (2026-09-17, E6-003 — active-tick hot path)
+
+- Local avoidance сохранил прежнюю формулу и ID-порядок, но spatial query ограничен математически достаточным радиусом, зависящим от обоих footprint и clearance. Переиспользуются neighbor buffer/de-dup generations; сортировка пропускается только когда уже получен возрастающий ID-порядок.
+- Полная runtime-схема юнита получила прямую component projection, доказанно эквивалентную общему `sync_dynamic`. Плоский terrain elevation имеет O(1) zero fast path с поддерживаемым счётчиком ненулевых вершин.
+- Formation cohesion не создаёт per-member Dictionary, а reconciliation использует сохранённые member IDs и O(1) entity lookup вместо сканирования всех юнитов по одному разу для каждой группы. Добавление/удаление участников, смерть, бой и snapshot/replay проходят прежний lifecycle.
+- Пассивный combat roster больше не строит заведомо бесполезную world signature. Уже ID-упорядоченные combat target/attacker arrays не сортируются повторно; при смешанном порядке прежняя сортировка остаётся.
+- `2×500` active p95 уменьшен `141,70 → 94,86` мс; `8×500` — `757,65 → 518,63` мс. Canonical hashes полностью совпадают. E6 остаётся открытым: следующий owner — двухуровневое групповое продвижение/local correction и затем отдельные combat/gather/AI/render workloads.

@@ -34,24 +34,26 @@ static func remaining_distance(unit: Dictionary) -> float:
 
 
 static func _update_group(members: Array) -> void:
-	var active: Array = []
+	var active_units: Array = []
+	var remaining_distances := PackedFloat64Array()
 	for unit in members:
 		if int(unit.get("stuck_ticks", 0)) < DETACH_STUCK_TICKS:
-			active.append({"unit": unit, "remaining": remaining_distance(unit)})
-	if active.size() < 2:
+			active_units.append(unit)
+			remaining_distances.append(remaining_distance(unit))
+	if active_units.size() < 2:
 		return
 	var minimum_remaining := INF
 	var maximum_remaining := 0.0
-	for entry in active:
-		minimum_remaining = minf(minimum_remaining, float(entry["remaining"]))
-		maximum_remaining = maxf(maximum_remaining, float(entry["remaining"]))
+	for remaining in remaining_distances:
+		minimum_remaining = minf(minimum_remaining, remaining)
+		maximum_remaining = maxf(maximum_remaining, remaining)
 	var spread := maximum_remaining - minimum_remaining
 	if spread <= COHESION_TOLERANCE:
 		return
 	var pressure := clampf((spread - COHESION_TOLERANCE) / 3.0, 0.0, 1.0)
-	for entry in active:
-		var remaining := float(entry["remaining"])
-		var unit: Dictionary = entry["unit"]
+	for index in range(active_units.size()):
+		var remaining := remaining_distances[index]
+		var unit: Dictionary = active_units[index]
 		if remaining <= minimum_remaining + FRONT_BAND:
 			unit["cohesion_speed_scale"] = lerpf(1.0, MIN_FRONT_SCALE, pressure)
 		elif remaining >= maximum_remaining - REAR_BAND:

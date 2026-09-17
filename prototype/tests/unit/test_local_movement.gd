@@ -10,6 +10,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_velocity_and_neighbor_avoidance()
 	test_obstacle_fallback_and_speed_limit()
+	test_runtime_fast_path_matches_generic()
 
 	if failures.is_empty():
 		print("N-005 local movement tests passed")
@@ -44,6 +45,19 @@ func test_obstacle_fallback_and_speed_limit() -> void:
 		assert_true(Vector2i(floori(next.x), floori(next.y)) != Vector2i(5, 5), "fallback does not enter obstacle")
 
 
+func test_runtime_fast_path_matches_generic() -> void:
+	var grid = open_grid()
+	var moving := runtime_unit(10, Vector2(4.0, 5.0), Vector2(9.0, 5.0))
+	var neighbor := runtime_unit(11, Vector2(4.65, 5.0), Vector2(1.0, 5.0))
+	var generic_unit: Dictionary = moving.duplicate(true)
+	var runtime_unit_copy: Dictionary = moving.duplicate(true)
+	var generic_reason := LocalMovement.calculate_into(generic_unit, generic_unit["target"], [neighbor], grid, 0.05)
+	var runtime_reason := LocalMovement.calculate_runtime_unit_into(runtime_unit_copy, runtime_unit_copy["target"], [neighbor], grid, 0.05)
+	assert_true(runtime_reason == generic_reason, "runtime fast path preserves diagnostic reason")
+	assert_true(runtime_unit_copy["desired_velocity"] == generic_unit["desired_velocity"], "runtime fast path preserves desired velocity")
+	assert_true(runtime_unit_copy["actual_velocity"] == generic_unit["actual_velocity"], "runtime fast path preserves actual velocity")
+
+
 func unit(id: int, position: Vector2, target: Vector2) -> Dictionary:
 	return {
 		"id": id,
@@ -56,6 +70,14 @@ func unit(id: int, position: Vector2, target: Vector2) -> Dictionary:
 		"minimum_clearance": Footprint.DEFAULT_CLEARANCE,
 		"push_priority": 2,
 	}
+
+
+func runtime_unit(id: int, position: Vector2, target: Vector2) -> Dictionary:
+	var result := unit(id, position, target)
+	result["cohesion_speed_scale"] = 1.0
+	result["movement_domain"] = "land"
+	result["terrain_restriction"] = -1
+	return result
 
 
 func open_grid():

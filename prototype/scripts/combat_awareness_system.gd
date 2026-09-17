@@ -15,11 +15,19 @@ func reset() -> void:
 func collect_commands(world, tick: int) -> Array:
 	if world == null:
 		return []
+	var units: Array = world.get_combat_attackers()
+	var has_active_observer := false
+	for unit_value in units:
+		var unit: Dictionary = unit_value
+		if String(unit.get("stance", "passive")) != "passive" and _eligible_for_awareness(world, unit):
+			has_active_observer = true
+			break
+	if not has_active_observer:
+		return []
 	var world_signature := _world_signature(world)
 	if world_signature == last_world_signature:
 		return []
 	last_world_signature = world_signature
-	var units: Array = world.get_combat_attackers()
 	units.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	var assigned := _assigned_attacker_counts(units)
 	var commands: Array = []

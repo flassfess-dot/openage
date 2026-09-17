@@ -22,6 +22,7 @@ func _initialize() -> void:
 	test_other_entity_types(world)
 	test_dynamic_sync(world)
 	test_stable_idle_sync_matches_full_sync(world)
+	test_runtime_unit_sync_matches_full_sync(world)
 
 	if failures.is_empty():
 		print("S-001 entity component tests passed")
@@ -113,6 +114,28 @@ func test_stable_idle_sync_matches_full_sync(world) -> void:
 	EntityComponents.sync_dynamic(full_sync_unit)
 	EntityComponents.sync_stable_idle_tick(idle_sync_unit)
 	assert_equal(idle_sync_unit["components"], full_sync_unit["components"], "stable idle fast path matches complete component sync")
+
+
+func test_runtime_unit_sync_matches_full_sync(world) -> void:
+	var source_unit: Dictionary = world.add_unit(1, "clubman", Vector2(9.0, 8.0), false).duplicate(true)
+	for key in ["pos", "previous_pos", "target", "destination"]:
+		source_unit[key] = Vector2(source_unit[key]) + Vector2(0.25, 0.5)
+	source_unit["path"] = [Vector2(10.0, 9.0), Vector2(11.0, 10.0)]
+	source_unit["path_index"] = 1
+	source_unit["desired_velocity"] = Vector2(0.5, 0.25)
+	source_unit["actual_velocity"] = Vector2(0.4, 0.2)
+	source_unit["hp"] = 19.0
+	source_unit["cooldown"] = 0.6
+	source_unit["work"] = 0.3
+	source_unit["carried_amount"] = 4.0
+	source_unit["carried_resource_type_id"] = 1
+	source_unit["anim_state"] = "Move"
+	source_unit["anim"] = 2.25
+	var full_sync_unit: Dictionary = source_unit.duplicate(true)
+	var runtime_sync_unit: Dictionary = source_unit.duplicate(true)
+	EntityComponents.sync_dynamic(full_sync_unit)
+	EntityComponents.sync_runtime_unit(runtime_sync_unit)
+	assert_equal(runtime_sync_unit["components"], full_sync_unit["components"], "runtime unit fast path matches complete component sync")
 
 
 func assert_float(actual: float, expected: float, context: String) -> void:

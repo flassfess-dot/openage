@@ -328,6 +328,61 @@ static func sync_dynamic(entity: Dictionary) -> void:
 	animation["events_fired"] = entity.get("animation_events_fired", animation.get("events_fired", {}))
 
 
+static func sync_runtime_unit(entity: Dictionary) -> void:
+	# SimulationWorld units are created with the complete runtime schema. Their
+	# hot per-tick projection can therefore avoid dozens of has/get/default
+	# lookups while writing exactly the same component fields as sync_dynamic.
+	var components: Dictionary = entity["components"]
+	var transform: Dictionary = components["transform"]
+	transform["position"] = entity["pos"]
+	transform["previous_position"] = entity["previous_pos"]
+	transform["elevation"] = float(entity["elevation"])
+	transform["facing"] = int(entity["facing"])
+	transform["movement_facing"] = int(entity["movement_facing"])
+	transform["desired_facing"] = int(entity["desired_facing"])
+	transform["action_facing"] = int(entity["action_facing"])
+
+	var health: Dictionary = components["health"]
+	health["current"] = float(entity["hp"])
+	health["maximum"] = float(entity["max_hp"])
+	health["alive"] = float(entity["hp"]) > 0.0
+
+	var movement: Dictionary = components["movement"]
+	movement["target"] = entity["target"]
+	movement["destination"] = entity["destination"]
+	movement["path"] = entity["path"]
+	movement["path_index"] = entity["path_index"]
+	movement["desired_velocity"] = entity["desired_velocity"]
+	movement["path_request_id"] = entity["path_request_id"]
+	movement["path_status"] = entity["path_status"]
+	movement["path_grid_revision"] = entity["path_grid_revision"]
+	movement["actual_velocity"] = entity["actual_velocity"]
+	movement["speed"] = entity["speed"]
+	movement["terrain_restriction"] = entity["terrain_restriction"]
+	movement["domain"] = entity["movement_domain"]
+
+	var combat: Dictionary = components["combat"]
+	combat["target_id"] = int(entity["target_id"])
+	combat["cooldown"] = float(entity["cooldown"])
+	combat["stance"] = String(entity["stance"])
+	combat["acquisition_range"] = float(entity["acquisition_range"])
+	combat["chase_range"] = float(entity["chase_range"])
+	combat["retaliation_target_id"] = int(entity["retaliation_target_id"])
+
+	var carrier: Dictionary = components["resource_carrier"]
+	carrier["amount"] = float(entity["carried_amount"])
+	carrier["resource_type_id"] = int(entity["carried_resource_type_id"])
+
+	var worker: Dictionary = components["worker"]
+	worker["resource_id"] = int(entity["resource_id"])
+	worker["action_cooldown"] = float(entity["work"])
+
+	var animation: Dictionary = components["animation_state"]
+	animation["state"] = String(entity["anim_state"])
+	animation["elapsed"] = float(entity["anim"])
+	animation["events_fired"] = entity["animation_events_fired"]
+
+
 static func sync_stable_idle_tick(entity: Dictionary) -> void:
 	# A unit that entered and left the tick idle, without a route, cannot have
 	# changed its transform, movement plan or carried resources in that tick.
