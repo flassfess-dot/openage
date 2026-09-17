@@ -2,12 +2,12 @@ class_name RoRSimulationVisibilitySystem
 extends RefCounted
 
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
+const MOVEMENT_REFRESH_BUCKETS := 4
 
 var fog: FogOfWar
 var units_provider: Callable
 var buildings_provider: Callable
-var last_source_signature: Array = []
-var visibility_dirty := true
+var movement_refresh_bucket := 0
 
 
 func _init(world_size: Vector2i, source_units: Callable = Callable(), source_buildings: Callable = Callable()) -> void:
@@ -16,47 +16,27 @@ func _init(world_size: Vector2i, source_units: Callable = Callable(), source_bui
 	buildings_provider = source_buildings
 
 
-func advance(_context: Dictionary = {}) -> void:
+func advance(context: Dictionary = {}) -> void:
 	var units: Array = units_provider.call() if units_provider.is_valid() else []
 	var buildings: Array = buildings_provider.call() if buildings_provider.is_valid() else []
-	var signature := _source_signature(units, buildings)
-	if not visibility_dirty and signature == last_source_signature:
+	if bool(context.get("force", false)):
+		fog.update(units, buildings)
 		return
-	fog.update(units, buildings)
-	last_source_signature = signature
-	visibility_dirty = false
+	fog.update(units, buildings, MOVEMENT_REFRESH_BUCKETS, movement_refresh_bucket)
+	movement_refresh_bucket = posmod(movement_refresh_bucket + 1, MOVEMENT_REFRESH_BUCKETS)
 
 
 func reset() -> void:
 	fog.reset()
-	last_source_signature.clear()
-	visibility_dirty = true
+	movement_refresh_bucket = 0
 
 
 func set_alliance(first_team: int, second_team: int, allied: bool = true) -> void:
 	fog.set_alliance(first_team, second_team, allied)
-	visibility_dirty = true
 
 
 func set_relation(observer_team: int, source_team: int, allied: bool = true) -> void:
 	fog.set_relation(observer_team, source_team, allied)
-	visibility_dirty = true
-
-
-func _source_signature(units: Array, buildings: Array) -> Array:
-	var result: Array = []
-	for entity_value in units + buildings:
-		var entity: Dictionary = entity_value
-		var vision: Dictionary = entity.get("components", {}).get("vision", {})
-		if int(entity.get("team", 0)) <= 0 or float(entity.get("hp", 0.0)) <= 0.0 or not bool(vision.get("enabled", true)) or float(vision.get("range", 0.0)) <= 0.0:
-			continue
-		result.append([
-			int(entity.get("id", -1)),
-			int(entity.get("team", 0)),
-			Vector2(entity.get("pos", Vector2.ZERO)),
-			float(vision.get("range", 0.0)),
-		])
-	return result
 
 
 func state_at_world(team: int, position: Vector2) -> int:

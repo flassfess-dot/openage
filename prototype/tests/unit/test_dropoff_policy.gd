@@ -25,6 +25,8 @@ func _initialize() -> void:
 	worker["carried_resource_type_id"] = 3
 	assert_equal(int(world.nearest_dropoff(worker)["id"]), int(storage_pit["id"]), "gold uses the same data-driven Storage Pit policy")
 	assert_true(int(town_center["id"]) != int(world.nearest_dropoff(worker)["id"]), "more distant universal Town Center remains a fallback")
+	var tied_storage_pit: Dictionary = world.add_building(699, "storage_pit", Vector2(6.0, 3.0), 1)
+	assert_equal(int(world.nearest_dropoff(worker)["id"]), int(tied_storage_pit["id"]), "equidistant drop sites keep the stable lower-ID tie break")
 
 	if failures.is_empty():
 		print("I8-004 drop-site policy tests passed")

@@ -9,6 +9,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	test_unknown_explored_visible_and_allies()
+	test_overlapping_sources_keep_shared_cells_visible()
 	test_simulation_and_render_visibility()
 	test_gaia_visibility_contract()
 
@@ -53,6 +54,21 @@ func test_unknown_explored_visible_and_allies() -> void:
 	assert_equal(fog.state_name(fog.state_at_world(1, ally["pos"])), "explored", "destroyed source stops granting vision")
 	var snapshot: PackedByteArray = fog.snapshot(1)
 	assert_equal(int(snapshot[8 * 12 + 10]), FogOfWar.EXPLORED, "minimap snapshot uses the same exploration grid")
+
+
+func test_overlapping_sources_keep_shared_cells_visible() -> void:
+	var fog = FogOfWar.new(Vector2i(12, 12))
+	var first := vision_entity(1, Vector2(4.5, 4.5), 2.0)
+	first["id"] = 10
+	var second := vision_entity(1, Vector2(5.5, 4.5), 2.0)
+	second["id"] = 11
+	fog.update([first, second], [])
+	first["pos"] = Vector2(9.5, 9.5)
+	fog.update([first, second], [])
+	assert_equal(fog.state_at_world(1, Vector2(5.5, 4.5)), FogOfWar.VISIBLE, "moving one overlapping source preserves the other source's visibility")
+	second["hp"] = 0.0
+	fog.update([first, second], [])
+	assert_equal(fog.state_at_world(1, Vector2(5.5, 4.5)), FogOfWar.EXPLORED, "last overlapping source removal downgrades the shared cell")
 
 
 func test_simulation_and_render_visibility() -> void:

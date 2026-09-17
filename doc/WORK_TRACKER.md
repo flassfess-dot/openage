@@ -1420,3 +1420,10 @@ ext_unit_id.
 - Во время cooldown каждый атакующий ошибочно добавлял `Recover → FaceTarget → Recover` в order history на каждом такте. Facing по-прежнему обновляется, но переход `FaceTarget/PerformAction` теперь происходит только когда следующая атака готова; статические атакующие используют тот же контракт.
 - Длинный точный A/B против commit `9e5e6ba6`, `8×500 combat / 3+20`: fixed tick p50/p95/max `467,34 / 501,22 / 507,04 → 463,77 / 483,36 / 490,48` мс; combat task p50/p95 `148,91 / 160,84 → 139,56 / 146,69` мс.
 - Новый canonical hash `5aa4590c…014f` принят как намеренное исправление ложной истории фаз; damage/timing/facing не менялись. Прямой recovery-history test и animation/events/order/melee/autonomous gates проходят.
+
+### Прогресс (2026-09-18, E6-010 — gather-cycle и bounded incremental fog)
+
+- Manual benchmark получил настоящий `gather_economy`: реальный каталог, 500 Villager на игрока, 500 источников и 64 Granary на контрольном `2×500`, обычные approach/gather/carry/deposit/return правила. Все 1000 приказов приняты; итог после `520+240` ticks — 11 671 gather и 988 deposit cycles, food `5060/5000`.
+- Исходный профиль: fixed p50/p95 `137,89 / 204,11` мс, fog `60,00 / 69,99`, task `51,83 / 115,66`. Полный пересчёт fog заменён per-source footprint delta и per-cell overlap counts; движение распределено по четырём stable-ID buckets с максимумом 150 мс, а death/spawn/alliance/explicit refresh остаются немедленными.
+- Повтор того же профиля: fixed `91,52 / 150,92` мс, fog `17,62 / 21,45`, sample wall `35,21 → 23,18` с при идентичном экономическом результате. Hash обновлён из-за намеренно bounded fog cadence. Fog/visibility/diplomacy/combat-awareness и gather/dropoff/return tests проходят.
+- Измеренный следующий owner: `unit_orders.task 49,04 / 106,65` мс и burst из сотен индивидуальных A* при одновременном возврате. Теперь допускается узкий GDExtension/data-oriented прототип для path/flow/local movement с обязательным GDScript fallback; характеристики экономики и публичный order/save/replay contract не переносятся и не меняются.

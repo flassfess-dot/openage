@@ -1178,7 +1178,7 @@ func sync_all_components() -> void:
 
 
 func update_fog_of_war() -> void:
-	visibility_system.advance()
+	visibility_system.advance({"force": true})
 
 func query_units_near(position: Vector2, radius: float) -> Array:
 	return spatial_index.query_circle(position, radius, "unit")
@@ -2151,21 +2151,21 @@ func nearest_dropoff(worker: Dictionary) -> Variant:
 	for value in drop_site_ids:
 		if int(value) >= 0:
 			allowed[int(value)] = true
-	var candidates: Array = []
+	var nearest: Variant = null
+	var nearest_distance := INF
+	var nearest_id := 2147483647
 	for building in buildings:
 		if int(building.get("team", 0)) != int(worker.get("team", 0)) or float(building.get("hp", 0.0)) <= 0.0:
 			continue
 		if not dropoff_accepts_resource(building, carried_resource_type, allowed):
 			continue
-		candidates.append(building)
-	if candidates.is_empty():
-		return null
-	candidates.sort_custom(func(left, right):
-		var left_distance: float = worker["pos"].distance_squared_to(left["pos"])
-		var right_distance: float = worker["pos"].distance_squared_to(right["pos"])
-		return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and int(left["id"]) < int(right["id"]))
-	)
-	return candidates[0]
+		var distance: float = worker["pos"].distance_squared_to(building["pos"])
+		var building_id := int(building["id"])
+		if (distance < nearest_distance and not is_equal_approx(distance, nearest_distance)) or (is_equal_approx(distance, nearest_distance) and building_id < nearest_id):
+			nearest = building
+			nearest_distance = distance
+			nearest_id = building_id
+	return nearest
 
 
 func dropoff_accepts_resource(building: Dictionary, resource_type_id: int, worker_allowed_source_ids: Dictionary = {}) -> bool:

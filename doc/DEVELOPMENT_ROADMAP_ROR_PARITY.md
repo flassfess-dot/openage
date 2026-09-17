@@ -807,3 +807,9 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 
 - Recovery больше не пишет ложный цикл `Recover → FaceTarget → Recover` каждый cooldown tick; фактический facing продолжает следовать цели, а переход к действию выполняется только при готовой атаке.
 - Длинный `8×500 / 3+20` A/B против `9e5e6ba6`: fixed p95 `501,22 → 483,36` мс, combat task p95 `160,84 → 146,69` мс. Новый hash принят из-за намеренного исправления order history; боевые числа и timing не изменены.
+
+### E6-010 — экономический workload и инкрементальный fog (2026-09-18)
+
+- `gather_economy` моделирует 500 реальных Villager на игрока через approach, gather, carry, deposit и повторный маршрут; все команды и итоговые ресурсы проходят обычный authoritative pipeline.
+- На `2×500 / 400×400 / 520+240` полный пересчёт fog занимал `60,00 / 69,99` мс p50/p95 и поднимал fixed tick до `137,89 / 204,11` мс. Per-source deltas, overlap counts и четыре deterministic movement bucket снизили fog до `17,62 / 21,45`, fixed tick — до `91,52 / 150,92` мс; экономический итог не изменён.
+- Следующий владелец — синхронные source/drop-site path bursts и per-unit task dispatch. E6 теперь допускает узкий GDExtension/data-oriented kernel для измеренных path/flow/local-movement массивов, но сохраняет GDScript fallback, публичные commands, economy rules, snapshot/save/replay и deterministic gates.

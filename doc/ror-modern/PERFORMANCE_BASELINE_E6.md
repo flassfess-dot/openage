@@ -165,13 +165,25 @@ Canonical SHA-256 каждого 2/4/8-player area-x4 workload совпадае�
 
 Новый hash принят намеренно: различие — отсутствие недостоверных повторов `FaceTarget/Recover` во внутренней bounded history, а не изменение урона, attack timing или направления. Animation/melee/order/autonomous-combat gates проходят. Боевой tick всё ещё почти в десять раз выше бюджета, поэтому E6 продолжается.
 
-## 13. Следующие профили и запреты
+## 13. E6-010 — полный экономический цикл и инкрементальный fog
+
+В benchmark добавлен `gather_economy`, использующий реальный runtime/object/graphics catalog: 500 Villager на игрока распределены по выровненным по navigation grid Berry Bush, совместимым Granary и выполняют обычный `gather → carry → deposit → return`. Источники разделены максимум по два работника, поэтому тест не подменяется искусственной очередью у одного объекта. Отчёт отдельно фиксирует принятые команды, gather/deposit cycles, несущих груз работников и stockpile каждого игрока.
+
+Контрольный `2×500 / 400×400 / 520+240` до оптимизации дал `137,89 / 204,11` мс p50/p95 fixed tick, `60,00 / 69,99` мс fog и `51,83 / 115,66` мс task. Все 1000 работников активны; завершены 988 разгрузок и 11 671 акт сбора.
+
+Gameplay fog переведён с полного сброса visible-состояния всей карты на счётчики перекрытия и дельты footprint каждого источника зрения. Движущиеся источники равномерно распределены по четырём deterministic buckets; смерть, появление, изменение команды/радиуса и явный запрос обновляются немедленно, обычное перемещение — не позднее трёх последующих fixed ticks (150 мс). Это ограничивает кадр без потери explored history и создаёт единый seam для будущего terrain/elevation occlusion.
+
+После изменения тот же профиль дал `91,52 / 150,92` мс fixed tick, а fog — `17,62 / 21,45` мс. Sample wall уменьшился `35,21 → 23,18` с. Экономический итог точен и совпадает: 988 разгрузок, 11 671 сбор, food `5060/5000`; изменился canonical hash, поскольку bounded visibility cadence намеренно входит в авторитетное fog-состояние. Fog/visibility/diplomacy/combat-awareness tests закрепляют overlap counts, принудительное немедленное обновление и верхнюю границу bucket-цикла.
+
+Оставшийся владелец нагрузки теперь измерен, а не предполагается: `unit_orders.task` даёт `49,04 / 106,65` мс, 893 возвратных path query — `4,19 / 8,14` мс каждый. Синхронный переход большой группы способен собрать сотни малых A* в одном такте. Следующий пакет сравнивает общий flow/corridor для одинаковой точки сдачи с нативным data-oriented navigation kernel; перенос в GDExtension разрешён именно для этого измеренного владельца, но экономика, footprint contract и deterministic result остаются в GDScript-authoritative API.
+
+## 14. Следующие профили и запреты
 
 1. Расширить formation-профили отдельными `formation_assemble`, crossing-groups, narrow-corridor и combat-transition окнами. Общий марш уже не должен оптимизироваться ценой перестроения, сжатия/восстановления или внешнего avoidance.
-2. Добавить отдельные `move/local-avoidance/combat/gather` workloads и устранять только их измеренные полные обходы/повторные вычисления; idle и shared-march workloads не служат заменой этим профилям.
+2. Сохранить отдельные `move/local-avoidance/combat/gather` workloads и устранять только их измеренные полные обходы/повторные вычисления; следующий gather-owner — пакетные маршруты source/drop-site, а не изменение скорости или вместимости рабочих.
 3. Добавить активный 2/4/8-player AI/combat workload, отдельно измеряя snapshot и planning cadence.
 4. Добавить render baseline с world/minimap fog, source composite/player colour, culling, draw calls, CPU frame и GPU frame. Headless simulation numbers не являются доказательством плавного UI.
 5. Повторить после retained fog chunks и общего world/minimap cache; camera pan не должен менять canonical hash или инициировать полный authoritative rebuild.
-6. Не переходить на MultiMesh, сторонний ECS, C# или GDExtension до профиля соответствующего владельца. Эквивалентная оптимизация обязана сохранить canonical hash и пройти прямые lifecycle/save/replay regressions. Намеренное улучшение movement/formation может создать новый hash baseline только после отдельного UX/collision/stress/replay gate; изменение характеристик, экономики или правил боя этим не разрешается.
+6. Не переходить на MultiMesh, сторонний ECS, C# или GDExtension без профиля соответствующего владельца. E6-010 теперь разрешает узкий прототип GDExtension для path/flow/local-movement массивов: публичный command/order API, authoritative экономика и сериализация остаются движковыми, а чистый вычислительный kernel обязан иметь GDScript fallback, одинаковый deterministic outcome и lifecycle/save/replay regressions. Намеренное улучшение movement/formation может создать новый hash baseline только после отдельного UX/collision/stress/replay gate; изменение характеристик, экономики или правил боя этим не разрешается.
 
-Текущий обязательный 50-мс tick budget ещё не достигнут: true-march даёт p95 `236,04` мс, individual crossing `313,89` мс, а combat contact около `493` мс на 8×500. Значение `2×500` будет повторено после следующего общего hot-path пакета, чтобы не тратить длинный прогон на каждую локальную правку. E6 остаётся открытым; после достижения бюджета для будущих механик требуется ещё не менее 30% p95-запаса.
+Текущий обязательный 50-мс tick budget ещё не достигнут: true-march даёт p95 `236,04` мс, individual crossing `313,89` мс и combat contact около `493` мс на 8×500; полный gather-cycle уже даёт `150,92` мс на 2×500. Значения 4/8×500 для экономики выполняются после устранения измеренного path burst, чтобы не тратить многоминутный прогон на известный синхронный blocker. E6 остаётся открытым; после достижения бюджета для будущих механик требуется ещё не менее 30% p95-запаса.
