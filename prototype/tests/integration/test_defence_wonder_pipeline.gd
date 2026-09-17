@@ -175,7 +175,9 @@ func verify_wonder_pipeline(catalog) -> void:
 	provision(world, 1)
 	world.add_building(1700, "town_center", Vector2(6.0, 6.0), 1)
 	world.add_building(1701, "town_center", Vector2(54.0, 54.0), 2)
-	var worker: Dictionary = world.add_unit(1, "villager", Vector2(22.0, 24.0), false)
+	# Keep the builder outside the Wonder's imported 5.2 x 5.2 footprint;
+	# placement legality intentionally treats living units as hard blockers.
+	var worker: Dictionary = world.add_unit(1, "villager", Vector2(20.5, 24.0), false)
 	var enemy: Dictionary = world.add_unit(2, "clubman", Vector2(50.0, 50.0), false)
 	enemy["stance"] = "passive"
 	var controller = GameController.new(world)

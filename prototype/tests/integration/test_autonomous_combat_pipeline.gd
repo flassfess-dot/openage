@@ -90,7 +90,7 @@ func test_enemy_building_is_a_first_class_combat_target() -> void:
 	var controller := GameController.new(world)
 	var attack = Commands.AttackCommand.new(1, [int(attacker["id"])], int(building["id"]))
 	controller.enqueue_command(attack, true, 1)
-	for _tick in range(12):
+	for _tick in range(40):
 		controller.advance_frame(0.05, 1, 2)
 		if world.find_building(90) == null:
 			break

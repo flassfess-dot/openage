@@ -2,6 +2,7 @@ extends SceneTree
 
 const Commands := preload("res://scripts/commands.gd")
 const GameController := preload("res://scripts/game_controller.gd")
+const Footprint := preload("res://scripts/footprint.gd")
 const MatchDefinition := preload("res://scripts/match_definition.gd")
 const MapGenerator := preload("res://scripts/random_map_generator.gd")
 const MatchBootstrap := preload("res://scripts/match_bootstrap.gd")
@@ -141,11 +142,17 @@ func find_source_objective_site(world, worker: Dictionary, condition: Dictionary
 			var position := Vector2(half_x * 0.5, half_y * 0.5)
 			if not world.map_supports_foundation("tower", position):
 				continue
-			worker["pos"] = position
-			worker["previous_pos"] = position
-			world.update_fog_of_war()
-			if world.can_place_foundation(1, "tower", position):
-				return position
+			var footprint := Footprint.building(world.unit_stats("tower"), position)
+			var preview := {"pos": position, "footprint": footprint}
+			for approach_value in world.building_perimeter_candidates(worker, preview):
+				var approach := Vector2(approach_value)
+				if not world.navigation_grid.is_position_walkable_for(approach, float(worker.get("footprint_radius", 0.3)), String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1))):
+					continue
+				worker["pos"] = approach
+				worker["previous_pos"] = approach
+				world.update_fog_of_war()
+				if world.can_place_foundation(1, "tower", position):
+					return position
 	return null
 
 

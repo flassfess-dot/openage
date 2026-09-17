@@ -82,7 +82,9 @@ func verify_city_wall_plan_pipeline(catalog) -> void:
 	world.grant_technology(2, 101)
 	world.grant_technology(2, 11)
 	world.add_building(100, "town_center", Vector2(24.5, 24.5), 2)
-	var worker: Dictionary = world.add_unit(2, "villager", Vector2(24.5, 24.5), false)
+	# A mobile unit spawned inside the Town Center cannot leave its occupied
+	# navigation cells. Start the builder beyond the planned wall perimeter.
+	var worker: Dictionary = world.add_unit(2, "villager", Vector2(31.5, 24.5), false)
 	world.update_fog_of_war()
 	var contract := {
 		"schema_version": 1,

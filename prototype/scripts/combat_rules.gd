@@ -66,8 +66,23 @@ static func edge_distance(attacker: Dictionary, target: Dictionary) -> float:
 	var target_footprint: Dictionary = target.get("footprint", {})
 	if String(target_footprint.get("shape", "")) == "polygon":
 		var half_size := Vector2(target_footprint.get("half_size", Vector2.ZERO))
-		var offset := (attacker_position - target_position).abs() - half_size
-		var outside := Vector2(maxf(0.0, offset.x), maxf(0.0, offset.y)).length()
+		var minimum := target_position - half_size
+		var maximum := target_position + half_size
+		var occupied_cells: Array = target.get("occupied_cells", [])
+		if not occupied_cells.is_empty():
+			minimum = Vector2(INF, INF)
+			maximum = Vector2(-INF, -INF)
+			for cell_value in occupied_cells:
+				var cell := Vector2(Vector2i(cell_value))
+				minimum.x = minf(minimum.x, cell.x)
+				minimum.y = minf(minimum.y, cell.y)
+				maximum.x = maxf(maximum.x, cell.x + 1.0)
+				maximum.y = maxf(maximum.y, cell.y + 1.0)
+		var offset := Vector2(
+			maxf(maxf(minimum.x - attacker_position.x, 0.0), attacker_position.x - maximum.x),
+			maxf(maxf(minimum.y - attacker_position.y, 0.0), attacker_position.y - maximum.y)
+		)
+		var outside := offset.length()
 		return maxf(0.0, outside - float(attacker.get("footprint_radius", 0.0)))
 	var center_distance: float = attacker_position.distance_to(target_position)
 	var occupied_radius := float(attacker.get("footprint_radius", 0.0)) + float(target.get("footprint_radius", 0.0))

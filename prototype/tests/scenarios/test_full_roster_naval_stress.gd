@@ -27,12 +27,13 @@ func verify_full_roster_navigation(catalog) -> void:
 	var world = water_world(catalog, Vector2i(48, 30))
 	var sentinel := add_source_ship(world, 2, 17, Vector2(46.5, 28.5))
 	sentinel["stance"] = "passive"
-	world.set_alliance(1, 2, true)
 	var ships: Array[Dictionary] = []
 	var initial_x: Dictionary = {}
 	for index in range(ALL_SHIP_SOURCES.size()):
 		var source_id: int = ALL_SHIP_SOURCES[index]
 		var ship: Dictionary = add_source_ship(world, 1, source_id, Vector2(2.5, 2.5 + index * 2.25))
+		ship["stance"] = "passive"
+		ship["attack_autonomous"] = false
 		ships.append(ship)
 		initial_x[int(ship["id"])] = float(ship["pos"].x)
 		assert_true(world.assign_command_move([ship], Vector2(44.5, 2.5 + index * 2.25)), "source %d accepts a water-domain move" % source_id)
@@ -45,6 +46,8 @@ func verify_full_roster_navigation(catalog) -> void:
 	for ship in ships:
 		if float(ship.get("pos", Vector2.ZERO).x) - float(initial_x[int(ship["id"])]) > 30.0:
 			progressed += 1
+		else:
+			print("I12-019F navigation diagnostic source=%d pos=%s destination=%s task=%s path=%d status=%s reason=%s radius=%.3f desired=%s actual=%s stuck=%s" % [int(ship.get("source_unit_id", -1)), str(ship.get("pos", Vector2.ZERO)), str(ship.get("destination", Vector2.ZERO)), String(ship.get("task", "")), ship.get("path", []).size(), String(ship.get("path_status", "")), String(ship.get("diagnostic_reason", "")), float(ship.get("footprint_radius", 0.0)), str(ship.get("desired_velocity", Vector2.ZERO)), str(ship.get("actual_velocity", Vector2.ZERO)), str(ship.get("stuck_ticks", -1))])
 	assert_equal(progressed, ALL_SHIP_SOURCES.size(), "every economic, transport and combat ship crosses the long water route")
 	assert_equal(violations, 0, "full naval roster never leaves its source-valid water surface")
 	assert_true(minimum_pair_distance(ships) > 0.05, "local avoidance prevents full-roster position collapse")

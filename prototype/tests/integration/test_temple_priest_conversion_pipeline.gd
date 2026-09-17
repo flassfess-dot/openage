@@ -151,7 +151,9 @@ func verify_faith_and_priest_technologies(world, priest: Dictionary) -> void:
 
 
 func verify_monotheism_and_resistance(world, upgraded_priest: Dictionary) -> void:
-	var fresh_priest: Dictionary = world.add_unit(1, "priest", Vector2(8.0, 8.0), false)
+	# Keep the fixture inside the one-cell building conversion radius measured
+	# from the authoritative occupied-cell boundary.
+	var fresh_priest: Dictionary = world.add_unit(1, "priest", Vector2(8.3, 8.3), false)
 	var enemy_priest: Dictionary = world.add_unit(2, "priest", Vector2(10.0, 8.0), false)
 	assert_equal(world.conversion_system.validate_target(fresh_priest, enemy_priest), "monotheism_required", "enemy Priests require Monotheism")
 	var enemy_house: Dictionary = world.add_building(961, "house", Vector2(9.5, 9.5), 2)

@@ -40,6 +40,13 @@ func _initialize() -> void:
 	var result: Dictionary = world.get_victory_result()
 	var final_hash: String = recorder.world_state_hash(world, final_tick, controller)
 	print("E5-006B live tick=%d issued=%d battle_over=%s result=%s hash=%s" % [final_tick, issued, world.is_battle_over(), result, final_hash])
+	if not world.is_battle_over():
+		print("E5-006B terminal diagnostic units=%s buildings=%s" % [_survivor_summary(world.get_units()), _survivor_summary(world.get_buildings())])
+		for entity_value in world.get_units() + world.get_buildings():
+			var entity: Dictionary = entity_value
+			if float(entity.get("hp", 0.0)) <= 0.0 or (int(entity.get("team", 0)) != 1 and String(entity.get("kind", "")) != "clubman"):
+				continue
+			print("E5-006B entity id=%d team=%d kind=%s pos=%s hp=%.2f task=%s target_id=%d destination=%s combat_destination=%s path=%d path_index=%d status=%s reason=%s radius=%.3f" % [int(entity.get("id", -1)), int(entity.get("team", 0)), String(entity.get("kind", "")), str(entity.get("pos", Vector2.ZERO)), float(entity.get("hp", 0.0)), String(entity.get("task", "static")), int(entity.get("target_id", -1)), str(entity.get("destination", Vector2.ZERO)), str(entity.get("combat_destination", null)), entity.get("path", []).size(), int(entity.get("path_index", 0)), String(entity.get("path_status", "")), String(entity.get("diagnostic_reason", "")), float(entity.get("footprint_radius", 0.0))])
 	assert_true(issued > 0, "generated AI records public commands")
 	assert_true(world.is_battle_over(), "generated two-player inland match reaches a terminal state")
 	assert_equal(int(result.get("winner_team", 0)), 2, "active generated AI defeats the idle human opponent")
@@ -84,6 +91,17 @@ func create_runtime(built: Dictionary) -> Dictionary:
 func assert_true(value: bool, context: String) -> void:
 	if not value:
 		failures.append("%s: expected true" % context)
+
+
+func _survivor_summary(entities: Array) -> Dictionary:
+	var result: Dictionary = {}
+	for entity_value in entities:
+		var entity: Dictionary = entity_value
+		if float(entity.get("hp", 0.0)) <= 0.0:
+			continue
+		var key := "%d:%s:%s:%s" % [int(entity.get("team", 0)), String(entity.get("kind", "")), String(entity.get("task", "static")), String(entity.get("diagnostic_reason", ""))]
+		result[key] = int(result.get(key, 0)) + 1
+	return result
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
