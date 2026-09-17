@@ -1414,3 +1414,9 @@ ext_unit_id.
 - Обычный групповой move освобождает прежние назначения пакетно. На полностью открытом общем envelope выполняется одна проверка прямоугольной области и регистрируются прямые member routes; препятствие или неодинаковый movement contract автоматически оставляют индивидуальный A*.
 - На одинаковом `2×500` профиле command wall прошёл ступени `9197,61 → 3815,75 → 326,81` мс. До и после общего пути hash совпал (`037b60ff…cab`), 1000 маршрутов зарегистрированы без A*. Полный `8×500` теперь принимает восемь команд за `1246,09` мс, активирует все 4000 юнитов и больше не является многоминутным blocker.
 - Impact gate: destination/navigation command, navigation stress, formation scenarios/interaction/shared motion, melee/autonomous combat, deterministic replay, player order controls и save/load. Следующий measured owner — fixed-tick individual/combat hot path; затем gather/AI и visible render/fog/HUD.
+
+### Прогресс (2026-09-18, E6-009 — стабильный combat recovery)
+
+- Во время cooldown каждый атакующий ошибочно добавлял `Recover → FaceTarget → Recover` в order history на каждом такте. Facing по-прежнему обновляется, но переход `FaceTarget/PerformAction` теперь происходит только когда следующая атака готова; статические атакующие используют тот же контракт.
+- Длинный точный A/B против commit `9e5e6ba6`, `8×500 combat / 3+20`: fixed tick p50/p95/max `467,34 / 501,22 / 507,04 → 463,77 / 483,36 / 490,48` мс; combat task p50/p95 `148,91 / 160,84 → 139,56 / 146,69` мс.
+- Новый canonical hash `5aa4590c…014f` принят как намеренное исправление ложной истории фаз; damage/timing/facing не менялись. Прямой recovery-history test и animation/events/order/melee/autonomous gates проходят.

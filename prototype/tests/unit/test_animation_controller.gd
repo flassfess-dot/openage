@@ -55,6 +55,7 @@ func test_simulation_attack_phases() -> void:
 	var world = SimulationWorld.new(Vector2i(12, 12))
 	var attacker: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
 	var target: Dictionary = world.add_unit(2, "clubman", Vector2(4.5, 4.0), false)
+	attacker["attack_period"] = 1.0
 	world.assign_command_attack([attacker], target["id"])
 	world.advance(0.05, 1, 2)
 	assert_equal(attacker["anim_state"], AnimationController.ATTACK_WINDUP, "ready attack enters windup")
@@ -62,6 +63,9 @@ func test_simulation_attack_phases() -> void:
 	world.advance(0.05, 1, 2)
 	assert_equal(attacker["anim_state"], AnimationController.ATTACK_RECOVER, "cooldown enters recovery")
 	assert_float(float(attacker["anim"]), 0.05, "recovery continues the same attack clip")
+	var recovery_history_size: int = attacker.get("components", {}).get("order", {}).get("history", []).size()
+	world.advance(0.05, 1, 2)
+	assert_equal(attacker.get("components", {}).get("order", {}).get("history", []).size(), recovery_history_size, "recovery tick does not churn face/recover order history")
 
 
 func assert_float(actual: float, expected: float, context: String) -> void:

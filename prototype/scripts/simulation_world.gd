@@ -1266,9 +1266,9 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 						ensure_navigation_destination(unit, combat_destination)
 						moving = move_unit(unit, delta)
 					else:
-						OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
 						face_unit_toward(unit, enemy["pos"])
 						if unit["cooldown"] <= 0.0:
+							OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
 							OrderPipeline.transition(unit, OrderPipeline.PERFORM_ACTION)
 							animation_state = AnimationController.ATTACK_WINDUP
 							attack_target = enemy
@@ -1393,9 +1393,9 @@ func update_static_combatants(delta: float, player_team: int) -> void:
 			else:
 				if OrderPipeline.phase(building) == OrderPipeline.RECOVER and float(building.get("cooldown", 0.0)) <= 0.0:
 					OrderPipeline.restart(building)
-				OrderPipeline.transition(building, OrderPipeline.FACE_TARGET)
 				face_unit_toward(building, Vector2(target.get("pos", building.get("pos", Vector2.ZERO))))
 				if float(building.get("cooldown", 0.0)) <= 0.0:
+					OrderPipeline.transition(building, OrderPipeline.FACE_TARGET)
 					OrderPipeline.transition(building, OrderPipeline.PERFORM_ACTION)
 					animation_state = AnimationController.ATTACK_WINDUP
 					attack_target = target
