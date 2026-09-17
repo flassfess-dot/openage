@@ -3,11 +3,16 @@ extends RefCounted
 
 var active_systems: Array[Dictionary] = []
 var completed_systems: Array[Dictionary] = []
+var performance_probe: Variant = null
 
 
 func clear() -> void:
 	active_systems.clear()
 	completed_systems.clear()
+
+
+func set_performance_probe(probe: Variant) -> void:
+	performance_probe = probe
 
 
 func add_active(system_name: String, executor: Callable) -> void:
@@ -24,7 +29,10 @@ func run(match_completed: bool, context: Dictionary) -> Array[String]:
 	for system in systems:
 		var executor: Callable = system["executor"]
 		assert(executor.is_valid(), "Invalid simulation system executor: %s" % system["name"])
+		var started := Time.get_ticks_usec() if performance_probe != null else 0
 		executor.call(context)
+		if performance_probe != null:
+			performance_probe.observe_microseconds("simulation.system.%s" % String(system["name"]), Time.get_ticks_usec() - started)
 		executed.append(String(system["name"]))
 	return executed
 

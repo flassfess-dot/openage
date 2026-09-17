@@ -21,6 +21,7 @@ func _initialize() -> void:
 	test_original_values(world)
 	test_other_entity_types(world)
 	test_dynamic_sync(world)
+	test_stable_idle_sync_matches_full_sync(world)
 
 	if failures.is_empty():
 		print("S-001 entity component tests passed")
@@ -90,6 +91,28 @@ func test_dynamic_sync(world) -> void:
 	assert_equal(components["combat"]["target_id"], 404, "Combat target follows simulation state")
 	assert_float(components["combat"]["cooldown"], 0.75, "Combat cooldown follows simulation state")
 	assert_equal(components["animation_state"]["state"], "AttackRecover", "AnimationState follows controller")
+
+
+func test_stable_idle_sync_matches_full_sync(world) -> void:
+	var source_unit: Dictionary = world.add_unit(1, "clubman", Vector2(8.0, 8.0), false).duplicate(true)
+	source_unit["previous_pos"] = Vector2(7.5, 8.0)
+	source_unit["actual_velocity"] = Vector2(1.0, 0.0)
+	EntityComponents.sync_dynamic(source_unit)
+	var full_sync_unit: Dictionary = source_unit.duplicate(true)
+	var idle_sync_unit: Dictionary = full_sync_unit.duplicate(true)
+	for unit in [full_sync_unit, idle_sync_unit]:
+		unit["previous_pos"] = unit["pos"]
+		unit["actual_velocity"] = Vector2.ZERO
+		unit["hp"] = 23.0
+		unit["cooldown"] = 0.45
+		unit["work"] = 0.25
+		unit["retaliation_target_id"] = -1
+		unit["anim_state"] = "Idle"
+		unit["anim"] = 1.75
+		unit["animation_events_fired"] = {"sample": true}
+	EntityComponents.sync_dynamic(full_sync_unit)
+	EntityComponents.sync_stable_idle_tick(idle_sync_unit)
+	assert_equal(idle_sync_unit["components"], full_sync_unit["components"], "stable idle fast path matches complete component sync")
 
 
 func assert_float(actual: float, expected: float, context: String) -> void:

@@ -274,16 +274,33 @@ static func sync_dynamic(entity: Dictionary) -> void:
 	health["alive"] = float(health["current"]) > 0.0
 
 	var movement: Dictionary = components.get("movement", {})
-	for mapping in [
-		["target", "target"], ["destination", "destination"], ["path", "path"],
-		["path_index", "path_index"], ["desired_velocity", "desired_velocity"],
-		["path_request_id", "path_request_id"], ["path_status", "path_status"],
-		["path_grid_revision", "path_grid_revision"],
-		["actual_velocity", "actual_velocity"], ["speed", "speed"],
-		["terrain_restriction", "terrain_restriction"], ["domain", "movement_domain"],
-	]:
-		if entity.has(mapping[1]):
-			movement[mapping[0]] = entity[mapping[1]]
+	# This runs for every active entity on every fixed tick. Keep the mapping
+	# allocation-free; constructing the former nested Array table dominated the
+	# 4,000-entity animation/component-sync profile.
+	if entity.has("target"):
+		movement["target"] = entity["target"]
+	if entity.has("destination"):
+		movement["destination"] = entity["destination"]
+	if entity.has("path"):
+		movement["path"] = entity["path"]
+	if entity.has("path_index"):
+		movement["path_index"] = entity["path_index"]
+	if entity.has("desired_velocity"):
+		movement["desired_velocity"] = entity["desired_velocity"]
+	if entity.has("path_request_id"):
+		movement["path_request_id"] = entity["path_request_id"]
+	if entity.has("path_status"):
+		movement["path_status"] = entity["path_status"]
+	if entity.has("path_grid_revision"):
+		movement["path_grid_revision"] = entity["path_grid_revision"]
+	if entity.has("actual_velocity"):
+		movement["actual_velocity"] = entity["actual_velocity"]
+	if entity.has("speed"):
+		movement["speed"] = entity["speed"]
+	if entity.has("terrain_restriction"):
+		movement["terrain_restriction"] = entity["terrain_restriction"]
+	if entity.has("movement_domain"):
+		movement["domain"] = entity["movement_domain"]
 
 	var combat: Dictionary = components.get("combat", {})
 	combat["target_id"] = int(entity.get("target_id", combat.get("target_id", -1)))
@@ -300,6 +317,50 @@ static func sync_dynamic(entity: Dictionary) -> void:
 		carrier["amount"] = float(entity["carried_amount"])
 	if entity.has("carried_resource_type_id"):
 		carrier["resource_type_id"] = int(entity["carried_resource_type_id"])
+
+	var worker: Dictionary = components.get("worker", {})
+	worker["resource_id"] = int(entity.get("resource_id", worker.get("resource_id", -1)))
+	worker["action_cooldown"] = float(entity.get("work", worker.get("action_cooldown", 0.0)))
+
+	var animation: Dictionary = components.get("animation_state", {})
+	animation["state"] = String(entity.get("anim_state", animation.get("state", "Idle")))
+	animation["elapsed"] = float(entity.get("anim", animation.get("elapsed", 0.0)))
+	animation["events_fired"] = entity.get("animation_events_fired", animation.get("events_fired", {}))
+
+
+static func sync_stable_idle_tick(entity: Dictionary) -> void:
+	# A unit that entered and left the tick idle, without a route, cannot have
+	# changed its transform, movement plan or carried resources in that tick.
+	# Keep the few fields which may still advance (cooldowns, health and the
+	# animation clock) authoritative without rewriting every component map.
+	var components: Dictionary = entity.get("components", {})
+	if components.is_empty():
+		return
+	var transform: Dictionary = components.get("transform", {})
+	var previous_position: Vector2 = entity.get("previous_pos", transform.get("previous_position", entity.get("pos", Vector2.ZERO)))
+	if transform.get("previous_position", previous_position) != previous_position:
+		transform["previous_position"] = previous_position
+
+	var health: Dictionary = components.get("health", {})
+	health["current"] = float(entity.get("hp", health.get("current", 0.0)))
+	health["maximum"] = float(entity.get("max_hp", health.get("maximum", 0.0)))
+	health["alive"] = float(health["current"]) > 0.0
+
+	var combat: Dictionary = components.get("combat", {})
+	combat["target_id"] = int(entity.get("target_id", combat.get("target_id", -1)))
+	combat["cooldown"] = float(entity.get("cooldown", combat.get("cooldown", 0.0)))
+	combat["stance"] = String(entity.get("stance", combat.get("stance", "passive")))
+	combat["acquisition_range"] = float(entity.get("acquisition_range", combat.get("acquisition_range", 0.0)))
+	combat["chase_range"] = float(entity.get("chase_range", combat.get("chase_range", 0.0)))
+	combat["retaliation_target_id"] = int(entity.get("retaliation_target_id", combat.get("retaliation_target_id", -1)))
+
+	var movement: Dictionary = components.get("movement", {})
+	var path_index := int(entity.get("path_index", movement.get("path_index", 0)))
+	if int(movement.get("path_index", path_index)) != path_index:
+		movement["path_index"] = path_index
+	var actual_velocity: Vector2 = entity.get("actual_velocity", movement.get("actual_velocity", Vector2.ZERO))
+	if movement.get("actual_velocity", actual_velocity) != actual_velocity:
+		movement["actual_velocity"] = actual_velocity
 
 	var worker: Dictionary = components.get("worker", {})
 	worker["resource_id"] = int(entity.get("resource_id", worker.get("resource_id", -1)))

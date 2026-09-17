@@ -43,11 +43,13 @@ var map_reserved_foundation_cells: Dictionary = {}
 var forest_resource_counts: Dictionary = {}
 var terrain_revision: int = 0
 var units: Array = []
+var units_by_id: Dictionary = {}
 var resource_nodes: Array = []
 var resource_nodes_by_id: Dictionary = {}
 var decaying_resource_nodes: Array = []
 var static_obstructions: Array = []
 var buildings: Array = []
+var buildings_by_id: Dictionary = {}
 var projectiles: Array = []
 var resolved_projectiles: Array = []
 
@@ -165,6 +167,11 @@ func set_simulation_seed(value: int) -> void:
 	simulation_seed = value
 	simulation_rng.seed = simulation_seed
 
+
+func set_performance_probe(probe: Variant) -> void:
+	tick_pipeline.set_performance_probe(probe)
+	pathfinder.set_performance_probe(probe)
+
 func set_gamespec(data: Dictionary) -> void:
 	gamespec_data = data
 	data_repository.configure_compatibility_gamespec(data)
@@ -241,12 +248,14 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	if not preserve_bulk_load:
 		bulk_load_depth = 0
 	units.clear()
+	units_by_id.clear()
 	resource_nodes.clear()
 	resource_nodes_by_id.clear()
 	decaying_resource_nodes.clear()
 	static_obstructions.clear()
 	forest_resource_counts.clear()
 	buildings.clear()
+	buildings_by_id.clear()
 	combat_system.reset()
 	ai_distress_system.reset()
 	pending_domain_events.clear()
@@ -504,7 +513,11 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	}
 	apply_archetype_identity(unit, kind)
 	configure_unit_combat_awareness(unit)
+	# The idle-tick fast path assumes the component projection represents the
+	# entity at tick entry. Establish that invariant once when the entity is born.
+	EntityComponents.sync_dynamic(unit)
 	units.append(unit)
+	units_by_id[entity_id] = unit
 	register_unit_victory_objective(unit)
 	apply_technology_state_to_entity(unit, team)
 	economy_system.add_population(team, int(unit["population_cost"]))
@@ -713,6 +726,7 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 	configure_entity_combat_awareness(building)
 	EntityComponents.sync_dynamic(building)
 	buildings.append(building)
+	buildings_by_id[id] = building
 	var spatial_half_size: Vector2 = footprint.get("half_size", Vector2.ONE * float(building["footprint_radius"]))
 	spatial_index.insert(building, position, spatial_half_size.length(), "obstacle")
 	register_building_victory_objective(building)
@@ -1167,16 +1181,41 @@ func query_combat_entities_near(position: Vector2, radius: float) -> Array:
 
 
 func update_units(delta: float, player_team: int, enemy_team: int) -> void:
+	var probe: Variant = tick_pipeline.performance_probe
+	var phase_started := Time.get_ticks_usec() if probe != null else 0
 	FormationCohesion.update(units)
+	if probe != null:
+		probe.observe_microseconds("simulation.unit_orders.formation_cohesion", Time.get_ticks_usec() - phase_started)
+		phase_started = Time.get_ticks_usec()
 	_release_finished_combat_reservations()
+	if probe != null:
+		probe.observe_microseconds("simulation.unit_orders.combat_reservations", Time.get_ticks_usec() - phase_started)
+	var preparation_microseconds := 0
+	var task_microseconds := 0
+	var presentation_microseconds := 0
+	var animation_microseconds := 0
+	var component_sync_microseconds := 0
 	for unit in units:
+		phase_started = Time.get_ticks_usec() if probe != null else 0
 		if unit["hp"] <= 0.0:
 			begin_death(unit)
+			if probe != null:
+				preparation_microseconds += Time.get_ticks_usec() - phase_started
 			continue
+		var position_before_tick: Vector2 = unit.get("pos", Vector2.ZERO)
+		var stable_idle_tick: bool = (
+			String(unit.get("task", "idle")) == "idle"
+			and unit.get("path", []).is_empty()
+			and int(unit.get("path_index", 0)) == 0
+			and Vector2(unit.get("target", position_before_tick)) == position_before_tick
+		)
 		unit["cooldown"] = maxf(0.0, unit["cooldown"] - delta)
 		unit["work"] = maxf(0.0, unit["work"] - delta)
 		conversion_system.advance_faith(unit, delta)
 		_update_huntable_reaction(unit)
+		if probe != null:
+			preparation_microseconds += Time.get_ticks_usec() - phase_started
+			phase_started = Time.get_ticks_usec()
 		var moving := false
 		var animation_state := AnimationController.IDLE
 		var attack_target: Variant = null
@@ -1272,16 +1311,49 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 				var building_update := update_building_order(unit, delta)
 				moving = bool(building_update.get("moving", false))
 				animation_state = String(building_update.get("animation_state", AnimationController.IDLE))
+			"idle":
+				if stable_idle_tick:
+					# Preserve the observable effects of move_unit's arrived branch
+					# without querying neighbours or rebuilding movement state.
+					if Vector2(unit.get("actual_velocity", Vector2.ZERO)) != Vector2.ZERO:
+						unit["actual_velocity"] = Vector2.ZERO
+					if int(unit.get("stuck_ticks", 0)) != 0 or int(unit.get("push_priority", 0)) != int(unit.get("base_push_priority", unit.get("push_priority", 0))):
+						StuckRecovery.reset(unit)
+				else:
+					moving = move_unit(unit, delta)
 			_:
 				moving = move_unit(unit, delta)
 
+		if probe != null:
+			task_microseconds += Time.get_ticks_usec() - phase_started
+			phase_started = Time.get_ticks_usec()
 		if moving and animation_state != AnimationController.CARRY:
 			animation_state = AnimationController.MOVE
 		var restart_attack_clip := animation_state == AnimationController.ATTACK_WINDUP and String(unit.get("anim_state", "")) == AnimationController.ATTACK_RECOVER
 		AnimationController.update(unit, animation_state, delta, restart_attack_clip)
 		if attack_target != null:
 			apply_attack_frame_event(unit, attack_target, player_team)
-		EntityComponents.sync_dynamic(unit)
+		if probe != null:
+			animation_microseconds += Time.get_ticks_usec() - phase_started
+			phase_started = Time.get_ticks_usec()
+		if (
+			stable_idle_tick
+			and String(unit.get("task", "idle")) == "idle"
+			and unit.get("path", []).is_empty()
+			and Vector2(unit.get("pos", Vector2.ZERO)).distance_squared_to(position_before_tick) <= 0.000001
+		):
+			EntityComponents.sync_stable_idle_tick(unit)
+		else:
+			EntityComponents.sync_dynamic(unit)
+		if probe != null:
+			component_sync_microseconds += Time.get_ticks_usec() - phase_started
+	if probe != null:
+		presentation_microseconds = animation_microseconds + component_sync_microseconds
+		probe.observe_microseconds("simulation.unit_orders.preparation", preparation_microseconds)
+		probe.observe_microseconds("simulation.unit_orders.task", task_microseconds)
+		probe.observe_microseconds("simulation.unit_orders.animation_sync", presentation_microseconds)
+		probe.observe_microseconds("simulation.unit_orders.animation", animation_microseconds)
+		probe.observe_microseconds("simulation.unit_orders.component_sync", component_sync_microseconds)
 
 
 func update_static_combatants(delta: float, player_team: int) -> void:
@@ -1522,9 +1594,11 @@ func advance_death_only(delta: float) -> void:
 func purge_removed_units() -> void:
 	for index in range(units.size() - 1, -1, -1):
 		if bool(units[index].get("removed", false)):
+			units_by_id.erase(int(units[index].get("id", -1)))
 			units.remove_at(index)
 	for index in range(buildings.size() - 1, -1, -1):
 		if bool(buildings[index].get("removed", false)):
+			buildings_by_id.erase(int(buildings[index].get("id", -1)))
 			buildings.remove_at(index)
 
 func move_unit(unit: Dictionary, delta: float) -> bool:
@@ -1702,10 +1776,7 @@ func _team_relations() -> Dictionary:
 	return result
 
 func find_unit(id: int) -> Variant:
-	for unit in units:
-		if unit["id"] == id:
-			return unit
-	return null
+	return units_by_id.get(id)
 
 
 func find_combat_target(id: int) -> Variant:
@@ -2043,10 +2114,7 @@ func assign_command_return_resources(selected: Array, target_building_id: int = 
 
 
 func find_building(id: int) -> Variant:
-	for building in buildings:
-		if int(building.get("id", -1)) == id:
-			return building
-	return null
+	return buildings_by_id.get(id)
 
 
 func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Vector2:
@@ -2477,6 +2545,7 @@ func cancel_foundation(building_id: int) -> bool:
 		deactivate_building_victory_objective(building)
 		for index in range(buildings.size() - 1, -1, -1):
 			if int(buildings[index].get("id", -1)) == building_id:
+				buildings_by_id.erase(building_id)
 				buildings.remove_at(index)
 				break
 	building_approach_slots.erase(building_id)

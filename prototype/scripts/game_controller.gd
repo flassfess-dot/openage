@@ -34,12 +34,21 @@ var replay_recorder: Variant = null
 var replay_source: Variant = null
 var record_replay_state_hashes := true
 var last_replay_mismatch: String = ""
+var performance_probe: Variant = null
 
 func _init(world = null) -> void:
 	simulation_world = world
 
 func set_world(world) -> void:
 	simulation_world = world
+	if simulation_world != null and simulation_world.has_method("set_performance_probe"):
+		simulation_world.set_performance_probe(performance_probe)
+
+
+func set_performance_probe(probe: Variant) -> void:
+	performance_probe = probe
+	if simulation_world != null and simulation_world.has_method("set_performance_probe"):
+		simulation_world.set_performance_probe(probe)
 
 func enqueue_command(command, record: bool = true, issuer_id: int = 0) -> void:
 	if command == null:
@@ -778,20 +787,33 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	return simulation_world.get_last_battle_message()
 
 func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
+	var fixed_tick_started := Time.get_ticks_usec() if performance_probe != null else 0
 	_inject_replay_commands_for_current_tick()
 	tick_index += 1
 	simulation_world.begin_event_capture()
+	var command_started := Time.get_ticks_usec() if performance_probe != null else 0
 	process_commands()
+	var command_microseconds := Time.get_ticks_usec() - command_started if performance_probe != null else 0
+	var autonomy_started := Time.get_ticks_usec() if performance_probe != null else 0
 	for wildlife_command in wildlife_behavior.collect_commands(simulation_world, tick_index):
 		enqueue_command(wildlife_command, false, 0)
 	for autonomous_command in combat_awareness.collect_commands(simulation_world, tick_index):
 		var attacker = simulation_world.find_combat_target(int(autonomous_command.unit_ids[0]))
 		if attacker != null:
 			enqueue_command(autonomous_command, false, int(attacker.get("team", 0)))
+	var autonomy_microseconds := Time.get_ticks_usec() - autonomy_started if performance_probe != null else 0
+	command_started = Time.get_ticks_usec() if performance_probe != null else 0
 	process_commands()
+	if performance_probe != null:
+		command_microseconds += Time.get_ticks_usec() - command_started
 	var task_states_after_commands := _all_unit_task_states()
+	var world_started := Time.get_ticks_usec() if performance_probe != null else 0
 	simulation_world.advance(FIXED_STEP_SECONDS, player_team, enemy_team)
+	var world_microseconds := Time.get_ticks_usec() - world_started if performance_probe != null else 0
+	var formation_started := Time.get_ticks_usec() if performance_probe != null else 0
 	reconcile_formation_groups()
+	var formation_microseconds := Time.get_ticks_usec() - formation_started if performance_probe != null else 0
+	var event_started := Time.get_ticks_usec() if performance_probe != null else 0
 	simulation_world.end_event_capture()
 	_forward_domain_events()
 	_emit_runtime_task_changes(task_states_after_commands)
@@ -803,6 +825,13 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
 			var actual: String = replay_source.world_state_hash(simulation_world, tick_index, self)
 			if actual != expected:
 				last_replay_mismatch = "tick:%d expected:%s actual:%s" % [tick_index, expected, actual]
+	if performance_probe != null:
+		performance_probe.observe_microseconds("controller.commands", command_microseconds)
+		performance_probe.observe_microseconds("controller.autonomy", autonomy_microseconds)
+		performance_probe.observe_microseconds("controller.world_advance", world_microseconds)
+		performance_probe.observe_microseconds("controller.formation_reconcile", formation_microseconds)
+		performance_probe.observe_microseconds("controller.events_replay", Time.get_ticks_usec() - event_started)
+		performance_probe.observe_microseconds("controller.fixed_tick", Time.get_ticks_usec() - fixed_tick_started)
 
 
 func _inject_replay_commands_for_current_tick() -> void:

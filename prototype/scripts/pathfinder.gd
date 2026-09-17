@@ -11,10 +11,15 @@ const DIRECTIONS := [
 var grid
 var cache: Dictionary = {}
 var cache_hits: int = 0
+var performance_probe: Variant = null
 
 
 func _init(navigation_grid = null) -> void:
 	grid = navigation_grid
+
+
+func set_performance_probe(probe: Variant) -> void:
+	performance_probe = probe
 
 
 func clear_cache() -> void:
@@ -23,11 +28,14 @@ func clear_cache() -> void:
 
 
 func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2]:
+	var started := Time.get_ticks_usec() if performance_probe != null else 0
+	if performance_probe != null:
+		performance_probe.increment("navigation.path_queries")
 	var start := Vector2i(floori(start_world.x), floori(start_world.y))
 	var requested_goal := Vector2i(floori(goal_world.x), floori(goal_world.y))
 	var goal := nearest_walkable(requested_goal, movement_domain, restriction_id, clearance_radius)
 	if goal.x < 0:
-		return []
+		return _finish_path_observation(started, [], false)
 	# Exact endpoints matter even when both requests fall into the same cell.
 	# Without them a return-to-slot request can reuse an earlier contact point.
 	var key := "%d:%s:%d:%.4f:%d:%d:%d:%d:%.4f:%.4f:%.4f:%.4f" % [grid.revision, movement_domain, restriction_id, clearance_radius, start.x, start.y, goal.x, goal.y, start_world.x, start_world.y, goal_world.x, goal_world.y]
@@ -35,11 +43,11 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		cache_hits += 1
 		var cached_path: Array[Vector2] = []
 		cached_path.assign(cache[key])
-		return cached_path
+		return _finish_path_observation(started, cached_path, true)
 	var cells := find_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
 	if cells.is_empty():
 		cache[key] = []
-		return []
+		return _finish_path_observation(started, [], false)
 	var smoothed := smooth_cells(cells, movement_domain, restriction_id, clearance_radius)
 	var result: Array[Vector2] = []
 	for index in range(1, smoothed.size()):
@@ -52,18 +60,30 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	if goal == requested_goal and not result.is_empty() and grid.is_position_walkable_for(goal_world, clearance_radius, movement_domain, restriction_id):
 		result[result.size() - 1] = goal_world
 	cache[key] = result.duplicate()
-	return result
+	return _finish_path_observation(started, result, false)
+
+
+func _finish_path_observation(started: int, path: Array[Vector2], cache_hit: bool) -> Array[Vector2]:
+	if performance_probe != null:
+		performance_probe.observe_microseconds("navigation.path_query", Time.get_ticks_usec() - started)
+		if cache_hit:
+			performance_probe.increment("navigation.path_cache_hits")
+		if path.is_empty():
+			performance_probe.increment("navigation.path_unreachable")
+	return path
 
 
 func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
 	if grid == null or not grid.contains(start) or not grid.contains(goal) or not _cell_walkable(goal, movement_domain, restriction_id, clearance_radius):
 		return []
+	var expanded_nodes := 0
 	var frontier: Array = []
 	_frontier_push(frontier, {"cell": start, "score": 0.0, "cost": 0.0})
 	var came_from: Dictionary = {start: start}
 	var cost_so_far: Dictionary = {start: 0.0}
 	while not frontier.is_empty():
 		var current_entry: Dictionary = _frontier_pop(frontier)
+		expanded_nodes += 1
 		var current: Vector2i = current_entry["cell"]
 		if float(current_entry["cost"]) > float(cost_so_far.get(current, INF)) + 0.000001:
 			continue
@@ -80,6 +100,8 @@ func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "
 				came_from[next] = current
 				_frontier_push(frontier, {"cell": next, "score": next_cost + _heuristic(next, goal), "cost": next_cost})
 	if not came_from.has(goal):
+		if performance_probe != null:
+			performance_probe.increment("navigation.expanded_nodes", expanded_nodes)
 		return []
 	var reversed: Array[Vector2i] = [goal]
 	var current := goal
@@ -87,6 +109,8 @@ func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "
 		current = came_from[current]
 		reversed.append(current)
 	reversed.reverse()
+	if performance_probe != null:
+		performance_probe.increment("navigation.expanded_nodes", expanded_nodes)
 	return reversed
 
 
