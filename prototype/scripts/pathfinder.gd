@@ -44,11 +44,20 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		var cached_path: Array[Vector2] = []
 		cached_path.assign(cache[key])
 		return _finish_path_observation(started, cached_path, true)
-	var cells := find_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+	var cells := direct_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+	var direct_path := not cells.is_empty()
+	if not direct_path:
+		cells = find_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
 	if cells.is_empty():
 		cache[key] = []
 		return _finish_path_observation(started, [], false)
-	var smoothed := smooth_cells(cells, movement_domain, restriction_id, clearance_radius)
+	if direct_path and performance_probe != null:
+		performance_probe.increment("navigation.direct_path_hits")
+	var smoothed: Array[Vector2i]
+	if direct_path and cells.size() > 1:
+		smoothed = [cells[0], cells[cells.size() - 1]]
+	else:
+		smoothed = smooth_cells(cells, movement_domain, restriction_id, clearance_radius)
 	var result: Array[Vector2] = []
 	for index in range(1, smoothed.size()):
 		var cell: Vector2i = smoothed[index]
@@ -178,16 +187,30 @@ func smooth_cells(path: Array[Vector2i], movement_domain: String = "land", restr
 
 
 func line_walkable(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> bool:
+	return not direct_cell_path(start, goal, movement_domain, restriction_id, clearance_radius).is_empty()
+
+
+func direct_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
+	if grid == null or not grid.contains(start) or not grid.contains(goal):
+		return []
+	if not _cell_walkable(start, movement_domain, restriction_id, clearance_radius) or not _cell_walkable(goal, movement_domain, restriction_id, clearance_radius):
+		return []
+	var result: Array[Vector2i] = [start]
+	if start == goal:
+		return result
 	var difference := goal - start
 	var steps := maxi(absi(difference.x), absi(difference.y))
 	var previous := start
 	for index in range(1, steps + 1):
 		var ratio := float(index) / float(steps)
 		var current := Vector2i(roundi(lerpf(start.x, goal.x, ratio)), roundi(lerpf(start.y, goal.y, ratio)))
+		if current == previous:
+			continue
 		if not _can_step(previous, current, movement_domain, restriction_id, clearance_radius):
-			return false
+			return []
+		result.append(current)
 		previous = current
-	return true
+	return result
 
 
 func nearest_walkable(requested: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Vector2i:

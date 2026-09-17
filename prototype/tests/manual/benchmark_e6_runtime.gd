@@ -1,5 +1,7 @@
 extends SceneTree
 
+const Commands := preload("res://scripts/commands.gd")
+const FormationGeometry := preload("res://scripts/formation_geometry.gd")
 const GameController := preload("res://scripts/game_controller.gd")
 const PerformanceProbe := preload("res://scripts/performance_probe.gd")
 const ReplaySystem := preload("res://scripts/replay_system.gd")
@@ -39,16 +41,20 @@ func _run_case(options: Dictionary) -> Dictionary:
 	var setup_started := Time.get_ticks_usec()
 	var world = SimulationWorld.new(Vector2i(map_side, map_side))
 	var players: Array = []
+	var unit_ids_by_team: Dictionary = {}
 	for team in range(1, player_count + 1):
 		players.append({"team": team, "controller": "ai", "civilization_id": 13})
 	world.configure_players(players)
 	world.begin_bulk_load()
 	for team in range(1, player_count + 1):
+		var team_unit_ids: Array[int] = []
 		for index in range(units_per_player):
 			var unit: Dictionary = world.add_unit(team, "clubman", _unit_position(team, index, player_count, map_side), false)
 			unit["stance"] = "passive"
 			unit["attack_autonomous"] = false
 			unit["acquisition_range"] = 0.0
+			team_unit_ids.append(int(unit["id"]))
+		unit_ids_by_team[team] = team_unit_ids
 	world.end_bulk_load()
 	var setup_microseconds := Time.get_ticks_usec() - setup_started
 
@@ -56,6 +62,26 @@ func _run_case(options: Dictionary) -> Dictionary:
 	controller.set_speed_multiplier(1.0)
 	var probe = PerformanceProbe.new(maxi(64, sample_ticks + 8))
 	controller.set_performance_probe(probe)
+	var command_phase: Dictionary = {}
+	if String(options["workload"]) == "formation_march":
+		probe.clear()
+		for team in range(1, player_count + 1):
+			var ids: Array[int] = unit_ids_by_team[team]
+			controller.enqueue_command(Commands.FormationMoveCommand.new(
+				controller.tick_index + 1,
+				ids,
+				_formation_destination(team, player_count, map_side),
+				FormationGeometry.BLOCK,
+				Vector2.DOWN
+			), true, team)
+		var command_started := Time.get_ticks_usec()
+		controller.advance_frame(0.05, 1, 2)
+		command_phase = {
+			"wall_microseconds": Time.get_ticks_usec() - command_started,
+			"probe": probe.report(),
+			"accepted": _command_result_count(controller.command_results, true),
+			"rejected": _command_result_count(controller.command_results, false),
+		}
 	for _tick in range(warmup_ticks):
 		controller.advance_frame(0.05, 1, 2)
 	probe.clear()
@@ -68,7 +94,7 @@ func _run_case(options: Dictionary) -> Dictionary:
 	return {
 		"schema_version": 1,
 		"case": String(options["case"]),
-		"workload": "passive_full_population",
+		"workload": String(options["workload"]),
 		"players": player_count,
 		"units_per_player": units_per_player,
 		"entity_count": world.get_units().size(),
@@ -77,7 +103,9 @@ func _run_case(options: Dictionary) -> Dictionary:
 		"warmup_ticks": warmup_ticks,
 		"sample_ticks": sample_ticks,
 		"setup_microseconds": setup_microseconds,
+		"command_phase": command_phase,
 		"sample_wall_microseconds": benchmark_microseconds,
+		"active_units_after_sample": world.get_units().filter(func(unit): return String(unit.get("task", "idle")) != "idle").size(),
 		"canonical_hash": final_hash,
 		"probe": probe.report(),
 		"process": {
@@ -103,9 +131,31 @@ func _unit_position(team: int, index: int, player_count: int, map_side: int) -> 
 	return Vector2(clampi(x, 1, map_side - 2), clampi(y, 1, map_side - 2)) + Vector2(0.5, 0.5)
 
 
+func _formation_destination(team: int, player_count: int, map_side: int) -> Vector2:
+	var region_columns := ceili(sqrt(float(player_count)))
+	var region_rows := ceili(float(player_count) / float(region_columns))
+	var region_column := (team - 1) % region_columns
+	var region_row := (team - 1) / region_columns
+	var region_width := maxi(8, map_side / region_columns)
+	var region_height := maxi(8, map_side / region_rows)
+	return Vector2(
+		region_column * region_width + region_width * 0.5,
+		region_row * region_height + region_height - 24.0
+	)
+
+
+func _command_result_count(results: Dictionary, accepted: bool) -> int:
+	var count := 0
+	for result in results.values():
+		if bool(result.get("accepted", false)) == accepted:
+			count += 1
+	return count
+
+
 func _options(arguments: PackedStringArray) -> Dictionary:
 	var result := {
 		"case": "area_x4_2p",
+		"workload": "passive_full_population",
 		"players": 2,
 		"units_per_player": 500,
 		"map_side": 400,
@@ -121,8 +171,10 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 		var value := argument.substr(separator + 1)
 		if key in ["players", "units_per_player", "map_side", "warmup_ticks", "sample_ticks"]:
 			result[key] = maxi(0, int(value))
-		elif key in ["case", "output"]:
+		elif key in ["case", "output", "workload"]:
 			result[key] = value
+	if String(result["workload"]) not in ["passive_full_population", "formation_march"]:
+		result["workload"] = "passive_full_population"
 	result["players"] = clampi(int(result["players"]), 2, 8)
 	result["units_per_player"] = maxi(1, int(result["units_per_player"]))
 	result["map_side"] = maxi(32, int(result["map_side"]))

@@ -60,9 +60,32 @@ func query_aabb(rectangle: Rect2, category: String = "") -> Array:
 	return result
 
 func query_neighbors(entity: Dictionary, radius: float, category: String = "unit") -> Array:
-	var result := query_circle(entity.get("pos", Vector2.ZERO), radius, category)
+	# Movement calls this for every mobile entity on every fixed tick. Avoid the
+	# generic query's String keys and the second Array created by filter(). IDs
+	# are unique inside one requested category, and final ID sorting preserves
+	# deterministic avoidance order.
+	var result: Array = []
+	var seen_ids: Dictionary = {}
+	var center: Vector2 = entity.get("pos", Vector2.ZERO)
 	var entity_id := int(entity.get("id", -1))
-	return result.filter(func(candidate): return int(candidate.get("id", -2)) != entity_id)
+	var minimum := cell_for(center - Vector2.ONE * radius)
+	var maximum := cell_for(center + Vector2.ONE * radius)
+	for y in range(minimum.y, maximum.y + 1):
+		for x in range(minimum.x, maximum.x + 1):
+			for item in buckets.get(Vector2i(x, y), []):
+				if category != "" and item["category"] != category:
+					continue
+				var candidate: Dictionary = item["entity"]
+				var candidate_id := int(candidate.get("id", -2))
+				if candidate_id == entity_id or seen_ids.has(candidate_id):
+					continue
+				var allowed_distance: float = radius + float(item["radius"])
+				if center.distance_squared_to(item["position"]) > allowed_distance * allowed_distance:
+					continue
+				seen_ids[candidate_id] = true
+				result.append(candidate)
+	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	return result
 
 func _unique_key(item: Dictionary) -> String:
 	return "%s:%d" % [item["category"], int(item["entity"].get("id", -1))]

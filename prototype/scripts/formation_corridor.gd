@@ -9,7 +9,11 @@ static func plan(start_world: Vector2, goal_world: Vector2, formation_type: Stri
 	var goal: Vector2i = pathfinder.nearest_walkable(requested_goal)
 	if goal.x < 0:
 		return {"route": [], "modes": [], "required_width": 1, "has_compression": false}
-	var cells: Array[Vector2i] = pathfinder.find_cell_path(start, goal)
+	# An unobstructed march uses the same rasterized group corridor directly.
+	# A* remains the fallback when the straight corridor is blocked.
+	var cells: Array[Vector2i] = pathfinder.direct_cell_path(start, goal)
+	if cells.is_empty():
+		cells = pathfinder.find_cell_path(start, goal)
 	if cells.is_empty():
 		return {"route": [], "modes": [], "required_width": 1, "has_compression": false}
 	var required_width := _required_width(formation_type, member_count, spacing, member_radius)
@@ -35,11 +39,22 @@ static func plan(start_world: Vector2, goal_world: Vector2, formation_type: Stri
 
 
 static func member_waypoints(plan_data: Dictionary, member_count: int, formation_type: String, spacing: float, final_forward: Vector2, slot_id: int) -> Array[Vector2]:
+	var all_waypoints := member_waypoint_sets(plan_data, member_count, formation_type, spacing, final_forward)
+	if slot_id < 0 or slot_id >= all_waypoints.size():
+		return []
+	var selected: Array[Vector2] = []
+	selected.assign(all_waypoints[slot_id])
+	return selected
+
+
+static func member_waypoint_sets(plan_data: Dictionary, member_count: int, formation_type: String, spacing: float, final_forward: Vector2) -> Array:
 	var route: Array = plan_data.get("route", [])
 	var modes: Array = plan_data.get("modes", [])
-	if route.is_empty() or slot_id < 0 or slot_id >= member_count:
+	if route.is_empty() or member_count <= 0:
 		return []
-	var result: Array[Vector2] = []
+	var result: Array = []
+	for _slot_id in range(member_count):
+		result.append([])
 	var previous_mode := "preferred"
 	for index in range(1, route.size()):
 		var mode: String = modes[index]
@@ -52,7 +67,8 @@ static func member_waypoints(plan_data: Dictionary, member_count: int, formation
 				active_forward = _world_route_direction(route, index)
 			var local := Geometry.local_slots(member_count, active_type, spacing)
 			var slots := Geometry.world_slots(local, route[index], active_forward)
-			result.append(slots[slot_id])
+			for slot_id in range(member_count):
+				result[slot_id].append(slots[slot_id])
 		previous_mode = mode
 	return result
 

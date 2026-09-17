@@ -177,9 +177,27 @@ func is_walkable_for(cell: Vector2i, movement_domain: String = "land", restricti
 
 
 func is_position_walkable_for(position: Vector2, radius: float, movement_domain: String = "land", restriction_id: int = -1) -> bool:
-	for probe in [position, position + Vector2(radius, 0), position + Vector2(-radius, 0), position + Vector2(0, radius), position + Vector2(0, -radius)]:
-		if not is_walkable_for(Vector2i(floori(probe.x), floori(probe.y)), movement_domain, restriction_id):
-			return false
+	if not is_walkable_for(Vector2i(floori(position.x), floori(position.y)), movement_domain, restriction_id):
+		return false
+	if radius <= 0.0001:
+		return true
+	return (
+		is_walkable_for(Vector2i(floori(position.x + radius), floori(position.y)), movement_domain, restriction_id)
+		and is_walkable_for(Vector2i(floori(position.x - radius), floori(position.y)), movement_domain, restriction_id)
+		and is_walkable_for(Vector2i(floori(position.x), floori(position.y + radius)), movement_domain, restriction_id)
+		and is_walkable_for(Vector2i(floori(position.x), floori(position.y - radius)), movement_domain, restriction_id)
+	)
+
+
+func is_world_rect_walkable_for(minimum: Vector2, maximum: Vector2, margin: float, movement_domain: String = "land", restriction_id: int = -1) -> bool:
+	var minimum_cell := Vector2i(floori(minimum.x - margin), floori(minimum.y - margin))
+	var maximum_cell := Vector2i(floori(maximum.x + margin), floori(maximum.y + margin))
+	if not contains(minimum_cell) or not contains(maximum_cell):
+		return false
+	for y in range(minimum_cell.y, maximum_cell.y + 1):
+		for x in range(minimum_cell.x, maximum_cell.x + 1):
+			if not is_walkable_for(Vector2i(x, y), movement_domain, restriction_id):
+				return false
 	return true
 
 

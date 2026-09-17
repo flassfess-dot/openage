@@ -13,7 +13,9 @@ func release(entity_id: int) -> void:
 
 func reserve(entity_id: int, desired: Vector2, radius: float, navigation_grid, group_id: int = -1, movement_domain: String = "land", restriction_id: int = -1) -> Vector2:
 	release(entity_id)
-	var candidates: Array[Vector2] = [desired]
+	if _is_available(desired, radius, navigation_grid, movement_domain, restriction_id):
+		reservations[entity_id] = {"position": desired, "radius": radius, "group_id": group_id}
+		return desired
 	var desired_cell := Vector2i(floori(desired.x), floori(desired.y))
 	var maximum_radius := maxi(navigation_grid.size.x, navigation_grid.size.y) if navigation_grid != null else 4
 	for ring in range(1, maximum_radius + 1):
@@ -27,12 +29,10 @@ func reserve(entity_id: int, desired: Vector2, radius: float, navigation_grid, g
 			var left_distance: float = left.distance_squared_to(desired)
 			var right_distance: float = right.distance_squared_to(desired)
 			return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and (left.y < right.y or (left.y == right.y and left.x < right.x))))
-		candidates.append_array(ring_candidates)
-
-	for candidate in candidates:
-		if _is_available(candidate, radius, navigation_grid, movement_domain, restriction_id):
-			reservations[entity_id] = {"position": candidate, "radius": radius, "group_id": group_id}
-			return candidate
+		for candidate in ring_candidates:
+			if _is_available(candidate, radius, navigation_grid, movement_domain, restriction_id):
+				reservations[entity_id] = {"position": candidate, "radius": radius, "group_id": group_id}
+				return candidate
 	return desired
 
 
@@ -51,11 +51,8 @@ func is_occupied(entity: Dictionary) -> bool:
 
 
 func _is_available(position: Vector2, radius: float, navigation_grid, movement_domain: String = "land", restriction_id: int = -1) -> bool:
-	if navigation_grid != null:
-		var probes := [position, position + Vector2(radius, 0), position + Vector2(-radius, 0), position + Vector2(0, radius), position + Vector2(0, -radius)]
-		for probe in probes:
-			if not navigation_grid.is_walkable_for(Vector2i(floori(probe.x), floori(probe.y)), movement_domain, restriction_id):
-				return false
+	if navigation_grid != null and not navigation_grid.is_position_walkable_for(position, radius, movement_domain, restriction_id):
+		return false
 	for existing in reservations.values():
 		var minimum_distance := radius + float(existing["radius"]) + 0.02
 		if position.distance_squared_to(existing["position"]) < minimum_distance * minimum_distance:

@@ -52,6 +52,10 @@ var buildings: Array = []
 var buildings_by_id: Dictionary = {}
 var projectiles: Array = []
 var resolved_projectiles: Array = []
+var movement_neighbor_query_microseconds: int = 0
+var movement_local_calculation_microseconds: int = 0
+var movement_integration_microseconds: int = 0
+var movement_arrival_microseconds: int = 0
 
 var entity_id_sequence := EntityIds.new()
 var spatial_index := SpatialHash.new(2.0)
@@ -1182,6 +1186,10 @@ func query_combat_entities_near(position: Vector2, radius: float) -> Array:
 
 func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	var probe: Variant = tick_pipeline.performance_probe
+	movement_neighbor_query_microseconds = 0
+	movement_local_calculation_microseconds = 0
+	movement_integration_microseconds = 0
+	movement_arrival_microseconds = 0
 	var phase_started := Time.get_ticks_usec() if probe != null else 0
 	FormationCohesion.update(units)
 	if probe != null:
@@ -1354,6 +1362,10 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		probe.observe_microseconds("simulation.unit_orders.animation_sync", presentation_microseconds)
 		probe.observe_microseconds("simulation.unit_orders.animation", animation_microseconds)
 		probe.observe_microseconds("simulation.unit_orders.component_sync", component_sync_microseconds)
+		probe.observe_microseconds("simulation.movement.neighbor_query", movement_neighbor_query_microseconds)
+		probe.observe_microseconds("simulation.movement.local_calculation", movement_local_calculation_microseconds)
+		probe.observe_microseconds("simulation.movement.integration", movement_integration_microseconds)
+		probe.observe_microseconds("simulation.movement.arrival", movement_arrival_microseconds)
 
 
 func update_static_combatants(delta: float, player_team: int) -> void:
@@ -1602,6 +1614,8 @@ func purge_removed_units() -> void:
 			buildings.remove_at(index)
 
 func move_unit(unit: Dictionary, delta: float) -> bool:
+	var probe: Variant = tick_pipeline.performance_probe
+	var movement_phase_started := Time.get_ticks_usec() if probe != null else 0
 	var difference: Vector2 = unit["target"] - unit["pos"]
 	if difference.length() < 0.035:
 		var arrival_displacement := difference
@@ -1619,6 +1633,8 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			unit["path_index"] = next_index
 			unit["target"] = path[next_index]
 			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
+			if probe != null:
+				movement_arrival_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return true
 		unit["path"] = []
 		unit["path_index"] = 0
@@ -1632,18 +1648,24 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 				assign_unit_destination(unit, unit["reserved_destination"], false)
 		elif unit["task"] in ["attack", "gather"]:
 			OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+		if probe != null:
+			movement_arrival_microseconds += Time.get_ticks_usec() - movement_phase_started
 		return false
 
 	var start_position: Vector2 = unit["pos"]
 	var search_radius := float(unit.get("footprint_radius", 0.3)) + 1.0
 	var neighbors := spatial_index.query_neighbors(unit, search_radius, "unit")
-	var movement: Dictionary = LocalMovement.calculate(unit, unit["target"], neighbors, navigation_grid, delta)
-	unit["desired_velocity"] = movement["desired_velocity"]
-	unit["actual_velocity"] = movement["actual_velocity"]
+	if probe != null:
+		movement_neighbor_query_microseconds += Time.get_ticks_usec() - movement_phase_started
+		movement_phase_started = Time.get_ticks_usec()
+	var movement_reason := LocalMovement.calculate_into(unit, unit["target"], neighbors, navigation_grid, delta)
+	if probe != null:
+		movement_local_calculation_microseconds += Time.get_ticks_usec() - movement_phase_started
+		movement_phase_started = Time.get_ticks_usec()
 	if Vector2(unit["desired_velocity"]).length_squared() > 0.000001:
 		unit["desired_facing"] = facing_for_vector(unit["desired_velocity"])
-	if movement["reason"] != "":
-		unit["diagnostic_reason"] = movement["reason"]
+	if movement_reason != "":
+		unit["diagnostic_reason"] = movement_reason
 	var step: Vector2 = unit["actual_velocity"] * delta
 	if step.length() >= difference.length() and step.dot(difference) > 0.0:
 		unit["pos"] = unit["target"]
@@ -1672,7 +1694,11 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			OrderPipeline.complete(unit, "stuck")
 			release_unit_destination(unit)
 			restore_formation_facing(unit)
+			if probe != null:
+				movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return false
+	if probe != null:
+		movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 	return true
 
 func face_unit_toward(unit: Dictionary, target: Vector2) -> void:
@@ -3033,11 +3059,13 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 	OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
 	return true
 
-func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destination: Vector2) -> bool:
+func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destination: Vector2, prevalidated_direct: bool = false) -> bool:
 	if not OrderPipeline.is_active(unit, "move"):
 		OrderPipeline.begin(unit, "move", -1, destination, false)
 	OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
-	var reserved_destination := destination_reservations.reserve(int(unit["id"]), Coordinates.clamp_world(destination, map_size), float(unit.get("footprint_radius", 0.3)), navigation_grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+	var requested_destination := Coordinates.clamp_world(destination, map_size)
+	var reserved_destination := destination_reservations.reserve(int(unit["id"]), requested_destination, float(unit.get("footprint_radius", 0.3)), navigation_grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+	var direct_segments_allowed := prevalidated_direct and reserved_destination.is_equal_approx(requested_destination)
 	unit["reserved_destination"] = reserved_destination
 	unit["destination"] = reserved_destination
 	var targets := waypoints.duplicate()
@@ -3048,7 +3076,12 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 	var combined: Array[Vector2] = []
 	var cursor: Vector2 = unit["pos"]
 	for target in targets:
-		var path_result := navigation_service.request_path(int(unit["id"]), cursor, Coordinates.clamp_world(target, map_size), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
+		var clamped_target := Coordinates.clamp_world(target, map_size)
+		var path_result: Dictionary
+		if direct_segments_allowed and cursor.distance_squared_to(clamped_target) > 0.0001:
+			path_result = navigation_service.register_prevalidated_direct_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
+		else:
+			path_result = navigation_service.request_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
 		unit["path_request_id"] = int(path_result["request_id"])
 		unit["path_status"] = String(path_result["status"])
 		unit["path_grid_revision"] = int(path_result["grid_revision"])

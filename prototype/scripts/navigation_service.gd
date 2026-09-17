@@ -50,5 +50,31 @@ func request_path(entity_id: int, start: Vector2, requested_goal: Vector2, movem
 	return result
 
 
+func register_prevalidated_direct_path(entity_id: int, start: Vector2, requested_goal: Vector2, movement_domain: String = "land", restriction_id: int = -1, purpose: String = "formation_segment", clearance_radius: float = 0.0) -> Dictionary:
+	var request_id := next_request_id
+	next_request_id += 1
+	var grid_revision := int(pathfinder.grid.revision) if pathfinder != null and pathfinder.grid != null else -1
+	var path: Array[Vector2] = [requested_goal]
+	var result := {
+		"request_id": request_id,
+		"entity_id": entity_id,
+		"purpose": purpose,
+		"start": start,
+		"requested_goal": requested_goal,
+		"resolved_goal": requested_goal,
+		"movement_domain": movement_domain,
+		"restriction_id": restriction_id,
+		"clearance_radius": clearance_radius,
+		"grid_revision": grid_revision,
+		"status": "resolved",
+		"reason": "",
+		"path": path.duplicate(),
+	}
+	results_by_request[request_id] = result.duplicate(true)
+	if pathfinder != null and pathfinder.performance_probe != null:
+		pathfinder.performance_probe.increment("navigation.prevalidated_group_segments")
+	return result
+
+
 func result_for(request_id: int) -> Dictionary:
 	return results_by_request.get(request_id, {}).duplicate(true)

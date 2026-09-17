@@ -9,6 +9,7 @@ func _initialize() -> void:
 	test_minimum_total_movement_avoids_crossing()
 	test_previous_slot_is_preserved_when_it_fits()
 	test_ties_resolve_by_entity_id()
+	test_large_assignment_is_unique_deterministic_and_role_aware()
 
 	if failures.is_empty():
 		print("F-004 formation assignment tests passed")
@@ -43,8 +44,34 @@ func test_ties_resolve_by_entity_id() -> void:
 	assert_equal(result[9], 1, "higher EntityId receives remaining slot")
 
 
-func unit(id: int, position: Vector2) -> Dictionary:
-	return {"id": id, "pos": position, "footprint_radius": 0.3}
+func test_large_assignment_is_unique_deterministic_and_role_aware() -> void:
+	var units: Array = []
+	var slots: Array = []
+	for index in range(80):
+		var kind := "clubman" if index < 40 else "archer"
+		units.append(unit(index + 1, Vector2(index % 10, index / 10), kind))
+		var local := Vector2(index % 10, index / 10)
+		slots.append({"slot_id": index, "world": local + Vector2(20, 20), "local": local, "capacity_radius": 0.45})
+	var first := Assignment.assign(units, slots)
+	var second := Assignment.assign(units, slots)
+	assert_equal(first, second, "large assignment is deterministic")
+	assert_equal(first.size(), 80, "large assignment covers every member")
+	var unique_slots: Dictionary = {}
+	var heavy_y := 0.0
+	var ranged_y := 0.0
+	for index in range(80):
+		var assigned_slot := int(first[index + 1])
+		unique_slots[assigned_slot] = true
+		if index < 40:
+			heavy_y += float(slots[assigned_slot]["local"].y)
+		else:
+			ranged_y += float(slots[assigned_slot]["local"].y)
+	assert_equal(unique_slots.size(), 80, "large assignment never duplicates a slot")
+	assert_true(heavy_y > ranged_y, "large assignment keeps heavy infantry ahead of ranged units")
+
+
+func unit(id: int, position: Vector2, kind: String = "clubman") -> Dictionary:
+	return {"id": id, "pos": position, "kind": kind, "footprint_radius": 0.3}
 
 
 func slot(id: int, position: Vector2) -> Dictionary:

@@ -758,3 +758,11 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Stretch `800×800`, 8×500: p95 `294,08` мс; постоянный tick почти не вырос относительно `400×400`, но static/peak memory выросла до `445,1 / 1328,6` МБ. Следующий измеренный simulation hotspot — `unit_orders`; render/fog/HUD требуют отдельного видимого профиля. Полный отчёт: `doc/ror-modern/PERFORMANCE_BASELINE_E6.md`.
 - Вложенный профиль `unit_orders` убрал две доказанные лишние стоимости: per-tick allocation таблицы component mapping и общий movement/full-component path для юнита, который весь такт остаётся idle без маршрута. На 8×500 p95 fixed tick снизился далее до `212,69` мс, `unit_orders` — до `113,25` мс; canonical hash `0a02c57c…f1cd` совпал. Замер включает сохранение прежнего обнуления скорости и `previous_position` после остановки.
 - Переходы idle → move/combat/gather/formation и component equivalence прошли прямые gates. Следующая работа использует отдельные активные workloads; пассивный baseline не выдаётся за доказательство боевой или визуальной производительности.
+
+### E6-002 — scalable formation march (2026-09-17)
+
+- Добавлен воспроизводимый active workload: одна публичная formation command на 500 юнитов каждого из 2/4/8 игроков и последующие измеряемые fixed ticks.
+- Малые группы сохраняют точное Hungarian assignment; большие используют детерминированное `O(N log N)` role/spatial assignment. Corridor geometry строится пакетно, direct segment проверяется до A*, destination reservation расширяется только по необходимости.
+- На полностью открытом общем envelope маршрут группы проверяется один раз и регистрирует эквивалентные индивидуальные navigation results. Препятствия, края, несовместимые домены и сдвинутые endpoints безусловно используют прежний footprint-aware индивидуальный поиск. Это реализует целевой контракт общего пути на марше без потери индивидуального уточнения.
+- `2×500`: command `8209 → 815` мс, tick p95 `196,86 → 141,70` мс. `8×500`: command `17041 → 5441` мс, tick p95 `947,27 → 757,65` мс. Canonical hashes каждой пары совпали.
+- Следующий владелец — активный `unit_orders`, а не A*: group task dispatch, local avoidance/neighbor queries, integration и component projection. E6 gate остаётся открытым; детальный baseline хранится в `doc/ror-modern/PERFORMANCE_BASELINE_E6.md`.

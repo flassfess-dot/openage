@@ -12,6 +12,7 @@ func _initialize() -> void:
 	test_deterministic_request_result_envelope()
 	test_unreachable_result()
 	test_world_records_latest_request()
+	test_prevalidated_direct_result_matches_normal_result()
 
 	if failures.is_empty():
 		print("I4-001 navigation request/result tests passed")
@@ -51,6 +52,14 @@ func test_world_records_latest_request() -> void:
 	assert_equal(unit["path_status"], "resolved", "world exposes resolved status")
 	assert_equal(unit["path_grid_revision"], world.navigation_grid.revision, "world records path grid revision")
 	assert_true(not unit["path"].is_empty(), "world consumes path only from result envelope")
+
+
+func test_prevalidated_direct_result_matches_normal_result() -> void:
+	var normal: NavigationService = service_for_terrain("grass")
+	var prevalidated: NavigationService = service_for_terrain("grass")
+	var normal_result := normal.request_path(11, Vector2(1.5, 1.5), Vector2(6.5, 6.5), "land", -1, "formation_segment", 0.3)
+	var prevalidated_result := prevalidated.register_prevalidated_direct_path(11, Vector2(1.5, 1.5), Vector2(6.5, 6.5), "land", -1, "formation_segment", 0.3)
+	assert_equal(prevalidated_result, normal_result, "prevalidated open segment preserves the canonical navigation envelope")
 
 
 func service_for_terrain(kind: String) -> NavigationService:

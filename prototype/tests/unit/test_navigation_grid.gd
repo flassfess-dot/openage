@@ -10,6 +10,7 @@ func _initialize() -> void:
 	test_terrain_and_bounds()
 	test_dynamic_resource_and_building_occupancy()
 	test_surface_components()
+	test_walkable_rectangle_rejects_obstacles_and_edges()
 
 	if failures.is_empty():
 		print("N-003 navigation grid tests passed")
@@ -59,6 +60,15 @@ func test_surface_components() -> void:
 	assert_equal(grid.surface_component_id(Vector2i(5, 6), "land"), left, "dynamic occupancy does not invalidate geographic components")
 	grid.set_terrain(Vector2i(6, 3), "grass")
 	assert_equal(grid.surface_component_id(Vector2i(2, 3), "land"), grid.surface_component_id(Vector2i(9, 3), "land"), "terrain edits invalidate and reconnect cached components")
+
+
+func test_walkable_rectangle_rejects_obstacles_and_edges() -> void:
+	var grid = NavigationGrid.new(Vector2i(12, 12))
+	grid.configure_terrain(func(_cell): return "grass")
+	assert_true(grid.is_world_rect_walkable_for(Vector2(2.5, 2.5), Vector2(8.5, 8.5), 0.3), "open group envelope is prevalidated")
+	grid.occupy([Vector2i(6, 6)], "building", 7)
+	assert_equal(grid.is_world_rect_walkable_for(Vector2(2.5, 2.5), Vector2(8.5, 8.5), 0.3), false, "occupied group envelope requires normal path validation")
+	assert_equal(grid.is_world_rect_walkable_for(Vector2(0.1, 2.0), Vector2(4.0, 5.0), 0.3), false, "margin outside the map is rejected")
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
