@@ -1400,3 +1400,17 @@ ext_unit_id.
 - Circle/AABB/neighbor запросы расширяют bucket range на максимальный mobile radius, затем применяют прежнюю точную проверку с собственным радиусом кандидата и stable-ID sorting. Insert snapshot позиции сохранён явно, поэтому перемещение уже обработанного юнита не меняет соседей ещё не обработанного в том же такте.
 - Прямой contract проверяет large footprint, boundary inclusion/exclusion, snapshot position, selection-запись без runtime-полей, reusable buffer и external formation filtering. Пройдены navigation stress, autonomous combat, pointer, shared formation и deterministic replay gates.
 - `8×500 / 3+20` shared march: p50/p95/max `216,94 / 236,04 / 240,05` мс, spatial `15,17`, neighbor `18,62`. Formation assemble: `280,82 / 304,82 / 325,22` мс, spatial `11,45`, neighbor `64,11`. Свежий A/B с commit `26b1fa38` имеет тот же canonical hash `5dea1e…78ba`; E6 остаётся открытым.
+
+### Прогресс (2026-09-18, E6-007 — активная матрица и боевой timing)
+
+- Benchmark больше не экстраполирует один formation march на всю игру: добавлены независимые `individual_crossing`, `group_click_reservation` и `combat_contact`, при этом command wall отделён от fixed ticks.
+- `individual_crossing 8×500` принимает и сохраняет активными все 4000 юнитов: p50/p95 `298,46 / 313,89` мс; главный владелец — `unit_orders 248,57` мс, внутри него local calculation `97,52` и neighbor query `59,14`.
+- Первый `combat_contact 8×500` дал p50/p95 `488,12 / 504,87` мс. Кэш только трёх неизменяемых attack timing полей вместо повторного source lookup/deep duplicate сохранил полный hash `52433705…92ff` и снизил animation p95 `172,87 → 153,01` мс; полный tick короткого A/B стал `493,26` мс.
+- Полный mass-click 8×500 до первого такта занимал более трёх минут и был остановлен. Это оформлено как отдельный algorithmic blocker, а не скрыто за успешным formation workload.
+
+### Прогресс (2026-09-18, E6-008 — масштабируемый массовый приказ)
+
+- Destination reservations получили spatial buckets, точную проверку только соседних bucket и корректное удаление при release. Для непрерывной серии одного клика ring ordering кэшируется, а deterministic cursor не пересматривает все уже занятые позиции; release/signature/revision change сбрасывают его.
+- Обычный групповой move освобождает прежние назначения пакетно. На полностью открытом общем envelope выполняется одна проверка прямоугольной области и регистрируются прямые member routes; препятствие или неодинаковый movement contract автоматически оставляют индивидуальный A*.
+- На одинаковом `2×500` профиле command wall прошёл ступени `9197,61 → 3815,75 → 326,81` мс. До и после общего пути hash совпал (`037b60ff…cab`), 1000 маршрутов зарегистрированы без A*. Полный `8×500` теперь принимает восемь команд за `1246,09` мс, активирует все 4000 юнитов и больше не является многоминутным blocker.
+- Impact gate: destination/navigation command, navigation stress, formation scenarios/interaction/shared motion, melee/autonomous combat, deterministic replay, player order controls и save/load. Следующий measured owner — fixed-tick individual/combat hot path; затем gather/AI и visible render/fog/HUD.

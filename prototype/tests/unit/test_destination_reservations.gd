@@ -9,6 +9,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	test_destinations_are_unique_and_deterministic()
+	test_release_removes_spatial_occupancy()
 	test_move_completion_requires_reserved_place()
 
 	if failures.is_empty():
@@ -32,6 +33,21 @@ func test_destinations_are_unique_and_deterministic() -> void:
 	var repeated = DestinationReservations.new()
 	repeated.reserve(1, Vector2(6.0, 6.0), 0.3, grid, 10)
 	assert_equal(repeated.reserve(2, Vector2(6.0, 6.0), 0.3, grid, 10), second, "tie-break is deterministic")
+
+
+func test_release_removes_spatial_occupancy() -> void:
+	var grid = NavigationGrid.new(Vector2i(12, 12))
+	grid.configure_terrain(func(_cell: Vector2i) -> String: return "land")
+	var reservations = DestinationReservations.new()
+	var desired := Vector2(6.0, 6.0)
+	reservations.reserve(1, desired, 0.3, grid)
+	var displaced := reservations.reserve(2, desired, 0.3, grid)
+	assert_true(displaced != desired, "occupied destination displaces the second entity")
+	reservations.release(1)
+	assert_equal(reservations.reserve(3, desired, 0.3, grid), desired, "released spatial slot becomes available")
+	reservations.clear()
+	assert_equal(reservations.reservation_buckets, {}, "clear removes spatial buckets")
+	assert_equal(reservations.maximum_reserved_radius, 0.0, "clear resets maximum radius")
 
 
 func test_move_completion_requires_reserved_place() -> void:

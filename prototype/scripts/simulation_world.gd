@@ -94,6 +94,7 @@ var bulk_load_depth: int = 0
 var gamespec_data: Dictionary = {}
 var object_catalog_data: Dictionary = {}
 var graphics_catalog_data: Dictionary = {}
+var attack_animation_spec_cache: Dictionary = {}
 var civilization_by_team: Dictionary = {1: 13, 2: 13}
 var population_by_team: Dictionary = {}
 var population_reserved_by_team: Dictionary = {}
@@ -181,6 +182,7 @@ func set_performance_probe(probe: Variant) -> void:
 func set_gamespec(data: Dictionary) -> void:
 	gamespec_data = data
 	data_repository.configure_compatibility_gamespec(data)
+	attack_animation_spec_cache.clear()
 
 
 func set_terrain_catalog(data: Dictionary) -> void:
@@ -194,16 +196,19 @@ func set_object_catalog(data: Dictionary) -> void:
 	object_catalog_data = data
 	data_repository.configure_objects(data)
 	technology_system.configure(data)
+	attack_animation_spec_cache.clear()
 	for team in civilization_by_team.keys():
 		initialize_team_rules(int(team))
 
 
 func set_graphics_catalog(data: Dictionary) -> void:
 	graphics_catalog_data = data
+	attack_animation_spec_cache.clear()
 
 
 func set_runtime_catalog(data: Dictionary) -> void:
 	data_repository.configure_runtime(data)
+	attack_animation_spec_cache.clear()
 	var trade_policy: Dictionary = data_repository.runtime_metadata("trade_boat").get("trade", {})
 	for team in civilization_by_team.keys():
 		trade_system.initialize_team(int(team), trade_policy)
@@ -212,6 +217,7 @@ func set_runtime_catalog(data: Dictionary) -> void:
 func set_team_civilization(team: int, civilization_id: int) -> void:
 	player_registry.set_civilization(team, civilization_id)
 	civilization_by_team[team] = civilization_id
+	attack_animation_spec_cache.clear()
 	trade_system.initialize_team(team, data_repository.runtime_metadata("trade_boat").get("trade", {}))
 	if not object_catalog_data.is_empty():
 		technology_system.reset_team(team)
@@ -1407,25 +1413,49 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 
 
 func attack_animation_spec(unit: Dictionary) -> Dictionary:
+	var kind := String(unit.get("kind", ""))
+	var team := int(unit.get("team", 0))
+	var source_id := int(unit.get("source_unit_id", -1))
 	var role_source_id := int(unit.get("worker_role_source_unit_id", -1))
+	var cache_key := Vector3i(team, source_id, role_source_id)
+	var kind_cache: Dictionary = attack_animation_spec_cache.get(kind, {})
+	if kind_cache.has(cache_key):
+		return kind_cache[cache_key]
+	var result: Dictionary
 	if role_source_id >= 0:
-		var role_source := object_record_by_id(role_source_id, int(unit.get("team", 0)))
+		var role_source := object_record_by_id(role_source_id, team)
 		var graphic_id := int(role_source.get("graphics", {}).get("attack", -1))
-		var graphic: Dictionary = graphics_catalog_data.get("graphics", {}).get(String.num_int64(graphic_id), {}).duplicate(true)
+		var graphic: Dictionary = graphics_catalog_data.get("graphics", {}).get(String.num_int64(graphic_id), {})
 		var event_frame := int(role_source.get("combat", {}).get("frame_delay", 0))
-		graphic["damage_frame"] = event_frame
-		graphic["projectile_release_frame"] = event_frame
-		return graphic
-	var source := object_record_by_id(int(unit.get("source_unit_id", -1)), int(unit.get("team", 0)))
-	if not source.is_empty():
-		var graphic_id := int(source.get("graphics", {}).get("attack", -1))
-		var graphic: Dictionary = graphics_catalog_data.get("graphics", {}).get(String.num_int64(graphic_id), {}).duplicate(true)
-		if not graphic.is_empty():
-			var event_frame := int(source.get("combat", {}).get("frame_delay", 0))
-			graphic["damage_frame"] = event_frame
-			graphic["projectile_release_frame"] = event_frame
-			return graphic
-	return unit_stats(String(unit.get("kind", ""))).get("animations", {}).get("attack", {})
+		result = {
+			"damage_frame": event_frame,
+			"projectile_release_frame": event_frame,
+			"frame_rate": float(graphic.get("frame_rate", 0.1)),
+		}
+	else:
+		var source := object_record_by_id(source_id, team)
+		if not source.is_empty():
+			var graphic_id := int(source.get("graphics", {}).get("attack", -1))
+			var graphic: Dictionary = graphics_catalog_data.get("graphics", {}).get(String.num_int64(graphic_id), {})
+			if not graphic.is_empty():
+				var event_frame := int(source.get("combat", {}).get("frame_delay", 0))
+				result = {
+					"damage_frame": event_frame,
+					"projectile_release_frame": event_frame,
+					"frame_rate": float(graphic.get("frame_rate", 0.1)),
+				}
+		if result.is_empty():
+			var stats := unit_stats(kind)
+			var fallback: Dictionary = stats.get("animations", {}).get("attack", {})
+			var default_event_frame := int(stats.get("attack_frame_delay", 0))
+			result = {
+				"damage_frame": int(fallback.get("damage_frame", default_event_frame)),
+				"projectile_release_frame": int(fallback.get("projectile_release_frame", default_event_frame)),
+				"frame_rate": float(fallback.get("frame_rate", 0.1)),
+			}
+	kind_cache[cache_key] = result
+	attack_animation_spec_cache[kind] = kind_cache
+	return result
 
 
 func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
@@ -3044,11 +3074,43 @@ func assign_command_move(selected: Array, target: Vector2) -> bool:
 		unit["target_id"] = -1
 		_clear_combat_intent(unit)
 		OrderPipeline.begin(unit, "move", -1, target, false)
-		if not assign_unit_destination(unit, target):
+	# Release the complete selection before assigning its new endpoints. This
+	# prevents obsolete slots owned by later members from fragmenting a mass
+	# command and lets the deterministic reservation cursor advance once.
+	for unit in selected:
+		destination_reservations.release(int(unit["id"]))
+	var reserved_by_id: Dictionary = {}
+	for unit in selected:
+		var requested := Coordinates.clamp_world(target, map_size)
+		var reserved := destination_reservations.reserve(int(unit["id"]), requested, float(unit.get("footprint_radius", 0.3)), navigation_grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+		unit["reserved_destination"] = reserved
+		reserved_by_id[int(unit["id"])] = reserved
+	var prevalidated_direct := _group_move_envelope_is_open(selected, reserved_by_id)
+	for unit in selected:
+		if not assign_unit_destination(unit, Vector2(reserved_by_id[int(unit["id"])]), false, prevalidated_direct):
 			OrderPipeline.complete(unit, "no_path")
 		else:
 			resolved_count += 1
 	return resolved_count > 0
+
+
+func _group_move_envelope_is_open(selected: Array, reserved_by_id: Dictionary) -> bool:
+	if selected.size() < 2 or reserved_by_id.size() != selected.size():
+		return false
+	var movement_domain := String(selected[0].get("movement_domain", "land"))
+	var restriction_id := int(selected[0].get("terrain_restriction", -1))
+	var minimum := Vector2(INF, INF)
+	var maximum := Vector2(-INF, -INF)
+	var maximum_radius := 0.0
+	for unit in selected:
+		if String(unit.get("movement_domain", "land")) != movement_domain or int(unit.get("terrain_restriction", -1)) != restriction_id:
+			return false
+		var destination: Vector2 = reserved_by_id[int(unit["id"])]
+		for position in [Vector2(unit["pos"]), destination]:
+			minimum = Vector2(minf(minimum.x, position.x), minf(minimum.y, position.y))
+			maximum = Vector2(maxf(maximum.x, position.x), maxf(maximum.y, position.y))
+		maximum_radius = maxf(maximum_radius, float(unit.get("footprint_radius", 0.3)))
+	return navigation_grid.is_world_rect_walkable_for(minimum, maximum, maximum_radius, movement_domain, restriction_id)
 
 func assign_command_attack_move(selected: Array, target: Vector2) -> bool:
 	var resolved_count := 0
@@ -3075,7 +3137,7 @@ func assign_command_attack_move(selected: Array, target: Vector2) -> bool:
 			resolved_count += 1
 	return resolved_count > 0
 
-func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_destination: bool = true) -> bool:
+func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_destination: bool = true, prevalidated_direct: bool = false) -> bool:
 	open_movement_envelopes_by_id.erase(int(unit["id"]))
 	if not OrderPipeline.is_active(unit):
 		OrderPipeline.begin(unit, String(unit.get("task", "move")), int(unit.get("target_id", -1)), destination, String(unit.get("task", "")) in ["attack", "gather"])
@@ -3085,7 +3147,12 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 		clamped_destination = destination_reservations.reserve(int(unit["id"]), clamped_destination, float(unit.get("footprint_radius", 0.3)), navigation_grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
 		unit["reserved_destination"] = clamped_destination
 	unit["destination"] = clamped_destination
-	var path_result := navigation_service.request_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "replan" if not unit.get("path", []).is_empty() else String(unit.get("task", "move")), float(unit.get("footprint_radius", 0.3)))
+	var path_purpose := "replan" if not unit.get("path", []).is_empty() else String(unit.get("task", "move"))
+	var path_result: Dictionary
+	if prevalidated_direct:
+		path_result = navigation_service.register_prevalidated_direct_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)))
+	else:
+		path_result = navigation_service.request_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)))
 	unit["path_request_id"] = int(path_result["request_id"])
 	unit["path_status"] = String(path_result["status"])
 	unit["path_grid_revision"] = int(path_result["grid_revision"])
@@ -3682,6 +3749,7 @@ func change_resource_amount(team: int, resource_id: int, delta: int) -> void:
 
 
 func apply_technology_commands(team: int, commands: Array, resolve_automatic: bool = true) -> void:
+	attack_animation_spec_cache.clear()
 	var upgraded_entities: Array[Dictionary] = []
 	var upgraded_entity_ids: Dictionary = {}
 	for command_value in commands:

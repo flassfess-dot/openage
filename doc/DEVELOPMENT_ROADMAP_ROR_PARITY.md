@@ -795,3 +795,10 @@ L2 `test_ai_vs_ai_match.gd` запускает две стороны без бо
 - Индекс хранит позицию момента rebuild, а не читает изменяющееся поле кандидата во время последовательной обработки такта. Поэтому ускорение не вводит order dependency. Stable EntityId order, selection/target queries, external-formation filter и exact distance contract сохранены.
 - Длинный `8×500 / 3+20` shared march: p50/p95/max `216,94 / 236,04 / 240,05` мс, spatial index `15,17`, neighbor query `18,62`. Formation assemble: `280,82 / 304,82 / 325,22` мс, spatial `11,45`, neighbor `64,11`.
 - Отдельный A/B worktree предыдущего commit дал тот же итоговый SHA-256 `5dea1e…78ba`; новый индекс не изменил canonical outcome. Spatial/navigation/combat/pointer/shared-formation/replay impact gates проходят. Следующие владельцы выбираются только отдельными combat/gather/AI и fixed-tick профилями; E6 gate остаётся открытым.
+
+### E6-007/E6-008 — реальные active workloads и массовый приказ (2026-09-18)
+
+- Benchmark разделяет passive, shared march, formation assemble, individual crossing, mass click и combat contact. `8×500` individual crossing даёт p50/p95 `298,46 / 313,89` мс; combat contact — около `488 / 505` мс. Attack timing cache сохранил hash и снизил animation p95 `172,87 → 153,01` мс.
+- Исходный mass-click `8×500` не дошёл до первого такта за три минуты. Spatial buckets конечных позиций, кэшированный deterministic ring cursor, пакетное освобождение старых мест и единая проверка открытого group envelope устранили повторный полный обход и 1000 независимых A*.
+- `2×500` command wall снижен `9197,61 → 326,81` мс с тем же SHA-256 `037b60ff…cab`; полный `8×500` теперь принимает восемь команд за `1246,09` мс и активирует все 4000 участников. Препятствие или разный movement domain/restriction сохраняют индивидуальный поиск.
+- Это эквивалентная оптимизация текущей открытой нагрузки. Будущая смена движения/формаций вправе установить новый baseline после UX/collision/obstacle/replay gate; совпадение с траекториями RoR не требуется, ухудшение управления не допускается.

@@ -55,11 +55,18 @@ func _run_case(options: Dictionary) -> Dictionary:
 		var team_unit_ids: Array[int] = []
 		var prepared_positions: Array = formation_start_positions.get(team, [])
 		for index in range(units_per_player):
-			var spawn_position: Vector2 = prepared_positions[index] if index < prepared_positions.size() else _unit_position(team, index, player_count, map_side)
+			var spawn_position: Vector2
+			if String(options["workload"]) == "combat_contact":
+				spawn_position = _combat_position(team, index, units_per_player, player_count, map_side)
+			else:
+				spawn_position = prepared_positions[index] if index < prepared_positions.size() else _unit_position(team, index, player_count, map_side)
 			var unit: Dictionary = world.add_unit(team, "clubman", spawn_position, false)
 			unit["stance"] = "passive"
 			unit["attack_autonomous"] = false
 			unit["acquisition_range"] = 0.0
+			if String(options["workload"]) == "combat_contact":
+				unit["max_hp"] = 1000.0
+				unit["hp"] = 1000.0
 			team_unit_ids.append(int(unit["id"]))
 		unit_ids_by_team[team] = team_unit_ids
 	world.end_bulk_load()
@@ -70,17 +77,20 @@ func _run_case(options: Dictionary) -> Dictionary:
 	var probe = PerformanceProbe.new(maxi(64, sample_ticks + 8))
 	controller.set_performance_probe(probe)
 	var command_phase: Dictionary = {}
-	if String(options["workload"]) in ["formation_march", "formation_assemble"]:
+	if String(options["workload"]) in ["formation_march", "formation_assemble", "group_click_reservation"]:
 		probe.clear()
 		for team in range(1, player_count + 1):
 			var ids: Array[int] = unit_ids_by_team[team]
-			controller.enqueue_command(Commands.FormationMoveCommand.new(
-				controller.tick_index + 1,
-				ids,
-				_formation_destination(team, player_count, map_side),
-				FormationGeometry.BLOCK,
-				Vector2.DOWN
-			), true, team)
+			if String(options["workload"]) == "group_click_reservation":
+				controller.enqueue_command(Commands.MoveCommand.new(controller.tick_index + 1, ids, _formation_destination(team, player_count, map_side)), true, team)
+			else:
+				controller.enqueue_command(Commands.FormationMoveCommand.new(
+					controller.tick_index + 1,
+					ids,
+					_formation_destination(team, player_count, map_side),
+					FormationGeometry.BLOCK,
+					Vector2.DOWN
+				), true, team)
 		var command_started := Time.get_ticks_usec()
 		controller.advance_frame(0.05, 1, 2)
 		command_phase = {
@@ -88,6 +98,42 @@ func _run_case(options: Dictionary) -> Dictionary:
 			"probe": probe.report(),
 			"accepted": _command_result_count(controller.command_results, true),
 			"rejected": _command_result_count(controller.command_results, false),
+		}
+	elif String(options["workload"]) == "individual_crossing":
+		probe.clear()
+		var movement_setup_started := Time.get_ticks_usec()
+		var assigned := 0
+		for team in range(1, player_count + 1):
+			var ids: Array[int] = unit_ids_by_team[team]
+			for index in range(ids.size()):
+				var unit = world.find_unit(ids[index])
+				assigned += int(world.assign_command_move([unit], _individual_destination(team, index, player_count, map_side)))
+		command_phase = {
+			"wall_microseconds": Time.get_ticks_usec() - movement_setup_started,
+			"probe": probe.report(),
+			"accepted": assigned,
+			"rejected": player_count * units_per_player - assigned,
+		}
+	elif String(options["workload"]) == "combat_contact":
+		probe.clear()
+		var combat_setup_started := Time.get_ticks_usec()
+		var combat_assigned := 0
+		for first_team in range(1, player_count + 1, 2):
+			var second_team := first_team + 1
+			if second_team > player_count:
+				break
+			var first_ids: Array[int] = unit_ids_by_team[first_team]
+			var second_ids: Array[int] = unit_ids_by_team[second_team]
+			for index in range(mini(first_ids.size(), second_ids.size())):
+				var first = world.find_unit(first_ids[index])
+				var second = world.find_unit(second_ids[index])
+				combat_assigned += int(world.assign_command_attack([first], int(second["id"])))
+				combat_assigned += int(world.assign_command_attack([second], int(first["id"])))
+		command_phase = {
+			"wall_microseconds": Time.get_ticks_usec() - combat_setup_started,
+			"probe": probe.report(),
+			"accepted": combat_assigned,
+			"rejected": player_count * units_per_player - combat_assigned,
 		}
 	for _tick in range(warmup_ticks):
 		controller.advance_frame(0.05, 1, 2)
@@ -151,6 +197,45 @@ func _formation_destination(team: int, player_count: int, map_side: int) -> Vect
 	)
 
 
+func _individual_destination(team: int, index: int, player_count: int, map_side: int) -> Vector2:
+	var region_columns := ceili(sqrt(float(player_count)))
+	var region_rows := ceili(float(player_count) / float(region_columns))
+	var region_column := (team - 1) % region_columns
+	var region_row := (team - 1) / region_columns
+	var region_width := maxi(8, map_side / region_columns)
+	var region_height := maxi(8, map_side / region_rows)
+	var usable_width := maxi(1, region_width - 4)
+	var source_column := index % usable_width
+	var destination_column := (source_column + maxi(1, usable_width / 2)) % usable_width
+	var row := index / usable_width
+	return Vector2(
+		clampi(region_column * region_width + 2 + destination_column, 1, map_side - 2),
+		clampi(region_row * region_height + 2 + row, 1, map_side - 2)
+	) + Vector2(0.5, 0.5)
+
+
+func _combat_position(team: int, index: int, units_per_player: int, player_count: int, map_side: int) -> Vector2:
+	var pair_index := (team - 1) / 2
+	var pair_count := maxi(1, ceili(float(player_count) / 2.0))
+	var arena_columns := ceili(sqrt(float(pair_count)))
+	var arena_rows := ceili(float(pair_count) / float(arena_columns))
+	var arena_column := pair_index % arena_columns
+	var arena_row := pair_index / arena_columns
+	var arena_width := float(map_side) / float(arena_columns)
+	var arena_height := float(map_side) / float(arena_rows)
+	var columns := maxi(1, ceili(sqrt(float(units_per_player))))
+	var column := index % columns
+	var row := index / columns
+	var spacing := 1.4
+	var grid_width := float(columns - 1) * spacing
+	var grid_height := float(ceili(float(units_per_player) / float(columns)) - 1) * spacing
+	var side_offset := -0.35 if team % 2 == 1 else 0.35
+	return Vector2(
+		arena_column * arena_width + arena_width * 0.5 - grid_width * 0.5 + float(column) * spacing + side_offset,
+		arena_row * arena_height + arena_height * 0.5 - grid_height * 0.5 + float(row) * spacing
+	)
+
+
 func _formation_start(team: int, player_count: int, map_side: int) -> Vector2:
 	var region_columns := ceili(sqrt(float(player_count)))
 	var region_rows := ceili(float(player_count) / float(region_columns))
@@ -193,7 +278,7 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 			result[key] = maxi(0, int(value))
 		elif key in ["case", "output", "workload"]:
 			result[key] = value
-	if String(result["workload"]) not in ["passive_full_population", "formation_march", "formation_assemble"]:
+	if String(result["workload"]) not in ["passive_full_population", "formation_march", "formation_assemble", "individual_crossing", "group_click_reservation", "combat_contact"]:
 		result["workload"] = "passive_full_population"
 	result["players"] = clampi(int(result["players"]), 2, 8)
 	result["units_per_player"] = maxi(1, int(result["units_per_player"]))

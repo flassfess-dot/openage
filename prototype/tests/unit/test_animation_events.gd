@@ -8,6 +8,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	test_named_events_fire_once()
+	test_attack_timing_cache_invalidation()
 	test_damage_waits_for_original_frame()
 	test_projectile_release_frame()
 
@@ -26,6 +27,33 @@ func test_named_events_fire_once() -> void:
 		var unit := {"anim_state": AnimationController.IDLE, "anim": 0.3, "animation_events_fired": {}}
 		assert_equal(AnimationController.event_reached(unit, event_name, 2, 0.1), true, "%s fires" % event_name)
 		assert_equal(AnimationController.event_reached(unit, event_name, 2, 0.1), false, "%s fires once" % event_name)
+
+
+func test_attack_timing_cache_invalidation() -> void:
+	var world = SimulationWorld.new(Vector2i(8, 8))
+	world.set_gamespec({"units": {"clubman": {
+		"hit_points": 30.0,
+		"speed": 1.0,
+		"attack_frame_delay": 3,
+		"animations": {"attack": {"frame_rate": 0.125}},
+	}}})
+	var unit: Dictionary = world.add_unit(1, "clubman", Vector2(2.0, 2.0), false)
+	var first: Dictionary = world.attack_animation_spec(unit)
+	var second: Dictionary = world.attack_animation_spec(unit)
+	assert_equal(first, second, "cached attack timing remains stable")
+	assert_equal(first["damage_frame"], 3, "fallback damage frame is cached")
+	assert_equal(first["projectile_release_frame"], 3, "fallback projectile frame is cached")
+	assert_equal(first["frame_rate"], 0.125, "fallback frame rate is cached")
+	assert_equal(world.attack_animation_spec_cache.get("clubman", {}).size(), 1, "one timing entry is cached")
+	world.set_gamespec({"units": {"clubman": {
+		"hit_points": 30.0,
+		"speed": 1.0,
+		"attack_frame_delay": 5,
+		"animations": {"attack": {"frame_rate": 0.2}},
+	}}})
+	var updated: Dictionary = world.attack_animation_spec(unit)
+	assert_equal(updated["damage_frame"], 5, "gamespec replacement invalidates cached damage frame")
+	assert_equal(updated["frame_rate"], 0.2, "gamespec replacement invalidates cached frame rate")
 
 
 func test_damage_waits_for_original_frame() -> void:

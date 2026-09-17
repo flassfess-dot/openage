@@ -33,7 +33,7 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 		return
 	var attack_spec: Dictionary = world.attack_animation_spec(unit)
 	var event_name := "projectile_release_frame" if unit["projectile_id"] >= 0 else "damage_frame"
-	var event_frame := int(attack_spec.get(event_name, world.unit_stats(unit["kind"]).get("attack_frame_delay", 0)))
+	var event_frame := int(attack_spec.get(event_name, 0))
 	var frame_duration := maxf(0.001, float(attack_spec.get("frame_rate", 0.1)))
 	if not AnimationController.event_reached(unit, event_name, event_frame, frame_duration):
 		return
