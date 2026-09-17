@@ -640,7 +640,8 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 	formation_groups[group.group_id] = group
 	next_formation_group_id += 1
 	var member_waypoint_sets := FormationCorridor.member_waypoint_sets(corridor_plan, ordered.size(), formation_name, group.spacing, forward)
-	var prevalidated_direct_routes := _formation_routes_are_open(ordered, member_waypoint_sets)
+	var route_envelope := _formation_route_envelope(ordered, member_waypoint_sets)
+	var prevalidated_direct_routes := bool(route_envelope.get("open", false))
 	for unit in ordered:
 		var assigned_slot: Dictionary = group.slot_for(int(unit["id"]))
 		unit["task"] = "move"
@@ -654,7 +655,7 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 		unit["formation_slot_mode"] = "soft"
 		var member_waypoints: Array[Vector2] = []
 		member_waypoints.assign(member_waypoint_sets[int(assigned_slot["slot_id"])])
-		if simulation_world.assign_unit_waypoints(unit, member_waypoints, assigned_slot["world"], prevalidated_direct_routes):
+		if simulation_world.assign_unit_waypoints(unit, member_waypoints, assigned_slot["world"], prevalidated_direct_routes, route_envelope):
 			resolved_count += 1
 	if performance_probe != null:
 		performance_probe.observe_microseconds("formation.member_routes", Time.get_ticks_usec() - formation_probe_started)
@@ -779,9 +780,9 @@ func _configure_group_route(group, members: Array, start_center: Vector2) -> Dic
 	return corridor_plan
 
 
-func _formation_routes_are_open(members: Array, waypoint_sets: Array) -> bool:
+func _formation_route_envelope(members: Array, waypoint_sets: Array) -> Dictionary:
 	if members.is_empty() or waypoint_sets.size() != members.size():
-		return false
+		return {"open": false}
 	var movement_domain := String(members[0].get("movement_domain", "land"))
 	var restriction_id := int(members[0].get("terrain_restriction", -1))
 	var minimum := Vector2(INF, INF)
@@ -789,18 +790,24 @@ func _formation_routes_are_open(members: Array, waypoint_sets: Array) -> bool:
 	var maximum_radius := 0.0
 	for member in members:
 		if String(member.get("movement_domain", "land")) != movement_domain or int(member.get("terrain_restriction", -1)) != restriction_id:
-			return false
+			return {"open": false}
 		var position: Vector2 = member.get("pos", Vector2.ZERO)
 		minimum = Vector2(minf(minimum.x, position.x), minf(minimum.y, position.y))
 		maximum = Vector2(maxf(maximum.x, position.x), maxf(maximum.y, position.y))
 		maximum_radius = maxf(maximum_radius, float(member.get("footprint_radius", 0.3)))
 	for waypoints in waypoint_sets:
 		if waypoints.is_empty():
-			return false
+			return {"open": false}
 		for waypoint in waypoints:
 			minimum = Vector2(minf(minimum.x, waypoint.x), minf(minimum.y, waypoint.y))
 			maximum = Vector2(maxf(maximum.x, waypoint.x), maxf(maximum.y, waypoint.y))
-	return simulation_world.navigation_grid.is_world_rect_walkable_for(minimum, maximum, maximum_radius, movement_domain, restriction_id)
+	var open: bool = simulation_world.navigation_grid.is_world_rect_walkable_for(minimum, maximum, maximum_radius, movement_domain, restriction_id)
+	return {
+		"open": open,
+		"minimum": minimum,
+		"maximum": maximum,
+		"grid_revision": simulation_world.navigation_grid.revision,
+	}
 
 func _detach_units_from_formations(selected: Array) -> void:
 	var affected_groups: Dictionary = {}

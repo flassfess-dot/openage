@@ -1,6 +1,8 @@
 class_name RoRSimulationSnapshot
 extends RefCounted
 
+const EntityComponents := preload("res://scripts/entity_components.gd")
+
 const FORMAT_VERSION: int = 1
 
 
@@ -185,6 +187,7 @@ static func _sorted_entities(source: Array) -> Array:
 	var result: Array = []
 	for entity in source:
 		var canonical_entity: Dictionary = entity.duplicate(true)
+		EntityComponents.sync_dynamic(canonical_entity)
 		# Selection belongs to player-control/presentation state and must not
 		# change deterministic simulation hashes.
 		canonical_entity.erase("selected")
@@ -197,6 +200,7 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 	if compact:
 		return _compact_ai_entity(entity, observer_team)
 	var result: Dictionary = entity.duplicate(true)
+	EntityComponents.sync_dynamic(result)
 	result.erase("selected")
 	var cargo: Dictionary = result.get("components", {}).get("cargo", {})
 	if bool(cargo.get("enabled", false)):

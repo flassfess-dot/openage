@@ -56,7 +56,7 @@ static func calculate_into(unit: Dictionary, target: Vector2, neighbors: Array, 
 	return reason
 
 
-static func calculate_runtime_unit_into(unit: Dictionary, target: Vector2, neighbors: Array, navigation_grid, delta: float) -> String:
+static func calculate_runtime_unit_into(unit: Dictionary, target: Vector2, neighbors: Array, navigation_grid, delta: float, open_envelope: Variant = null) -> String:
 	# Authoritative runtime units and their unit neighbours have a complete
 	# schema. This is the same arithmetic as calculate_into, without fallback
 	# Dictionary lookups in the 4,000-unit fixed-tick hot loop.
@@ -97,7 +97,8 @@ static func calculate_runtime_unit_into(unit: Dictionary, target: Vector2, neigh
 	if velocity.length() > speed and speed > 0.0:
 		velocity = velocity.normalized() * speed
 	var reason := ""
-	if not _position_walkable(position + velocity * delta, float(unit["footprint_radius"]), navigation_grid, String(unit["movement_domain"]), int(unit["terrain_restriction"])):
+	var proposed_position := position + velocity * delta
+	if not _inside_open_envelope(proposed_position, open_envelope) and not _position_walkable(proposed_position, float(unit["footprint_radius"]), navigation_grid, String(unit["movement_domain"]), int(unit["terrain_restriction"])):
 		reason = "local_obstacle"
 		velocity = _walkable_alternative(unit, desired, position, speed, delta, navigation_grid)
 		if velocity == Vector2.ZERO:
@@ -105,6 +106,14 @@ static func calculate_runtime_unit_into(unit: Dictionary, target: Vector2, neigh
 	unit["desired_velocity"] = desired
 	unit["actual_velocity"] = velocity
 	return reason
+
+
+static func _inside_open_envelope(position: Vector2, envelope: Variant) -> bool:
+	if not envelope is Dictionary or not bool(envelope.get("open", false)):
+		return false
+	var minimum: Vector2 = envelope.get("minimum", Vector2(INF, INF))
+	var maximum: Vector2 = envelope.get("maximum", Vector2(-INF, -INF))
+	return position.x >= minimum.x and position.y >= minimum.y and position.x <= maximum.x and position.y <= maximum.y
 
 
 static func _walkable_alternative(unit: Dictionary, desired: Vector2, position: Vector2, speed: float, delta: float, navigation_grid) -> Vector2:

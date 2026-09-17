@@ -90,13 +90,27 @@ Canonical SHA-256 каждого 2/4/8-player area-x4 workload совпадае�
 
 Пакет сохраняет одинаковый fixed tick, полный local avoidance, footprint checks, стабильный порядок соседей, формационный lifecycle и индивидуальные маршруты. Целевой бюджет ещё не достигнут; следующая архитектурная граница — отделить общее дальнее продвижение группы от индивидуальной ближней коррекции, не разрежая боевые/целевые решения и не меняя canonical outcome без отдельного обоснованного контракта.
 
-## 7. Следующие профили и запреты
+## 7. E6-004 — projection на границе и cache открытого corridor
 
-1. Продолжить formation-march оптимизацию по измеренным владельцам: единое group-motion состояние, разреженная локальная коррекция дальних соседей и пакетная projection/sync без изменения canonical outcome.
+Авторитетные системы симуляции уже используют плоские runtime-поля сущностей. Дублирующие динамические поля вложенной component-схемы теперь проецируются на глубокую копию только при canonical/presentation snapshot. Это исключает запись десятков Dictionary-полей для каждого юнита каждого такта, но сохраняет точное состояние для render, save, replay и hash. Прямой component test доказывает projection transform, health и animation; lifecycle/save/replay impact-gates проходят.
+
+Общий открытый envelope, проверенный при formation command, теперь остаётся неавторитетным кэшем у участников. Пока предлагаемая позиция внутри envelope и `NavigationGrid.revision` не изменилась, повторная footprint walkability-проверка эквивалентна уже доказанной общей проверке и пропускается. Выход за envelope, новый приказ, release или изменение карты удаляет/игнорирует кэш и возвращает полный `LocalMovement` contract.
+
+| Workload, 400×400 | E6-003 p95 | E6-004 p95 | Canonical SHA-256 |
+|---|---:|---:|---|
+| 2 × 500 formation march, 2+3 ticks | 94,86 мс | 79,25 мс | `f8a07914996a…8652`, совпадает |
+| 8 × 500 formation march, 2+3 ticks | 518,63 мс | 409,30 мс | `3707915a9c01…8b11`, совпадает |
+| 8 × 500 formation march, 3+20 ticks | — | 355,28 / 422,84 мс p50/p95 | новый длинный baseline `add690acb205…b95` |
+
+На коротком 8×500 срезе route cache уменьшил local calculation p95 `94,91 → 49,33` мс относительно уже перенёсшего projection E6-004 pre-cache среза; component sync в fixed tick равен нулю. На длинном срезе `unit_orders` остаётся главным владельцем (`317,11` мс p95): neighbor query `127,51`, local calculation `52,16`, integration `46,21`. Все 4 000 юнитов продолжают марш. Бюджет 50 мс и запас 30% пока не достигнут.
+
+## 8. Следующие профили и запреты
+
+1. Реализовать единое дальнее group-motion состояние и индивидуальную связанную коррекцию только рядом с препятствием, другой группой или конкретной целью. Покадровое совпадение с траекторией RoR не требуется: принимаются отзывчивость, читаемость, отсутствие наложений/дрожания/застреваний, корректное сжатие/восстановление, боевой переход и детерминированный replay.
 2. Добавить отдельные `move/local-avoidance/combat/gather` workloads и устранять только их измеренные полные обходы/повторные вычисления; idle и formation workloads не служат заменой этим профилям.
 3. Добавить активный 2/4/8-player AI/combat workload, отдельно измеряя snapshot и planning cadence.
 4. Добавить render baseline с world/minimap fog, source composite/player colour, culling, draw calls, CPU frame и GPU frame. Headless simulation numbers не являются доказательством плавного UI.
 5. Повторить после retained fog chunks и общего world/minimap cache; camera pan не должен менять canonical hash или инициировать полный authoritative rebuild.
-6. Не переходить на MultiMesh, сторонний ECS, C# или GDExtension до профиля соответствующего владельца. Любая оптимизация обязана сохранить canonical hash и пройти прямые lifecycle/save/replay regressions.
+6. Не переходить на MultiMesh, сторонний ECS, C# или GDExtension до профиля соответствующего владельца. Эквивалентная оптимизация обязана сохранить canonical hash и пройти прямые lifecycle/save/replay regressions. Намеренное улучшение movement/formation может создать новый hash baseline только после отдельного UX/collision/stress/replay gate; изменение характеристик, экономики или правил боя этим не разрешается.
 
 Текущий обязательный 50-мс tick budget ещё не достигнут: даже 2×500 имеет p95 70,78 мс, а 8×500 — 292,38 мс. E6 остаётся открытым; для будущих механик после достижения бюджета требуется ещё не менее 30% p95-запаса.

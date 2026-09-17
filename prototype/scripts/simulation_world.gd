@@ -57,6 +57,7 @@ var movement_local_calculation_microseconds: int = 0
 var movement_integration_microseconds: int = 0
 var movement_arrival_microseconds: int = 0
 var movement_neighbor_buffer: Array = []
+var open_movement_envelopes_by_id: Dictionary = {}
 
 var entity_id_sequence := EntityIds.new()
 var spatial_index := SpatialHash.new(2.0)
@@ -274,6 +275,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	battle_message = ""
 	resource_approach_slots.clear()
 	building_approach_slots.clear()
+	open_movement_envelopes_by_id.clear()
 	last_build_failure = ""
 	production_system.reset()
 	transport_system.reset()
@@ -1344,18 +1346,10 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 			apply_attack_frame_event(unit, attack_target, player_team)
 		if probe != null:
 			animation_microseconds += Time.get_ticks_usec() - phase_started
-			phase_started = Time.get_ticks_usec()
-		if (
-			stable_idle_tick
-			and String(unit.get("task", "idle")) == "idle"
-			and unit.get("path", []).is_empty()
-			and Vector2(unit.get("pos", Vector2.ZERO)).distance_squared_to(position_before_tick) <= 0.000001
-		):
-			EntityComponents.sync_stable_idle_tick(unit)
-		else:
-			EntityComponents.sync_runtime_unit(unit)
-		if probe != null:
-			component_sync_microseconds += Time.get_ticks_usec() - phase_started
+		# Dynamic component mirrors are projected on snapshot/presentation
+		# boundaries. Authoritative systems above operate on the unit runtime
+		# fields, so rewriting the same nested Dictionaries for every entity on
+		# every tick only duplicates state and dominates large moving groups.
 	if probe != null:
 		presentation_microseconds = animation_microseconds + component_sync_microseconds
 		probe.observe_microseconds("simulation.unit_orders.preparation", preparation_microseconds)
@@ -1659,7 +1653,11 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	if probe != null:
 		movement_neighbor_query_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
-	var movement_reason := LocalMovement.calculate_runtime_unit_into(unit, unit["target"], movement_neighbor_buffer, navigation_grid, delta)
+	var open_envelope: Variant = open_movement_envelopes_by_id.get(int(unit["id"]))
+	if open_envelope != null and int(open_envelope.get("grid_revision", -1)) != navigation_grid.revision:
+		open_movement_envelopes_by_id.erase(int(unit["id"]))
+		open_envelope = null
+	var movement_reason := LocalMovement.calculate_runtime_unit_into(unit, unit["target"], movement_neighbor_buffer, navigation_grid, delta, open_envelope)
 	if probe != null:
 		movement_local_calculation_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
@@ -3057,6 +3055,7 @@ func assign_command_attack_move(selected: Array, target: Vector2) -> bool:
 	return resolved_count > 0
 
 func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_destination: bool = true) -> bool:
+	open_movement_envelopes_by_id.erase(int(unit["id"]))
 	if not OrderPipeline.is_active(unit):
 		OrderPipeline.begin(unit, String(unit.get("task", "move")), int(unit.get("target_id", -1)), destination, String(unit.get("task", "")) in ["attack", "gather"])
 	OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
@@ -3082,7 +3081,8 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 	OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
 	return true
 
-func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destination: Vector2, prevalidated_direct: bool = false) -> bool:
+func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destination: Vector2, prevalidated_direct: bool = false, open_envelope: Dictionary = {}) -> bool:
+	open_movement_envelopes_by_id.erase(int(unit["id"]))
 	if not OrderPipeline.is_active(unit, "move"):
 		OrderPipeline.begin(unit, "move", -1, destination, false)
 	OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
@@ -3122,6 +3122,8 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 		unit["diagnostic_reason"] = "no_group_route"
 		unit["task"] = "idle"
 		return false
+	if direct_segments_allowed and bool(open_envelope.get("open", false)):
+		open_movement_envelopes_by_id[int(unit["id"])] = open_envelope
 	unit["target"] = combined[0]
 	unit["diagnostic_reason"] = "group_corridor" if waypoints.size() > 1 else ""
 	OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
@@ -3455,6 +3457,7 @@ func assign_command_gather(selected: Array, target_id: int) -> void:
 
 func release_unit_destination(unit: Dictionary) -> void:
 	destination_reservations.release(int(unit.get("id", -1)))
+	open_movement_envelopes_by_id.erase(int(unit.get("id", -1)))
 	unit["reserved_destination"] = null
 
 func _finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> void:

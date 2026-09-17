@@ -2,6 +2,7 @@ extends SceneTree
 
 const EntityComponents := preload("res://scripts/entity_components.gd")
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
+const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
 var failures: Array[String] = []
@@ -23,6 +24,7 @@ func _initialize() -> void:
 	test_dynamic_sync(world)
 	test_stable_idle_sync_matches_full_sync(world)
 	test_runtime_unit_sync_matches_full_sync(world)
+	test_snapshot_projects_dynamic_components(world)
 
 	if failures.is_empty():
 		print("S-001 entity component tests passed")
@@ -136,6 +138,19 @@ func test_runtime_unit_sync_matches_full_sync(world) -> void:
 	EntityComponents.sync_dynamic(full_sync_unit)
 	EntityComponents.sync_runtime_unit(runtime_sync_unit)
 	assert_equal(runtime_sync_unit["components"], full_sync_unit["components"], "runtime unit fast path matches complete component sync")
+
+
+func test_snapshot_projects_dynamic_components(world) -> void:
+	var unit: Dictionary = world.add_unit(1, "clubman", Vector2(10.0, 8.0), false)
+	unit["pos"] = Vector2(10.75, 9.25)
+	unit["previous_pos"] = Vector2(10.5, 9.0)
+	unit["hp"] = 18.0
+	unit["anim_state"] = "Move"
+	var snapshot: Dictionary = SimulationSnapshot.canonical(world, 7)
+	var projected: Dictionary = snapshot["world"]["units"].filter(func(candidate): return int(candidate["id"]) == int(unit["id"]))[0]
+	assert_equal(projected["components"]["transform"]["position"], unit["pos"], "canonical snapshot projects current transform")
+	assert_float(projected["components"]["health"]["current"], unit["hp"], "canonical snapshot projects current health")
+	assert_equal(projected["components"]["animation_state"]["state"], unit["anim_state"], "canonical snapshot projects current animation")
 
 
 func assert_float(actual: float, expected: float, context: String) -> void:

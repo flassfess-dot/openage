@@ -56,6 +56,11 @@ func test_runtime_fast_path_matches_generic() -> void:
 	assert_true(runtime_reason == generic_reason, "runtime fast path preserves diagnostic reason")
 	assert_true(runtime_unit_copy["desired_velocity"] == generic_unit["desired_velocity"], "runtime fast path preserves desired velocity")
 	assert_true(runtime_unit_copy["actual_velocity"] == generic_unit["actual_velocity"], "runtime fast path preserves actual velocity")
+	var enveloped_unit: Dictionary = moving.duplicate(true)
+	var envelope := {"open": true, "minimum": Vector2(0.0, 0.0), "maximum": Vector2(12.0, 12.0)}
+	var enveloped_reason := LocalMovement.calculate_runtime_unit_into(enveloped_unit, enveloped_unit["target"], [neighbor], grid, 0.05, envelope)
+	assert_true(enveloped_reason == generic_reason, "open envelope preserves diagnostic reason")
+	assert_true(enveloped_unit["actual_velocity"] == generic_unit["actual_velocity"], "open envelope preserves movement result")
 
 
 func unit(id: int, position: Vector2, target: Vector2) -> Dictionary:
