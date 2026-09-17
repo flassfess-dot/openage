@@ -42,14 +42,21 @@ func _run_case(options: Dictionary) -> Dictionary:
 	var world = SimulationWorld.new(Vector2i(map_side, map_side))
 	var players: Array = []
 	var unit_ids_by_team: Dictionary = {}
+	var formation_start_positions: Dictionary = {}
+	if String(options["workload"]) == "formation_march":
+		var local_slots := FormationGeometry.local_slots(units_per_player, FormationGeometry.BLOCK, 1.0)
+		for team in range(1, player_count + 1):
+			formation_start_positions[team] = FormationGeometry.world_slots(local_slots, _formation_start(team, player_count, map_side), Vector2.DOWN)
 	for team in range(1, player_count + 1):
 		players.append({"team": team, "controller": "ai", "civilization_id": 13})
 	world.configure_players(players)
 	world.begin_bulk_load()
 	for team in range(1, player_count + 1):
 		var team_unit_ids: Array[int] = []
+		var prepared_positions: Array = formation_start_positions.get(team, [])
 		for index in range(units_per_player):
-			var unit: Dictionary = world.add_unit(team, "clubman", _unit_position(team, index, player_count, map_side), false)
+			var spawn_position: Vector2 = prepared_positions[index] if index < prepared_positions.size() else _unit_position(team, index, player_count, map_side)
+			var unit: Dictionary = world.add_unit(team, "clubman", spawn_position, false)
 			unit["stance"] = "passive"
 			unit["attack_autonomous"] = false
 			unit["acquisition_range"] = 0.0
@@ -63,7 +70,7 @@ func _run_case(options: Dictionary) -> Dictionary:
 	var probe = PerformanceProbe.new(maxi(64, sample_ticks + 8))
 	controller.set_performance_probe(probe)
 	var command_phase: Dictionary = {}
-	if String(options["workload"]) == "formation_march":
+	if String(options["workload"]) in ["formation_march", "formation_assemble"]:
 		probe.clear()
 		for team in range(1, player_count + 1):
 			var ids: Array[int] = unit_ids_by_team[team]
@@ -144,6 +151,19 @@ func _formation_destination(team: int, player_count: int, map_side: int) -> Vect
 	)
 
 
+func _formation_start(team: int, player_count: int, map_side: int) -> Vector2:
+	var region_columns := ceili(sqrt(float(player_count)))
+	var region_rows := ceili(float(player_count) / float(region_columns))
+	var region_column := (team - 1) % region_columns
+	var region_row := (team - 1) / region_columns
+	var region_width := maxi(8, map_side / region_columns)
+	var region_height := maxi(8, map_side / region_rows)
+	return Vector2(
+		region_column * region_width + region_width * 0.5,
+		region_row * region_height + 24.0
+	)
+
+
 func _command_result_count(results: Dictionary, accepted: bool) -> int:
 	var count := 0
 	for result in results.values():
@@ -173,7 +193,7 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 			result[key] = maxi(0, int(value))
 		elif key in ["case", "output", "workload"]:
 			result[key] = value
-	if String(result["workload"]) not in ["passive_full_population", "formation_march"]:
+	if String(result["workload"]) not in ["passive_full_population", "formation_march", "formation_assemble"]:
 		result["workload"] = "passive_full_population"
 	result["players"] = clampi(int(result["players"]), 2, 8)
 	result["units_per_player"] = maxi(1, int(result["units_per_player"]))

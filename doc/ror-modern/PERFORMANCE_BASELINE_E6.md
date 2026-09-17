@@ -104,13 +104,26 @@ Canonical SHA-256 каждого 2/4/8-player area-x4 workload совпадае�
 
 На коротком 8×500 срезе route cache уменьшил local calculation p95 `94,91 → 49,33` мс относительно уже перенёсшего projection E6-004 pre-cache среза; component sync в fixed tick равен нулю. На длинном срезе `unit_orders` остаётся главным владельцем (`317,11` мс p95): neighbor query `127,51`, local calculation `52,16`, integration `46,21`. Все 4 000 юнитов продолжают марш. Бюджет 50 мс и запас 30% пока не достигнут.
 
-## 8. Следующие профили и запреты
+## 8. E6-005 — общий марш собранного строя
 
-1. Реализовать единое дальнее group-motion состояние и индивидуальную связанную коррекцию только рядом с препятствием, другой группой или конкретной целью. Покадровое совпадение с траекторией RoR не требуется: принимаются отзывчивость, читаемость, отсутствие наложений/дрожания/застреваний, корректное сжатие/восстановление, боевой переход и детерминированный replay.
-2. Добавить отдельные `move/local-avoidance/combat/gather` workloads и устранять только их измеренные полные обходы/повторные вычисления; idle и formation workloads не служат заменой этим профилям.
+Предыдущий `formation_march` начинал с широкой региональной сетки и фактически одновременно измерял перестройку 500 участников и последующий марш. Теперь это разные воспроизводимые нагрузки: `formation_assemble` сохраняет старую раскладку, а `formation_march` создаёт тех же 500 Clubman в точных BLOCK-slots у начала маршрута. Это позволяет отдельно оптимизировать обычное дальнее продвижение и дорогой tactical reformation, не скрывая ни одно из них.
+
+Общий режим включается только когда каждый живой участник группы движется в soft slot с одинаковым оставшимся displacement и effective speed, не находится в recovery, а максимальные footprint/clearance безопасны для spacing. Тогда все попарные расстояния сохраняются одной трансляцией. Консервативный group AABB broad phase проверяет другие группы и одиночные сущности. Если рядом никого нет и corridor envelope открыт, внутренний neighbor scan и повторная terrain/local-avoidance работа не могут изменить результат и пропускаются. Внешний контакт сохраняет external avoidance; первая деформация, другой speed/task, stuck, unsafe footprint или revision сетки возвращают полный индивидуальный путь.
+
+| Workload, 400×400, 3+20 ticks | Command | Fixed tick p50/p95/max | Unit orders p95 | Canonical SHA-256 |
+|---|---:|---:|---:|---|
+| 2 × 500 shared formation march | 485,19 мс | 50,16 / 62,63 / 90,20 мс | 34,33 мс | `0bacd4f86f9b…1e95` |
+| 8 × 500 shared formation march | 4604,44 мс | 237,18 / 256,86 / 346,41 мс | 147,68 мс | `eb89955c1e84…a6b2` |
+
+В 8×500 длинном окне зафиксировано 80 000 shared/isolated member-ticks, то есть все 4000 участников использовали доказанный общий режим на всех 20 измеряемых тактах. Внутри `unit_orders`: formation cohesion `33,52` мс p95, neighbor query `20,13`, local calculation `8,22`, integration `39,71`. Отдельный integration scenario подтверждает неизменное spacing, отсутствие overlap, восстановление внешнего avoidance и инвалидирование corridor cache при navigation revision. Runtime hints удаляются из canonical/presentation snapshots.
+
+## 9. Следующие профили и запреты
+
+1. Расширить formation-профили отдельными `formation_assemble`, crossing-groups, narrow-corridor и combat-transition окнами. Общий марш уже не должен оптимизироваться ценой перестроения, сжатия/восстановления или внешнего avoidance.
+2. Добавить отдельные `move/local-avoidance/combat/gather` workloads и устранять только их измеренные полные обходы/повторные вычисления; idle и shared-march workloads не служат заменой этим профилям.
 3. Добавить активный 2/4/8-player AI/combat workload, отдельно измеряя snapshot и planning cadence.
 4. Добавить render baseline с world/minimap fog, source composite/player colour, culling, draw calls, CPU frame и GPU frame. Headless simulation numbers не являются доказательством плавного UI.
 5. Повторить после retained fog chunks и общего world/minimap cache; camera pan не должен менять canonical hash или инициировать полный authoritative rebuild.
 6. Не переходить на MultiMesh, сторонний ECS, C# или GDExtension до профиля соответствующего владельца. Эквивалентная оптимизация обязана сохранить canonical hash и пройти прямые lifecycle/save/replay regressions. Намеренное улучшение movement/formation может создать новый hash baseline только после отдельного UX/collision/stress/replay gate; изменение характеристик, экономики или правил боя этим не разрешается.
 
-Текущий обязательный 50-мс tick budget ещё не достигнут: даже 2×500 имеет p95 70,78 мс, а 8×500 — 292,38 мс. E6 остаётся открытым; для будущих механик после достижения бюджета требуется ещё не менее 30% p95-запаса.
+Текущий обязательный 50-мс tick budget ещё не достигнут: true march даёт p95 `62,63` мс на 2×500 и `256,86` мс на 8×500. E6 остаётся открытым; после достижения бюджета для будущих механик требуется ещё не менее 30% p95-запаса.

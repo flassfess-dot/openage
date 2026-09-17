@@ -108,6 +108,18 @@ static func calculate_runtime_unit_into(unit: Dictionary, target: Vector2, neigh
 	return reason
 
 
+static func calculate_shared_translation_into(unit: Dictionary, target: Vector2) -> void:
+	# The group broad phase proves that all members preserve the same safe
+	# displacement, no external entity is in avoidance range and the whole step
+	# remains inside a prevalidated open envelope. Only desired translation is
+	# left; repeating neighbor and terrain work cannot change the result.
+	var difference: Vector2 = target - unit["pos"]
+	var speed := maxf(0.0, float(unit["speed"]) * float(unit["cohesion_speed_scale"]))
+	var velocity := difference.normalized() * speed if difference.length_squared() > 0.000001 else Vector2.ZERO
+	unit["desired_velocity"] = velocity
+	unit["actual_velocity"] = velocity
+
+
 static func _inside_open_envelope(position: Vector2, envelope: Variant) -> bool:
 	if not envelope is Dictionary or not bool(envelope.get("open", false)):
 		return false

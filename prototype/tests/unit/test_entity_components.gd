@@ -146,11 +146,15 @@ func test_snapshot_projects_dynamic_components(world) -> void:
 	unit["previous_pos"] = Vector2(10.5, 9.0)
 	unit["hp"] = 18.0
 	unit["anim_state"] = "Move"
+	unit["formation_shared_motion"] = true
+	unit["formation_shared_isolated"] = true
 	var snapshot: Dictionary = SimulationSnapshot.canonical(world, 7)
 	var projected: Dictionary = snapshot["world"]["units"].filter(func(candidate): return int(candidate["id"]) == int(unit["id"]))[0]
 	assert_equal(projected["components"]["transform"]["position"], unit["pos"], "canonical snapshot projects current transform")
 	assert_float(projected["components"]["health"]["current"], unit["hp"], "canonical snapshot projects current health")
 	assert_equal(projected["components"]["animation_state"]["state"], unit["anim_state"], "canonical snapshot projects current animation")
+	assert_equal(projected.has("formation_shared_motion"), false, "canonical snapshot omits runtime group-motion hint")
+	assert_equal(projected.has("formation_shared_isolated"), false, "canonical snapshot omits runtime broad-phase hint")
 
 
 func assert_float(actual: float, expected: float, context: String) -> void:

@@ -8,6 +8,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_large_footprint_is_inserted_into_every_cell()
 	test_queries_are_unique_filtered_and_stable()
+	test_external_neighbor_query_excludes_shared_formation()
 
 	if failures.is_empty():
 		print("N-002 spatial hash tests passed")
@@ -42,6 +43,18 @@ func test_queries_are_unique_filtered_and_stable() -> void:
 	assert_equal(reusable, [second], "reusable neighbor query preserves result and clears prior contents")
 	var exact_radius := index.movement_neighbor_radius(first)
 	assert_equal(index.query_neighbors(first, exact_radius, "unit"), [second], "derived movement radius retains avoidance neighbor")
+
+
+func test_external_neighbor_query_excludes_shared_formation() -> void:
+	var index = SpatialHash.new(1.0)
+	var source := {"id": 1, "pos": Vector2(2.0, 2.0), "formation_group_id": 8, "footprint_radius": 0.3, "minimum_clearance": 0.04}
+	var group_member := {"id": 2, "pos": Vector2(2.5, 2.0), "formation_group_id": 8, "footprint_radius": 0.3, "minimum_clearance": 0.04}
+	var outsider := {"id": 3, "pos": Vector2(2.0, 2.5), "formation_group_id": 9, "footprint_radius": 0.3, "minimum_clearance": 0.04}
+	for unit in [source, group_member, outsider]:
+		index.insert(unit, unit["pos"], unit["footprint_radius"], "unit")
+	var result: Array = []
+	index.query_external_neighbors_into(source, 1.0, 8, result)
+	assert_equal(result, [outsider], "shared formation is excluded while outsider remains")
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:

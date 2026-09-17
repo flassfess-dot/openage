@@ -121,6 +121,40 @@ func query_neighbors_into(entity: Dictionary, radius: float, category: String, r
 	if not already_sorted:
 		result.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
 
+
+func query_external_neighbors_into(entity: Dictionary, radius: float, formation_group_id: int, result: Array) -> void:
+	# A rigidly translating formation preserves every internal pair distance.
+	# Only entities outside that proven shared-motion group can influence local
+	# avoidance. Keep the same stable-ID result contract as query_neighbors_into.
+	result.clear()
+	neighbor_query_generation += 1
+	var generation := neighbor_query_generation
+	var center: Vector2 = entity["pos"]
+	var entity_id := int(entity["id"])
+	var last_candidate_id := -9223372036854775807
+	var already_sorted := true
+	var minimum := cell_for(center - Vector2.ONE * radius)
+	var maximum := cell_for(center + Vector2.ONE * radius)
+	for y in range(minimum.y, maximum.y + 1):
+		for x in range(minimum.x, maximum.x + 1):
+			for item in buckets.get(Vector2i(x, y), []):
+				if item["category"] != "unit":
+					continue
+				var candidate: Dictionary = item["entity"]
+				var candidate_id := int(candidate["id"])
+				if candidate_id == entity_id or int(candidate.get("formation_group_id", -1)) == formation_group_id or int(neighbor_seen_generation.get(candidate_id, 0)) == generation:
+					continue
+				var allowed_distance: float = radius + float(item["radius"])
+				if center.distance_squared_to(item["position"]) > allowed_distance * allowed_distance:
+					continue
+				neighbor_seen_generation[candidate_id] = generation
+				if candidate_id < last_candidate_id:
+					already_sorted = false
+				last_candidate_id = candidate_id
+				result.append(candidate)
+	if not already_sorted:
+		result.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
+
 func _unique_key(item: Dictionary) -> String:
 	return "%s:%d" % [item["category"], int(item["entity"].get("id", -1))]
 

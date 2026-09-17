@@ -191,6 +191,8 @@ static func _sorted_entities(source: Array) -> Array:
 		# Selection belongs to player-control/presentation state and must not
 		# change deterministic simulation hashes.
 		canonical_entity.erase("selected")
+		canonical_entity.erase("formation_shared_motion")
+		canonical_entity.erase("formation_shared_isolated")
 		result.append(canonical_entity)
 	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	return result
@@ -202,6 +204,8 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 	var result: Dictionary = entity.duplicate(true)
 	EntityComponents.sync_dynamic(result)
 	result.erase("selected")
+	result.erase("formation_shared_motion")
+	result.erase("formation_shared_isolated")
 	var cargo: Dictionary = result.get("components", {}).get("cargo", {})
 	if bool(cargo.get("enabled", false)):
 		cargo["count"] = cargo.get("passenger_ids", []).size()

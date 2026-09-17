@@ -433,6 +433,8 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		"desired_velocity": Vector2.ZERO,
 		"actual_velocity": Vector2.ZERO,
 		"cohesion_speed_scale": 1.0,
+		"formation_shared_motion": false,
+		"formation_shared_isolated": false,
 		"selected": selected,
 		"hp": health["current"],
 		"max_hp": health["maximum"],
@@ -492,6 +494,7 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		"formation_facing": initial_facing,
 		"formation_group_id": -1,
 		"formation_slot_id": -1,
+		"formation_slot_capacity": 0.0,
 		"formation_home": null,
 		"formation_slot_mode": "none",
 		"combat_role": "",
@@ -1483,8 +1486,11 @@ func begin_death(unit: Dictionary) -> void:
 	OrderPipeline.complete(unit, "unit_died")
 	unit["formation_group_id"] = -1
 	unit["formation_slot_id"] = -1
+	unit["formation_slot_capacity"] = 0.0
 	unit["formation_home"] = null
 	unit["formation_slot_mode"] = "none"
+	unit["formation_shared_motion"] = false
+	unit["formation_shared_isolated"] = false
 	unit["combat_destination"] = null
 	if not bool(unit.get("population_released", false)):
 		var team := int(unit.get("team", 0))
@@ -1649,15 +1655,30 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 
 	var start_position: Vector2 = unit["pos"]
 	var search_radius := spatial_index.movement_neighbor_radius(unit)
-	spatial_index.query_neighbors_into(unit, search_radius, "unit", movement_neighbor_buffer)
-	if probe != null:
-		movement_neighbor_query_microseconds += Time.get_ticks_usec() - movement_phase_started
-		movement_phase_started = Time.get_ticks_usec()
 	var open_envelope: Variant = open_movement_envelopes_by_id.get(int(unit["id"]))
 	if open_envelope != null and int(open_envelope.get("grid_revision", -1)) != navigation_grid.revision:
 		open_movement_envelopes_by_id.erase(int(unit["id"]))
 		open_envelope = null
-	var movement_reason := LocalMovement.calculate_runtime_unit_into(unit, unit["target"], movement_neighbor_buffer, navigation_grid, delta, open_envelope)
+	var shared_motion := bool(unit["formation_shared_motion"]) and open_envelope != null
+	if shared_motion and bool(unit["formation_shared_isolated"]):
+		movement_neighbor_buffer.clear()
+		if probe != null:
+			probe.increment("movement.shared_formation_units")
+			probe.increment("movement.isolated_shared_formation_units")
+	elif shared_motion:
+		spatial_index.query_external_neighbors_into(unit, search_radius, int(unit["formation_group_id"]), movement_neighbor_buffer)
+		if probe != null:
+			probe.increment("movement.shared_formation_units")
+	else:
+		spatial_index.query_neighbors_into(unit, search_radius, "unit", movement_neighbor_buffer)
+	if probe != null:
+		movement_neighbor_query_microseconds += Time.get_ticks_usec() - movement_phase_started
+		movement_phase_started = Time.get_ticks_usec()
+	var movement_reason := ""
+	if shared_motion and bool(unit["formation_shared_isolated"]):
+		LocalMovement.calculate_shared_translation_into(unit, unit["target"])
+	else:
+		movement_reason = LocalMovement.calculate_runtime_unit_into(unit, unit["target"], movement_neighbor_buffer, navigation_grid, delta, open_envelope)
 	if probe != null:
 		movement_local_calculation_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()

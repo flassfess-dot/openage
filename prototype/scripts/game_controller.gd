@@ -649,6 +649,7 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 		unit["resource_id"] = -1
 		unit["formation_group_id"] = group.group_id
 		unit["formation_slot_id"] = assigned_slot["slot_id"]
+		unit["formation_slot_capacity"] = assigned_slot["capacity_radius"]
 		unit["formation_forward"] = forward
 		unit["formation_facing"] = formation_facing
 		unit["formation_home"] = assigned_slot["world"]
@@ -732,6 +733,7 @@ func _reconcile_formation_group(group_id: int, requested_member_ids: Variant = n
 	for unit in members:
 		var assigned_slot: Dictionary = group.slot_for(int(unit["id"]))
 		unit["formation_slot_id"] = assigned_slot["slot_id"]
+		unit["formation_slot_capacity"] = assigned_slot["capacity_radius"]
 		unit["formation_forward"] = group.forward
 		unit["formation_facing"] = formation_facing
 		unit["formation_home"] = assigned_slot["world"]
@@ -822,9 +824,12 @@ func _detach_units_from_formations(selected: Array) -> void:
 func _clear_unit_formation(unit: Dictionary) -> void:
 	unit["formation_group_id"] = -1
 	unit["formation_slot_id"] = -1
+	unit["formation_slot_capacity"] = 0.0
 	unit["formation_forward"] = Vector2.ZERO
 	unit["formation_home"] = null
 	unit["formation_slot_mode"] = "none"
+	unit["formation_shared_motion"] = false
+	unit["formation_shared_isolated"] = false
 
 func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> String:
 	if paused or simulation_world == null:
