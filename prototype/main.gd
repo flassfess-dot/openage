@@ -7,6 +7,7 @@ const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const GameController := preload("res://scripts/game_controller.gd")
 const RoRCommands = preload("res://scripts/commands.gd")
 const RenderWorld := preload("res://scripts/render_world.gd")
+const RenderItem := preload("res://scripts/render_item.gd")
 const Diagnostics := preload("res://scripts/diagnostics.gd")
 const InputAdapter := preload("res://scripts/input_adapter.gd")
 const PickingService := preload("res://scripts/picking_service.gd")
@@ -53,6 +54,7 @@ const PLAYER_TEAM := 1
 const ENEMY_TEAM := 2
 const HUD_TOP := InterfaceLayout.TOP_HEIGHT
 const HUD_BOTTOM := InterfaceLayout.BOTTOM_HEIGHT
+const OVERVIEW_REFRESH_TICKS := 4
 
 @export_file("*.json") var match_path: String = MatchDefinition.DEFAULT_PATH
 var match_definition_override: Dictionary = {}
@@ -132,6 +134,15 @@ var cached_minimap_mesh_tick: int = -1
 var cached_minimap_mesh_fog_revision: int = -1
 var cached_minimap_mesh_rectangle := Rect2()
 var cached_terrain_resource_signature: int = -1
+var presentation_revision: int = 0
+var cached_presentation_tick: int = -1
+var cached_presentation_bounds := Rect2i()
+var cached_presentation_selection_signature: int = 0
+var cached_presentation_diagnostics := false
+var cached_overview_tick: int = -1
+var cached_world_drawables: Array = []
+var cached_world_drawables_revision: int = -1
+var cached_world_drawables_control_signature: int = 0
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
@@ -384,7 +395,7 @@ func update_units(delta: float) -> void:
 		return
 	queue_ai_commands()
 	var battle_text := game_controller.advance_frame(delta, PLAYER_TEAM, ENEMY_TEAM)
-	sync_world_state()
+	sync_world_state(false)
 	process_presentation_events()
 	if battle_text != "":
 		game_message = battle_text
@@ -902,7 +913,24 @@ func current_world_drawables() -> Array:
 	var highlighted_ids: Array[int] = selection_preview_ids.duplicate()
 	if interaction_highlight_id >= 0 and not highlighted_ids.has(interaction_highlight_id):
 		highlighted_ids.append(interaction_highlight_id)
-	return render_world.create_world_drawables(presentation_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, PLAYER_TEAM, player_control_state.selected_ids())
+	highlighted_ids.sort()
+	var selected_ids := player_control_state.selected_ids()
+	var control_signature := hash([highlighted_ids, selected_ids])
+	if cached_world_drawables_revision != presentation_revision or cached_world_drawables_control_signature != control_signature:
+		var retained_snapshot := presentation_snapshot.duplicate()
+		retained_snapshot["effects"] = []
+		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, PLAYER_TEAM, selected_ids)
+		cached_world_drawables_revision = presentation_revision
+		cached_world_drawables_control_signature = control_signature
+	else:
+		render_world.refresh_world_drawables(cached_world_drawables, Callable(self, "world_to_screen"), interpolation_alpha)
+	var effects: Array = presentation_snapshot.get("effects", [])
+	if effects.is_empty():
+		return cached_world_drawables
+	var combined: Array = cached_world_drawables.duplicate()
+	combined.append_array(render_world.create_world_drawables({"effects": effects}, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info")))
+	combined.sort_custom(RenderItem.less)
+	return combined
 
 
 func pick_stack_at(screen_position: Vector2) -> Array:
@@ -1241,19 +1269,37 @@ func refresh_hud_model() -> void:
 		hud_controls.set_view_model(hud_model)
 
 
-func sync_world_state() -> void:
+func sync_world_state(force: bool = true) -> void:
 	if simulation_world == null:
 		return
-	var snapshot_bounds := visible_tile_bounds(8)
+	var current_tick := game_controller.tick_index if game_controller != null else 0
 	var selected_ids := player_control_state.selected_ids()
-	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, game_controller.tick_index if game_controller != null else 0, PLAYER_TEAM, {
+	var selection_signature := hash(selected_ids)
+	var required_view_bounds := _expanded_tile_bounds(visible_tile_bounds(), 2)
+	if not force and not presentation_snapshot.is_empty() and current_tick == cached_presentation_tick and selection_signature == cached_presentation_selection_signature and diagnostics_enabled == cached_presentation_diagnostics and _tile_bounds_contains(cached_presentation_bounds, required_view_bounds):
+		return
+	var snapshot_bounds := visible_tile_bounds(8)
+	var previous_overview: Dictionary = presentation_snapshot.get("overview", {})
+	var refresh_overview := cached_overview_tick < 0 or current_tick < cached_overview_tick or current_tick - cached_overview_tick >= OVERVIEW_REFRESH_TICKS
+	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, current_tick, PLAYER_TEAM, {
 		"include_navigation": false,
 		"include_build_sites": false,
-		"include_overview": true,
+		"include_overview": refresh_overview,
+		"compact_render_entities": not diagnostics_enabled,
 		"entity_bounds": Rect2(Vector2(snapshot_bounds.position), Vector2(snapshot_bounds.size)),
 		"always_include_entity_ids": selected_ids,
 		"command_option_entity_ids": selected_ids,
 	})
+	if refresh_overview:
+		cached_overview_tick = current_tick
+	elif not previous_overview.is_empty():
+		presentation_snapshot["overview"] = previous_overview
+	presentation_snapshot["overview_tick"] = cached_overview_tick
+	cached_presentation_tick = current_tick
+	cached_presentation_bounds = snapshot_bounds
+	cached_presentation_selection_signature = selection_signature
+	cached_presentation_diagnostics = diagnostics_enabled
+	presentation_revision += 1
 	presentation_snapshot["markers"] = match_definition.get("presentation_markers", [])
 	var visible_bounds := visible_tile_bounds()
 	var environment_bounds := Rect2i(visible_bounds.position - Vector2i(2, 2), visible_bounds.size + Vector2i(4, 4))
@@ -1774,7 +1820,7 @@ func draw_minimap(rectangle: Rect2) -> void:
 	draw_colored_polygon(aperture, Color.BLACK)
 	var map_points := MinimapProjection.map_polygon(map_size, center, scale)
 	draw_colored_polygon(map_points, Color("3e7a35"))
-	var snapshot_tick := int(presentation_snapshot.get("tick", -1))
+	var snapshot_tick := int(presentation_snapshot.get("overview_tick", presentation_snapshot.get("tick", -1)))
 	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
 	if cached_minimap_mesh == null or cached_minimap_mesh_tick != snapshot_tick or cached_minimap_mesh_fog_revision != fog_revision or cached_minimap_mesh_rectangle != rectangle:
 		cached_minimap_mesh = _build_minimap_mesh(center, scale)

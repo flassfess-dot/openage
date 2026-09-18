@@ -97,6 +97,22 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 		"always_include_entity_ids": [int(visible_enemy["id"])],
 	})
 	assert_equal(selected_outside["units"].size(), 2, "selected entity remains detailed outside viewport bounds")
+	var compact_render := SimulationSnapshot.presentation(world, 7, 1, {
+		"include_navigation": false,
+		"include_build_sites": false,
+		"compact_render_entities": true,
+		"entity_bounds": Rect2(Vector2(3.0, 3.0), Vector2(5.0, 3.0)),
+		"always_include_entity_ids": [int(player["id"])],
+		"command_option_entity_ids": [int(player["id"])],
+	})
+	var render_player: Dictionary = compact_render["units"].filter(func(unit): return int(unit.get("id", -1)) == int(player["id"]))[0]
+	var render_enemy: Dictionary = compact_render["units"].filter(func(unit): return int(unit.get("id", -1)) == int(visible_enemy["id"]))[0]
+	assert_true(render_player.has("path"), "always-included selection retains its full command and HUD projection")
+	assert_true(not render_enemy.has("path"), "unselected render projection omits authoritative navigation paths")
+	assert_true(not render_enemy.get("components", {}).has("combat"), "unselected render projection omits heavyweight combat tables")
+	assert_true(render_enemy.has("footprint") and render_enemy.has("anim_state"), "unselected render projection retains picking and animation fields")
+	render_enemy["footprint"]["selection_radius"] = Vector2(99.0, 99.0)
+	assert_not_equal(visible_enemy.get("footprint", {}).get("selection_radius"), Vector2(99.0, 99.0), "compact render footprint remains detached from simulation state")
 	snapshot["player_state"]["food"] = 0
 	snapshot["fog"]["cells"][0] = 99
 	assert_equal(world.get_food(), 180, "player economy snapshot is detached")

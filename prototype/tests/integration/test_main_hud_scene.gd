@@ -41,6 +41,14 @@ func _initialize() -> void:
 	game._close_hud_modal()
 	assert_true(game.game_controller.paused, "closing a modal preserves an existing manual pause")
 	game.game_controller.set_paused(false)
+	game.game_controller.set_paused(true)
+	game.sync_world_state()
+	var retained_revision: int = game.presentation_revision
+	game.sync_world_state(false)
+	assert_equal(game.presentation_revision, retained_revision, "presentation cadence reuses an unchanged fixed-tick snapshot")
+	game.sync_world_state()
+	assert_equal(game.presentation_revision, retained_revision + 1, "explicit synchronization still forces a fresh presentation boundary")
+	game.game_controller.set_paused(false)
 
 	var target_world := Vector2(5.0, 6.0)
 	var geometry: Dictionary = game.minimap_geometry()

@@ -450,3 +450,23 @@ Canonical hash остался `c4244f120085360a47d0b53aaf786f4396e48ad135c73190f
 Terrain и fog meshes строятся в локальных координатах с overscan. Обычный pan меняет только pixel-snapped transform; повторная геометрия требуется после выхода камеры из запаса, изменения zoom, terrain/fog revision или forest-floor content. Контрольный 1280×720 GPU capture подтвердил отсутствие atlas seams, цветной полосы map edge и рассогласования fog/terrain; targeted terrain/fog/viewport/render/snapshot/HUD и large-campaign gates проходят.
 
 Изолированный visible gate теперь укладывается в ранее заданный comfort `35 мс`, но не выполняет 60-FPS `16,67 мс` и не включает стоимость активного simulation tick в тот же кадр. Внутри sync чистый presentation snapshot p95 около `29,5` мс; вариант без overview остаётся около `24,4` мс, значит основной следующий владелец — глубокая полная projection 160 detailed entities, затем построение 331 drawables (`~10,6` мс). Следующий пакет должен ввести специализированный immutable render projection/retained drawable cache и измерить совместный active tick+render frame, сохранив selected/HUD privacy, fog и canonical isolation.
+
+## 27. E6-023 — compact render projection и retained drawables
+
+Presentation boundary теперь различает три контракта: полный снимок для выбранных объектов/HUD/команд, существующий AI projection и отдельную компактную render projection для обычных видимых сущностей. Последняя копирует только identity, transform, animation, health, footprint, source presentation identity и минимальные context-action capabilities; path arrays, combat tables, technology и production internals не покидают авторитетный мир. Footprint и малые массивы остаются отсоединёнными копиями. Диагностический режим автоматически возвращает полный снимок.
+
+`main.tscn` публикует presentation только при новом fixed tick, изменении selection/diagnostics либо выходе камеры за overscan. Compact overview для minimap/control groups обновляется раз в четыре fixed tick и сохраняет fog-safe read model. В пределах одной publication render queue удерживает уже разрешённые frame descriptors/composite parts и словари drawable; между тактами обновляются только интерполированные anchors/depth и при необходимости стабильная сортировка. Selection/highlight/effects имеют собственную сигнатуру invalidation.
+
+Повтор того же GPU workload `2×500 / 400×400 / 800×600 / 160 visible`:
+
+| Метрика | E6-022 | E6-023 | Изменение |
+|---|---:|---:|---:|
+| snapshot/sync p95 | 30,914 мс | 12,587 мс | `2,46×` |
+| retained drawable refresh p95 | 10,604 мс | 1,752 мс | `6,05×` |
+| fixed-camera frame p95 | 26,816 мс | 16,713 мс | VSYNC 60 Hz |
+| pan frame p95 | 28,561 мс | 16,646 мс | VSYNC 60 Hz |
+| draw calls p95 | 340 | 341 | без изменения batching |
+
+Первичная полная сборка очереди всё ещё стоит около `12,0` мс, но выполняется только на publication/selection/effect invalidation, а не на каждый render frame. Изолированный rendering достиг 60 Hz на i7-7700/RTX 3080 Ti; требуемый 30% резерв ещё не доказан.
+
+Совмещённый exactly-one-fixed-tick + presentation + GPU-frame профиль намеренно свёл 80+80 противников в плотный экранный контакт. Он обнаружил следующий независимый blocker: combined p95 `766,822` мс, из которых fixed tick `692,134`, `controller.autonomy` `664,347`, а весь `world_advance` только `26,037` мс. Следовательно, E6-024 должен устранить полный перебор в `CombatAwarenessSystem` пространственным candidate query и безопасной deterministic cadence; render-код и camera culling не должны маскировать этот авторитетный долг.

@@ -12,6 +12,7 @@ func _initialize() -> void:
 	test_required_render_item_fields()
 	test_stable_layer_sorting_and_overlays()
 	test_health_bars_follow_selection_visibility()
+	test_retained_queue_refreshes_interpolated_anchors()
 	test_presentation_marker_is_a_non_selectable_drawable()
 	test_objective_is_a_non_selectable_drawable()
 	test_environment_field_culls_and_renders_non_selectable_items()
@@ -67,6 +68,23 @@ func test_health_bars_follow_selection_visibility() -> void:
 	var health_items := selected_bars.filter(func(item): return item["kind"] == "health_bar")
 	assert_equal(health_items.size(), 1, "selected unit exposes exactly one health bar")
 	assert_equal(int(health_items[0]["stable_id"]), int(friendly["id"]), "health bar belongs to the selected unit")
+
+
+func test_retained_queue_refreshes_interpolated_anchors() -> void:
+	var world = SimulationWorld.new(Vector2i(16, 16))
+	var unit: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	unit["previous_pos"] = Vector2(2.0, 2.0)
+	unit["pos"] = Vector2(4.0, 4.0)
+	var renderer = RenderWorld.new()
+	var items: Array = renderer.create_world_drawables(world, func(position: Vector2) -> Vector2: return position * 10.0, 0.0, Callable(self, "fake_frame_info"))
+	var original_body: Dictionary = items.filter(func(item): return item["kind"] == "unit")[0]
+	assert_equal(original_body["world_anchor"], Vector2(2.0, 2.0), "initial retained queue uses the requested interpolation alpha")
+	renderer.refresh_world_drawables(items, func(position: Vector2) -> Vector2: return position * 10.0, 0.5)
+	var refreshed_body: Dictionary = items.filter(func(item): return item["kind"] == "unit")[0]
+	var refreshed_shadow: Dictionary = items.filter(func(item): return item["kind"] == "shadow")[0]
+	assert_equal(refreshed_body["world_anchor"], Vector2(3.0, 3.0), "retained body updates its interpolated anchor without rebuilding descriptors")
+	assert_equal(refreshed_shadow["world_anchor"], Vector2(3.0, 3.0), "retained overlays stay attached to the interpolated body")
+	assert_equal(refreshed_body["screen_y"], 30.0, "retained queue refreshes the depth key")
 
 
 func test_presentation_marker_is_a_non_selectable_drawable() -> void:

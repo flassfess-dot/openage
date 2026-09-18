@@ -6,6 +6,7 @@ extends SceneTree
 
 const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
+const PerformanceProbe := preload("res://scripts/performance_probe.gd")
 
 const DEFAULT_SIZE := Vector2i(1024, 768)
 const DEFAULT_OUTPUT := "res://qa/performance/e6-visible.json"
@@ -99,6 +100,19 @@ func _run_case(options: Dictionary) -> Dictionary:
 		game.view_offset += Vector2(8.0, 0.0)
 		game._sync_terrain_canvas()
 		pan_frame_times.append(await _render_frame(game))
+	game.game_controller.set_speed_multiplier(1.0)
+	var active_probe = PerformanceProbe.new(maxi(64, int(options["sample_frames"]) + 8))
+	game.game_controller.set_performance_probe(active_probe)
+	for _frame in range(int(options["warmup_frames"])):
+		await _active_fixed_render_frame(game)
+	active_probe.clear()
+	var active_start_tick: int = game.game_controller.tick_index
+	var active_start_revision: int = game.presentation_revision
+	var active_frame_times: Array[int] = []
+	for _frame in range(int(options["sample_frames"])):
+		active_frame_times.append(await _active_fixed_render_frame(game))
+	var active_end_tick: int = game.game_controller.tick_index
+	var active_end_revision: int = game.presentation_revision
 
 	var snapshot_units: Array = game.presentation_snapshot.get("units", [])
 	var screen_unit_ids := _screen_unit_ids(game, snapshot_units, requested_size)
@@ -126,6 +140,10 @@ func _run_case(options: Dictionary) -> Dictionary:
 		"drawable_build_microseconds": _summary(drawable_times),
 		"render_frame_microseconds": _summary(frame_times),
 		"pan_frame_microseconds": _summary(pan_frame_times),
+		"active_frame_microseconds": _summary(active_frame_times),
+		"active_fixed_ticks": active_end_tick - active_start_tick,
+		"active_presentation_revisions": active_end_revision - active_start_revision,
+		"active_probe": active_probe.report(),
 		"draw_calls": _summary(draw_calls),
 		"objects_in_frame": _summary(objects_in_frame),
 		"primitives_in_frame": _summary(primitives_in_frame),
@@ -153,6 +171,7 @@ func _measure_snapshot_breakdown(game, samples: int) -> Dictionary:
 		"include_navigation": false,
 		"include_build_sites": false,
 		"include_overview": true,
+		"compact_render_entities": true,
 		"entity_bounds": Rect2(Vector2(bounds.position), Vector2(bounds.size)),
 		"always_include_entity_ids": [],
 		"command_option_entity_ids": [],
@@ -215,6 +234,25 @@ func _measure_sync_stage_breakdown(game, samples: int) -> Dictionary:
 
 func _render_frame(game) -> int:
 	var started := Time.get_ticks_usec()
+	frame_post_draw_received = false
+	RenderingServer.frame_post_draw.connect(_on_frame_post_draw, CONNECT_ONE_SHOT)
+	game.queue_redraw()
+	if game.terrain_canvas != null:
+		game.terrain_canvas.queue_redraw()
+	for _attempt in range(12):
+		await process_frame
+		if frame_post_draw_received:
+			return Time.get_ticks_usec() - started
+	if RenderingServer.frame_post_draw.is_connected(_on_frame_post_draw):
+		RenderingServer.frame_post_draw.disconnect(_on_frame_post_draw)
+	return -1
+
+
+func _active_fixed_render_frame(game) -> int:
+	var started := Time.get_ticks_usec()
+	game.game_controller.advance_frame(0.05, game.PLAYER_TEAM, game.ENEMY_TEAM)
+	game.sync_world_state(false)
+	game.process_presentation_events()
 	frame_post_draw_received = false
 	RenderingServer.frame_post_draw.connect(_on_frame_post_draw, CONNECT_ONE_SHOT)
 	game.queue_redraw()

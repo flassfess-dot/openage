@@ -106,6 +106,34 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	return drawables
 
 
+func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interpolation_alpha: float = 1.0) -> Array:
+	# Frame descriptors, composite parts and render-item dictionaries are stable
+	# for one published presentation revision. Between fixed simulation ticks only
+	# interpolation changes, so update anchors in place instead of rebuilding the
+	# complete render queue and resolving every sprite again.
+	var alpha := clampf(interpolation_alpha, 0.0, 1.0)
+	var moved := false
+	for drawable_value in drawables:
+		var drawable: Dictionary = drawable_value
+		var kind := String(drawable.get("kind", ""))
+		var data: Dictionary = drawable.get("data", {})
+		var position: Variant = null
+		if kind == "projectile":
+			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), alpha)
+		elif kind in ["unit", "unit_part", "shadow", "selection", "health_bar"] and String(data.get("movement_domain", "land")) != "static":
+			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), alpha)
+		if position == null:
+			continue
+		var resolved_position: Vector2 = position
+		if not resolved_position.is_equal_approx(Vector2(drawable.get("world_anchor", resolved_position))):
+			moved = true
+		drawable["world_anchor"] = resolved_position
+		drawable["screen_y"] = float(world_to_screen.call(resolved_position).y)
+	if moved:
+		drawables.sort_custom(RenderItem.less)
+	return drawables
+
+
 func _frame_info(provider: Callable, kind: String, data: Variant) -> Dictionary:
 	if provider.is_valid():
 		var result: Variant = provider.call(kind, data)

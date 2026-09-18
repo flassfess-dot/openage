@@ -20,6 +20,7 @@ static func canonical(world, tick: int, controller = null) -> Dictionary:
 static func presentation(world, tick: int, observer_team: int = 0, options: Dictionary = {}) -> Dictionary:
 	var fog = world.get_fog_of_war()
 	var compact_entities := bool(options.get("compact_entities", false))
+	var compact_render_entities := bool(options.get("compact_render_entities", false))
 	var include_navigation := bool(options.get("include_navigation", true))
 	var include_build_sites := bool(options.get("include_build_sites", true))
 	var include_fog_cells := bool(options.get("include_fog_cells", true))
@@ -60,7 +61,13 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				overview_units.append(_overview_entity(unit))
 			if has_entity_bounds and not _entity_in_bounds(unit, entity_bounds) and not always_include_entity_ids.has(int(unit.get("id", -1))):
 				continue
-			var presentation_unit := _presentation_entity(unit, observer_team, compact_entities)
+			var unit_id := int(unit.get("id", -1))
+			var presentation_unit := _presentation_entity(
+				unit,
+				observer_team,
+				compact_entities,
+				compact_render_entities and not always_include_entity_ids.has(unit_id)
+			)
 			if observer_team > 0 and int(unit.get("team", 0)) == observer_team and world.entity_is_worker(unit) and (not restrict_command_options or command_option_entity_ids.has(int(unit.get("id", -1)))):
 				if not requested_build_options.is_empty():
 					presentation_unit["command_options"] = {"build": requested_build_options}
@@ -75,7 +82,13 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				overview_resources.append(_overview_entity(resource))
 			if has_entity_bounds and not _entity_in_bounds(resource, entity_bounds) and not always_include_entity_ids.has(int(resource.get("id", -1))):
 				continue
-			resources.append(_presentation_entity(resource, observer_team, compact_entities))
+			var resource_id := int(resource.get("id", -1))
+			resources.append(_presentation_entity(
+				resource,
+				observer_team,
+				compact_entities,
+				compact_render_entities and not always_include_entity_ids.has(resource_id)
+			))
 	var objectives: Array = []
 	for objective in world.victory_objectives:
 		if not bool(objective.get("active", true)):
@@ -90,7 +103,13 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				overview_buildings.append(_overview_entity(building))
 			if has_entity_bounds and not _entity_in_bounds(building, entity_bounds) and not always_include_entity_ids.has(int(building.get("id", -1))):
 				continue
-			var presentation_building := _presentation_entity(building, observer_team, compact_entities)
+			var building_id := int(building.get("id", -1))
+			var presentation_building := _presentation_entity(
+				building,
+				observer_team,
+				compact_entities,
+				compact_render_entities and not always_include_entity_ids.has(building_id)
+			)
 			presentation_building["target_domains"] = world.combat_target_domains(building)
 			if world.trade_system.is_trade_dock(building):
 				presentation_building["trade"] = world.trade_system.presentation_for_dock(building)
@@ -226,9 +245,11 @@ static func _sorted_entities(source: Array) -> Array:
 	return result
 
 
-static func _presentation_entity(entity: Dictionary, observer_team: int = 0, compact: bool = false) -> Dictionary:
+static func _presentation_entity(entity: Dictionary, observer_team: int = 0, compact: bool = false, compact_render: bool = false) -> Dictionary:
 	if compact:
 		return _compact_ai_entity(entity, observer_team)
+	if compact_render:
+		return _compact_render_entity(entity)
 	var result: Dictionary = entity.duplicate(true)
 	EntityComponents.sync_dynamic(result)
 	result.erase("selected")
@@ -244,6 +265,62 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 	if bool(trade.get("enabled", false)) and observer_team > 0 and int(entity.get("team", 0)) != observer_team:
 		for private_field in ["target_dock_id", "home_dock_id", "selected_input_resource_type_id", "approach_position", "cargo_goods", "cargo_gold", "trip_count"]:
 			trade.erase(private_field)
+	return result
+
+
+static func _compact_render_entity(entity: Dictionary) -> Dictionary:
+	# A frame does not need authoritative movement paths, combat tables,
+	# technology state or production internals for every visible object. Keep a
+	# detached projection with the stable fields consumed by rendering, picking
+	# and right-click context resolution. Selected entities bypass this path and
+	# retain the complete presentation contract for HUD actions and commands.
+	var result: Dictionary = {}
+	for key in [
+		"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
+		"pos", "previous_pos", "elevation", "source_elevation", "visual_height",
+		"hp", "max_hp", "amount", "max_amount", "active", "logical_only",
+		"state", "resource_state", "depletion_stage", "visible_when_depleted",
+		"harvestable", "resource_type_id", "building_type", "movement_domain",
+		"footprint_radius", "selection_radius", "selection_height",
+		"anim", "anim_state", "facing", "presentation_facing",
+		"death_phase", "death_elapsed", "construction_stage",
+		"display_graphic_id", "source_graphic_id", "source_graphic_asset_name",
+		"source_depleted_asset_name", "combat_enabled", "task", "target_id",
+		"target_building_id", "formation_forward", "carried_amount",
+	]:
+		if entity.has(key):
+			result[key] = entity[key]
+	for array_key in ["behavior_tags", "unit_lineage", "allowed_gatherer_domains"]:
+		if entity.has(array_key):
+			result[array_key] = entity.get(array_key, []).duplicate()
+	if entity.has("footprint"):
+		result["footprint"] = entity.get("footprint", {}).duplicate(true)
+	var source_components: Dictionary = entity.get("components", {})
+	var components: Dictionary = {}
+	var ownership: Dictionary = source_components.get("ownership", {})
+	if not ownership.is_empty():
+		components["ownership"] = {
+			"civilization_id": int(ownership.get("civilization_id", 13)),
+		}
+	for component_name in ["worker", "conversion", "healing"]:
+		var source_component: Dictionary = source_components.get(component_name, {})
+		if not source_component.is_empty():
+			components[component_name] = {
+				"enabled": bool(source_component.get("enabled", false)),
+			}
+	var cargo: Dictionary = source_components.get("cargo", {})
+	if not cargo.is_empty():
+		components["cargo"] = {
+			"enabled": bool(cargo.get("enabled", false)),
+			"capacity": maxi(0, int(cargo.get("capacity", 0))),
+		}
+	var trade: Dictionary = source_components.get("trade", {})
+	if not trade.is_empty():
+		components["trade"] = {
+			"enabled": bool(trade.get("enabled", false)),
+			"target_building_source_id": int(trade.get("target_building_source_id", -1)),
+		}
+	result["components"] = components
 	return result
 
 
