@@ -347,3 +347,25 @@ Fast paths сохраняют порядок систем и fixed cadence. По
 | fog p95 | 11,693 мс | 12,009 мс |
 
 Canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carriers совпали. Priest/conversion, huntable resource, stuck/local movement, gather/return, navigation stress, deterministic replay и save/load gates проходят. Следующие измеренные владельцы — fog collect/reconcile и remaining gather/movement task; deadline `50` и comfort `35` мс остаются открыты.
+
+## 22. E6-018 — revisioned и пакетное согласование fog sources
+
+Профиль E6-017 разделил fog p95 `12,009` мс на collect `6,198` и reconcile `5,284` мс. Геометрия уже занимала меньше миллисекунды, поэтому расширение C++-границы не требовалось. Runtime source fields читаются из нормализованной schema; неизменившийся source переиспользует прежнюю запись, а изменившийся получает локальную числовую revision. Она не входит в canonical snapshot и заменяет глубокое сравнение словаря вместе с массивом клеток.
+
+Reconcile сохраняет прежний stable source order и overlap semantics, но сначала собирает add/remove/replace deltas. Для каждого observer `PackedByteArray states` и `PackedInt32Array counts` извлекаются один раз, все deltas применяются к этой паре, после чего buffers записываются обратно один раз. Player/alliance ownership, topology rebuild, UNKNOWN/EXPLORED/VISIBLE transitions, public revision, snapshots, save/load, presentation и GDScript visibility authority остались прежними.
+
+Сопоставимый `gather_economy 2×500 / 400×400 / 520+240`:
+
+| Метрика | E6-017 | E6-018 |
+|---|---:|---:|
+| sample wall | 13,00 с | 12,30 с |
+| fixed tick p50 / p95 / max | 53,977 / 61,109 / 72,943 мс | 50,903 / 56,580 / 64,606 мс |
+| world advance p95 | 54,636 мс | 50,887 мс |
+| fog p95 | 12,009 мс | 9,988 мс |
+| fog ensure p95 | 1,008 мс | 0,348 мс |
+| fog collect p95 | 6,198 мс | 4,907 мс |
+| fog reconcile p95 | 5,284 мс | 4,766 мс |
+| unit orders p95 | 36,501 мс | 34,916 мс |
+| unit task p95 | 26,706 мс | 25,545 мс |
+
+Canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carriers совпали. Fog unit tests, bounded visibility refresh, diplomacy, deterministic replay, canonical snapshot, save/load и versioned archive gates проходят. Deadline `50` и comfort `35` мс ещё открыты; следующий measured owner — gather/movement task, после чего выполняются mixed 4/8×500 и visible render profiles.

@@ -1488,3 +1488,11 @@ ext_unit_id.
 - На одинаковом `gather_economy 2×500 / 400×400 / 520+240`: preparation p95 `6,412 → 2,786` мс, movement integration `8,451 → 7,472`, unit-orders `41,376 → 36,501`, fixed tick `65,622 → 61,109`, sample wall `13,84 → 13,00` с.
 - Hash `c4244f12…bcc747`, 11 671 gather, 988 deposits, food `5060/5000`, 693 carriers совпали. Priest/conversion, huntable retaliation/carcass, stuck/local movement, gather/return, navigation stress, deterministic replay и save/load gates проходят.
 - Следующая точная задача — fog collect/reconcile p95 `12,009` мс и оставшийся gather/movement task `26,706`; после достижения 50-мс deadline повторить mixed 4/8×500, затем visible render.
+
+### Прогресс (2026-09-18, E6-018 — пакетное согласование fog sources)
+
+- Runtime vision source использует нормализованные `team/hp/pos/components.vision` поля; совместимый deterministic ID fallback сохранён только для узких hand-written fixtures. Неизменившийся источник переиспользует прежнюю запись, изменившийся получает локальную числовую revision вместо глубокого сравнения словаря с `PackedInt32Array` клеток.
+- Add/remove/replace сначала собираются в детерминированные списки. Затем каждый observer получает один локальный `states/counts` buffer, ко всем source deltas применяются прежние overlap rules, и buffer записывается один раз. Player/alliance ownership, explored/visible state, revision, snapshots, presentation и native-disabled fallback не менялись.
+- На одинаковом `gather_economy 2×500 / 400×400 / 520+240`: fog p95 `12,009 → 9,988` мс, collect `6,198 → 4,907`, ensure `1,008 → 0,348`, reconcile `5,284 → 4,766`; fixed p50/p95/max `50,903 / 56,580 / 64,606` мс, sample wall `12,30` с против `13,00` с E6-017.
+- Canonical hash `c4244f12…bcc747`, 11 671 gather, 988 deposits, food `5060/5000`, 693 carriers совпали. Fog, bounded visibility refresh, diplomacy, deterministic replay, canonical snapshot, save/load и versioned save archive gates проходят.
+- Deadline `50` и comfort `35` мс ещё открыты. Следующий измеренный владелец — gather/movement task p95 `25,545`; после его сокращения повторить mixed 4/8×500, затем visible CPU/GPU/render gate.

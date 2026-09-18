@@ -96,9 +96,13 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 	vision_cells_microseconds = 0
 	regenerated_sources = 0
 	for entity in units:
-		ensure_player(int(entity.get("team", 0)))
+		var team := int(entity["team"])
+		if team > 0 and not states_by_player.has(team):
+			ensure_player(team)
 	for entity in buildings:
-		ensure_player(int(entity.get("team", 0)))
+		var team := int(entity["team"])
+		if team > 0 and not states_by_player.has(team):
+			ensure_player(team)
 	if performance_probe != null:
 		performance_probe.observe_microseconds("simulation.fog.ensure_players", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
@@ -115,17 +119,7 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 	if visibility_topology_dirty:
 		changed = _rebuild_visibility(current_sources)
 	else:
-		for source_key in vision_sources.keys():
-			if current_sources.has(source_key):
-				continue
-			changed = _remove_source(vision_sources[source_key]) or changed
-		for source_key in current_sources.keys():
-			var current: Dictionary = current_sources[source_key]
-			var previous: Variant = vision_sources.get(source_key)
-			if previous == null:
-				changed = _add_source(current) or changed
-			elif previous != current:
-				changed = _replace_source(previous, current) or changed
+		changed = _reconcile_visibility(current_sources)
 	vision_sources = current_sources
 	visibility_topology_dirty = false
 	if changed:
@@ -165,15 +159,17 @@ func snapshot(player_id: int) -> PackedByteArray:
 func _collect_sources(entities: Array, category_id: int, result: Dictionary, movement_bucket_count: int, movement_bucket_index: int) -> void:
 	for index in range(entities.size()):
 		var entity: Dictionary = entities[index]
-		if float(entity.get("hp", 0.0)) <= 0.0:
+		if float(entity["hp"]) <= 0.0:
 			continue
-		var vision: Dictionary = entity.get("components", {}).get("vision", {})
-		var sight_radius := maxf(0.0, float(vision.get("range", 0.0)))
-		if sight_radius <= 0.0 or not bool(vision.get("enabled", true)):
+		var vision: Dictionary = entity["components"]["vision"]
+		var sight_radius := maxf(0.0, float(vision["range"]))
+		if sight_radius <= 0.0 or not bool(vision["enabled"]):
 			continue
-		var source_player := int(entity.get("team", 0))
+		var source_player := int(entity["team"])
 		if source_player <= 0:
 			continue
+		# Isolated compatibility fixtures may omit an ID; runtime entities always
+		# provide one. Preserve the existing deterministic array-index fallback.
 		var entity_id := int(entity.get("id", -1))
 		# Runtime entity IDs are global across units and buildings, but retain one
 		# category bit so isolated tests and compatibility fixtures may reuse IDs.
@@ -181,16 +177,16 @@ func _collect_sources(entities: Array, category_id: int, result: Dictionary, mov
 		# every visibility tick without changing source identity or update order.
 		var stable_id := entity_id if entity_id >= 0 else index
 		var source_key := (stable_id << 1) | (category_id & 1)
-		var center := Vector2(entity.get("pos", Vector2.ZERO))
+		var center := Vector2(entity["pos"])
 		var previous: Variant = vision_sources.get(source_key)
-		if previous != null and int(previous.get("team", 0)) == source_player and Vector2(previous.get("center", Vector2.ZERO)).is_equal_approx(center) and is_equal_approx(float(previous.get("radius", 0.0)), sight_radius):
+		if previous != null and int(previous["team"]) == source_player and Vector2(previous["center"]).is_equal_approx(center) and is_equal_approx(float(previous["radius"]), sight_radius):
 			result[source_key] = previous
 			continue
 		var stable_bucket_value := entity_id if entity_id >= 0 else index
 		var movement_refresh_deferred := (
 			previous != null
-			and int(previous.get("team", 0)) == source_player
-			and is_equal_approx(float(previous.get("radius", 0.0)), sight_radius)
+			and int(previous["team"]) == source_player
+			and is_equal_approx(float(previous["radius"]), sight_radius)
 			and maxi(1, movement_bucket_count) > 1
 			and posmod(stable_bucket_value, maxi(1, movement_bucket_count)) != posmod(movement_bucket_index, maxi(1, movement_bucket_count))
 		)
@@ -207,6 +203,7 @@ func _collect_sources(entities: Array, category_id: int, result: Dictionary, mov
 			"center": center,
 			"radius": sight_radius,
 			"cells": cells,
+			"source_revision": int(previous.get("source_revision", 0)) + 1 if previous != null else 1,
 		}
 
 
@@ -243,6 +240,55 @@ func _rebuild_visibility(current_sources: Dictionary) -> bool:
 	return changed
 
 
+func _reconcile_visibility(current_sources: Dictionary) -> bool:
+	var removed_sources: Array[Dictionary] = []
+	var added_sources: Array[Dictionary] = []
+	var previous_replacements: Array[Dictionary] = []
+	var current_replacements: Array[Dictionary] = []
+	for source_key in vision_sources.keys():
+		if not current_sources.has(source_key):
+			removed_sources.append(vision_sources[source_key])
+	for source_key in current_sources.keys():
+		var current: Dictionary = current_sources[source_key]
+		var previous: Variant = vision_sources.get(source_key)
+		if previous == null:
+			added_sources.append(current)
+		elif int(previous.get("source_revision", 0)) != int(current.get("source_revision", 0)):
+			previous_replacements.append(previous)
+			current_replacements.append(current)
+	if removed_sources.is_empty() and added_sources.is_empty() and previous_replacements.is_empty():
+		return false
+
+	var changed := false
+	for observer_value in states_by_player.keys():
+		var observer := int(observer_value)
+		var allies: Dictionary = allies_by_player.get(observer, {})
+		var states: PackedByteArray = states_by_player[observer]
+		var counts: PackedInt32Array = visible_counts_by_player[observer]
+		for source in removed_sources:
+			if bool(allies.get(int(source["team"]), false)):
+				changed = _apply_remove_visible_cells(states, counts, source["cells"]) or changed
+		for source in added_sources:
+			if bool(allies.get(int(source["team"]), false)):
+				changed = _apply_add_visible_cells(states, counts, source["cells"]) or changed
+		for replacement_index in range(previous_replacements.size()):
+			var previous: Dictionary = previous_replacements[replacement_index]
+			var current: Dictionary = current_replacements[replacement_index]
+			var previous_team := int(previous["team"])
+			var current_team := int(current["team"])
+			if previous_team == current_team:
+				if bool(allies.get(current_team, false)):
+					changed = _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"]) or changed
+				continue
+			if bool(allies.get(previous_team, false)):
+				changed = _apply_remove_visible_cells(states, counts, previous["cells"]) or changed
+			if bool(allies.get(current_team, false)):
+				changed = _apply_add_visible_cells(states, counts, current["cells"]) or changed
+		states_by_player[observer] = states
+		visible_counts_by_player[observer] = counts
+	return changed
+
+
 func _add_source(source: Dictionary) -> bool:
 	var changed := false
 	for observer_value in states_by_player.keys():
@@ -252,59 +298,35 @@ func _add_source(source: Dictionary) -> bool:
 	return changed
 
 
-func _remove_source(source: Dictionary) -> bool:
-	var changed := false
-	for observer_value in states_by_player.keys():
-		var observer := int(observer_value)
-		if bool(allies_by_player.get(observer, {}).get(int(source["team"]), false)):
-			changed = _remove_visible_cells(observer, source["cells"]) or changed
-	return changed
-
-
-func _replace_source(previous: Dictionary, current: Dictionary) -> bool:
-	if int(previous["team"]) != int(current["team"]):
-		var removed := _remove_source(previous)
-		var added := _add_source(current)
-		return removed or added
-	var changed := false
-	for observer_value in states_by_player.keys():
-		var observer := int(observer_value)
-		if bool(allies_by_player.get(observer, {}).get(int(current["team"]), false)):
-			changed = _replace_visible_cells(observer, previous["cells"], current["cells"]) or changed
-	return changed
-
-
 func _add_visible_cells(observer: int, cells: PackedInt32Array) -> bool:
 	var states: PackedByteArray = states_by_player[observer]
 	var counts: PackedInt32Array = visible_counts_by_player[observer]
+	var changed := _apply_add_visible_cells(states, counts, cells)
+	states_by_player[observer] = states
+	visible_counts_by_player[observer] = counts
+	return changed
+
+func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array) -> bool:
 	var changed := false
 	for index in cells:
 		if counts[index] == 0 and states[index] != VISIBLE:
 			states[index] = VISIBLE
 			changed = true
 		counts[index] += 1
-	states_by_player[observer] = states
-	visible_counts_by_player[observer] = counts
 	return changed
 
 
-func _remove_visible_cells(observer: int, cells: PackedInt32Array) -> bool:
-	var states: PackedByteArray = states_by_player[observer]
-	var counts: PackedInt32Array = visible_counts_by_player[observer]
+func _apply_remove_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array) -> bool:
 	var changed := false
 	for index in cells:
 		counts[index] = maxi(0, counts[index] - 1)
 		if counts[index] == 0 and states[index] == VISIBLE:
 			states[index] = EXPLORED
 			changed = true
-	states_by_player[observer] = states
-	visible_counts_by_player[observer] = counts
 	return changed
 
 
-func _replace_visible_cells(observer: int, previous_cells: PackedInt32Array, current_cells: PackedInt32Array) -> bool:
-	var states: PackedByteArray = states_by_player[observer]
-	var counts: PackedInt32Array = visible_counts_by_player[observer]
+func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Array, previous_cells: PackedInt32Array, current_cells: PackedInt32Array) -> bool:
 	var previous_index := 0
 	var current_index := 0
 	var changed := false
@@ -326,8 +348,6 @@ func _replace_visible_cells(observer: int, previous_cells: PackedInt32Array, cur
 				changed = true
 			counts[current_cell] += 1
 			current_index += 1
-	states_by_player[observer] = states
-	visible_counts_by_player[observer] = counts
 	return changed
 
 
