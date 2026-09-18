@@ -9,6 +9,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_stance_rules()
 	test_neutral_autonomous_targeting()
+	test_multirate_awareness_deadlines()
 	if failures.is_empty():
 		print("I6-002 combat awareness stance tests passed")
 		quit(0)
@@ -87,6 +88,29 @@ func test_neutral_autonomous_targeting() -> void:
 	soldier["hp"] = 0.0
 	assert_equal(awareness.collect_commands(world, 2).size(), 0, "neutral worker is never acquired autonomously")
 	assert_equal(world.team_relation(2, 1), "enemy", "neutral stance does not mutate the reverse player relation")
+
+
+func test_multirate_awareness_deadlines() -> void:
+	var world = open_world()
+	var observer: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	var enemy: Dictionary = world.add_unit(2, "clubman", Vector2(5.0, 4.0), false)
+	configure_awareness(observer, "aggressive", 6.0)
+	configure_awareness(enemy, "passive", 6.0)
+	world.update_fog_of_war()
+	var awareness := CombatAwarenessSystem.new()
+	# Cell (1, 1) has aggressive phase 1 modulo 4. Starting immediately
+	# after that phase must still discover a local threat by the next window.
+	assert_equal(awareness.collect_commands(world, 2).size(), 0, "ordinary scan may be distributed off its phase")
+	assert_equal(awareness.collect_commands(world, 3).size(), 0, "ordinary scan remains distributed on the second off-phase")
+	assert_equal(awareness.collect_commands(world, 4).size(), 0, "ordinary scan remains distributed on the third off-phase")
+	var deadline_commands := awareness.collect_commands(world, 5)
+	assert_equal(deadline_commands.size(), 1, "aggressive acquisition occurs within the four-tick deadline")
+	assert_equal(deadline_commands[0].target_entity_id, int(enemy["id"]), "deadline scan preserves exact target identity")
+
+	# Attack-move is an explicit combat intent and therefore bypasses the
+	# background cadence even when the spatial phase is not due.
+	observer["task"] = "attack_move"
+	assert_equal(awareness.collect_commands(world, 2).size(), 1, "attack-move scans immediately off-phase")
 
 
 func open_world():

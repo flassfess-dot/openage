@@ -1996,25 +1996,25 @@ func find_combat_target(id: int) -> Variant:
 	return find_building(id)
 
 
-func get_combat_targets() -> Array:
+func get_combat_targets(stable_order: bool = true) -> Array:
 	var result: Array = []
 	var last_id := -9223372036854775807
 	var already_sorted := true
 	for unit in units:
 		if float(unit.get("hp", 0.0)) > 0.0 and not entity_has_behavior_tag(unit, "noncombat_target"):
 			var unit_id := int(unit["id"])
-			if unit_id < last_id:
+			if stable_order and unit_id < last_id:
 				already_sorted = false
 			last_id = unit_id
 			result.append(unit)
 	for building in buildings:
 		if float(building.get("hp", 0.0)) > 0.0:
 			var building_id := int(building["id"])
-			if building_id < last_id:
+			if stable_order and building_id < last_id:
 				already_sorted = false
 			last_id = building_id
 			result.append(building)
-	if not already_sorted:
+	if stable_order and not already_sorted:
 		result.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
 	return result
 

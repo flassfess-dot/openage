@@ -1532,3 +1532,10 @@ ext_unit_id.
 - Presentation публикуется только на новом fixed tick, изменении selection/diagnostics или выходе камеры из overscan; overview миникарты имеет deterministic cadence четыре тика. Разрешённые sprite frames/composite parts и drawable dictionaries удерживаются до следующей publication, а между тактами обновляются только интерполированные anchors/depth.
 - На прежнем `2×500 / 160 visible / 800×600` snapshot p95 `30,914 → 12,587` мс, drawable refresh `10,604 → 1,752`, fixed frame `26,816 → 16,713`, pan `28,561 → 16,646`; draw calls остаются `341`. Изолированная сцена достигла VSYNC 60 Hz, но 30% резерв ещё открыт.
 - Exactly-one-active-tick профиль локализовал новый blocker вне renderer: combined p95 `766,822` мс, fixed `692,134`, autonomy `664,347`, world advance `26,037`. Плотный контакт выявил полный перебор `CombatAwarenessSystem`; E6-024 вводит spatial candidates/deterministic cadence и проверяет автоатаку, retaliation, stance, replay и dense-contact нагрузку.
+
+### Прогресс (2026-09-18, E6-024 — spatial combat awareness)
+
+- Полный перебор assistance и повторные запросы кандидатов заменены transient retaliation/combat indexes. Combat buckets разделены по spatial cell и team, поэтому собственные/союзные сущности отбрасываются один раз, но точные range/fog/reachability/neutral/ranking правила остаются индивидуальными.
+- Existing attack валидируется каждый такт; retaliation и `attack`/`attack_move` реагируют немедленно. Обычный aggressive scan имеет deterministic deadline четыре такта, defensive/stand-ground — два; фаза зависит от tick и клетки мира, не от камеры.
+- Dense `2×500 / 160 visible` снизил autonomy p95 `664,347 → 20,197` мс, fixed tick `692,134 → 47,407` мс, active tick+frame `766,822 → 153,520` мс. Isolated render остаётся у VSYNC `16,654` мс.
+- Perception, combat awareness, autonomous combat, defence/Wonder, formation и deterministic replay impact gates проходят; отдельный тест закрепляет scan deadline и немедленный off-phase attack-move. Следующий владелец — presentation publication в совмещённом active frame, а не боевой fixed tick.

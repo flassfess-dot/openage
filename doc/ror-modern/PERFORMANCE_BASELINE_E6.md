@@ -470,3 +470,23 @@ Presentation boundary теперь различает три контракта:
 Первичная полная сборка очереди всё ещё стоит около `12,0` мс, но выполняется только на publication/selection/effect invalidation, а не на каждый render frame. Изолированный rendering достиг 60 Hz на i7-7700/RTX 3080 Ti; требуемый 30% резерв ещё не доказан.
 
 Совмещённый exactly-one-fixed-tick + presentation + GPU-frame профиль намеренно свёл 80+80 противников в плотный экранный контакт. Он обнаружил следующий независимый blocker: combined p95 `766,822` мс, из которых fixed tick `692,134`, `controller.autonomy` `664,347`, а весь `world_advance` только `26,037` мс. Следовательно, E6-024 должен устранить полный перебор в `CombatAwarenessSystem` пространственным candidate query и безопасной deterministic cadence; render-код и camera culling не должны маскировать этот авторитетный долг.
+
+## 28. E6-024 — пространственное боевое восприятие и deterministic cadence
+
+Профиль исходного `CombatAwarenessSystem` разделил `controller.autonomy` на setup, index, validation, assistance, spatial query и perception. Полный перебор союзников для defensive assistance занимал около `446,6` мс p95, повторные spatial queries — `168,9` мс; это подтвердило алгоритмический, а не графический источник задержки.
+
+Runtime теперь строит на один fixed tick два транзиентных индекса: редкий retaliation index для помощи и combat-candidate buckets, разделённые по пространственной ячейке и команде. Собственная команда и союзники отбрасываются один раз при формировании общего conservative candidate set; индивидуальный этап сохраняет точную дальность, fog visibility, neutral policy, достижимость и стабильный ranking threat → assigned attackers → class → distance → EntityId. Глобальная сортировка временного списка целей исключена: итоговый EntityId tie-break делает её избыточной. Existing attack target валидируется каждый такт; retaliation и `attack`/`attack_move` сканируют немедленно; обычный aggressive acquisition распределён по четырём тактам, defensive/stand-ground — по двум. Фаза зависит только от authoritative spatial cell и tick, а не от камеры.
+
+На том же реальном GPU workload `2×500 / 160 visible / 800×600`, восемь последовательных активных тактов:
+
+| Метрика | E6-023 active | E6-024 | Изменение |
+|---|---:|---:|---:|
+| combat autonomy p95 | 664,347 мс | 20,197 мс | `32,9×` |
+| assistance p95 | 446,642 мс | 1,093 мс | spatial retaliation index |
+| candidate query/perception p95 | 168,920+18,5 мс | 1,459+0,581 мс | team-partitioned buckets |
+| fixed tick p95 | 692,134 мс | 47,407 мс | hard 50-мс deadline выполнен |
+| world advance p95 | 26,037 мс | 24,976 мс | игровые системы не ослаблены |
+| active tick + frame p95 | 766,822 мс | 153,520 мс | следующий presentation cadence gate |
+| isolated render p95 | 16,713 мс | 16,654 мс | batching сохранён |
+
+Perception, stance/retaliation, autonomous-combat, defence/Wonder, formation и deterministic replay impact gates проходят. Отдельный unit test закрепляет четырёхтактовый deadline обычного обнаружения и немедленный off-phase `attack_move`; camera-independent behavior и authoritative simulation сохранены. Следующий measured owner — совмещённая публикация presentation после активного fixed tick: сам fixed deadline закрыт, но общий active frame ещё не имеет 60-FPS cadence/reserve.
