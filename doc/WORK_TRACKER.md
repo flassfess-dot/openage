@@ -1456,3 +1456,11 @@ ext_unit_id.
 - Новый `RoRVisibilityKernel` считает только circle-to-row-major-cell footprint. Player/alliance ownership, source lifecycle, overlap counts, explored/visible state, revision/snapshot/presentation и fallback остаются в GDScript.
 - На одинаковом `2×500` geometry p95 `9,647 → 0,835` мс, fog `20,722 → 10,987`, fixed `94,530 → 81,784`, sample wall `19,09 → 16,56` с. Hash `c4244f12…bcc747`, gather/deposit/food полностью совпали.
 - Fog/visibility/diplomacy/replay/save-load/observability gate проходит. Следующий measured owner: unit-orders p95 `58,680`, внутри него task `42,959` мс; deadline/comfort остаются открыты.
+
+### Прогресс (2026-09-18, E6-014 — gather hot-path allocations)
+
+- Gather/dropoff update больше не создаёт Dictionary результата на каждого рабочего в каждом такте: внутренний integer state code сохраняет прежние idle/move/gather/carry и arrival-animation semantics.
+- Активные runtime entities читают нормализованные worker/stage/carry/resource fields напрямую; fallback к catalog оставлен только для старых сохранений и узких hand-written fixtures, где `allowed_gatherer_domains` ещё отсутствует.
+- На том же `gather_economy 2×500 / 400×400 / 520+240` fixed p50/p95/max `62,453 / 76,760 / 92,265` мс, world advance p95 `70,988`, unit-orders `53,276`, task `38,195`; sample wall `15,41` с против `16,56` с E6-013.
+- Approaching/harvesting/returning p95 `19,647 / 13,813 / 24,050` мс. Hash `c4244f12…bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carrying units совпали. Gather-cycle, return-resources, naval economy, deterministic replay и save/load проходят.
+- E6 остаётся открытым: следующий measured owner — returning/movement integration и построение native movement snapshot; после устранения следующего доказанного повтора — mixed 4/8×500 и visible CPU/GPU/render matrix.

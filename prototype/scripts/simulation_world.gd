@@ -21,6 +21,13 @@ const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const CombatRules := preload("res://scripts/combat_rules.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const SimulationVisibilitySystem := preload("res://scripts/simulation_visibility_system.gd")
+
+const GATHER_UPDATE_IDLE := 0
+const GATHER_UPDATE_MOVE := 1
+const GATHER_UPDATE_ACTION := 2
+const GATHER_UPDATE_CARRY_IDLE := 3
+const GATHER_UPDATE_CARRY_MOVE := 4
+const GATHER_UPDATE_MOVE_IDLE := 5
 const SimulationEconomySystem := preload("res://scripts/simulation_economy_system.gd")
 const SimulationProductionSystem := preload("res://scripts/simulation_production_system.gd")
 const SimulationCombatSystem := preload("res://scripts/simulation_combat_system.gd")
@@ -1339,8 +1346,19 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 						_finish_healing(unit, healing_result)
 			"gather":
 				var gather_update := update_gather_order(unit, delta)
-				moving = bool(gather_update.get("moving", false))
-				animation_state = String(gather_update.get("animation_state", AnimationController.IDLE))
+				match gather_update:
+					GATHER_UPDATE_MOVE:
+						moving = true
+						animation_state = AnimationController.MOVE
+					GATHER_UPDATE_MOVE_IDLE:
+						animation_state = AnimationController.MOVE
+					GATHER_UPDATE_ACTION:
+						animation_state = AnimationController.GATHER
+					GATHER_UPDATE_CARRY_IDLE:
+						animation_state = AnimationController.CARRY
+					GATHER_UPDATE_CARRY_MOVE:
+						moving = true
+						animation_state = AnimationController.CARRY
 			"build", "repair":
 				var building_update := update_building_order(unit, delta)
 				moving = bool(building_update.get("moving", false))
@@ -1965,48 +1983,54 @@ func resource_accessible_to_team(resource: Dictionary, team: int) -> bool:
 
 
 func resource_allows_worker(resource: Dictionary, worker: Dictionary) -> bool:
-	var allowed_domains: Array = data_repository.runtime_metadata(String(resource.get("kind", ""))).get("allowed_gatherer_domains", [])
+	var allowed_domains: Array = resource.get("allowed_gatherer_domains", [])
+	if not resource.has("allowed_gatherer_domains"):
+		# Compatibility for old saves and narrow hand-written fixtures.
+		allowed_domains = data_repository.runtime_metadata(String(resource.get("kind", ""))).get("allowed_gatherer_domains", [])
 	if allowed_domains.is_empty():
 		allowed_domains = ["land"]
 	return String(worker.get("movement_domain", "land")) in allowed_domains
 
-func update_gather_order(worker: Dictionary, delta: float) -> Dictionary:
-	if not entity_is_worker(worker):
+func update_gather_order(worker: Dictionary, delta: float) -> int:
+	# Active SimulationWorld units own the complete runtime schema. Compatibility
+	# fallbacks remain at load/command boundaries instead of repeating nested
+	# catalog and tag checks for every worker on every fixed tick.
+	if not bool(worker["components"]["worker"]["enabled"]):
 		finish_gather_order(worker, "not_a_worker")
-		return {"moving": false, "animation_state": AnimationController.IDLE}
-	if String(worker.get("gather_stage", "none")) == "returning":
+		return GATHER_UPDATE_IDLE
+	if String(worker["gather_stage"]) == "returning":
 		return update_dropoff_order(worker, delta)
 
-	var resource: Variant = find_resource(int(worker.get("resource_id", -1)))
-	if resource == null or int(resource.get("amount", 0)) <= 0 or not resource_accessible_to_team(resource, int(worker.get("team", 0))) or not resource_allows_worker(resource, worker):
+	var resource: Variant = find_resource(int(worker["resource_id"]))
+	if resource == null or int(resource["amount"]) <= 0 or not resource_accessible_to_team(resource, int(worker["team"])) or not resource_allows_worker(resource, worker):
 		release_resource_approach_slot(worker)
-		if float(worker.get("carried_amount", 0.0)) > 0.0:
+		if float(worker["carried_amount"]) > 0.0:
 			begin_resource_return(worker)
-			return {"moving": false, "animation_state": AnimationController.CARRY}
+			return GATHER_UPDATE_CARRY_IDLE
 		finish_gather_order(worker, "resource_unavailable")
-		return {"moving": false, "animation_state": AnimationController.IDLE}
+		return GATHER_UPDATE_IDLE
 
-	var capacity := maxf(0.0, float(worker.get("carry_capacity", 0.0)))
-	if capacity > 0.0 and float(worker.get("carried_amount", 0.0)) >= capacity - 0.0001:
+	var capacity := maxf(0.0, float(worker["carry_capacity"]))
+	if capacity > 0.0 and float(worker["carried_amount"]) >= capacity - 0.0001:
 		begin_resource_return(worker)
-		return {"moving": false, "animation_state": AnimationController.CARRY}
+		return GATHER_UPDATE_CARRY_IDLE
 
-	if not worker.get("resource_approach_slot") is Vector2:
+	if not worker["resource_approach_slot"] is Vector2:
 		if not prepare_resource_approach(worker, resource):
 			finish_gather_order(worker, "no_approach_slot")
-			return {"moving": false, "animation_state": AnimationController.IDLE}
+			return GATHER_UPDATE_IDLE
 	var approach: Vector2 = worker["resource_approach_slot"]
 	if worker["pos"].distance_squared_to(approach) > 0.0144:
 		worker["gather_stage"] = "approaching"
 		ensure_navigation_destination(worker, approach)
-		return {"moving": move_unit(worker, delta), "animation_state": AnimationController.MOVE}
+		return GATHER_UPDATE_MOVE if move_unit(worker, delta) else GATHER_UPDATE_MOVE_IDLE
 
 	worker["gather_stage"] = "harvesting"
 	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
 	face_unit_toward(worker, resource["pos"])
 	if float(worker.get("work", 0.0)) > 0.0:
 		OrderPipeline.transition(worker, OrderPipeline.RECOVER)
-		return {"moving": false, "animation_state": AnimationController.GATHER}
+		return GATHER_UPDATE_ACTION
 
 	OrderPipeline.restart(worker)
 	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
@@ -2017,23 +2041,23 @@ func update_gather_order(worker: Dictionary, delta: float) -> Dictionary:
 	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
 	if int(resource.get("amount", 0)) <= 0 or (capacity > 0.0 and float(worker.get("carried_amount", 0.0)) >= capacity - 0.0001):
 		begin_resource_return(worker)
-	return {"moving": false, "animation_state": AnimationController.GATHER}
+	return GATHER_UPDATE_ACTION
 
 
-func update_dropoff_order(worker: Dictionary, delta: float) -> Dictionary:
+func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 	if float(worker.get("carried_amount", 0.0)) <= 0.0:
 		var empty_resource: Variant = find_resource(int(worker.get("resource_id", -1)))
 		if empty_resource != null and int(empty_resource.get("amount", 0)) > 0 and resource_accessible_to_team(empty_resource, int(worker.get("team", 0))) and prepare_resource_approach(worker, empty_resource):
 			OrderPipeline.restart(worker)
-			return {"moving": false, "animation_state": AnimationController.IDLE}
+			return GATHER_UPDATE_IDLE
 		finish_gather_order(worker, "cycle_complete")
-		return {"moving": false, "animation_state": AnimationController.IDLE}
+		return GATHER_UPDATE_IDLE
 
 	var dropoff: Variant = find_building(int(worker.get("dropoff_id", -1)))
 	if dropoff == null or float(dropoff.get("hp", 0.0)) <= 0.0:
 		if not begin_resource_return(worker):
 			finish_gather_order(worker, "no_dropoff")
-			return {"moving": false, "animation_state": AnimationController.IDLE}
+			return GATHER_UPDATE_IDLE
 		dropoff = find_building(int(worker.get("dropoff_id", -1)))
 	var destination: Variant = worker.get("dropoff_position")
 	if not destination is Vector2:
@@ -2041,7 +2065,7 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> Dictionary:
 		worker["dropoff_position"] = destination
 	if worker["pos"].distance_squared_to(destination) > 0.0144:
 		ensure_navigation_destination(worker, destination)
-		return {"moving": move_unit(worker, delta), "animation_state": AnimationController.CARRY}
+		return GATHER_UPDATE_CARRY_MOVE if move_unit(worker, delta) else GATHER_UPDATE_CARRY_IDLE
 
 	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
 	face_unit_toward(worker, dropoff["pos"])
@@ -2053,9 +2077,9 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> Dictionary:
 	if resource != null and int(resource.get("amount", 0)) > 0:
 		OrderPipeline.restart(worker)
 		if prepare_resource_approach(worker, resource):
-			return {"moving": false, "animation_state": AnimationController.IDLE}
+			return GATHER_UPDATE_IDLE
 	finish_gather_order(worker, "resource_depleted")
-	return {"moving": false, "animation_state": AnimationController.IDLE}
+	return GATHER_UPDATE_IDLE
 
 
 func gather(resource_id: int, worker: Dictionary) -> float:

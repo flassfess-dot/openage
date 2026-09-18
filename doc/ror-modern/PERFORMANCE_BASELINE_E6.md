@@ -258,3 +258,26 @@ Stage-профиль того же workload разделил `simulation.unit_or
 | unit task p95 | 44,535 мс | 42,959 мс |
 
 Hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits и food `5060/5000` совпали. Exact native/GDScript footprints проверены для центра, границ, fractional и zero radius; fog/visibility, diplomacy, replay и save/load проходят. Observability test теперь корректно принимает как A* expanded nodes, так и direct-path resolution: открытый прямой маршрут не обязан искусственно запускать A*. Deadline `50` и comfort `35` мс ещё открыты; следующий измеренный owner — GDScript unit task/gather validation, а не дальнейшее расширение fog kernel без нового профиля.
+
+## 18. E6-014 — устранение временных объектов в gather hot path
+
+Профиль E6-013 показал, что после ускорения path/local movement/fog главным остаточным владельцем остаётся `unit_orders.task`. Каждый из 1000 рабочих на каждом такте создавал Dictionary с `moving/animation_state`, повторно проходил общий worker/tag contract и заново запрашивал неизменяемый `allowed_gatherer_domains` из каталога. Эти операции заменены внутренним integer state code и чтением уже нормализованной runtime schema. Совместимость старых сохранений/ручных fixtures остаётся на границе при отсутствии закэшированного resource field.
+
+Сопоставимый `gather_economy 2×500 / 400×400 / 520+240`, все native kernels включены:
+
+| Метрика | E6-013 | E6-014 |
+|---|---:|---:|
+| sample wall | 16,56 с | 15,41 с |
+| fixed tick p50 / p95 | 67,344 / 81,784 мс | 62,453 / 76,760 мс |
+| fixed tick max | — | 92,265 мс |
+| world advance p95 | 76,172 мс | 70,988 мс |
+| unit orders p95 | 58,680 мс | 53,276 мс |
+| unit task p95 | 42,959 мс | 38,195 мс |
+| approaching p95 | 24,139 мс | 19,647 мс |
+| harvesting p95 | 16,921 мс | 13,813 мс |
+| returning p95 | 25,901 мс | 24,050 мс |
+| fog p95 | 10,987 мс | 11,199 мс |
+| native movement snapshot p95 | — | 4,192 мс |
+| movement integration p95 | — | 8,181 мс |
+
+Canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747` и экономический итог полностью совпали: 11 671 gather, 988 deposits, food `5060/5000`, 693 несущих ресурсы юнита. Gather/dropoff, naval economy, deterministic replay и save/load impact gates проходят. Deadline `50` и comfort `35` мс ещё не достигнуты. Следующий профиль разделяет returning-stage lookup/transition и движение, а также проверяет стоимость подготовки native movement snapshot; новый нативный перенос допустим только при подтверждённом вычислительном ядре.
