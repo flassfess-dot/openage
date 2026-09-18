@@ -17,6 +17,7 @@ func _initialize() -> void:
 	test_simulation_routes_around_town_center()
 	test_native_kernel_matches_gdscript()
 	test_native_local_movement_matches_gdscript()
+	test_native_local_movement_keeps_mixed_configuration_routing()
 
 	if failures.is_empty():
 		print("N-004 pathfinder tests passed")
@@ -139,6 +140,22 @@ func test_native_local_movement_matches_gdscript() -> void:
 	LocalMovement.calculate_runtime_unit_into(expected, Vector2(9.5, 5.5), [units[1], units[2]], finder.grid, 0.05)
 	var native: Vector4 = finder.calculate_native_movement(units[0], Vector2(9.5, 5.5), 0.05)
 	assert_vector_close(Vector2(native.x, native.y), Vector2(expected["actual_velocity"]), 0.00001, "native local avoidance preserves velocity")
+
+
+func test_native_local_movement_keeps_mixed_configuration_routing() -> void:
+	var finder = Pathfinder.new(open_grid(Vector2i(18, 15)))
+	if not finder.uses_native_kernel():
+		return
+	var land_unit := movement_unit(1, Vector2(5.5, 5.5), 1)
+	var water_unit := movement_unit(2, Vector2(10.5, 10.5), 1)
+	water_unit["movement_domain"] = "water"
+	finder.prepare_native_movement_snapshot([land_unit, water_unit])
+	assert_true(finder.has_native_movement_for(1), "mixed snapshot maps the land unit to its kernel")
+	assert_true(finder.has_native_movement_for(2), "mixed snapshot maps the water unit to its kernel")
+	var land_result: Vector4 = finder.calculate_native_movement(land_unit, Vector2(9.5, 5.5), 0.05)
+	var water_result: Vector4 = finder.calculate_native_movement(water_unit, Vector2(12.5, 10.5), 0.05)
+	assert_true(roundi(land_result.z) >= 0, "land movement uses a configured kernel")
+	assert_true(roundi(water_result.z) >= 0, "water movement uses its separately configured kernel")
 
 
 func movement_unit(id: int, position: Vector2, priority: int) -> Dictionary:

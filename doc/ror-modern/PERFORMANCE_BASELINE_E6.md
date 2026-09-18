@@ -281,3 +281,27 @@ Hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 
 | movement integration p95 | — | 8,181 мс |
 
 Canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747` и экономический итог полностью совпали: 11 671 gather, 988 deposits, food `5060/5000`, 693 несущих ресурсы юнита. Gather/dropoff, naval economy, deterministic replay и save/load impact gates проходят. Deadline `50` и comfort `35` мс ещё не достигнуты. Следующий профиль разделяет returning-stage lookup/transition и движение, а также проверяет стоимость подготовки native movement snapshot; новый нативный перенос допустим только при подтверждённом вычислительном ядре.
+
+## 19. E6-015 — однородный movement snapshot и boundary-normalized gather
+
+`prepare_native_movement_snapshot` раньше каждый такт заново создавал шесть packed arrays, форматировал `movement_domain:restriction` для каждого юнита и строил два промежуточных Dictionary даже когда все 1000 участников принадлежали одной конфигурации. Теперь arrays переиспользуются, однородный состав получает один shared kernel, а mixed-domain путь сохраняет прежнее раздельное назначение. Отдельный native regression проверяет одновременные land/water units.
+
+В gather hot loop найден eager fallback языка: выражение по умолчанию `resource.get("resource_type_id", resource_type_for(...resource_stats...))` вычисляло catalog lookup до вызова `get`, даже когда готовое поле существовало. Нормализованное поле теперь читается напрямую, а fallback остаётся только для старых/ручных fixtures. Совместимость команды с team/domain по-прежнему проверяется при назначении; ownership transfer и смена роли явно отменяют приказ, поэтому их повторный lookup каждый fixed tick устранён.
+
+Сопоставимый `gather_economy 2×500 / 400×400 / 520+240`:
+
+| Метрика | E6-014 | E6-015 |
+|---|---:|---:|
+| sample wall | 15,41 с | 14,11 с |
+| fixed tick p50 / p95 | 62,453 / 76,760 мс | 57,582 / 70,570 мс |
+| world advance p95 | 70,988 мс | 64,860 мс |
+| unit orders p95 | 53,276 мс | 48,117 мс |
+| unit task p95 | 38,195 мс | 35,210 мс |
+| approaching p95 | 19,647 мс | 17,166 мс |
+| harvesting p95 | 13,813 мс | 11,608 мс |
+| returning p95 | 24,050 мс | 24,046 мс |
+| native movement snapshot p95 | 4,192 мс | 1,715 мс |
+
+Hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carrying units совпали. Gather/return/naval economy, pathfinder mixed-domain и deterministic replay gates проходят.
+
+Дополнительный aggregate профиль не изменяет симуляцию и суммирует уже измеренное время path запросов внутри одного тика. Он показал `simulation.navigation.path_queries` p95 `10,041` мс, max `20,972` мс при p95 отдельного запроса `0,937` мс. Расширенный exact-cache эксперимент не дал попаданий или улучшения: волна состоит из разных текущих позиций и конечных slots, поэтому изменение ключа удалено. Следующий архитектурный owner — revisioned source/drop-site corridor: один дальний маршрут на группу с индивидуальными конечными слотами/local avoidance и автоматическим fallback при препятствии или изменении navigation revision.

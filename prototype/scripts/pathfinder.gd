@@ -16,6 +16,14 @@ var native_enabled: bool = true
 var native_available: bool = false
 var native_kernels: Dictionary = {}
 var native_movement_kernels_by_unit_id: Dictionary = {}
+var native_shared_movement_kernel: Variant = null
+var native_movement_ids := PackedInt32Array()
+var native_movement_positions := PackedVector2Array()
+var native_movement_radii := PackedFloat32Array()
+var native_movement_clearances := PackedFloat32Array()
+var native_movement_priorities := PackedInt32Array()
+var native_movement_health := PackedFloat32Array()
+var observed_path_query_microseconds: int = 0
 
 
 func _init(navigation_grid = null) -> void:
@@ -27,11 +35,20 @@ func set_performance_probe(probe: Variant) -> void:
 	performance_probe = probe
 
 
+func reset_path_query_tick_observation() -> void:
+	observed_path_query_microseconds = 0
+
+
+func path_query_tick_microseconds() -> int:
+	return observed_path_query_microseconds
+
+
 func clear_cache() -> void:
 	cache.clear()
 	cache_hits = 0
 	native_kernels.clear()
 	native_movement_kernels_by_unit_id.clear()
+	native_shared_movement_kernel = null
 
 
 func set_native_enabled(enabled: bool) -> void:
@@ -59,54 +76,78 @@ func prepare_native_kernels_for_units(units: Array) -> void:
 
 func prepare_native_movement_snapshot(units: Array) -> void:
 	native_movement_kernels_by_unit_id.clear()
+	native_shared_movement_kernel = null
 	if not uses_native_kernel() or units.is_empty():
 		return
-	var ids := PackedInt32Array()
-	var positions := PackedVector2Array()
-	var radii := PackedFloat32Array()
-	var clearances := PackedFloat32Array()
-	var priorities := PackedInt32Array()
-	var health := PackedFloat32Array()
-	ids.resize(units.size())
-	positions.resize(units.size())
-	radii.resize(units.size())
-	clearances.resize(units.size())
-	priorities.resize(units.size())
-	health.resize(units.size())
-	var configurations: Dictionary = {}
-	var configuration_by_unit_id: Dictionary = {}
+	native_movement_ids.resize(units.size())
+	native_movement_positions.resize(units.size())
+	native_movement_radii.resize(units.size())
+	native_movement_clearances.resize(units.size())
+	native_movement_priorities.resize(units.size())
+	native_movement_health.resize(units.size())
+	var first_unit: Dictionary = units[0]
+	var shared_domain := String(first_unit["movement_domain"])
+	var shared_restriction := int(first_unit["terrain_restriction"])
+	var homogeneous_configuration := true
 	for index in range(units.size()):
 		var unit: Dictionary = units[index]
-		var unit_id := int(unit.get("id", -1))
-		var movement_domain := String(unit.get("movement_domain", "land"))
-		var restriction_id := int(unit.get("terrain_restriction", -1))
+		var movement_domain := String(unit["movement_domain"])
+		var restriction_id := int(unit["terrain_restriction"])
+		if movement_domain != shared_domain or restriction_id != shared_restriction:
+			homogeneous_configuration = false
+		native_movement_ids[index] = int(unit["id"])
+		native_movement_positions[index] = Vector2(unit["pos"])
+		native_movement_radii[index] = float(unit["footprint_radius"])
+		native_movement_clearances[index] = float(unit["minimum_clearance"])
+		native_movement_priorities[index] = int(unit["push_priority"])
+		native_movement_health[index] = float(unit["hp"])
+	if homogeneous_configuration:
+		native_shared_movement_kernel = _native_kernel_for(shared_domain, shared_restriction)
+		native_shared_movement_kernel.configure_movement_snapshot(
+			native_movement_ids,
+			native_movement_positions,
+			native_movement_radii,
+			native_movement_clearances,
+			native_movement_priorities,
+			native_movement_health
+		)
+		return
+	var configurations: Dictionary = {}
+	var configuration_by_unit_id: Dictionary = {}
+	for unit in units:
+		var unit_id := int(unit["id"])
+		var movement_domain := String(unit["movement_domain"])
+		var restriction_id := int(unit["terrain_restriction"])
 		var configuration_key := "%s:%d" % [movement_domain, restriction_id]
 		configurations[configuration_key] = [movement_domain, restriction_id]
 		configuration_by_unit_id[unit_id] = configuration_key
-		ids[index] = unit_id
-		positions[index] = Vector2(unit.get("pos", Vector2.ZERO))
-		radii[index] = float(unit.get("footprint_radius", 0.3))
-		clearances[index] = float(unit.get("minimum_clearance", 0.08))
-		priorities[index] = int(unit.get("push_priority", 1))
-		health[index] = float(unit.get("hp", 0.0))
 	var kernels_by_configuration: Dictionary = {}
 	var configuration_keys := configurations.keys()
 	configuration_keys.sort()
 	for configuration_key in configuration_keys:
 		var configuration: Array = configurations[configuration_key]
 		var kernel = _native_kernel_for(String(configuration[0]), int(configuration[1]))
-		kernel.configure_movement_snapshot(ids, positions, radii, clearances, priorities, health)
+		kernel.configure_movement_snapshot(
+			native_movement_ids,
+			native_movement_positions,
+			native_movement_radii,
+			native_movement_clearances,
+			native_movement_priorities,
+			native_movement_health
+		)
 		kernels_by_configuration[configuration_key] = kernel
 	for unit_id in configuration_by_unit_id:
 		native_movement_kernels_by_unit_id[unit_id] = kernels_by_configuration[configuration_by_unit_id[unit_id]]
 
 
 func has_native_movement_for(unit_id: int) -> bool:
-	return uses_native_kernel() and native_movement_kernels_by_unit_id.has(unit_id)
+	return uses_native_kernel() and (native_shared_movement_kernel != null or native_movement_kernels_by_unit_id.has(unit_id))
 
 
 func calculate_native_movement(unit: Dictionary, target: Vector2, delta: float) -> Vector4:
-	var kernel = native_movement_kernels_by_unit_id.get(int(unit.get("id", -1)))
+	var kernel = native_shared_movement_kernel
+	if kernel == null:
+		kernel = native_movement_kernels_by_unit_id.get(int(unit["id"]))
 	if kernel == null:
 		return Vector4(0.0, 0.0, -1.0, 0.0)
 	return kernel.calculate_movement(
@@ -165,7 +206,9 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 
 func _finish_path_observation(started: int, path: Array[Vector2], cache_hit: bool) -> Array[Vector2]:
 	if performance_probe != null:
-		performance_probe.observe_microseconds("navigation.path_query", Time.get_ticks_usec() - started)
+		var elapsed := Time.get_ticks_usec() - started
+		observed_path_query_microseconds += elapsed
+		performance_probe.observe_microseconds("navigation.path_query", elapsed)
 		if cache_hit:
 			performance_probe.increment("navigation.path_cache_hits")
 		if path.is_empty():

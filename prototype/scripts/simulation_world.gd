@@ -1215,6 +1215,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	movement_arrival_microseconds = 0
 	movement_native_unit_updates = 0
 	movement_native_neighbor_candidates = 0
+	pathfinder.reset_path_query_tick_observation()
 	var phase_started := Time.get_ticks_usec() if probe != null else 0
 	FormationCohesion.update(units)
 	if probe != null:
@@ -1414,6 +1415,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		probe.observe_microseconds("simulation.movement.local_calculation", movement_local_calculation_microseconds)
 		probe.observe_microseconds("simulation.movement.integration", movement_integration_microseconds)
 		probe.observe_microseconds("simulation.movement.arrival", movement_arrival_microseconds)
+		probe.observe_microseconds("simulation.navigation.path_queries", pathfinder.path_query_tick_microseconds())
 		probe.increment("movement.native_unit_updates", movement_native_unit_updates)
 		probe.increment("movement.native_neighbor_candidates", movement_native_neighbor_candidates)
 
@@ -2002,7 +2004,11 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 		return update_dropoff_order(worker, delta)
 
 	var resource: Variant = find_resource(int(worker["resource_id"]))
-	if resource == null or int(resource["amount"]) <= 0 or not resource_accessible_to_team(resource, int(worker["team"])) or not resource_allows_worker(resource, worker):
+	# Team/domain compatibility is validated when the order starts. Neither can
+	# change silently: ownership transfer cancels affected gather orders and a
+	# movement-domain change starts a new role/order. Repeating both catalog
+	# contracts on every fixed tick only duplicates boundary work.
+	if resource == null or int(resource["amount"]) <= 0:
 		release_resource_approach_slot(worker)
 		if float(worker["carried_amount"]) > 0.0:
 			begin_resource_return(worker)
@@ -2028,7 +2034,7 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	worker["gather_stage"] = "harvesting"
 	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
 	face_unit_toward(worker, resource["pos"])
-	if float(worker.get("work", 0.0)) > 0.0:
+	if float(worker["work"]) > 0.0:
 		OrderPipeline.transition(worker, OrderPipeline.RECOVER)
 		return GATHER_UPDATE_ACTION
 
@@ -2036,8 +2042,8 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
 	OrderPipeline.transition(worker, OrderPipeline.PERFORM_ACTION)
 	gather(int(resource["id"]), worker)
-	worker["work"] = maxf(0.05, float(worker.get("gather_interval", 1.0)))
-	worker["gather_cycles"] = int(worker.get("gather_cycles", 0)) + 1
+	worker["work"] = maxf(0.05, float(worker["gather_interval"]))
+	worker["gather_cycles"] = int(worker["gather_cycles"]) + 1
 	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
 	if int(resource.get("amount", 0)) <= 0 or (capacity > 0.0 and float(worker.get("carried_amount", 0.0)) >= capacity - 0.0001):
 		begin_resource_return(worker)
@@ -2045,21 +2051,21 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 
 
 func update_dropoff_order(worker: Dictionary, delta: float) -> int:
-	if float(worker.get("carried_amount", 0.0)) <= 0.0:
-		var empty_resource: Variant = find_resource(int(worker.get("resource_id", -1)))
-		if empty_resource != null and int(empty_resource.get("amount", 0)) > 0 and resource_accessible_to_team(empty_resource, int(worker.get("team", 0))) and prepare_resource_approach(worker, empty_resource):
+	if float(worker["carried_amount"]) <= 0.0:
+		var empty_resource: Variant = find_resource(int(worker["resource_id"]))
+		if empty_resource != null and int(empty_resource["amount"]) > 0 and prepare_resource_approach(worker, empty_resource):
 			OrderPipeline.restart(worker)
 			return GATHER_UPDATE_IDLE
 		finish_gather_order(worker, "cycle_complete")
 		return GATHER_UPDATE_IDLE
 
-	var dropoff: Variant = find_building(int(worker.get("dropoff_id", -1)))
-	if dropoff == null or float(dropoff.get("hp", 0.0)) <= 0.0:
+	var dropoff: Variant = find_building(int(worker["dropoff_id"]))
+	if dropoff == null or float(dropoff["hp"]) <= 0.0:
 		if not begin_resource_return(worker):
 			finish_gather_order(worker, "no_dropoff")
 			return GATHER_UPDATE_IDLE
-		dropoff = find_building(int(worker.get("dropoff_id", -1)))
-	var destination: Variant = worker.get("dropoff_position")
+		dropoff = find_building(int(worker["dropoff_id"]))
+	var destination: Variant = worker["dropoff_position"]
 	if not destination is Vector2:
 		destination = dropoff_approach_position(worker, dropoff)
 		worker["dropoff_position"] = destination
@@ -2071,10 +2077,10 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 	face_unit_toward(worker, dropoff["pos"])
 	OrderPipeline.transition(worker, OrderPipeline.PERFORM_ACTION)
 	deposit_carried_resources(worker)
-	worker["deposit_cycles"] = int(worker.get("deposit_cycles", 0)) + 1
+	worker["deposit_cycles"] = int(worker["deposit_cycles"]) + 1
 	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
-	var resource: Variant = find_resource(int(worker.get("resource_id", -1)))
-	if resource != null and int(resource.get("amount", 0)) > 0:
+	var resource: Variant = find_resource(int(worker["resource_id"]))
+	if resource != null and int(resource["amount"]) > 0:
 		OrderPipeline.restart(worker)
 		if prepare_resource_approach(worker, resource):
 			return GATHER_UPDATE_IDLE
@@ -2084,23 +2090,29 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 
 func gather(resource_id: int, worker: Dictionary) -> float:
 	var resource: Variant = find_resource(resource_id)
-	if resource == null or int(resource.get("amount", 0)) <= 0:
+	if resource == null or int(resource["amount"]) <= 0:
 		return 0.0
-	var capacity := maxf(0.0, float(worker.get("carry_capacity", 0.0)))
-	var remaining_capacity := maxf(0.0, capacity - float(worker.get("carried_amount", 0.0)))
+	var capacity := maxf(0.0, float(worker["carry_capacity"]))
+	var remaining_capacity := maxf(0.0, capacity - float(worker["carried_amount"]))
 	if remaining_capacity <= 0.0:
 		return 0.0
 	var amount := minf(1.0, minf(float(resource["amount"]), remaining_capacity))
-	var resource_type_id := int(resource.get("resource_type_id", resource_type_for(String(resource.get("kind", "")), resource_stats(String(resource.get("kind", ""))))))
-	var carried_type := int(worker.get("carried_resource_type_id", -1))
-	if carried_type >= 0 and carried_type != resource_type_id and float(worker.get("carried_amount", 0.0)) > 0.0:
+	var resource_type_id: int
+	if resource.has("resource_type_id"):
+		resource_type_id = int(resource["resource_type_id"])
+	else:
+		# Compatibility for old saves and narrow hand-written fixtures only.
+		var resource_kind := String(resource.get("kind", ""))
+		resource_type_id = resource_type_for(resource_kind, resource_stats(resource_kind))
+	var carried_type := int(worker["carried_resource_type_id"])
+	if carried_type >= 0 and carried_type != resource_type_id and float(worker["carried_amount"]) > 0.0:
 		return 0.0
 	resource["amount"] = maxi(0, int(resource["amount"]) - int(amount))
-	worker["carried_amount"] = float(worker.get("carried_amount", 0.0)) + amount
+	worker["carried_amount"] = float(worker["carried_amount"]) + amount
 	worker["carried_resource_type_id"] = resource_type_id
 	_emit_domain_event("resource_gathered", {
-		"worker_id": int(worker.get("id", -1)),
-		"resource_id": int(resource.get("id", -1)),
+		"worker_id": int(worker["id"]),
+		"resource_id": int(resource["id"]),
 		"resource_type_id": resource_type_id,
 		"amount": amount,
 		"remaining": int(resource["amount"]),
@@ -2112,14 +2124,14 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 
 
 func deposit_carried_resources(worker: Dictionary) -> int:
-	var amount := maxi(0, roundi(float(worker.get("carried_amount", 0.0))))
-	var team := int(worker.get("team", 0))
-	var resource_type_id := int(worker.get("carried_resource_type_id", -1))
+	var amount := maxi(0, roundi(float(worker["carried_amount"])))
+	var team := int(worker["team"])
+	var resource_type_id := int(worker["carried_resource_type_id"])
 	if resource_type_id >= 0:
 		economy_system.change_resource_amount(team, resource_type_id, amount)
 	if amount > 0:
 		_emit_domain_event("resources_deposited", {
-			"worker_id": int(worker.get("id", -1)),
+			"worker_id": int(worker["id"]),
 			"team": team,
 			"resource_type_id": resource_type_id,
 			"amount": amount,
