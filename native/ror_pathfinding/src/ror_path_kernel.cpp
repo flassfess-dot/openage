@@ -12,6 +12,7 @@ namespace godot {
 namespace {
 constexpr double CARDINAL_COST = 1.0;
 constexpr double DIAGONAL_COST = 1.41421356237;
+constexpr double PI = 3.14159265358979323846;
 constexpr int32_t DIRECTIONS[8][2] = {
     {-1, -1}, {0, -1}, {1, -1},
     {-1, 0},           {1, 0},
@@ -22,9 +23,135 @@ constexpr int32_t DIRECTIONS[8][2] = {
 void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("configure", "width", "height", "revision", "walkable"), &RoRPathKernel::configure);
     ClassDB::bind_method(D_METHOD("find_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_cell_path, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("configure_movement_snapshot", "ids", "positions", "radii", "clearances", "priorities", "health"), &RoRPathKernel::configure_movement_snapshot);
+    ClassDB::bind_method(D_METHOD("calculate_movement", "unit_id", "target", "speed", "cohesion_scale", "delta"), &RoRPathKernel::calculate_movement);
     ClassDB::bind_method(D_METHOD("get_revision"), &RoRPathKernel::get_revision);
     ClassDB::bind_method(D_METHOD("get_last_expanded_nodes"), &RoRPathKernel::get_last_expanded_nodes);
     ClassDB::bind_method(D_METHOD("is_configured"), &RoRPathKernel::is_configured);
+}
+
+void RoRPathKernel::configure_movement_snapshot(
+        const PackedInt32Array &ids,
+        const PackedVector2Array &positions,
+        const PackedFloat32Array &radii,
+        const PackedFloat32Array &clearances,
+        const PackedInt32Array &priorities,
+        const PackedFloat32Array &health) {
+    const int64_t count = std::min({ids.size(), positions.size(), radii.size(), clearances.size(), priorities.size(), health.size()});
+    movement_ids_.resize(static_cast<size_t>(count));
+    movement_positions_.resize(static_cast<size_t>(count));
+    movement_radii_.resize(static_cast<size_t>(count));
+    movement_clearances_.resize(static_cast<size_t>(count));
+    movement_priorities_.resize(static_cast<size_t>(count));
+    movement_health_.resize(static_cast<size_t>(count));
+    movement_index_by_id_.clear();
+    movement_buckets_.clear();
+    maximum_movement_radius_ = 0.0f;
+    maximum_movement_clearance_ = 0.0f;
+    for (int64_t index = 0; index < count; ++index) {
+        const size_t stored = static_cast<size_t>(index);
+        movement_ids_[stored] = ids[index];
+        movement_positions_[stored] = positions[index];
+        movement_radii_[stored] = std::max(0.0f, radii[index]);
+        movement_clearances_[stored] = std::max(0.0f, clearances[index]);
+        movement_priorities_[stored] = priorities[index];
+        movement_health_[stored] = health[index];
+        movement_index_by_id_[movement_ids_[stored]] = static_cast<int32_t>(index);
+        if (movement_health_[stored] <= 0.0f) {
+            continue;
+        }
+        maximum_movement_radius_ = std::max(maximum_movement_radius_, movement_radii_[stored]);
+        maximum_movement_clearance_ = std::max(maximum_movement_clearance_, movement_clearances_[stored]);
+        const int32_t bucket_x = static_cast<int32_t>(std::floor(movement_positions_[stored].x / 2.0));
+        const int32_t bucket_y = static_cast<int32_t>(std::floor(movement_positions_[stored].y / 2.0));
+        movement_buckets_[movement_bucket_key(bucket_x, bucket_y)].push_back(static_cast<int32_t>(index));
+    }
+}
+
+Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) {
+    const auto own_entry = movement_index_by_id_.find(unit_id);
+    if (own_entry == movement_index_by_id_.end() || !is_configured()) {
+        return Vector4(0.0, 0.0, -1.0, 0.0);
+    }
+    const int32_t own_index = own_entry->second;
+    const Vector2 position = movement_positions_[static_cast<size_t>(own_index)];
+    const Vector2 difference = target - position;
+    const double resolved_speed = std::max(0.0, speed * cohesion_scale);
+    const Vector2 desired = difference.length_squared() > 0.000001 ? difference.normalized() * resolved_speed : Vector2();
+    const bool has_desired = desired.length_squared() > 0.0;
+    const Vector2 desired_normalized = has_desired ? desired.normalized() : Vector2();
+    const Vector2 lateral_normalized = has_desired ? Vector2(-desired.y, desired.x).normalized() : Vector2();
+    const double own_radius = movement_radii_[static_cast<size_t>(own_index)];
+    const double own_clearance = movement_clearances_[static_cast<size_t>(own_index)];
+    const int32_t own_priority = movement_priorities_[static_cast<size_t>(own_index)];
+    const double query_radius = 1.6 * own_radius + 0.6 * maximum_movement_radius_ + 1.6 * maximum_movement_clearance_;
+    const double bucket_radius = query_radius + maximum_movement_radius_;
+    const int32_t minimum_x = static_cast<int32_t>(std::floor((position.x - bucket_radius) / 2.0));
+    const int32_t maximum_x = static_cast<int32_t>(std::floor((position.x + bucket_radius) / 2.0));
+    const int32_t minimum_y = static_cast<int32_t>(std::floor((position.y - bucket_radius) / 2.0));
+    const int32_t maximum_y = static_cast<int32_t>(std::floor((position.y + bucket_radius) / 2.0));
+    movement_candidates_.clear();
+    for (int32_t y = minimum_y; y <= maximum_y; ++y) {
+        for (int32_t x = minimum_x; x <= maximum_x; ++x) {
+            const auto bucket = movement_buckets_.find(movement_bucket_key(x, y));
+            if (bucket == movement_buckets_.end()) {
+                continue;
+            }
+            for (const int32_t candidate_index : bucket->second) {
+                if (candidate_index == own_index) {
+                    continue;
+                }
+                const double allowed_distance = query_radius + movement_radii_[static_cast<size_t>(candidate_index)];
+                if (position.distance_squared_to(movement_positions_[static_cast<size_t>(candidate_index)]) <= allowed_distance * allowed_distance) {
+                    movement_candidates_.push_back(candidate_index);
+                }
+            }
+        }
+    }
+    std::sort(movement_candidates_.begin(), movement_candidates_.end(), [this](int32_t left, int32_t right) {
+        return movement_ids_[static_cast<size_t>(left)] < movement_ids_[static_cast<size_t>(right)];
+    });
+
+    Vector2 avoidance;
+    for (const int32_t candidate_index : movement_candidates_) {
+        const size_t candidate = static_cast<size_t>(candidate_index);
+        if (movement_health_[candidate] <= 0.0f) {
+            continue;
+        }
+        Vector2 gap = position - movement_positions_[candidate];
+        double distance = gap.length();
+        const double safe_distance = own_radius + movement_radii_[candidate] + std::max(own_clearance, static_cast<double>(movement_clearances_[candidate]));
+        if (distance <= 0.0001) {
+            const double sign_value = unit_id < movement_ids_[candidate] ? -1.0 : 1.0;
+            gap = Vector2(0.0, sign_value);
+            distance = 0.0001;
+        }
+        if (distance < safe_distance * 1.6) {
+            const double strength = std::clamp((safe_distance * 1.6 - distance) / (safe_distance * 1.6), 0.0, 1.0);
+            const Vector2 gap_normalized = gap.normalized();
+            const int32_t other_priority = movement_priorities_[candidate];
+            const double displacement_share = own_priority == other_priority ? 0.5 : (own_priority < other_priority ? 0.75 : 0.25);
+            avoidance += gap_normalized * resolved_speed * strength * displacement_share;
+            const Vector2 to_other = -gap_normalized;
+            if (has_desired && desired_normalized.dot(to_other) > 0.55) {
+                avoidance += lateral_normalized * resolved_speed * strength * 0.55;
+            }
+        }
+    }
+
+    Vector2 velocity = desired + avoidance;
+    if (velocity.length() > resolved_speed && resolved_speed > 0.0) {
+        velocity = velocity.normalized() * resolved_speed;
+    }
+    int32_t state = 0;
+    if (!position_walkable(position + velocity * delta, own_radius)) {
+        state = 1;
+        velocity = walkable_alternative(unit_id, desired, position, resolved_speed, delta, own_radius);
+        if (velocity == Vector2()) {
+            state = 2;
+        }
+    }
+    return Vector4(velocity.x, velocity.y, static_cast<double>(state), static_cast<double>(movement_candidates_.size()));
 }
 
 void RoRPathKernel::configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable) {
@@ -228,6 +355,43 @@ RoRPathKernel::FrontierEntry RoRPathKernel::frontier_pop() {
         index = best;
     }
     return first;
+}
+
+int64_t RoRPathKernel::movement_bucket_key(int32_t x, int32_t y) const {
+    const uint64_t packed = (static_cast<uint64_t>(static_cast<uint32_t>(x)) << 32)
+        | static_cast<uint32_t>(y);
+    return static_cast<int64_t>(packed);
+}
+
+bool RoRPathKernel::position_walkable(const Vector2 &position, double radius) const {
+    const int32_t x = static_cast<int32_t>(std::floor(position.x));
+    const int32_t y = static_cast<int32_t>(std::floor(position.y));
+    if (!cell_walkable(x, y)) {
+        return false;
+    }
+    if (radius <= 0.0001) {
+        return true;
+    }
+    return cell_walkable(static_cast<int32_t>(std::floor(position.x + radius)), y)
+        && cell_walkable(static_cast<int32_t>(std::floor(position.x - radius)), y)
+        && cell_walkable(x, static_cast<int32_t>(std::floor(position.y + radius)))
+        && cell_walkable(x, static_cast<int32_t>(std::floor(position.y - radius)));
+}
+
+Vector2 RoRPathKernel::walkable_alternative(int32_t unit_id, const Vector2 &desired, const Vector2 &position, double speed, double delta, double radius) const {
+    if (desired.length_squared() <= 0.000001) {
+        return Vector2();
+    }
+    const double positive_angles[4] = {PI / 4.0, -PI / 4.0, PI / 2.0, -PI / 2.0};
+    const double negative_angles[4] = {-PI / 4.0, PI / 4.0, -PI / 2.0, PI / 2.0};
+    const double *angles = unit_id % 2 == 0 ? negative_angles : positive_angles;
+    for (int index = 0; index < 4; ++index) {
+        const Vector2 candidate = desired.rotated(angles[index]).normalized() * speed;
+        if (position_walkable(position + candidate * delta, radius)) {
+            return candidate;
+        }
+    }
+    return Vector2();
 }
 
 } // namespace godot

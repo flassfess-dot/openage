@@ -328,6 +328,20 @@ static func sync_dynamic(entity: Dictionary) -> void:
 	animation["events_fired"] = entity.get("animation_events_fired", animation.get("events_fired", {}))
 
 
+static func sync_resource_carrier(entity: Dictionary) -> void:
+	# Gathering mutates only the carried payload and action cooldown. Keep the
+	# live component facade coherent without paying for a complete transform,
+	# health, movement, combat and animation projection on every resource unit.
+	var components: Dictionary = entity.get("components", {})
+	if components.is_empty():
+		return
+	var carrier: Dictionary = components.get("resource_carrier", {})
+	carrier["amount"] = float(entity.get("carried_amount", carrier.get("amount", 0.0)))
+	carrier["resource_type_id"] = int(entity.get("carried_resource_type_id", carrier.get("resource_type_id", -1)))
+	var worker: Dictionary = components.get("worker", {})
+	worker["action_cooldown"] = float(entity.get("work", worker.get("action_cooldown", 0.0)))
+
+
 static func sync_runtime_unit(entity: Dictionary) -> void:
 	# SimulationWorld units are created with the complete runtime schema. Their
 	# hot per-tick projection can therefore avoid dozens of has/get/default

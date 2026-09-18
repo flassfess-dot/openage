@@ -1,15 +1,18 @@
-# RoR native pathfinding kernel
+# RoR native navigation kernels
 
-This optional GDExtension accelerates only the dense A* search used by the
-authoritative GDScript pathfinder. Terrain/restriction rules, endpoint
-selection, direct-path checks, smoothing, orders, economy, save/load and
-replay remain in GDScript.
+This optional GDExtension accelerates the measured dense A* and local-avoidance
+hot loops used by the authoritative GDScript simulation. Terrain/restriction
+rules, endpoint selection, direct-path checks, smoothing, orders, integration,
+stuck recovery, economy, save/load and replay remain in GDScript.
 
 The kernel consumes a revisioned byte mask produced by `RoRPathfinder`, uses
 the same direction order, diagonal corner rule, octile heuristic and stable
 score/y/x heap tie-break as the fallback, and returns the raw cell path. If the
 extension cannot be loaded, `RoRPathfinder` automatically uses its original
-GDScript implementation.
+GDScript implementation. The local-movement kernel consumes one immutable
+per-tick snapshot, reproduces stable-ID neighbor order and the existing
+avoidance arithmetic, and returns only a proposed velocity; GDScript still
+owns position integration and every gameplay transition.
 
 Build on the development machine from the repository root:
 

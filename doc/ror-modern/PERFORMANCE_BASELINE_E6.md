@@ -213,3 +213,26 @@ Performance gates с E6-011 разделены:
 | path query p50 / p95 / max | 3,759 / 8,588 / 12,849 мс | 0,786 / 0,944 / 1,267 мс |
 
 В обоих прогонах выполнены 893 path request: 324 прямых и 569 A*. Результат полностью совпадает — 11 671 gather, 988 deposits, food `5060/5000`, canonical SHA-256 `3a2e5d64f4f800028f5b3689015bf178139da9efbf00913bc969cbe1ab9b49d7`. До prewarm построение маски занимало 1846,85 мс внутри первой массовой команды; теперь уникальные movement/restriction masks активных unit готовятся после bulk-load. Это увеличивает стадию загрузки карты, но устраняет пользовательский first-click hitch. Следующая оптимизация должна атаковать оставшиеся `63,41` мс task dispatch и синхронность волны return/deposit, а не переносить экономику или весь мир в C++.
+
+## 16. E6-012 — нативное локальное избегание с GDScript-authority
+
+Stage-профиль того же workload разделил `simulation.unit_orders.task`: approaching и returning давали p95 около `40,0/44,9` мс, harvesting `17,5` мс; агрегированные neighbor query, local calculation и integration занимали `8,6 + 20,8 + 9,1` мс. Это подтвердило локальное движение как следующий владелец, а не послужило поводом переносить весь unit/order loop.
+
+`RoRPathKernel` теперь также получает один immutable snapshot позиции, радиуса, clearance, push priority и здоровья на tick. Для каждой movement-domain/restriction mask он строит нативный spatial hash, собирает соседей в стабильном ID-порядке и повторяет прежнюю avoidance/terrain-alternative арифметику. Результат — только proposed velocity и diagnostic state. GDScript по-прежнему интегрирует позицию, обновляет facing/elevation, выполняет arrival, recovery/repath/stop и все задачи. Отсутствующая DLL отключает одновременно оба native kernels и оставляет прежний алгоритм.
+
+Последовательный A/B `gather_economy 2×500 / 400×400 / 520+240`, уже с одинаковым stage instrumentation:
+
+| Метрика | GDScript movement | Native local kernel |
+|---|---:|---:|
+| sample wall | 21,96 с | 19,70 с |
+| fixed tick p50 / p95 | 92,30 / 109,526 мс | 80,782 / 95,566 мс |
+| world advance p95 | 103,761 мс | 88,925 мс |
+| unit orders p95 | 75,690 мс | 62,058 мс |
+| task p95 | 63,742 мс | 45,671 мс |
+| snapshot preparation p95 | — | 5,065 мс |
+| neighbor query p95 | 8,631 мс | 3,435 мс |
+| local calculation p95 | 20,837 мс | 4,227 мс |
+| movement integration p95 | 9,064 мс | 8,726 мс |
+| fog p95 | 22,314 мс | 22,419 мс |
+
+Оба прогона дали 11 671 gather, 988 deposits и food `5060/5000`; три native прогона повторили canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`. Он отличается от GDScript baseline из-за допустимого нового floating-point пути movement, а не из-за правил экономики. Принятие прошло через kernel parity, gather/return/snapshot, local movement, stuck recovery, formation interaction/shared motion, navigation stress и deterministic replay tests. Live component facade после gather/deposit сохраняется узкой carrier-only синхронизацией. Comfort gate всё ещё открыт: фиксированный p95 `95,6` мс выше simulation deadline `50` и цели `35` мс. Следующие владельцы — remaining gather-stage work и fog; snapshot duplication для нескольких movement domains отдельно измеряется на naval/mixed workload до дальнейшего расширения C++.

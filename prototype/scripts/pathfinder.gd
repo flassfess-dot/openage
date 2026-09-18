@@ -15,6 +15,7 @@ var performance_probe: Variant = null
 var native_enabled: bool = true
 var native_available: bool = false
 var native_kernels: Dictionary = {}
+var native_movement_kernels_by_unit_id: Dictionary = {}
 
 
 func _init(navigation_grid = null) -> void:
@@ -30,6 +31,7 @@ func clear_cache() -> void:
 	cache.clear()
 	cache_hits = 0
 	native_kernels.clear()
+	native_movement_kernels_by_unit_id.clear()
 
 
 func set_native_enabled(enabled: bool) -> void:
@@ -53,6 +55,67 @@ func prepare_native_kernels_for_units(units: Array) -> void:
 	for key in keys:
 		var configuration: Array = configurations[key]
 		_native_kernel_for(String(configuration[0]), int(configuration[1]))
+
+
+func prepare_native_movement_snapshot(units: Array) -> void:
+	native_movement_kernels_by_unit_id.clear()
+	if not uses_native_kernel() or units.is_empty():
+		return
+	var ids := PackedInt32Array()
+	var positions := PackedVector2Array()
+	var radii := PackedFloat32Array()
+	var clearances := PackedFloat32Array()
+	var priorities := PackedInt32Array()
+	var health := PackedFloat32Array()
+	ids.resize(units.size())
+	positions.resize(units.size())
+	radii.resize(units.size())
+	clearances.resize(units.size())
+	priorities.resize(units.size())
+	health.resize(units.size())
+	var configurations: Dictionary = {}
+	var configuration_by_unit_id: Dictionary = {}
+	for index in range(units.size()):
+		var unit: Dictionary = units[index]
+		var unit_id := int(unit.get("id", -1))
+		var movement_domain := String(unit.get("movement_domain", "land"))
+		var restriction_id := int(unit.get("terrain_restriction", -1))
+		var configuration_key := "%s:%d" % [movement_domain, restriction_id]
+		configurations[configuration_key] = [movement_domain, restriction_id]
+		configuration_by_unit_id[unit_id] = configuration_key
+		ids[index] = unit_id
+		positions[index] = Vector2(unit.get("pos", Vector2.ZERO))
+		radii[index] = float(unit.get("footprint_radius", 0.3))
+		clearances[index] = float(unit.get("minimum_clearance", 0.08))
+		priorities[index] = int(unit.get("push_priority", 1))
+		health[index] = float(unit.get("hp", 0.0))
+	var kernels_by_configuration: Dictionary = {}
+	var configuration_keys := configurations.keys()
+	configuration_keys.sort()
+	for configuration_key in configuration_keys:
+		var configuration: Array = configurations[configuration_key]
+		var kernel = _native_kernel_for(String(configuration[0]), int(configuration[1]))
+		kernel.configure_movement_snapshot(ids, positions, radii, clearances, priorities, health)
+		kernels_by_configuration[configuration_key] = kernel
+	for unit_id in configuration_by_unit_id:
+		native_movement_kernels_by_unit_id[unit_id] = kernels_by_configuration[configuration_by_unit_id[unit_id]]
+
+
+func has_native_movement_for(unit_id: int) -> bool:
+	return uses_native_kernel() and native_movement_kernels_by_unit_id.has(unit_id)
+
+
+func calculate_native_movement(unit: Dictionary, target: Vector2, delta: float) -> Vector4:
+	var kernel = native_movement_kernels_by_unit_id.get(int(unit.get("id", -1)))
+	if kernel == null:
+		return Vector4(0.0, 0.0, -1.0, 0.0)
+	return kernel.calculate_movement(
+		int(unit["id"]),
+		target,
+		float(unit["speed"]),
+		float(unit["cohesion_speed_scale"]),
+		delta
+	)
 
 
 func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2]:

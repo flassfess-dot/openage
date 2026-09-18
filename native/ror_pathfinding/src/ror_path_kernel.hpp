@@ -1,11 +1,15 @@
 #pragma once
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
 namespace godot {
@@ -16,6 +20,14 @@ class RoRPathKernel : public RefCounted {
 public:
     void configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable);
     PackedInt32Array find_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
+    void configure_movement_snapshot(
+        const PackedInt32Array &ids,
+        const PackedVector2Array &positions,
+        const PackedFloat32Array &radii,
+        const PackedFloat32Array &clearances,
+        const PackedInt32Array &priorities,
+        const PackedFloat32Array &health);
+    Vector4 calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta);
     int64_t get_revision() const;
     int32_t get_last_expanded_nodes() const;
     bool is_configured() const;
@@ -40,6 +52,17 @@ private:
     std::vector<int32_t> parents_;
     std::vector<uint32_t> seen_generation_;
     std::vector<FrontierEntry> frontier_;
+    std::vector<int32_t> movement_ids_;
+    std::vector<Vector2> movement_positions_;
+    std::vector<float> movement_radii_;
+    std::vector<float> movement_clearances_;
+    std::vector<int32_t> movement_priorities_;
+    std::vector<float> movement_health_;
+    std::unordered_map<int32_t, int32_t> movement_index_by_id_;
+    std::unordered_map<int64_t, std::vector<int32_t>> movement_buckets_;
+    std::vector<int32_t> movement_candidates_;
+    float maximum_movement_radius_ = 0.0f;
+    float maximum_movement_clearance_ = 0.0f;
 
     bool contains(int32_t x, int32_t y) const;
     bool cell_walkable(int32_t x, int32_t y) const;
@@ -49,6 +72,9 @@ private:
     bool frontier_less(const FrontierEntry &left, const FrontierEntry &right) const;
     void frontier_push(const FrontierEntry &entry);
     FrontierEntry frontier_pop();
+    int64_t movement_bucket_key(int32_t x, int32_t y) const;
+    bool position_walkable(const Vector2 &position, double radius) const;
+    Vector2 walkable_alternative(int32_t unit_id, const Vector2 &desired, const Vector2 &position, double speed, double delta, double radius) const;
 };
 
 } // namespace godot

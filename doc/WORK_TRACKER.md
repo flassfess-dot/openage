@@ -1442,3 +1442,10 @@ ext_unit_id.
 - Детерминированный path A/B и 13 целевых navigation/economy/formation/replay/save tests проходят. Полный `gather_economy 2×500` сохраняет hash `3a2e5d64…b49d7`, 11 671 gather, 988 deposits и food `5060/5000`.
 - На этом A/B path p95 `8,588 → 0,944` мс, task p95 `106,17 → 63,41` мс, fixed p95 `149,42 → 106,51` мс, fixed max `263,04 → 126,70` мс, command wall `1171 → 650` мс. Mask build перенесён из первого приказа в bulk-load.
 - Следующий measured owner — оставшийся per-unit task dispatch и синхронная волна source/drop-site return; затем mixed 4/8×500 и отдельный видимый CPU/GPU/render профиль. E6 comfort gate `p95 ≤ 35 мс` ещё открыт.
+
+### Прогресс (2026-09-18, E6-012 — native local avoidance)
+
+- Stage-профиль разделил gather на approaching/harvesting/returning и подтвердил движение как основной остаточный task owner: neighbor/local/integration p95 `8,631 / 20,837 / 9,064` мс.
+- Optional extension расширен immutable tick snapshot и нативным spatial hash. Kernel сохраняет stable-ID neighbor order и возвращает только proposed velocity; GDScript владеет интеграцией, arrival/stuck recovery, задачами, экономикой, snapshot/save/replay и fallback.
+- На одинаковом `2×500 / 400×400 / 520+240` task p95 `63,742 → 45,671` мс, unit-orders `75,690 → 62,058`, fixed `109,526 → 95,566`, sample wall `21,96 → 19,70` с. Результат экономики неизменен: 11 671 gather, 988 deposits, food `5060/5000`; live carrier component обновляется узкой синхронизацией.
+- Новый movement hash `c4244f12…bcc747` повторён тремя native прогонами и принят как разрешённое UX-улучшение после path/local/stuck/formation/navigation/replay проверок. Следующие owners: оставшаяся gather-stage логика и fog p95 `~22,4` мс; deadline `50` и comfort `35` мс ещё не достигнуты.

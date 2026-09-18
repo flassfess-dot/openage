@@ -3,6 +3,7 @@ extends SceneTree
 const NavigationGrid := preload("res://scripts/navigation_grid.gd")
 const Pathfinder := preload("res://scripts/pathfinder.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
+const LocalMovement := preload("res://scripts/local_movement.gd")
 
 var failures: Array[String] = []
 
@@ -15,6 +16,7 @@ func _initialize() -> void:
 	test_clearance_aware_route_avoids_narrow_shore()
 	test_simulation_routes_around_town_center()
 	test_native_kernel_matches_gdscript()
+	test_native_local_movement_matches_gdscript()
 
 	if failures.is_empty():
 		print("N-004 pathfinder tests passed")
@@ -123,6 +125,40 @@ func test_native_kernel_matches_gdscript() -> void:
 	assert_equal(native_clearance, script_clearance, "native A* preserves clearance-aware path")
 
 
+func test_native_local_movement_matches_gdscript() -> void:
+	var finder = Pathfinder.new(open_grid(Vector2i(18, 15)))
+	if not finder.uses_native_kernel():
+		return
+	var units: Array = [
+		movement_unit(1, Vector2(5.5, 5.5), 1),
+		movement_unit(2, Vector2(6.0, 5.5), 1),
+		movement_unit(3, Vector2(5.7, 6.0), 2),
+	]
+	finder.prepare_native_movement_snapshot(units)
+	var expected: Dictionary = units[0].duplicate(true)
+	LocalMovement.calculate_runtime_unit_into(expected, Vector2(9.5, 5.5), [units[1], units[2]], finder.grid, 0.05)
+	var native: Vector4 = finder.calculate_native_movement(units[0], Vector2(9.5, 5.5), 0.05)
+	assert_vector_close(Vector2(native.x, native.y), Vector2(expected["actual_velocity"]), 0.00001, "native local avoidance preserves velocity")
+
+
+func movement_unit(id: int, position: Vector2, priority: int) -> Dictionary:
+	return {
+		"id": id,
+		"pos": position,
+		"previous_pos": position,
+		"hp": 25.0,
+		"footprint_radius": 0.3,
+		"minimum_clearance": 0.08,
+		"push_priority": priority,
+		"speed": 2.0,
+		"cohesion_speed_scale": 1.0,
+		"movement_domain": "land",
+		"terrain_restriction": -1,
+		"desired_velocity": Vector2.ZERO,
+		"actual_velocity": Vector2.ZERO,
+	}
+
+
 func open_grid(size: Vector2i):
 	var grid = NavigationGrid.new(size)
 	grid.configure_terrain(func(_cell: Vector2i) -> String: return "land")
@@ -137,3 +173,8 @@ func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 func assert_true(value: bool, context: String) -> void:
 	if not value:
 		failures.append("%s: expected true" % context)
+
+
+func assert_vector_close(actual: Vector2, expected: Vector2, tolerance: float, context: String) -> void:
+	if actual.distance_to(expected) > tolerance:
+		failures.append("%s: expected %s, got %s" % [context, expected, actual])

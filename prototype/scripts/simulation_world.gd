@@ -56,6 +56,8 @@ var movement_neighbor_query_microseconds: int = 0
 var movement_local_calculation_microseconds: int = 0
 var movement_integration_microseconds: int = 0
 var movement_arrival_microseconds: int = 0
+var movement_native_unit_updates: int = 0
+var movement_native_neighbor_candidates: int = 0
 var movement_neighbor_buffer: Array = []
 var open_movement_envelopes_by_id: Dictionary = {}
 
@@ -1203,6 +1205,8 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	movement_local_calculation_microseconds = 0
 	movement_integration_microseconds = 0
 	movement_arrival_microseconds = 0
+	movement_native_unit_updates = 0
+	movement_native_neighbor_candidates = 0
 	var phase_started := Time.get_ticks_usec() if probe != null else 0
 	FormationCohesion.update(units)
 	if probe != null:
@@ -1211,8 +1215,14 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	_release_finished_combat_reservations()
 	if probe != null:
 		probe.observe_microseconds("simulation.unit_orders.combat_reservations", Time.get_ticks_usec() - phase_started)
+		phase_started = Time.get_ticks_usec()
+	pathfinder.prepare_native_movement_snapshot(units)
+	if probe != null:
+		probe.observe_microseconds("simulation.unit_orders.native_movement_snapshot", Time.get_ticks_usec() - phase_started)
 	var preparation_microseconds := 0
 	var task_microseconds := 0
+	var task_microseconds_by_kind: Dictionary = {}
+	var gather_microseconds_by_stage: Dictionary = {}
 	var presentation_microseconds := 0
 	var animation_microseconds := 0
 	var component_sync_microseconds := 0
@@ -1240,7 +1250,9 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		var moving := false
 		var animation_state := AnimationController.IDLE
 		var attack_target: Variant = null
-		match unit["task"]:
+		var task_name := String(unit["task"])
+		var gather_stage_name := String(unit.get("gather_stage", "none")) if task_name == "gather" else ""
+		match task_name:
 			"trade":
 				var trade_update := trade_system.advance_unit(unit, delta)
 				moving = bool(trade_update.get("moving", false))
@@ -1346,7 +1358,11 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 				moving = move_unit(unit, delta)
 
 		if probe != null:
-			task_microseconds += Time.get_ticks_usec() - phase_started
+			var task_elapsed := Time.get_ticks_usec() - phase_started
+			task_microseconds += task_elapsed
+			task_microseconds_by_kind[task_name] = int(task_microseconds_by_kind.get(task_name, 0)) + task_elapsed
+			if task_name == "gather":
+				gather_microseconds_by_stage[gather_stage_name] = int(gather_microseconds_by_stage.get(gather_stage_name, 0)) + task_elapsed
 			phase_started = Time.get_ticks_usec()
 		if moving and animation_state != AnimationController.CARRY:
 			animation_state = AnimationController.MOVE
@@ -1364,6 +1380,14 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		presentation_microseconds = animation_microseconds + component_sync_microseconds
 		probe.observe_microseconds("simulation.unit_orders.preparation", preparation_microseconds)
 		probe.observe_microseconds("simulation.unit_orders.task", task_microseconds)
+		var task_kinds := task_microseconds_by_kind.keys()
+		task_kinds.sort()
+		for task_kind in task_kinds:
+			probe.observe_microseconds("simulation.unit_orders.task.%s" % String(task_kind), int(task_microseconds_by_kind[task_kind]))
+		var gather_stages := gather_microseconds_by_stage.keys()
+		gather_stages.sort()
+		for gather_stage in gather_stages:
+			probe.observe_microseconds("simulation.unit_orders.task.gather.%s" % String(gather_stage), int(gather_microseconds_by_stage[gather_stage]))
 		probe.observe_microseconds("simulation.unit_orders.animation_sync", presentation_microseconds)
 		probe.observe_microseconds("simulation.unit_orders.animation", animation_microseconds)
 		probe.observe_microseconds("simulation.unit_orders.component_sync", component_sync_microseconds)
@@ -1371,6 +1395,8 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		probe.observe_microseconds("simulation.movement.local_calculation", movement_local_calculation_microseconds)
 		probe.observe_microseconds("simulation.movement.integration", movement_integration_microseconds)
 		probe.observe_microseconds("simulation.movement.arrival", movement_arrival_microseconds)
+		probe.increment("movement.native_unit_updates", movement_native_unit_updates)
+		probe.increment("movement.native_neighbor_candidates", movement_native_neighbor_candidates)
 
 
 func update_static_combatants(delta: float, player_team: int) -> void:
@@ -1691,6 +1717,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		open_movement_envelopes_by_id.erase(int(unit["id"]))
 		open_envelope = null
 	var shared_motion := bool(unit["formation_shared_motion"]) and open_envelope != null
+	var native_movement: bool = not shared_motion and open_envelope == null and bool(pathfinder.has_native_movement_for(int(unit["id"])))
 	if shared_motion and bool(unit["formation_shared_isolated"]):
 		movement_neighbor_buffer.clear()
 		if probe != null:
@@ -1700,6 +1727,8 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		spatial_index.query_external_neighbors_into(unit, search_radius, int(unit["formation_group_id"]), movement_neighbor_buffer)
 		if probe != null:
 			probe.increment("movement.shared_formation_units")
+	elif native_movement:
+		movement_neighbor_buffer.clear()
 	else:
 		spatial_index.query_neighbors_into(unit, search_radius, "unit", movement_neighbor_buffer)
 	if probe != null:
@@ -1708,6 +1737,19 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	var movement_reason := ""
 	if shared_motion and bool(unit["formation_shared_isolated"]):
 		LocalMovement.calculate_shared_translation_into(unit, unit["target"])
+	elif native_movement:
+		var native_result: Vector4 = pathfinder.calculate_native_movement(unit, unit["target"], delta)
+		var native_state := roundi(native_result.z)
+		var native_difference: Vector2 = unit["target"] - unit["pos"]
+		var native_speed := maxf(0.0, float(unit["speed"]) * float(unit["cohesion_speed_scale"]))
+		unit["desired_velocity"] = native_difference.normalized() * native_speed if native_difference.length_squared() > 0.000001 else Vector2.ZERO
+		unit["actual_velocity"] = Vector2(native_result.x, native_result.y)
+		if native_state == 1:
+			movement_reason = "local_obstacle"
+		elif native_state == 2:
+			movement_reason = "local_blocked"
+		movement_native_unit_updates += 1
+		movement_native_neighbor_candidates += maxi(0, roundi(native_result.w))
 	else:
 		movement_reason = LocalMovement.calculate_runtime_unit_into(unit, unit["target"], movement_neighbor_buffer, navigation_grid, delta, open_envelope)
 	if probe != null:
@@ -2040,7 +2082,7 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 		"carried": float(worker["carried_amount"]),
 	})
 	update_resource_state(resource)
-	EntityComponents.sync_dynamic(worker)
+	EntityComponents.sync_resource_carrier(worker)
 	return amount
 
 
@@ -2062,7 +2104,7 @@ func deposit_carried_resources(worker: Dictionary) -> int:
 	worker["carried_resource_type_id"] = -1
 	worker["dropoff_id"] = -1
 	worker["dropoff_position"] = null
-	EntityComponents.sync_dynamic(worker)
+	EntityComponents.sync_resource_carrier(worker)
 	return amount
 
 
