@@ -45,6 +45,8 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var preferred_build_sites: Dictionary = options.get("preferred_build_sites", {})
 	var strict_preferred_build_site_kinds: Array = options.get("strict_preferred_build_site_kinds", [])
 	var requested_build_options: Array = []
+	var worker_build_options: Array = []
+	var worker_build_options_ready := false
 	var available_requested_build_site_kinds: Array = []
 	if observer_team > 0 and not requested_build_site_kinds.is_empty():
 		for option_value in world.get_build_options(observer_team):
@@ -72,7 +74,13 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				if not requested_build_options.is_empty():
 					presentation_unit["command_options"] = {"build": requested_build_options}
 				elif include_worker_command_options:
-					presentation_unit["command_options"] = {"build": world.get_build_options(observer_team)}
+					# Build availability belongs to the player/tick, not to an
+					# individual worker. A multi-worker selection must not rebuild
+					# the same detached option list once per selected villager.
+					if not worker_build_options_ready:
+						worker_build_options = world.get_build_options(observer_team)
+						worker_build_options_ready = true
+					presentation_unit["command_options"] = {"build": worker_build_options}
 			units.append(presentation_unit)
 	var resources: Array = []
 	var overview_resources: Array = []
@@ -163,7 +171,9 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		"ai_distress_signals": world.get_attack_distress_signals(observer_team) if observer_team > 0 else [],
 		"navigation": _presentation_navigation(world, fog, observer_team) if include_navigation else {},
 		"build_sites": build_sites,
-		"fog_revision": int(fog.revision),
+		# Rendering only depends on this observer's grid. Enemy and neutral fog
+		# changes must not invalidate the local player's cached fog mesh.
+		"fog_revision": int(fog.revision_for_player(observer_team)),
 		"fog": _presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []},
 		"player_state": _presentation_player_state(world, observer_team),
 		"battle_over": bool(world.battle_over),
@@ -593,6 +603,7 @@ static func _fog_state(fog) -> Dictionary:
 		states[int(player)] = cells
 	return {
 		"revision": int(fog.revision),
+		"revisions_by_player": fog.revisions_by_player.duplicate(true),
 		"states_by_player": states,
 		"allies_by_player": fog.allies_by_player.duplicate(true),
 	}

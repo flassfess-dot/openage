@@ -7,6 +7,7 @@ const VISIBLE := 2
 var map_size: Vector2i
 var states_by_player: Dictionary = {}
 var visible_counts_by_player: Dictionary = {}
+var revisions_by_player: Dictionary = {}
 var allies_by_player: Dictionary = {}
 var vision_sources: Dictionary = {}
 var visibility_topology_dirty := true
@@ -32,6 +33,7 @@ func _init(world_size: Vector2i = Vector2i.ONE) -> void:
 func reset() -> void:
 	states_by_player.clear()
 	visible_counts_by_player.clear()
+	revisions_by_player.clear()
 	allies_by_player.clear()
 	vision_sources.clear()
 	source_scan_generation = 0
@@ -64,6 +66,7 @@ func ensure_player(player_id: int) -> void:
 		visible_counts.resize(map_size.x * map_size.y)
 		visible_counts.fill(0)
 		visible_counts_by_player[player_id] = visible_counts
+		revisions_by_player[player_id] = 0
 		visibility_topology_dirty = true
 	if not allies_by_player.has(player_id):
 		allies_by_player[player_id] = {player_id: true}
@@ -77,6 +80,11 @@ func set_alliance(first_player: int, second_player: int, allied: bool = true) ->
 func set_relation(observer_player: int, source_player: int, allied: bool = true) -> void:
 	ensure_player(observer_player)
 	ensure_player(source_player)
+	var was_allied := bool(allies_by_player[observer_player].get(source_player, false))
+	if observer_player == source_player:
+		allied = true
+	if was_allied == allied:
+		return
 	if observer_player == source_player:
 		allies_by_player[observer_player][source_player] = true
 	elif allied:
@@ -84,7 +92,13 @@ func set_relation(observer_player: int, source_player: int, allied: bool = true)
 	else:
 		allies_by_player[observer_player].erase(source_player)
 	visibility_topology_dirty = true
-	revision += 1
+
+
+func revision_for_player(player_id: int) -> int:
+	if player_id <= 0:
+		return revision
+	ensure_player(player_id)
+	return int(revisions_by_player.get(player_id, 0))
 
 
 func are_allied(observer_player: int, owner_player: int) -> bool:
@@ -111,7 +125,7 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 		performance_probe.observe_microseconds("simulation.fog.ensure_players", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
 
-	var changed := false
+	var changed_players: Dictionary = {}
 	var current_sources: Dictionary = {}
 	var removed_sources: Array[Dictionary] = []
 	var added_sources: Array[Dictionary] = []
@@ -137,13 +151,16 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 		performance_probe.increment("fog.regenerated_sources", regenerated_sources)
 		phase_started = Time.get_ticks_usec()
 	if visibility_topology_dirty:
-		changed = _rebuild_visibility(current_sources)
+		changed_players = _rebuild_visibility(current_sources)
 		vision_sources = current_sources
 	else:
-		changed = _apply_source_deltas(removed_sources, added_sources, previous_replacements, current_replacements)
+		changed_players = _apply_source_deltas(removed_sources, added_sources, previous_replacements, current_replacements)
 	visibility_topology_dirty = false
-	if changed:
+	if not changed_players.is_empty():
 		revision += 1
+		for player_value in changed_players.keys():
+			var player_id := int(player_value)
+			revisions_by_player[player_id] = int(revisions_by_player.get(player_id, 0)) + 1
 	if performance_probe != null:
 		performance_probe.observe_microseconds("simulation.fog.reconcile", Time.get_ticks_usec() - phase_started)
 
@@ -307,23 +324,28 @@ func _vision_cells(center: Vector2, radius: float) -> PackedInt32Array:
 	return result
 
 
-func _rebuild_visibility(current_sources: Dictionary) -> bool:
-	var changed := false
+func _rebuild_visibility(current_sources: Dictionary) -> Dictionary:
+	var changed_players: Dictionary = {}
 	for observer_value in states_by_player.keys():
 		var observer := int(observer_value)
 		var states: PackedByteArray = states_by_player[observer]
 		var counts := PackedInt32Array()
 		counts.resize(states.size())
 		counts.fill(0)
+		var observer_changed := false
 		for index in range(states.size()):
 			if states[index] == VISIBLE:
 				states[index] = EXPLORED
-				changed = true
+				observer_changed = true
+		var allies: Dictionary = allies_by_player.get(observer, {})
+		for source in current_sources.values():
+			if bool(allies.get(int(source["team"]), false)):
+				observer_changed = _apply_add_visible_cells(states, counts, source["cells"]) or observer_changed
 		states_by_player[observer] = states
 		visible_counts_by_player[observer] = counts
-	for source in current_sources.values():
-		changed = _add_source(source) or changed
-	return changed
+		if observer_changed:
+			changed_players[observer] = true
+	return changed_players
 
 
 func _apply_source_deltas(
@@ -331,22 +353,23 @@ func _apply_source_deltas(
 	added_sources: Array[Dictionary],
 	previous_replacements: Array[Dictionary],
 	current_replacements: Array[Dictionary]
-) -> bool:
+) -> Dictionary:
 	if removed_sources.is_empty() and added_sources.is_empty() and previous_replacements.is_empty():
-		return false
+		return {}
 
-	var changed := false
+	var changed_players: Dictionary = {}
 	for observer_value in states_by_player.keys():
 		var observer := int(observer_value)
 		var allies: Dictionary = allies_by_player.get(observer, {})
 		var states: PackedByteArray = states_by_player[observer]
 		var counts: PackedInt32Array = visible_counts_by_player[observer]
+		var observer_changed := false
 		for source in removed_sources:
 			if bool(allies.get(int(source["team"]), false)):
-				changed = _apply_remove_visible_cells(states, counts, source["cells"]) or changed
+				observer_changed = _apply_remove_visible_cells(states, counts, source["cells"]) or observer_changed
 		for source in added_sources:
 			if bool(allies.get(int(source["team"]), false)):
-				changed = _apply_add_visible_cells(states, counts, source["cells"]) or changed
+				observer_changed = _apply_add_visible_cells(states, counts, source["cells"]) or observer_changed
 		for replacement_index in range(previous_replacements.size()):
 			var previous: Dictionary = previous_replacements[replacement_index]
 			var current: Dictionary = current_replacements[replacement_index]
@@ -354,15 +377,17 @@ func _apply_source_deltas(
 			var current_team := int(current["team"])
 			if previous_team == current_team:
 				if bool(allies.get(current_team, false)):
-					changed = _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"]) or changed
+					observer_changed = _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"]) or observer_changed
 				continue
 			if bool(allies.get(previous_team, false)):
-				changed = _apply_remove_visible_cells(states, counts, previous["cells"]) or changed
+				observer_changed = _apply_remove_visible_cells(states, counts, previous["cells"]) or observer_changed
 			if bool(allies.get(current_team, false)):
-				changed = _apply_add_visible_cells(states, counts, current["cells"]) or changed
+				observer_changed = _apply_add_visible_cells(states, counts, current["cells"]) or observer_changed
 		states_by_player[observer] = states
 		visible_counts_by_player[observer] = counts
-	return changed
+		if observer_changed:
+			changed_players[observer] = true
+	return changed_players
 
 
 func _add_source(source: Dictionary) -> bool:

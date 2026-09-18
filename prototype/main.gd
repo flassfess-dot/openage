@@ -366,20 +366,35 @@ func add_resource(kind: String, position: Vector2, amount: int) -> void:
 		return
 	simulation_world.add_resource(kind, position, amount)
 func _process(delta: float) -> void:
+	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var frame_started := Time.get_ticks_usec() if probe != null else 0
+	var stage_started := frame_started
 	presentation_audio_router.advance(delta)
 	presentation_effect_timeline.advance(delta)
 	_sync_effect_snapshot()
+	if probe != null:
+		probe.observe_microseconds("presentation.process.audio_effects", Time.get_ticks_usec() - stage_started)
 	if scenario_overlay != null and scenario_overlay.is_blocking():
 		return
 	if hud_modal_overlay != null and hud_modal_overlay.is_blocking():
 		return
+	stage_started = Time.get_ticks_usec() if probe != null else 0
 	update_camera(delta)
 	_sync_terrain_canvas()
+	if probe != null:
+		probe.observe_microseconds("presentation.process.camera_terrain", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	update_units(delta)
+	if probe != null:
+		probe.observe_microseconds("presentation.process.update_units", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	if message_time > 0.0:
 		message_time -= delta
 	command_marker_presentation.advance(delta)
 	queue_redraw()
+	if probe != null:
+		probe.observe_microseconds("presentation.process.feedback", Time.get_ticks_usec() - stage_started)
+		probe.observe_microseconds("presentation.process.total", Time.get_ticks_usec() - frame_started)
 
 func update_camera(delta: float) -> void:
 	var direction := Vector2.ZERO
@@ -393,10 +408,23 @@ func update_camera(delta: float) -> void:
 func update_units(delta: float) -> void:
 	if game_controller == null or simulation_world == null:
 		return
+	var probe: Variant = game_controller.performance_probe
+	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	queue_ai_commands()
+	if probe != null:
+		probe.observe_microseconds("presentation.update.ai", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	var battle_text := game_controller.advance_frame(delta, PLAYER_TEAM, ENEMY_TEAM)
+	if probe != null:
+		probe.observe_microseconds("presentation.update.controller", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	sync_world_state(false)
+	if probe != null:
+		probe.observe_microseconds("presentation.update.snapshot", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	process_presentation_events()
+	if probe != null:
+		probe.observe_microseconds("presentation.update.events", Time.get_ticks_usec() - stage_started)
 	if battle_text != "":
 		game_message = battle_text
 		message_time = 2.0
@@ -1272,12 +1300,17 @@ func refresh_hud_model() -> void:
 func sync_world_state(force: bool = true) -> void:
 	if simulation_world == null:
 		return
+	var probe: Variant = game_controller.performance_probe if game_controller != null else null
 	var current_tick := game_controller.tick_index if game_controller != null else 0
 	var selected_ids := player_control_state.selected_ids()
 	var selection_signature := hash(selected_ids)
 	var required_view_bounds := _expanded_tile_bounds(visible_tile_bounds(), 2)
 	if not force and not presentation_snapshot.is_empty() and current_tick == cached_presentation_tick and selection_signature == cached_presentation_selection_signature and diagnostics_enabled == cached_presentation_diagnostics and _tile_bounds_contains(cached_presentation_bounds, required_view_bounds):
+		if probe != null:
+			probe.increment("presentation.sync.skipped")
 		return
+	var sync_started := Time.get_ticks_usec() if probe != null else 0
+	var stage_started := sync_started
 	var snapshot_bounds := visible_tile_bounds(8)
 	var previous_overview: Dictionary = presentation_snapshot.get("overview", {})
 	var refresh_overview := cached_overview_tick < 0 or current_tick < cached_overview_tick or current_tick - cached_overview_tick >= OVERVIEW_REFRESH_TICKS
@@ -1290,6 +1323,9 @@ func sync_world_state(force: bool = true) -> void:
 		"always_include_entity_ids": selected_ids,
 		"command_option_entity_ids": selected_ids,
 	})
+	if probe != null:
+		probe.observe_microseconds("presentation.sync.snapshot", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	if refresh_overview:
 		cached_overview_tick = current_tick
 	elif not previous_overview.is_empty():
@@ -1304,6 +1340,9 @@ func sync_world_state(force: bool = true) -> void:
 	var visible_bounds := visible_tile_bounds()
 	var environment_bounds := Rect2i(visible_bounds.position - Vector2i(2, 2), visible_bounds.size + Vector2i(4, 4))
 	presentation_snapshot["environment"] = environment_presentation_field.query(environment_bounds)
+	if probe != null:
+		probe.observe_microseconds("presentation.sync.environment", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	units = presentation_snapshot.get("units", [])
 	resource_nodes = presentation_snapshot.get("resources", [])
 	var terrain_resource_signature := 17
@@ -1314,17 +1353,26 @@ func sync_world_state(force: bool = true) -> void:
 		cached_terrain_resource_signature = terrain_resource_signature
 		if terrain_canvas != null:
 			terrain_canvas.invalidate_content()
+	if probe != null:
+		probe.observe_microseconds("presentation.sync.resource_projection", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	var overview: Dictionary = presentation_snapshot.get("overview", {})
 	overview_units = overview.get("units", units)
 	overview_resource_nodes = overview.get("resources", resource_nodes)
 	overview_buildings = overview.get("buildings", presentation_snapshot.get("buildings", []))
 	player_control_state.prune(selectable_player_ids())
 	battle_over = bool(presentation_snapshot.get("battle_over", false))
+	if probe != null:
+		probe.observe_microseconds("presentation.sync.control_projection", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	refresh_hud_model()
 	if scenario_overlay != null:
 		scenario_overlay.set_snapshot(presentation_snapshot)
 	if hud_modal_overlay != null:
 		hud_modal_overlay.set_snapshot(presentation_snapshot)
+	if probe != null:
+		probe.observe_microseconds("presentation.sync.view_models", Time.get_ticks_usec() - stage_started)
+		probe.observe_microseconds("presentation.sync.total", Time.get_ticks_usec() - sync_started)
 
 
 func _restart_from_scenario_overlay() -> void:
@@ -1357,19 +1405,40 @@ func selection_rectangle(first: Vector2, second: Vector2) -> Rect2:
 	return Rect2(top_left, bottom_right - top_left)
 
 func _draw() -> void:
+	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var draw_started := Time.get_ticks_usec() if probe != null else 0
+	var stage_started := draw_started
 	draw_world_objects()
+	if probe != null:
+		probe.observe_microseconds("presentation.draw.world", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	draw_fog_overlay()
+	if probe != null:
+		probe.observe_microseconds("presentation.draw.fog", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	draw_map_edge_guard()
+	if probe != null:
+		probe.observe_microseconds("presentation.draw.map_edge", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	draw_command_marker()
+	if probe != null:
+		probe.observe_microseconds("presentation.draw.command_marker", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	if diagnostics_enabled:
 		draw_diagnostics()
 	draw_formation_ghost()
 	draw_hud()
+	if probe != null:
+		probe.observe_microseconds("presentation.draw.hud_overlays", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	var selection_gesture := input_adapter.selection_gesture()
 	if not selection_gesture.is_empty():
 		var rectangle := selection_rectangle(selection_gesture["from"], selection_gesture["to"])
 		draw_rect(rectangle, Color(0.25, 0.75, 1.0, 0.12), true)
 		draw_rect(rectangle, Color(0.35, 0.9, 1.0, 0.9), false, 1.5)
+	if probe != null:
+		probe.observe_microseconds("presentation.draw.gestures", Time.get_ticks_usec() - stage_started)
+		probe.observe_microseconds("presentation.draw.total", Time.get_ticks_usec() - draw_started)
 
 
 func _sync_terrain_canvas() -> void:
@@ -1477,6 +1546,7 @@ func draw_command_marker() -> void:
 func draw_fog_overlay() -> void:
 	if presentation_snapshot.is_empty():
 		return
+	var probe: Variant = game_controller.performance_probe if game_controller != null else null
 	var bounds := visible_tile_bounds()
 	var cells: Variant = presentation_snapshot.get("fog", {}).get("cells", [])
 	if cells.size() < map_size.x * map_size.y:
@@ -1484,32 +1554,70 @@ func draw_fog_overlay() -> void:
 	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
 	var terrain_revision := int(simulation_world.terrain_revision) if simulation_world != null else -1
 	if cached_world_fog_mesh == null or cached_world_fog_revision != fog_revision or not _tile_bounds_contains(cached_world_fog_bounds, bounds) or not is_equal_approx(cached_world_fog_zoom, view_zoom) or cached_world_fog_terrain_revision != terrain_revision:
+		var rebuild_started := Time.get_ticks_usec() if probe != null else 0
 		cached_world_fog_bounds = _expanded_tile_bounds(bounds, 12)
 		cached_world_fog_mesh = _build_world_fog_mesh(cached_world_fog_bounds, cells)
 		cached_world_fog_revision = fog_revision
 		cached_world_fog_zoom = view_zoom
 		cached_world_fog_terrain_revision = terrain_revision
+		if probe != null:
+			probe.observe_microseconds("presentation.fog.mesh_rebuild", Time.get_ticks_usec() - rebuild_started)
 	if cached_world_fog_mesh != null:
+		var submit_started := Time.get_ticks_usec() if probe != null else 0
 		draw_set_transform(PixelScaling.snap_screen(view_offset))
 		draw_mesh(cached_world_fog_mesh, null)
 		draw_set_transform(Vector2.ZERO)
+		if probe != null:
+			probe.observe_microseconds("presentation.fog.mesh_submit", Time.get_ticks_usec() - submit_started)
 
 
 func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
+	# Project the shared terrain lattice once. The previous implementation built
+	# two temporary triangle arrays and projected four corners independently for
+	# every hidden cell. On a typical viewport most corners belong to four cells,
+	# so that multiplied elevation sampling and allocations during every fog
+	# revision. This produces the identical 0->2 diagonal with one projection per
+	# lattice vertex and one exactly-sized vertex/color allocation.
+	var lattice_width := bounds.size.x + 1
+	var projected := PackedVector2Array()
+	projected.resize(lattice_width * (bounds.size.y + 1))
+	for local_y in range(bounds.size.y + 1):
+		for local_x in range(bounds.size.x + 1):
+			var world := Vector2(bounds.position + Vector2i(local_x, local_y))
+			projected[local_y * lattice_width + local_x] = PixelScaling.snap_screen(_world_to_fog_mesh(world))
+	var covered_cells := 0
+	for y in range(bounds.position.y, bounds.end.y):
+		for x in range(bounds.position.x, bounds.end.x):
+			if int(cells[y * map_size.x + x]) != FogOfWar.VISIBLE:
+				covered_cells += 1
+	if covered_cells == 0:
+		return null
 	var vertices := PackedVector3Array()
+	vertices.resize(covered_cells * 6)
 	var colors := PackedColorArray()
+	colors.resize(covered_cells * 6)
+	var vertex_index := 0
 	for y in range(bounds.position.y, bounds.end.y):
 		for x in range(bounds.position.x, bounds.end.x):
 			var state := int(cells[y * map_size.x + x])
 			if state == FogOfWar.VISIBLE:
 				continue
 			var color := FogPresentation.color_for_state(state)
-			for triangle in FogPresentation.terrain_conforming_cell_triangles(Vector2i(x, y), Callable(self, "_world_to_fog_mesh")):
-				for point in triangle:
-					vertices.append(Vector3(point.x, point.y, 0.0))
-					colors.append(color)
-	if vertices.is_empty():
-		return null
+			var local_x := x - bounds.position.x
+			var local_y := y - bounds.position.y
+			var top_left: Vector2 = projected[local_y * lattice_width + local_x]
+			var top_right: Vector2 = projected[local_y * lattice_width + local_x + 1]
+			var bottom_right: Vector2 = projected[(local_y + 1) * lattice_width + local_x + 1]
+			var bottom_left: Vector2 = projected[(local_y + 1) * lattice_width + local_x]
+			vertices[vertex_index] = Vector3(top_left.x, top_left.y, 0.0)
+			vertices[vertex_index + 1] = Vector3(top_right.x, top_right.y, 0.0)
+			vertices[vertex_index + 2] = Vector3(bottom_right.x, bottom_right.y, 0.0)
+			vertices[vertex_index + 3] = Vector3(top_left.x, top_left.y, 0.0)
+			vertices[vertex_index + 4] = Vector3(bottom_right.x, bottom_right.y, 0.0)
+			vertices[vertex_index + 5] = Vector3(bottom_left.x, bottom_left.y, 0.0)
+			for color_offset in range(6):
+				colors[vertex_index + color_offset] = color
+			vertex_index += 6
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices

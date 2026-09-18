@@ -13,6 +13,7 @@ func _initialize() -> void:
 	test_simulation_and_render_visibility()
 	test_gaia_visibility_contract()
 	test_native_visibility_cells_match_gdscript()
+	test_player_revisions_are_isolated()
 
 	if failures.is_empty():
 		print("S-006 fog of war tests passed")
@@ -88,6 +89,24 @@ func test_overlapping_sources_keep_shared_cells_visible() -> void:
 	second["hp"] = 0.0
 	fog.update([first, second], [])
 	assert_equal(fog.state_at_world(1, Vector2(5.5, 4.5)), FogOfWar.EXPLORED, "last overlapping source removal downgrades the shared cell")
+
+
+func test_player_revisions_are_isolated() -> void:
+	var fog = FogOfWar.new(Vector2i(20, 20))
+	var player_scout := vision_entity(1, Vector2(3.5, 3.5), 2.0)
+	player_scout["id"] = 20
+	var enemy_scout := vision_entity(2, Vector2(14.5, 14.5), 2.0)
+	enemy_scout["id"] = 21
+	fog.update([player_scout, enemy_scout], [])
+	var player_revision := fog.revision_for_player(1)
+	var enemy_revision := fog.revision_for_player(2)
+	enemy_scout["pos"] = Vector2(17.5, 14.5)
+	fog.update([player_scout, enemy_scout], [])
+	assert_equal(fog.revision_for_player(1), player_revision, "enemy-only vision changes do not invalidate the local player's fog mesh")
+	assert_true(fog.revision_for_player(2) > enemy_revision, "the moving player's fog revision still advances")
+	player_scout["pos"] = Vector2(6.5, 3.5)
+	fog.update([player_scout, enemy_scout], [])
+	assert_true(fog.revision_for_player(1) > player_revision, "local vision changes invalidate the local player's fog mesh")
 
 
 func test_simulation_and_render_visibility() -> void:
