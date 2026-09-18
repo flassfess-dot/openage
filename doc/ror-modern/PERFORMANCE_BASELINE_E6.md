@@ -326,3 +326,24 @@ Hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 
 Оба прогона: 893 запроса, 324 direct hits, 569 A*, 9324 expanded nodes, canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits, food `5060/5000`, 693 carriers. Pathfinder/navigation stress, gather/return/naval economy, deterministic replay и save/load gates проходят.
 
 Deadline `50` и comfort `35` мс ещё открыты. После снятия route burst основные владельцы — movement integration p95 `8,451` мс, fog `11,693`, per-unit preparation `6,412` и оставшийся task `27,539`. Следующий профиль должен сначала разделить эти уже измеренные расходы; source/drop-site flow/corridor вводится только если mixed 4/8×500 подтвердит повтор дальних маршрутов, а не как обязательное усложнение однородного теста.
+
+## 21. E6-017 — нулевые операции unit preparation и movement integration
+
+Общий unit loop выполнял одинаковую работу для несовместимых типов: заново писал уже нулевые cooldown/work, входил в conversion component lookup для каждого крестьянина и проверял behavior tags до того, как обнаруживал отсутствующую retaliation target. Movement делал несколько эквивалентных square roots, каждый такт записывал normal stuck state, вызывал clamp далеко от края и пересчитывал нулевую elevation на полностью плоской карте.
+
+Fast paths сохраняют порядок систем и fixed cadence. Положительные таймеры уменьшаются как прежде; enabled converter получает прежний faith update; huntable с target выполняет полный прежний handler. Arrival/overshoot/progress сравниваются по квадратам расстояний, `StuckRecovery.update()` сохраняет строковый публичный facade, а runtime использует `update_squared()`. Неплоская карта всегда сохраняет полный elevation path, пограничная позиция — прежний clamp.
+
+Сопоставимый `gather_economy 2×500 / 400×400 / 520+240`:
+
+| Метрика | E6-016 | E6-017 |
+|---|---:|---:|
+| sample wall | 13,84 с | 13,00 с |
+| fixed tick p50 / p95 | 57,271 / 65,622 мс | 53,977 / 61,109 мс |
+| world advance p95 | 58,604 мс | 54,636 мс |
+| unit orders p95 | 41,376 мс | 36,501 мс |
+| preparation p95 | 6,412 мс | 2,786 мс |
+| unit task p95 | 27,539 мс | 26,706 мс |
+| movement integration p95 | 8,451 мс | 7,472 мс |
+| fog p95 | 11,693 мс | 12,009 мс |
+
+Canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carriers совпали. Priest/conversion, huntable resource, stuck/local movement, gather/return, navigation stress, deterministic replay и save/load gates проходят. Следующие измеренные владельцы — fog collect/reconcile и remaining gather/movement task; deadline `50` и comfort `35` мс остаются открыты.

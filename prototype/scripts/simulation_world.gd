@@ -1249,10 +1249,14 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 			and int(unit.get("path_index", 0)) == 0
 			and Vector2(unit.get("target", position_before_tick)) == position_before_tick
 		)
-		unit["cooldown"] = maxf(0.0, unit["cooldown"] - delta)
-		unit["work"] = maxf(0.0, unit["work"] - delta)
-		conversion_system.advance_faith(unit, delta)
-		_update_huntable_reaction(unit)
+		if float(unit["cooldown"]) > 0.0:
+			unit["cooldown"] = maxf(0.0, float(unit["cooldown"]) - delta)
+		if float(unit["work"]) > 0.0:
+			unit["work"] = maxf(0.0, float(unit["work"]) - delta)
+		if bool(unit["components"]["conversion"]["enabled"]):
+			conversion_system.advance_faith(unit, delta)
+		if int(unit["retaliation_target_id"]) >= 0:
+			_update_huntable_reaction(unit)
 		if probe != null:
 			preparation_microseconds += Time.get_ticks_usec() - phase_started
 			phase_started = Time.get_ticks_usec()
@@ -1696,10 +1700,13 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	var probe: Variant = tick_pipeline.performance_probe
 	var movement_phase_started := Time.get_ticks_usec() if probe != null else 0
 	var difference: Vector2 = unit["target"] - unit["pos"]
-	if difference.length() < 0.035:
+	if difference.length_squared() < 0.001225:
 		var arrival_displacement := difference
 		unit["pos"] = unit["target"]
-		unit["elevation"] = elevation_at(unit["pos"])
+		if terrain_elevation.nonzero_vertex_count > 0:
+			unit["elevation"] = elevation_at(unit["pos"])
+		elif float(unit["elevation"]) != 0.0:
+			unit["elevation"] = 0.0
 		unit["actual_velocity"] = arrival_displacement / delta if delta > 0.0 else Vector2.ZERO
 		if arrival_displacement.length_squared() > 0.000001:
 			var arrival_facing := facing_for_vector(arrival_displacement)
@@ -1781,19 +1788,25 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	if movement_reason != "":
 		unit["diagnostic_reason"] = movement_reason
 	var step: Vector2 = unit["actual_velocity"] * delta
-	if step.length() >= difference.length() and step.dot(difference) > 0.0:
+	if step.length_squared() >= difference.length_squared() and step.dot(difference) > 0.0:
 		unit["pos"] = unit["target"]
 	else:
 		unit["pos"] += step
-	unit["pos"] = Coordinates.clamp_world(unit["pos"], map_size)
-	unit["elevation"] = elevation_at(unit["pos"])
+	var position: Vector2 = unit["pos"]
+	if position.x < 0.5 or position.y < 0.5 or position.x > float(map_size.x) - 0.5 or position.y > float(map_size.y) - 0.5:
+		unit["pos"] = Coordinates.clamp_world(position, map_size)
+	if terrain_elevation.nonzero_vertex_count > 0:
+		unit["elevation"] = elevation_at(unit["pos"])
+	elif float(unit["elevation"]) != 0.0:
+		unit["elevation"] = 0.0
 	var actual_displacement: Vector2 = unit["pos"] - start_position
 	unit["actual_velocity"] = actual_displacement / delta if delta > 0.0 else Vector2.ZERO
-	if actual_displacement.length_squared() > 0.000001:
+	var actual_displacement_squared := actual_displacement.length_squared()
+	if actual_displacement_squared > 0.000001:
 		var movement_facing := facing_for_vector(actual_displacement)
 		unit["movement_facing"] = movement_facing
 		unit["facing"] = movement_facing
-	var recovery_action := StuckRecovery.update(unit, actual_displacement.length())
+	var recovery_action := StuckRecovery.update_squared(unit, actual_displacement_squared)
 	match recovery_action:
 		"local_repath":
 			assign_unit_destination(unit, unit["destination"], false)
@@ -3118,7 +3131,7 @@ func advance_resource_lifecycle(delta: float) -> void:
 
 
 func _update_huntable_reaction(unit: Dictionary) -> void:
-	if not entity_has_behavior_tag(unit, "huntable") or int(unit.get("retaliation_target_id", -1)) < 0:
+	if int(unit.get("retaliation_target_id", -1)) < 0 or not entity_has_behavior_tag(unit, "huntable"):
 		return
 	var attacker: Variant = find_unit(int(unit.get("retaliation_target_id", -1)))
 	if attacker == null or float(attacker.get("hp", 0.0)) <= 0.0:

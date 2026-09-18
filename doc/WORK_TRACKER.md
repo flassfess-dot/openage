@@ -1480,3 +1480,11 @@ ext_unit_id.
 - Последовательный `gather_economy 2×500 / 400×400 / 520+240`: aggregate path p95 `10,041 → 1,329` мс, max `20,972 → 3,290`; отдельный request `0,937 → 0,095`. Fixed p95 `71,076 → 65,622`, world `65,512 → 58,604`, unit-orders `48,959 → 41,376`, task `36,170 → 27,539`, sample wall `14,14 → 13,84` с.
 - Counters полностью совпали: 893 path request, 324 direct hits, 569 A* и 9324 expanded nodes. Canonical hash `c4244f12…bcc747`, 11 671 gather, 988 deposits, food `5060/5000`, 693 carriers неизменны.
 - Pathfinder/navigation stress, gather/return/naval economy, deterministic replay и save/load gates проходят. Следующая точная задача — измерить и уменьшить movement integration (`8,451` мс p95), per-unit preparation (`6,412`) и fog (`11,693`); общий corridor/flow остаётся кандидатом для mixed 4/8×500, если там подтвердится повтор дальнего маршрута.
+
+### Прогресс (2026-09-18, E6-017 — unit preparation/integration fast paths)
+
+- Общий unit loop больше не пишет уже нулевые cooldown/work. Conversion faith вызывается только для enabled component, а huntable reaction — только при существующей retaliation target; редкие ветки и их порядок сохранены.
+- Movement заменил arrival/overshoot/stuck progress на эквивалентные squared comparisons, избегает повторных normal-state writes в `StuckRecovery`, не вычисляет elevation на полностью плоской карте и вызывает world clamp только при реальном выходе за границы.
+- На одинаковом `gather_economy 2×500 / 400×400 / 520+240`: preparation p95 `6,412 → 2,786` мс, movement integration `8,451 → 7,472`, unit-orders `41,376 → 36,501`, fixed tick `65,622 → 61,109`, sample wall `13,84 → 13,00` с.
+- Hash `c4244f12…bcc747`, 11 671 gather, 988 deposits, food `5060/5000`, 693 carriers совпали. Priest/conversion, huntable retaliation/carcass, stuck/local movement, gather/return, navigation stress, deterministic replay и save/load gates проходят.
+- Следующая точная задача — fog collect/reconcile p95 `12,009` мс и оставшийся gather/movement task `26,706`; после достижения 50-мс deadline повторить mixed 4/8×500, затем visible render.
