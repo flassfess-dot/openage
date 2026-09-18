@@ -43,6 +43,8 @@ func set_world(world) -> void:
 	simulation_world = world
 	if simulation_world != null and simulation_world.has_method("set_performance_probe"):
 		simulation_world.set_performance_probe(performance_probe)
+	if simulation_world != null and simulation_world.has_method("set_formation_cohesion_active"):
+		simulation_world.set_formation_cohesion_active(not formation_groups.is_empty())
 
 
 func set_performance_probe(probe: Variant) -> void:
@@ -277,22 +279,24 @@ func _emit_command_task_changes(command, previous_tasks: Dictionary) -> void:
 		})
 
 
-func _all_unit_task_states() -> Dictionary:
-	var result: Dictionary = {}
+func _all_unit_task_states() -> Array:
+	# get_combat_attackers() already guarantees stable entity-ID order. Keep the
+	# entity reference beside its task instead of building a Dictionary, sorting
+	# its keys and resolving every entity a second time after the world tick.
+	var result: Array = []
 	for unit in simulation_world.get_combat_attackers():
-		result[int(unit.get("id", -1))] = String(unit.get("task", "idle"))
+		result.append(unit)
+		result.append(String(unit.get("task", "idle")))
 	return result
 
 
-func _emit_runtime_task_changes(previous_tasks: Dictionary) -> void:
-	var ids: Array = previous_tasks.keys()
-	ids.sort()
-	for unit_id_value in ids:
-		var unit_id := int(unit_id_value)
-		var unit = simulation_world.find_combat_target(unit_id)
-		if unit == null:
+func _emit_runtime_task_changes(previous_tasks: Array) -> void:
+	for index in range(0, previous_tasks.size(), 2):
+		var unit: Dictionary = previous_tasks[index]
+		if bool(unit.get("removed", false)):
 			continue
-		var previous_task := String(previous_tasks[unit_id])
+		var unit_id := int(unit.get("id", -1))
+		var previous_task := String(previous_tasks[index + 1])
 		var current_task := String(unit.get("task", "idle"))
 		if previous_task == current_task:
 			continue
@@ -830,6 +834,7 @@ func _clear_unit_formation(unit: Dictionary) -> void:
 	unit["formation_slot_mode"] = "none"
 	unit["formation_shared_motion"] = false
 	unit["formation_shared_isolated"] = false
+	unit["cohesion_speed_scale"] = 1.0
 
 func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> String:
 	if paused or simulation_world == null:
@@ -865,6 +870,8 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
 		command_microseconds += Time.get_ticks_usec() - command_started
 	var task_states_after_commands := _all_unit_task_states()
 	var world_started := Time.get_ticks_usec() if performance_probe != null else 0
+	if simulation_world.has_method("set_formation_cohesion_active"):
+		simulation_world.set_formation_cohesion_active(not formation_groups.is_empty())
 	simulation_world.advance(FIXED_STEP_SECONDS, player_team, enemy_team)
 	var world_microseconds := Time.get_ticks_usec() - world_started if performance_probe != null else 0
 	var formation_started := Time.get_ticks_usec() if performance_probe != null else 0

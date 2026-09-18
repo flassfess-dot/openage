@@ -141,7 +141,9 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 
 
 func has_native_movement_for(unit_id: int) -> bool:
-	return uses_native_kernel() and (native_shared_movement_kernel != null or native_movement_kernels_by_unit_id.has(unit_id))
+	# Snapshot preparation clears both stores whenever native execution is
+	# unavailable, so the hot per-unit query needs no repeated capability checks.
+	return native_shared_movement_kernel != null or native_movement_kernels_by_unit_id.has(unit_id)
 
 
 func calculate_native_movement(unit: Dictionary, target: Vector2, delta: float) -> Vector4:

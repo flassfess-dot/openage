@@ -17,6 +17,8 @@ var regenerated_sources: int = 0
 var native_enabled: bool = true
 var native_available: bool = false
 var native_kernel: Variant = null
+var source_scan_generation: int = 0
+var source_seen_generations := PackedInt32Array()
 
 
 func _init(world_size: Vector2i = Vector2i.ONE) -> void:
@@ -32,6 +34,8 @@ func reset() -> void:
 	visible_counts_by_player.clear()
 	allies_by_player.clear()
 	vision_sources.clear()
+	source_scan_generation = 0
+	source_seen_generations.resize(0)
 	visibility_topology_dirty = true
 	revision += 1
 
@@ -107,20 +111,36 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 		performance_probe.observe_microseconds("simulation.fog.ensure_players", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
 
+	var changed := false
 	var current_sources: Dictionary = {}
-	_collect_sources(units, 0, current_sources, movement_bucket_count, movement_bucket_index)
-	_collect_sources(buildings, 1, current_sources, movement_bucket_count, movement_bucket_index)
+	var removed_sources: Array[Dictionary] = []
+	var added_sources: Array[Dictionary] = []
+	var previous_replacements: Array[Dictionary] = []
+	var current_replacements: Array[Dictionary] = []
+	if visibility_topology_dirty:
+		_collect_sources(units, 0, current_sources, movement_bucket_count, movement_bucket_index)
+		_collect_sources(buildings, 1, current_sources, movement_bucket_count, movement_bucket_index)
+	else:
+		source_scan_generation += 1
+		_collect_source_deltas(units, 0, movement_bucket_count, movement_bucket_index, added_sources, previous_replacements, current_replacements)
+		_collect_source_deltas(buildings, 1, movement_bucket_count, movement_bucket_index, added_sources, previous_replacements, current_replacements)
+		for source_key in vision_sources.keys():
+			var source: Dictionary = vision_sources[source_key]
+			var numeric_source_key := int(source_key)
+			if numeric_source_key < source_seen_generations.size() and int(source_seen_generations[numeric_source_key]) == source_scan_generation:
+				continue
+			removed_sources.append(source)
+			vision_sources.erase(source_key)
 	if performance_probe != null:
 		performance_probe.observe_microseconds("simulation.fog.collect_sources", Time.get_ticks_usec() - phase_started)
 		performance_probe.observe_microseconds("simulation.fog.vision_cells", vision_cells_microseconds)
 		performance_probe.increment("fog.regenerated_sources", regenerated_sources)
 		phase_started = Time.get_ticks_usec()
-	var changed := false
 	if visibility_topology_dirty:
 		changed = _rebuild_visibility(current_sources)
+		vision_sources = current_sources
 	else:
-		changed = _reconcile_visibility(current_sources)
-	vision_sources = current_sources
+		changed = _apply_source_deltas(removed_sources, added_sources, previous_replacements, current_replacements)
 	visibility_topology_dirty = false
 	if changed:
 		revision += 1
@@ -207,6 +227,72 @@ func _collect_sources(entities: Array, category_id: int, result: Dictionary, mov
 		}
 
 
+func _collect_source_deltas(
+	entities: Array,
+	category_id: int,
+	movement_bucket_count: int,
+	movement_bucket_index: int,
+	added_sources: Array[Dictionary],
+	previous_replacements: Array[Dictionary],
+	current_replacements: Array[Dictionary]
+) -> void:
+	for index in range(entities.size()):
+		var entity: Dictionary = entities[index]
+		if float(entity["hp"]) <= 0.0:
+			continue
+		var vision: Dictionary = entity["components"]["vision"]
+		var sight_radius := maxf(0.0, float(vision["range"]))
+		if sight_radius <= 0.0 or not bool(vision["enabled"]):
+			continue
+		var source_player := int(entity["team"])
+		if source_player <= 0:
+			continue
+		var entity_id := int(entity.get("id", -1))
+		var stable_id := entity_id if entity_id >= 0 else index
+		var source_key := (stable_id << 1) | (category_id & 1)
+		var center := Vector2(entity["pos"])
+		var previous: Variant = vision_sources.get(source_key)
+		if previous != null and int(previous["team"]) == source_player and Vector2(previous["center"]).is_equal_approx(center) and is_equal_approx(float(previous["radius"]), sight_radius):
+			if source_key >= source_seen_generations.size():
+				source_seen_generations.resize(source_key + 1)
+			source_seen_generations[source_key] = source_scan_generation
+			continue
+		var stable_bucket_value := entity_id if entity_id >= 0 else index
+		var movement_refresh_deferred := (
+			previous != null
+			and int(previous["team"]) == source_player
+			and is_equal_approx(float(previous["radius"]), sight_radius)
+			and maxi(1, movement_bucket_count) > 1
+			and posmod(stable_bucket_value, maxi(1, movement_bucket_count)) != posmod(movement_bucket_index, maxi(1, movement_bucket_count))
+		)
+		if movement_refresh_deferred:
+			if source_key >= source_seen_generations.size():
+				source_seen_generations.resize(source_key + 1)
+			source_seen_generations[source_key] = source_scan_generation
+			continue
+		var vision_started := Time.get_ticks_usec() if performance_probe != null else 0
+		var cells := _vision_cells(center, sight_radius)
+		if performance_probe != null:
+			vision_cells_microseconds += Time.get_ticks_usec() - vision_started
+			regenerated_sources += 1
+		var current := {
+			"team": source_player,
+			"center": center,
+			"radius": sight_radius,
+			"cells": cells,
+			"source_revision": int(previous.get("source_revision", 0)) + 1 if previous != null else 1,
+		}
+		if source_key >= source_seen_generations.size():
+			source_seen_generations.resize(source_key + 1)
+		source_seen_generations[source_key] = source_scan_generation
+		vision_sources[source_key] = current
+		if previous == null:
+			added_sources.append(current)
+		else:
+			previous_replacements.append(previous)
+			current_replacements.append(current)
+
+
 func _vision_cells(center: Vector2, radius: float) -> PackedInt32Array:
 	if uses_native_kernel():
 		return native_kernel.vision_cells(center, radius)
@@ -240,22 +326,12 @@ func _rebuild_visibility(current_sources: Dictionary) -> bool:
 	return changed
 
 
-func _reconcile_visibility(current_sources: Dictionary) -> bool:
-	var removed_sources: Array[Dictionary] = []
-	var added_sources: Array[Dictionary] = []
-	var previous_replacements: Array[Dictionary] = []
-	var current_replacements: Array[Dictionary] = []
-	for source_key in vision_sources.keys():
-		if not current_sources.has(source_key):
-			removed_sources.append(vision_sources[source_key])
-	for source_key in current_sources.keys():
-		var current: Dictionary = current_sources[source_key]
-		var previous: Variant = vision_sources.get(source_key)
-		if previous == null:
-			added_sources.append(current)
-		elif int(previous.get("source_revision", 0)) != int(current.get("source_revision", 0)):
-			previous_replacements.append(previous)
-			current_replacements.append(current)
+func _apply_source_deltas(
+	removed_sources: Array[Dictionary],
+	added_sources: Array[Dictionary],
+	previous_replacements: Array[Dictionary],
+	current_replacements: Array[Dictionary]
+) -> bool:
 	if removed_sources.is_empty() and added_sources.is_empty() and previous_replacements.is_empty():
 		return false
 

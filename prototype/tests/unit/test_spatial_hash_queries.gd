@@ -10,6 +10,7 @@ func _initialize() -> void:
 	test_queries_are_unique_filtered_and_stable()
 	test_external_neighbor_query_excludes_shared_formation()
 	test_mobile_index_uses_insert_snapshot_and_exact_footprint()
+	test_dynamic_synchronization_moves_cells_and_detects_lifecycle_changes()
 
 	if failures.is_empty():
 		print("N-002 spatial hash tests passed")
@@ -72,6 +73,23 @@ func test_mobile_index_uses_insert_snapshot_and_exact_footprint() -> void:
 	index.insert(outside, outside["pos"], outside["footprint_radius"], "unit")
 	touching["pos"] = Vector2(20.0, 20.0)
 	assert_equal(index.query_circle(Vector2(2.0, 2.0), 1.0, "unit"), [touching], "mobile query uses the fixed-tick insertion snapshot and exact radius")
+
+
+func test_dynamic_synchronization_moves_cells_and_detects_lifecycle_changes() -> void:
+	var index = SpatialHash.new(1.0)
+	var unit := {"id": 11, "pos": Vector2(1.2, 1.2), "hp": 20.0, "footprint_radius": 0.2, "minimum_clearance": 0.04}
+	var building := {"id": 12, "pos": Vector2(5.0, 5.0), "hp": 50.0}
+	index.insert(unit, unit["pos"], unit["footprint_radius"], "unit")
+	index.insert(building, building["pos"], 0.5, "obstacle")
+	unit["pos"] = Vector2(3.2, 1.2)
+	assert_equal(index.synchronize_dynamic_entities([unit], [building]), true, "stable live identities synchronize without rebuilding")
+	assert_equal(index.query_circle(Vector2(1.2, 1.2), 0.1, "unit"), [], "synchronization removes the unit from its previous cell")
+	assert_equal(index.query_circle(Vector2(3.2, 1.2), 0.1, "unit"), [unit], "synchronization publishes the new unit cell")
+	unit["hp"] = 0.0
+	assert_equal(index.synchronize_dynamic_entities([unit], [building]), false, "unit lifecycle changes request a full rebuild")
+	unit["hp"] = 20.0
+	building["hp"] = 0.0
+	assert_equal(index.synchronize_dynamic_entities([unit], [building]), false, "obstacle lifecycle changes request a full rebuild")
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:

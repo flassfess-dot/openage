@@ -51,6 +51,11 @@ var forest_resource_counts: Dictionary = {}
 var terrain_revision: int = 0
 var units: Array = []
 var units_by_id: Dictionary = {}
+var capturable_units: Array[Dictionary] = []
+var dying_units: Array[Dictionary] = []
+var dying_buildings: Array[Dictionary] = []
+var unit_removal_pending: bool = false
+var building_removal_pending: bool = false
 var resource_nodes: Array = []
 var resource_nodes_by_id: Dictionary = {}
 var decaying_resource_nodes: Array = []
@@ -65,6 +70,7 @@ var movement_integration_microseconds: int = 0
 var movement_arrival_microseconds: int = 0
 var movement_native_unit_updates: int = 0
 var movement_native_neighbor_candidates: int = 0
+var formation_cohesion_active: bool = true
 var movement_neighbor_buffer: Array = []
 var open_movement_envelopes_by_id: Dictionary = {}
 
@@ -271,6 +277,11 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 		bulk_load_depth = 0
 	units.clear()
 	units_by_id.clear()
+	capturable_units.clear()
+	dying_units.clear()
+	dying_buildings.clear()
+	unit_removal_pending = false
+	building_removal_pending = false
 	resource_nodes.clear()
 	resource_nodes_by_id.clear()
 	decaying_resource_nodes.clear()
@@ -539,6 +550,8 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		"components": components,
 	}
 	apply_archetype_identity(unit, kind)
+	if entity_has_behavior_tag(unit, "capturable"):
+		capturable_units.append(unit)
 	configure_unit_combat_awareness(unit)
 	# The idle-tick fast path assumes the component projection represents the
 	# entity at tick entry. Establish that invariant once when the entity is born.
@@ -928,7 +941,7 @@ func sync_unit_victory_objective(unit: Dictionary) -> void:
 
 
 func update_capturable_objectives() -> void:
-	for objective_unit_value in units:
+	for objective_unit_value in capturable_units:
 		var objective_unit: Dictionary = objective_unit_value
 		if not entity_has_behavior_tag(objective_unit, "capturable") or float(objective_unit.get("hp", 0.0)) <= 0.0:
 			continue
@@ -1091,7 +1104,8 @@ func _tick_purge(_context: Dictionary) -> void:
 
 
 func _tick_spatial_index(_context: Dictionary) -> void:
-	rebuild_spatial_index(false)
+	if not spatial_index.synchronize_dynamic_entities(units, buildings):
+		rebuild_spatial_index(false)
 
 
 func _tick_component_sync(_context: Dictionary) -> void:
@@ -1217,7 +1231,8 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	movement_native_neighbor_candidates = 0
 	pathfinder.reset_path_query_tick_observation()
 	var phase_started := Time.get_ticks_usec() if probe != null else 0
-	FormationCohesion.update(units)
+	if formation_cohesion_active:
+		FormationCohesion.update(units)
 	if probe != null:
 		probe.observe_microseconds("simulation.unit_orders.formation_cohesion", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
@@ -1424,10 +1439,17 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		probe.increment("movement.native_neighbor_candidates", movement_native_neighbor_candidates)
 
 
+func set_formation_cohesion_active(value: bool) -> void:
+	formation_cohesion_active = value
+
+
 func update_static_combatants(delta: float, player_team: int) -> void:
 	for building_value in buildings:
 		var building: Dictionary = building_value
-		if float(building.get("hp", 0.0)) <= 0.0 or String(building.get("state", "complete")) != "complete" or not bool(building.get("combat_enabled", false)):
+		if float(building.get("hp", 0.0)) <= 0.0:
+			begin_building_destruction(building)
+			continue
+		if String(building.get("state", "complete")) != "complete" or not bool(building.get("combat_enabled", false)):
 			continue
 		building["cooldown"] = maxf(0.0, float(building.get("cooldown", 0.0)) - delta)
 		var animation_state := AnimationController.IDLE
@@ -1544,6 +1566,7 @@ func corpse_animation_duration(source: Dictionary, team: int) -> float:
 func begin_death(unit: Dictionary) -> void:
 	if String(unit.get("death_phase", "alive")) != "alive":
 		return
+	dying_units.append(unit)
 	transport_system.destroy_cargo(unit)
 	conversion_system.cancel(unit, "unit_died")
 	healing_system.cancel(unit, "unit_died")
@@ -1573,6 +1596,7 @@ func begin_death(unit: Dictionary) -> void:
 	unit["formation_slot_mode"] = "none"
 	unit["formation_shared_motion"] = false
 	unit["formation_shared_isolated"] = false
+	unit["cohesion_speed_scale"] = 1.0
 	unit["combat_destination"] = null
 	if not bool(unit.get("population_released", false)):
 		var team := int(unit.get("team", 0))
@@ -1592,6 +1616,7 @@ func begin_entity_death(entity: Dictionary) -> void:
 func begin_building_destruction(building: Dictionary) -> void:
 	if building == null or String(building.get("death_phase", "alive")) != "alive":
 		return
+	dying_buildings.append(building)
 	_emit_domain_event("death", {
 		"entity_id": int(building.get("id", -1)),
 		"entity_category": "building",
@@ -1638,6 +1663,7 @@ func advance_death(unit: Dictionary, delta: float) -> void:
 			if float(unit["corpse_elapsed"]) + 0.000001 >= float(unit.get("corpse_duration", 0.0)):
 				unit["death_phase"] = "removed"
 				unit["removed"] = true
+				unit_removal_pending = true
 	if String(unit.get("death_phase", "")) == "corpse" and entity_has_behavior_tag(unit, "huntable"):
 		_complete_huntable_death(unit)
 	EntityComponents.sync_dynamic(unit)
@@ -1657,6 +1683,7 @@ func _complete_huntable_death(huntable: Dictionary) -> void:
 	carcass["origin_source_unit_id"] = int(huntable.get("source_unit_id", -1))
 	huntable["death_phase"] = "removed"
 	huntable["removed"] = true
+	unit_removal_pending = true
 	var hunters: Array = []
 	for candidate in units:
 		if float(candidate.get("hp", 0.0)) > 0.0 and entity_is_worker(candidate) and int(candidate.get("pending_hunt_target_id", -1)) == int(huntable.get("id", -1)):
@@ -1672,29 +1699,38 @@ func _complete_huntable_death(huntable: Dictionary) -> void:
 
 
 func advance_death_only(delta: float) -> void:
-	for unit in units:
-		if float(unit.get("hp", 0.0)) <= 0.0:
-			begin_death(unit)
-			advance_death(unit, delta)
-	for building in buildings:
-		if float(building.get("hp", 0.0)) <= 0.0:
-			begin_building_destruction(building)
-			building["death_elapsed"] = float(building.get("death_elapsed", 0.0)) + maxf(0.0, delta)
-			if float(building["death_elapsed"]) + 0.000001 >= float(building.get("death_duration", 0.05)):
-				building["death_phase"] = "removed"
-				building["removed"] = true
-			EntityComponents.sync_dynamic(building)
+	for unit in dying_units:
+		advance_death(unit, delta)
+	for building in dying_buildings:
+		building["death_elapsed"] = float(building.get("death_elapsed", 0.0)) + maxf(0.0, delta)
+		if float(building["death_elapsed"]) + 0.000001 >= float(building.get("death_duration", 0.05)):
+			building["death_phase"] = "removed"
+			building["removed"] = true
+			building_removal_pending = true
+		EntityComponents.sync_dynamic(building)
 
 
 func purge_removed_units() -> void:
-	for index in range(units.size() - 1, -1, -1):
-		if bool(units[index].get("removed", false)):
-			units_by_id.erase(int(units[index].get("id", -1)))
-			units.remove_at(index)
-	for index in range(buildings.size() - 1, -1, -1):
-		if bool(buildings[index].get("removed", false)):
-			buildings_by_id.erase(int(buildings[index].get("id", -1)))
-			buildings.remove_at(index)
+	if unit_removal_pending:
+		for index in range(units.size() - 1, -1, -1):
+			if bool(units[index].get("removed", false)):
+				if entity_has_behavior_tag(units[index], "capturable"):
+					capturable_units.erase(units[index])
+				units_by_id.erase(int(units[index].get("id", -1)))
+				units.remove_at(index)
+		for index in range(dying_units.size() - 1, -1, -1):
+			if bool(dying_units[index].get("removed", false)):
+				dying_units.remove_at(index)
+		unit_removal_pending = false
+	if building_removal_pending:
+		for index in range(buildings.size() - 1, -1, -1):
+			if bool(buildings[index].get("removed", false)):
+				buildings_by_id.erase(int(buildings[index].get("id", -1)))
+				buildings.remove_at(index)
+		for index in range(dying_buildings.size() - 1, -1, -1):
+			if bool(dying_buildings[index].get("removed", false)):
+				dying_buildings.remove_at(index)
+		building_removal_pending = false
 
 func move_unit(unit: Dictionary, delta: float) -> bool:
 	var probe: Variant = tick_pipeline.performance_probe
@@ -1739,25 +1775,30 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		return false
 
 	var start_position: Vector2 = unit["pos"]
-	var search_radius := spatial_index.movement_neighbor_radius(unit)
-	var open_envelope: Variant = open_movement_envelopes_by_id.get(int(unit["id"]))
+	var unit_id := int(unit["id"])
+	var shared_motion_requested := bool(unit["formation_shared_motion"])
+	var open_envelope: Variant = null
+	if shared_motion_requested or not open_movement_envelopes_by_id.is_empty():
+		open_envelope = open_movement_envelopes_by_id.get(unit_id)
 	if open_envelope != null and int(open_envelope.get("grid_revision", -1)) != navigation_grid.revision:
-		open_movement_envelopes_by_id.erase(int(unit["id"]))
+		open_movement_envelopes_by_id.erase(unit_id)
 		open_envelope = null
-	var shared_motion := bool(unit["formation_shared_motion"]) and open_envelope != null
-	var native_movement: bool = not shared_motion and open_envelope == null and bool(pathfinder.has_native_movement_for(int(unit["id"])))
+	var shared_motion := shared_motion_requested and open_envelope != null
+	var native_movement: bool = not shared_motion and open_envelope == null and pathfinder.has_native_movement_for(unit_id)
 	if shared_motion and bool(unit["formation_shared_isolated"]):
 		movement_neighbor_buffer.clear()
 		if probe != null:
 			probe.increment("movement.shared_formation_units")
 			probe.increment("movement.isolated_shared_formation_units")
 	elif shared_motion:
+		var search_radius := spatial_index.movement_neighbor_radius(unit)
 		spatial_index.query_external_neighbors_into(unit, search_radius, int(unit["formation_group_id"]), movement_neighbor_buffer)
 		if probe != null:
 			probe.increment("movement.shared_formation_units")
 	elif native_movement:
-		movement_neighbor_buffer.clear()
+		pass
 	else:
+		var search_radius := spatial_index.movement_neighbor_radius(unit)
 		spatial_index.query_neighbors_into(unit, search_radius, "unit", movement_neighbor_buffer)
 	if probe != null:
 		movement_neighbor_query_microseconds += Time.get_ticks_usec() - movement_phase_started
@@ -3092,7 +3133,7 @@ func update_resource_state(resource: Dictionary) -> void:
 	else:
 		resource[state_key] = "available"
 		resource[stage_key] = 0
-	EntityComponents.sync_dynamic(resource)
+	EntityComponents.sync_resource_amount(resource)
 	if previous_state != "depleted" and String(resource.get(state_key, "")) == "depleted":
 		if not harvestable_building:
 			_unregister_forest_resource(resource)

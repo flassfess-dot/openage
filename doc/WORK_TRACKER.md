@@ -1496,3 +1496,11 @@ ext_unit_id.
 - На одинаковом `gather_economy 2×500 / 400×400 / 520+240`: fog p95 `12,009 → 9,988` мс, collect `6,198 → 4,907`, ensure `1,008 → 0,348`, reconcile `5,284 → 4,766`; fixed p50/p95/max `50,903 / 56,580 / 64,606` мс, sample wall `12,30` с против `13,00` с E6-017.
 - Canonical hash `c4244f12…bcc747`, 11 671 gather, 988 deposits, food `5060/5000`, 693 carriers совпали. Fog, bounded visibility refresh, diplomacy, deterministic replay, canonical snapshot, save/load и versioned save archive gates проходят.
 - Deadline `50` и comfort `35` мс ещё открыты. Следующий измеренный владелец — gather/movement task p95 `25,545`; после его сокращения повторить mixed 4/8×500, затем visible CPU/GPU/render gate.
+
+### Прогресс (2026-09-18, E6-019 — активные simulation registries)
+
+- Fog registry обновляется на месте через generation marks; resource carrier синхронизирует только изменившийся amount; native-movement fast path не вычисляет GDScript neighbor radius и не очищает неиспользуемый buffer.
+- Capturable objectives, formation cohesion, death lifecycle и purge больше не обходят все сущности, когда их активный набор пуст. Spatial hash сохраняет buckets между тактами и перемещает только индексы, пересёкшие клетку; lifecycle mismatch вызывает безопасный полный rebuild. Task-change bridge сохраняет stable-ID order без Dictionary/sort/re-lookup.
+- На `gather_economy 2×500 / 400×400 / 520+240` fixed p50/p95/max составил `44,672 / 49,930 / 56,688` мс против `50,903 / 56,580 / 64,606` в E6-018; sample wall `12,30 → 10,76` с. Spatial p95 `3,452 → 2,124`, empty capturable `1,137 → 0,006`, formation `1,898 → 0,001`, death/purge `0,363/0,374 → 0,005/0,005` мс.
+- Hash `c4244f12…bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carriers совпали. Fog/visibility/diplomacy, path/local/stuck, gather/return/naval economy, formation, death/combat, replay/snapshot/save и spatial lifecycle impact gates проходят.
+- Двухсторонний hard deadline `50` мс выполнен; comfort `35` и E6 в целом ещё открыты. Следующая операция — mixed 4/8×500 и отдельный visible render профиль, затем выбор следующего владельца по росту метрик.

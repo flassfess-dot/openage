@@ -6,6 +6,8 @@ var unit_buckets: Dictionary = {}
 var unit_entities: Array = []
 var unit_positions: Array[Vector2] = []
 var unit_radii: Array[float] = []
+var unit_cells: Array[Vector2i] = []
+var obstacle_entities: Array = []
 var maximum_unit_radius: float = 0.0
 var maximum_unit_clearance: float = 0.0
 
@@ -19,6 +21,8 @@ func clear() -> void:
 	unit_entities.clear()
 	unit_positions.clear()
 	unit_radii.clear()
+	unit_cells.clear()
+	obstacle_entities.clear()
 	maximum_unit_radius = 0.0
 	maximum_unit_clearance = 0.0
 
@@ -32,10 +36,12 @@ func insert(entity: Dictionary, position: Vector2, radius: float, category: Stri
 		unit_positions.append(position)
 		unit_radii.append(mobile_radius)
 		var unit_cell := cell_for(position)
+		unit_cells.append(unit_cell)
 		if not unit_buckets.has(unit_cell):
 			unit_buckets[unit_cell] = []
 		unit_buckets[unit_cell].append(unit_index)
 		return
+	obstacle_entities.append(entity)
 	var item := {"entity": entity, "position": position, "radius": maxf(0.0, radius), "category": category}
 	var minimum := cell_for(position - Vector2.ONE * item["radius"])
 	var maximum := cell_for(position + Vector2.ONE * item["radius"])
@@ -45,6 +51,46 @@ func insert(entity: Dictionary, position: Vector2, radius: float, category: Stri
 			if not buckets.has(key):
 				buckets[key] = []
 			buckets[key].append(item)
+
+
+func synchronize_dynamic_entities(units: Array, buildings: Array) -> bool:
+	# The identity/order of live entities changes far less often than their
+	# positions. Preserve bucket storage between ticks and move only indices that
+	# crossed a cell boundary; callers fall back to a full rebuild on lifecycle
+	# changes so query semantics remain identical.
+	var unit_index := 0
+	for unit_value in units:
+		var unit: Dictionary = unit_value
+		if float(unit.get("hp", 0.0)) <= 0.0:
+			continue
+		if unit_index >= unit_entities.size() or int(unit_entities[unit_index].get("id", -1)) != int(unit.get("id", -1)):
+			return false
+		var position: Vector2 = unit.get("pos", Vector2.ZERO)
+		var next_cell := cell_for(position)
+		var previous_cell := unit_cells[unit_index]
+		unit_positions[unit_index] = position
+		if next_cell != previous_cell:
+			var previous_bucket: Array = unit_buckets.get(previous_cell, [])
+			previous_bucket.erase(unit_index)
+			if previous_bucket.is_empty():
+				unit_buckets.erase(previous_cell)
+			if not unit_buckets.has(next_cell):
+				unit_buckets[next_cell] = []
+			unit_buckets[next_cell].append(unit_index)
+			unit_cells[unit_index] = next_cell
+		unit_index += 1
+	if unit_index != unit_entities.size():
+		return false
+
+	var obstacle_index := 0
+	for building_value in buildings:
+		var building: Dictionary = building_value
+		if float(building.get("hp", 0.0)) <= 0.0:
+			continue
+		if obstacle_index >= obstacle_entities.size() or int(obstacle_entities[obstacle_index].get("id", -1)) != int(building.get("id", -1)):
+			return false
+		obstacle_index += 1
+	return obstacle_index == obstacle_entities.size()
 
 
 func movement_neighbor_radius(entity: Dictionary) -> float:

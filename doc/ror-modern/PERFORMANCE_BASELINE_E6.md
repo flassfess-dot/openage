@@ -369,3 +369,27 @@ Reconcile сохраняет прежний stable source order и overlap seman
 | unit task p95 | 26,706 мс | 25,545 мс |
 
 Canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carriers совпали. Fog unit tests, bounded visibility refresh, diplomacy, deterministic replay, canonical snapshot, save/load и versioned archive gates проходят. Deadline `50` и comfort `35` мс ещё открыты; следующий measured owner — gather/movement task, после чего выполняются mixed 4/8×500 и visible render profiles.
+
+## 23. E6-019 — активные реестры и инкрементальный spatial lifecycle
+
+После E6-018 профиль показал несколько небольших, но суммарно дорогих полных обходов. Даже при отсутствии формаций, захватываемых объектов, умирающих сущностей и ожидающего удаления мусора соответствующие системы проходили все 1000 юнитов. Spatial hash полностью очищал и заново создавал buckets после каждого такта, хотя состав сущностей стабилен, а task-change bridge строил Dictionary, сортировал его ключи и повторно искал каждую сущность.
+
+E6-019 не меняет игровые правила. Захватываемые юниты имеют отдельный lifecycle-реестр; formation cohesion запускается только при наличии авторитетной группы; death/removal обслуживают только активные списки. Spatial hash сохраняет идентичность сущностей и переносит индекс между buckets лишь при пересечении границы клетки, а при spawn/death/obstacle mismatch автоматически выполняет полный rebuild. Runtime task events используют уже упорядоченные ссылки на сущности вместо второго ID lookup. Fog source registry обновляется на месте через generation marks; carrier component получает узкую синхронизацию amount; native movement fast path не готовит неиспользуемый GDScript neighbor buffer.
+
+Сопоставимый `gather_economy 2×500 / 400×400 / 520+240`:
+
+| Метрика | E6-018 | E6-019 |
+|---|---:|---:|
+| sample wall | 12,30 с | 10,76 с |
+| fixed tick p50 / p95 / max | 50,903 / 56,580 / 64,606 мс | 44,672 / 49,930 / 56,688 мс |
+| world advance p95 | 50,887 мс | 45,582 мс |
+| unit orders p95 | 34,916 мс | 32,776 мс |
+| unit task p95 | 25,545 мс | 24,745 мс |
+| fog p95 | 9,988 мс | 9,798 мс |
+| spatial index p95 | 3,452 мс | 2,124 мс |
+| capturable objectives p95 | 1,137 мс | 0,006 мс |
+| formation cohesion p95 без групп | 1,898 мс | 0,001 мс |
+| death lifecycle / purge p95 без смертей | 0,363 / 0,374 мс | 0,005 / 0,005 мс |
+| runtime events p95 | 2,823 мс | 1,603 мс |
+
+Canonical hash остался `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`; также совпали 11 671 gather, 988 deposits, food `5060/5000` и 693 carriers. Deadline фиксированного тика `p95 ≤ 50 мс` впервые выполнен на полном двухстороннем экономическом workload, но это не закрывает E6: comfort gate `≤ 35 мс`, mixed 4/8×500, all-active stress и visible CPU/GPU/render gates остаются открытыми. Следующая операция — повторить масштабируемый mixed профиль для 4 и 8 игроков, определить рост по subsystem и только затем выбирать group corridor/flow-field, sparse cadence или очередной узкий native kernel.

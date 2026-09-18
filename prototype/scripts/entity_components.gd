@@ -332,14 +332,24 @@ static func sync_resource_carrier(entity: Dictionary) -> void:
 	# Gathering mutates only the carried payload and action cooldown. Keep the
 	# live component facade coherent without paying for a complete transform,
 	# health, movement, combat and animation projection on every resource unit.
-	var components: Dictionary = entity.get("components", {})
-	if components.is_empty():
+	if not entity.has("components"):
 		return
-	var carrier: Dictionary = components.get("resource_carrier", {})
-	carrier["amount"] = float(entity.get("carried_amount", carrier.get("amount", 0.0)))
-	carrier["resource_type_id"] = int(entity.get("carried_resource_type_id", carrier.get("resource_type_id", -1)))
-	var worker: Dictionary = components.get("worker", {})
-	worker["action_cooldown"] = float(entity.get("work", worker.get("action_cooldown", 0.0)))
+	var components: Dictionary = entity["components"]
+	var carrier: Dictionary = components["resource_carrier"]
+	carrier["amount"] = float(entity["carried_amount"])
+	carrier["resource_type_id"] = int(entity["carried_resource_type_id"])
+	var worker: Dictionary = components["worker"]
+	worker["action_cooldown"] = float(entity["work"])
+
+
+static func sync_resource_amount(entity: Dictionary) -> void:
+	# Resource harvest changes only the amount mirrored by resource_carrier.
+	# Depletion state remains authoritative on the runtime entity and is copied
+	# by snapshot/presentation boundaries like the other derived fields.
+	if not entity.has("components"):
+		return
+	var carrier: Dictionary = entity["components"]["resource_carrier"]
+	carrier["amount"] = float(entity["amount"])
 
 
 static func sync_runtime_unit(entity: Dictionary) -> void:
