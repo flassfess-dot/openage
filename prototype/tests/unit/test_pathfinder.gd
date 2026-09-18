@@ -11,6 +11,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_astar_avoids_water_and_corners()
 	test_smoothing_and_cache()
+	test_route_cache_clear_preserves_revisioned_native_masks()
 	test_blocked_destination_uses_nearest_cell()
 	test_same_cell_exact_endpoints_do_not_alias()
 	test_clearance_aware_route_avoids_narrow_shore()
@@ -52,6 +53,16 @@ func test_smoothing_and_cache() -> void:
 	var second := finder.find_path(Vector2(2.5, 2.5), Vector2(9.5, 7.5))
 	assert_equal(second, first, "cached path is deterministic")
 	assert_equal(finder.cache_hits, 1, "second group-compatible query hits cache")
+
+
+func test_route_cache_clear_preserves_revisioned_native_masks() -> void:
+	var finder = Pathfinder.new(open_grid(Vector2i(12, 12)))
+	finder.find_path(Vector2(2.5, 2.5), Vector2(9.5, 7.5))
+	var native_kernel_count: int = finder.native_kernels.size()
+	assert_true(not finder.cache.is_empty(), "route query populates the reusable route cache")
+	finder.clear_route_cache()
+	assert_true(finder.cache.is_empty(), "stuck recovery can invalidate route results")
+	assert_equal(finder.native_kernels.size(), native_kernel_count, "route-only invalidation preserves revisioned native masks")
 
 
 func test_blocked_destination_uses_nearest_cell() -> void:

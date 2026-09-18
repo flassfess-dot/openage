@@ -44,11 +44,18 @@ func path_query_tick_microseconds() -> int:
 
 
 func clear_cache() -> void:
-	cache.clear()
-	cache_hits = 0
+	clear_route_cache()
 	native_kernels.clear()
 	native_movement_kernels_by_unit_id.clear()
 	native_shared_movement_kernel = null
+
+
+func clear_route_cache() -> void:
+	# Stuck recovery needs a fresh route for one changed start/destination pair,
+	# but the revisioned walkability mask remains valid. Topology changes call
+	# clear_cache(), which additionally invalidates native kernels.
+	cache.clear()
+	cache_hits = 0
 
 
 func set_native_enabled(enabled: bool) -> void:

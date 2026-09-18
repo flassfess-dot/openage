@@ -1504,3 +1504,9 @@ ext_unit_id.
 - На `gather_economy 2×500 / 400×400 / 520+240` fixed p50/p95/max составил `44,672 / 49,930 / 56,688` мс против `50,903 / 56,580 / 64,606` в E6-018; sample wall `12,30 → 10,76` с. Spatial p95 `3,452 → 2,124`, empty capturable `1,137 → 0,006`, formation `1,898 → 0,001`, death/purge `0,363/0,374 → 0,005/0,005` мс.
 - Hash `c4244f12…bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carriers совпали. Fog/visibility/diplomacy, path/local/stuck, gather/return/naval economy, formation, death/combat, replay/snapshot/save и spatial lifecycle impact gates проходят.
 - Двухсторонний hard deadline `50` мс выполнен; comfort `35` и E6 в целом ещё открыты. Следующая операция — mixed 4/8×500 и отдельный visible render профиль, затем выбор следующего владельца по росту метрик.
+
+### Прогресс (2026-09-18, E6-020 — 4/8-player economy stress)
+
+- 4×500 выявил сверхлинейный conquest scan. Для 3+ команд один presence snapshot заменил повтор `players × entities`; rule-only resource/technology context больше не строится для conquest. Fixed p95 `109,094 → 100,824` мс, victory `4,459 → 2,093`, wall `23,10 → 21,72` с с тем же hash и экономикой.
+- 8×500 обнаружил единичный fixed max `2,535` с: synchronized global repath удалял revisioned native masks вместе с route results. Новый `clear_route_cache()` сохраняет masks; полный clear остался у реального topology revision. Fixed max `2,535 с → 243,568 мс`, aggregate path max `2,285 с → 3,562 мс`, p95 `216,223 → 205,223` мс, wall `49,06 → 45,14` с; hash `125b50…6f7b` и 47 257 gather / 3 939 deposits совпали.
+- Повтор 2×500 сохранил hash и mean `44,875` мс; p95 `50,159` подтверждает границу без резерва. Следующая задача — добавить реалистичный `mixed_match` для 2/4/8×500 и отдельно visible render subset; all-active economy остаётся stress, а не моделью обычного экрана.

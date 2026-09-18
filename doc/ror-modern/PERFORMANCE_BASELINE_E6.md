@@ -393,3 +393,21 @@ E6-019 не меняет игровые правила. Захватываемы
 | runtime events p95 | 2,823 мс | 1,603 мс |
 
 Canonical hash остался `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`; также совпали 11 671 gather, 988 deposits, food `5060/5000` и 693 carriers. Deadline фиксированного тика `p95 ≤ 50 мс` впервые выполнен на полном двухстороннем экономическом workload, но это не закрывает E6: comfort gate `≤ 35 мс`, mixed 4/8×500, all-active stress и visible CPU/GPU/render gates остаются открытыми. Следующая операция — повторить масштабируемый mixed профиль для 4 и 8 игроков, определить рост по subsystem и только затем выбирать group corridor/flow-field, sparse cadence или очередной узкий native kernel.
+
+## 24. E6-020 — multi-player conquest и bounded stuck-repath
+
+Первый масштабный повтор `gather_economy` показал почти линейный рост основных систем, но две отдельные проблемы. При 4+ командах conquest дважды выполнял `O(players × entities)` поиск живых участников, а обычному conquest каждый такт без необходимости готовились resource/technology maps. При 8×500 синхронная волна stuck recovery восемь раз вызывала глобальный `clear_cache()`: вместе с маршрутами удалялись неизменившиеся native walkability masks 400×400, и один такт получил path burst 2,285 с.
+
+Для 3+ команд теперь строится один deterministic presence snapshot; двухсторонний early-exit путь оставлен прежним. Resource/technology context создаётся только для rule `scenario`. Stuck recovery очищает только готовые route results; topology/map revision по-прежнему использует полный `clear_cache()` и пересобирает native kernels. Прямой unit test закрепляет эту границу.
+
+| Профиль | До | После | Итог |
+|---|---:|---:|---|
+| 4×500 fixed p95 | 109,094 мс | 100,824 мс | hash `1c41b0…b0ab` совпал |
+| 4×500 victory p95 | 4,459 мс | 2,093 мс | conquest side неизменна |
+| 4×500 sample wall | 23,10 с | 21,72 с | 23 659 gather / 1 969 deposits |
+| 8×500 fixed p95 | 216,223 мс | 205,223 мс | hash `125b50…6f7b` совпал |
+| 8×500 fixed max | 2 534,818 мс | 243,568 мс | runaway устранён |
+| 8×500 aggregate path max | 2 285,171 мс | 3,562 мс | mask rebuild cascade устранён |
+| 8×500 sample wall | 49,06 с | 45,14 с | 47 257 gather / 3 939 deposits |
+
+Двухсторонний контроль сохранил hash `c4244f12…bcc747` и среднее `44,875` мс; p95 повторного прогона `50,159` мс против `49,930` в E6-019 показывает, что hard deadline пока находится ровно на шумовой границе, а не имеет резерва. All-active economy масштабируется примерно линейно, но 4/8-player значения не являются comfort gate. Следующий обязательный инструмент — воспроизводимый `mixed_match`: фиксированная доля экономики, группового движения, боевого контакта и резерва при полном population 500 на игрока; render-visible subset измеряется отдельно.

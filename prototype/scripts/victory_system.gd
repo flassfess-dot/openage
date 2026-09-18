@@ -63,10 +63,11 @@ func conquest_winner(teams: Array, context: Dictionary) -> int:
 
 func conquest_winners(teams: Array, context: Dictionary) -> Array[int]:
 	var active: Array[int] = []
+	var conquest_presence: Variant = context.get("conquest_presence")
 	for team_value in teams:
 		var team := int(team_value)
-		var has_units: bool = context.get("units", []).any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0)
-		var has_buildings: bool = context.get("buildings", []).any(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)))
+		var has_units: bool = bool(conquest_presence.get(team, false)) if conquest_presence != null else context.get("units", []).any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0)
+		var has_buildings: bool = false if conquest_presence != null else context.get("buildings", []).any(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)))
 		if has_units or has_buildings:
 			active.append(team)
 	if active.is_empty() or int(context.get("participant_count", teams.size())) <= 1:

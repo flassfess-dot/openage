@@ -1852,7 +1852,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		"local_repath":
 			assign_unit_destination(unit, unit["destination"], false)
 		"global_repath":
-			pathfinder.clear_cache()
+			pathfinder.clear_route_cache()
 			assign_unit_destination(unit, unit["destination"], false)
 		"stop":
 			unit["path"] = []
@@ -1901,22 +1901,36 @@ func check_battle_state(player_team: int, enemy_team: int, delta: float = 0.0) -
 	var teams: Array = player_registry.all_teams()
 	if teams.is_empty():
 		teams = [player_team, enemy_team]
-	if victory_system.rules.any(func(rule): return String(rule.get("type", "conquest")) == "conquest"):
+	var has_conquest_rule := victory_system.rules.any(func(rule): return String(rule.get("type", "conquest")) == "conquest")
+	var conquest_presence: Variant = null
+	if has_conquest_rule and teams.size() >= 3:
+		conquest_presence = {}
+		for unit_value in get_all_units_including_embarked():
+			var unit: Dictionary = unit_value
+			if float(unit.get("hp", 0.0)) > 0.0:
+				conquest_presence[int(unit.get("team", 0))] = true
+		for building_value in buildings:
+			var building: Dictionary = building_value
+			if float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)):
+				conquest_presence[int(building.get("team", 0))] = true
+	if has_conquest_rule:
 		for team_value in teams:
 			var team := int(team_value)
 			if player_registry.status(team) != PlayerRegistry.ACTIVE:
 				continue
-			var has_units := get_all_units_including_embarked().any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0)
-			var has_buildings := buildings.any(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)))
+			var has_units := bool(conquest_presence.get(team, false)) if conquest_presence != null else get_all_units_including_embarked().any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0)
+			var has_buildings := false if conquest_presence != null else buildings.any(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)))
 			if not has_units and not has_buildings and player_registry.defeat(team):
 				_emit_domain_event("player_defeated", {"team": team})
 	var resources: Dictionary = {}
 	var technologies: Dictionary = {}
-	for team in teams:
-		resources[team] = {}
-		for resource_id in range(4):
-			resources[team][resource_id] = get_resource_amount(team, resource_id)
-		technologies[team] = technology_system.researched_ids(team)
+	var needs_scenario_rule_state := victory_system.rules.any(func(rule): return String(rule.get("type", "conquest")) == "scenario")
+	if needs_scenario_rule_state:
+		for team in teams:
+			resources[team] = {}
+			for resource_id in range(4):
+				resources[team][resource_id] = get_resource_amount(team, resource_id)
+			technologies[team] = technology_system.researched_ids(team)
 	var victory_context := {
 		"teams": teams,
 		"participant_count": teams.size(),
@@ -1930,6 +1944,8 @@ func check_battle_state(player_team: int, enemy_team: int, delta: float = 0.0) -
 		"technologies": technologies,
 		"relations": _team_relations(),
 	}
+	if conquest_presence != null:
+		victory_context["conquest_presence"] = conquest_presence
 	var scenario_update: Dictionary = scenario_system.update(victory_context)
 	for event_value in scenario_update.get("events", []):
 		var event: Dictionary = event_value
