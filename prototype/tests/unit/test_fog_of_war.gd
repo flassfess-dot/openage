@@ -12,6 +12,7 @@ func _initialize() -> void:
 	test_overlapping_sources_keep_shared_cells_visible()
 	test_simulation_and_render_visibility()
 	test_gaia_visibility_contract()
+	test_native_visibility_cells_match_gdscript()
 
 	if failures.is_empty():
 		print("S-006 fog of war tests passed")
@@ -28,6 +29,24 @@ func test_gaia_visibility_contract() -> void:
 	assert_equal(fog.snapshot(0).size(), 0, "Gaia does not allocate a player fog buffer")
 	var world = SimulationWorld.new(Vector2i(8, 8))
 	assert_true(world.is_entity_visible_to(0, {"team": 1, "pos": Vector2(2.5, 2.5)}), "Gaia perception targets are not rejected by player fog")
+
+
+func test_native_visibility_cells_match_gdscript() -> void:
+	var fog = FogOfWar.new(Vector2i(32, 24))
+	if not fog.uses_native_kernel():
+		return
+	var cases := [
+		[Vector2(0.2, 0.4), 4.0],
+		[Vector2(15.5, 12.5), 6.75],
+		[Vector2(31.8, 23.6), 5.25],
+		[Vector2(9.0, 7.0), 0.0],
+	]
+	for entry in cases:
+		var native_cells: PackedInt32Array = fog._vision_cells(entry[0], entry[1])
+		fog.set_native_enabled(false)
+		var script_cells: PackedInt32Array = fog._vision_cells(entry[0], entry[1])
+		fog.set_native_enabled(true)
+		assert_equal(native_cells, script_cells, "native visibility footprint preserves row-major cells at %s r=%s" % [entry[0], entry[1]])
 
 
 func test_unknown_explored_visible_and_allies() -> void:

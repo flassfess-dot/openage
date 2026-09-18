@@ -45,6 +45,7 @@ func _run_case(options: Dictionary) -> Dictionary:
 	var setup_started := Time.get_ticks_usec()
 	var world = SimulationWorld.new(Vector2i(map_side, map_side))
 	world.pathfinder.set_native_enabled(bool(options["native_pathfinding"]))
+	world.visibility_system.set_native_enabled(bool(options["native_visibility"]))
 	var workload := String(options["workload"])
 	if workload == "gather_economy":
 		var catalog = ResourceCatalog.new()
@@ -213,6 +214,7 @@ func _run_case(options: Dictionary) -> Dictionary:
 		"warmup_ticks": warmup_ticks,
 		"sample_ticks": sample_ticks,
 		"native_pathfinding": world.pathfinder.uses_native_kernel(),
+		"native_visibility": world.visibility_system.uses_native_kernel(),
 		"setup_microseconds": setup_microseconds,
 		"command_phase": command_phase,
 		"sample_wall_microseconds": benchmark_microseconds,
@@ -401,6 +403,7 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 		"warmup_ticks": 2,
 		"sample_ticks": 10,
 		"native_pathfinding": true,
+		"native_visibility": true,
 		"output": "res://qa/performance/e6-area-x4-2p.json",
 	}
 	for argument in arguments:
@@ -412,6 +415,8 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 		if key in ["players", "units_per_player", "map_side", "warmup_ticks", "sample_ticks"]:
 			result[key] = maxi(0, int(value))
 		elif key == "native_pathfinding":
+			result[key] = value.to_lower() not in ["false", "0", "no", "off"]
+		elif key == "native_visibility":
 			result[key] = value.to_lower() not in ["false", "0", "no", "off"]
 		elif key in ["case", "output", "workload"]:
 			result[key] = value

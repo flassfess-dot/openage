@@ -5,6 +5,7 @@
 #include <godot_cpp/godot.hpp>
 
 #include "ror_path_kernel.hpp"
+#include "ror_visibility_kernel.hpp"
 
 using namespace godot;
 
@@ -13,6 +14,7 @@ void initialize_ror_pathfinding(ModuleInitializationLevel level) {
         return;
     }
     GDREGISTER_CLASS(RoRPathKernel);
+    GDREGISTER_CLASS(RoRVisibilityKernel);
 }
 
 void uninitialize_ror_pathfinding(ModuleInitializationLevel level) {

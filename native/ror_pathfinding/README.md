@@ -1,9 +1,10 @@
 # RoR native navigation kernels
 
-This optional GDExtension accelerates the measured dense A* and local-avoidance
-hot loops used by the authoritative GDScript simulation. Terrain/restriction
-rules, endpoint selection, direct-path checks, smoothing, orders, integration,
-stuck recovery, economy, save/load and replay remain in GDScript.
+This optional GDExtension accelerates the measured dense A*, local-avoidance
+and visibility-footprint hot loops used by the authoritative GDScript
+simulation. Terrain/restriction rules, endpoint selection, direct-path checks,
+smoothing, fog ownership/counts, orders, integration, stuck recovery, economy,
+save/load and replay remain in GDScript.
 
 The kernel consumes a revisioned byte mask produced by `RoRPathfinder`, uses
 the same direction order, diagonal corner rule, octile heuristic and stable
@@ -13,6 +14,10 @@ GDScript implementation. The local-movement kernel consumes one immutable
 per-tick snapshot, reproduces stable-ID neighbor order and the existing
 avoidance arithmetic, and returns only a proposed velocity; GDScript still
 owns position integration and every gameplay transition.
+
+`RoRVisibilityKernel` performs only the bounded circle-to-row-major-cell
+geometry. Player/alliance relations, explored/visible state, overlap counts,
+revisioning and presentation remain in the deterministic GDScript fog system.
 
 Build on the development machine from the repository root:
 

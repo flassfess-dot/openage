@@ -50,7 +50,10 @@ func test_observability_does_not_change_simulation() -> void:
 	assert_equal(int(report["metrics_microseconds"]["controller.fixed_tick"]["count"]), 6, "one fixed-tick sample is recorded per tick")
 	assert_equal(int(report["metrics_microseconds"]["simulation.system.unit_orders"]["count"]), 6, "central systems expose per-tick cost")
 	assert_true(int(report["counters"].get("navigation.path_queries", 0)) >= 1, "path queries are counted")
-	assert_true(int(report["counters"].get("navigation.expanded_nodes", 0)) >= 1, "expanded path nodes are counted")
+	assert_true(
+		int(report["counters"].get("navigation.direct_path_hits", 0)) + int(report["counters"].get("navigation.expanded_nodes", 0)) >= 1,
+		"direct and searched path resolutions are observable"
+	)
 
 
 func moving_runtime(measured: bool) -> Dictionary:

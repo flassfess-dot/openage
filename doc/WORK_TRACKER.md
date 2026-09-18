@@ -1449,3 +1449,10 @@ ext_unit_id.
 - Optional extension расширен immutable tick snapshot и нативным spatial hash. Kernel сохраняет stable-ID neighbor order и возвращает только proposed velocity; GDScript владеет интеграцией, arrival/stuck recovery, задачами, экономикой, snapshot/save/replay и fallback.
 - На одинаковом `2×500 / 400×400 / 520+240` task p95 `63,742 → 45,671` мс, unit-orders `75,690 → 62,058`, fixed `109,526 → 95,566`, sample wall `21,96 → 19,70` с. Результат экономики неизменен: 11 671 gather, 988 deposits, food `5060/5000`; live carrier component обновляется узкой синхронизацией.
 - Новый movement hash `c4244f12…bcc747` повторён тремя native прогонами и принят как разрешённое UX-улучшение после path/local/stuck/formation/navigation/replay проверок. Следующие owners: оставшаяся gather-stage логика и fog p95 `~22,4` мс; deadline `50` и comfort `35` мс ещё не достигнуты.
+
+### Прогресс (2026-09-18, E6-013 — native visibility footprint)
+
+- Fog stage profile: ensure `1,115`, collect `16,180`, vision geometry `9,460`, reconcile `5,443` мс p95. Integer `(entity_id << 1) | category` source keys вместо строк дали fog `22,246 → 20,722` мс без изменения hash.
+- Новый `RoRVisibilityKernel` считает только circle-to-row-major-cell footprint. Player/alliance ownership, source lifecycle, overlap counts, explored/visible state, revision/snapshot/presentation и fallback остаются в GDScript.
+- На одинаковом `2×500` geometry p95 `9,647 → 0,835` мс, fog `20,722 → 10,987`, fixed `94,530 → 81,784`, sample wall `19,09 → 16,56` с. Hash `c4244f12…bcc747`, gather/deposit/food полностью совпали.
+- Fog/visibility/diplomacy/replay/save-load/observability gate проходит. Следующий measured owner: unit-orders p95 `58,680`, внутри него task `42,959` мс; deadline/comfort остаются открыты.

@@ -16,6 +16,7 @@ add_subdirectory("${GODOT_CPP_PATH}" "${CMAKE_BINARY_DIR}/godot-cpp")
 add_library(ror_pathfinding SHARED
     src/register_types.cpp
     src/ror_path_kernel.cpp
+    src/ror_visibility_kernel.cpp
 )
 
 target_include_directories(ror_pathfinding PRIVATE src)

@@ -180,6 +180,7 @@ func set_simulation_seed(value: int) -> void:
 func set_performance_probe(probe: Variant) -> void:
 	tick_pipeline.set_performance_probe(probe)
 	pathfinder.set_performance_probe(probe)
+	visibility_system.set_performance_probe(probe)
 
 func set_gamespec(data: Dictionary) -> void:
 	gamespec_data = data

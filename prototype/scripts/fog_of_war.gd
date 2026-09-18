@@ -11,10 +11,20 @@ var allies_by_player: Dictionary = {}
 var vision_sources: Dictionary = {}
 var visibility_topology_dirty := true
 var revision: int = 0
+var performance_probe: Variant = null
+var vision_cells_microseconds: int = 0
+var regenerated_sources: int = 0
+var native_enabled: bool = true
+var native_available: bool = false
+var native_kernel: Variant = null
 
 
 func _init(world_size: Vector2i = Vector2i.ONE) -> void:
 	map_size = Vector2i(maxi(1, world_size.x), maxi(1, world_size.y))
+	native_available = ClassDB.class_exists("RoRVisibilityKernel")
+	if native_available:
+		native_kernel = ClassDB.instantiate("RoRVisibilityKernel")
+		native_kernel.configure(map_size.x, map_size.y)
 
 
 func reset() -> void:
@@ -24,6 +34,18 @@ func reset() -> void:
 	vision_sources.clear()
 	visibility_topology_dirty = true
 	revision += 1
+
+
+func set_performance_probe(probe: Variant) -> void:
+	performance_probe = probe
+
+
+func set_native_enabled(enabled: bool) -> void:
+	native_enabled = enabled
+
+
+func uses_native_kernel() -> bool:
+	return native_enabled and native_available and native_kernel != null
 
 
 func ensure_player(player_id: int) -> void:
@@ -70,14 +92,25 @@ func are_allied(observer_player: int, owner_player: int) -> bool:
 
 
 func update(units: Array, buildings: Array, movement_bucket_count: int = 1, movement_bucket_index: int = 0) -> void:
+	var phase_started := Time.get_ticks_usec() if performance_probe != null else 0
+	vision_cells_microseconds = 0
+	regenerated_sources = 0
 	for entity in units:
 		ensure_player(int(entity.get("team", 0)))
 	for entity in buildings:
 		ensure_player(int(entity.get("team", 0)))
+	if performance_probe != null:
+		performance_probe.observe_microseconds("simulation.fog.ensure_players", Time.get_ticks_usec() - phase_started)
+		phase_started = Time.get_ticks_usec()
 
 	var current_sources: Dictionary = {}
-	_collect_sources(units, "unit", current_sources, movement_bucket_count, movement_bucket_index)
-	_collect_sources(buildings, "building", current_sources, movement_bucket_count, movement_bucket_index)
+	_collect_sources(units, 0, current_sources, movement_bucket_count, movement_bucket_index)
+	_collect_sources(buildings, 1, current_sources, movement_bucket_count, movement_bucket_index)
+	if performance_probe != null:
+		performance_probe.observe_microseconds("simulation.fog.collect_sources", Time.get_ticks_usec() - phase_started)
+		performance_probe.observe_microseconds("simulation.fog.vision_cells", vision_cells_microseconds)
+		performance_probe.increment("fog.regenerated_sources", regenerated_sources)
+		phase_started = Time.get_ticks_usec()
 	var changed := false
 	if visibility_topology_dirty:
 		changed = _rebuild_visibility(current_sources)
@@ -97,6 +130,8 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 	visibility_topology_dirty = false
 	if changed:
 		revision += 1
+	if performance_probe != null:
+		performance_probe.observe_microseconds("simulation.fog.reconcile", Time.get_ticks_usec() - phase_started)
 
 
 func state_at_cell(player_id: int, cell: Vector2i) -> int:
@@ -127,7 +162,7 @@ func snapshot(player_id: int) -> PackedByteArray:
 	return PackedByteArray(states_by_player[player_id]).duplicate()
 
 
-func _collect_sources(entities: Array, category: String, result: Dictionary, movement_bucket_count: int, movement_bucket_index: int) -> void:
+func _collect_sources(entities: Array, category_id: int, result: Dictionary, movement_bucket_count: int, movement_bucket_index: int) -> void:
 	for index in range(entities.size()):
 		var entity: Dictionary = entities[index]
 		if float(entity.get("hp", 0.0)) <= 0.0:
@@ -140,7 +175,12 @@ func _collect_sources(entities: Array, category: String, result: Dictionary, mov
 		if source_player <= 0:
 			continue
 		var entity_id := int(entity.get("id", -1))
-		var source_key := "%s:%d" % [category, entity_id if entity_id >= 0 else index]
+		# Runtime entity IDs are global across units and buildings, but retain one
+		# category bit so isolated tests and compatibility fixtures may reuse IDs.
+		# Integer keys avoid formatting and hashing thousands of short Strings on
+		# every visibility tick without changing source identity or update order.
+		var stable_id := entity_id if entity_id >= 0 else index
+		var source_key := (stable_id << 1) | (category_id & 1)
 		var center := Vector2(entity.get("pos", Vector2.ZERO))
 		var previous: Variant = vision_sources.get(source_key)
 		if previous != null and int(previous.get("team", 0)) == source_player and Vector2(previous.get("center", Vector2.ZERO)).is_equal_approx(center) and is_equal_approx(float(previous.get("radius", 0.0)), sight_radius):
@@ -157,15 +197,22 @@ func _collect_sources(entities: Array, category: String, result: Dictionary, mov
 		if movement_refresh_deferred:
 			result[source_key] = previous
 			continue
+		var vision_started := Time.get_ticks_usec() if performance_probe != null else 0
+		var cells := _vision_cells(center, sight_radius)
+		if performance_probe != null:
+			vision_cells_microseconds += Time.get_ticks_usec() - vision_started
+			regenerated_sources += 1
 		result[source_key] = {
 			"team": source_player,
 			"center": center,
 			"radius": sight_radius,
-			"cells": _vision_cells(center, sight_radius),
+			"cells": cells,
 		}
 
 
 func _vision_cells(center: Vector2, radius: float) -> PackedInt32Array:
+	if uses_native_kernel():
+		return native_kernel.vision_cells(center, radius)
 	var result := PackedInt32Array()
 	var minimum := Vector2i(maxi(0, floori(center.x - radius)), maxi(0, floori(center.y - radius)))
 	var maximum := Vector2i(mini(map_size.x - 1, floori(center.x + radius)), mini(map_size.y - 1, floori(center.y + radius)))

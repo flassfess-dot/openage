@@ -236,3 +236,25 @@ Stage-профиль того же workload разделил `simulation.unit_or
 | fog p95 | 22,314 мс | 22,419 мс |
 
 Оба прогона дали 11 671 gather, 988 deposits и food `5060/5000`; три native прогона повторили canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`. Он отличается от GDScript baseline из-за допустимого нового floating-point пути movement, а не из-за правил экономики. Принятие прошло через kernel parity, gather/return/snapshot, local movement, stuck recovery, formation interaction/shared motion, navigation stress и deterministic replay tests. Live component facade после gather/deposit сохраняется узкой carrier-only синхронизацией. Comfort gate всё ещё открыт: фиксированный p95 `95,6` мс выше simulation deadline `50` и цели `35` мс. Следующие владельцы — remaining gather-stage work и fog; snapshot duplication для нескольких movement domains отдельно измеряется на naval/mixed workload до дальнейшего расширения C++.
+
+## 17. E6-013 — нативная геометрия vision footprint без переноса fog authority
+
+Внутренний stage-профиль fog на текущем `2×500` показал p95: ensure players `1,115` мс, collect sources `16,180`, внутри него `_vision_cells` `9,460`, reconcile overlap counts `5,443`. Первый безопасный шаг заменил строковые `unit:ID/building:ID` ключи на `(ID << 1) | category`; fog p95 снизился `22,246 → 20,722` мс, canonical state не изменился.
+
+После этого добавлен отдельный `RoRVisibilityKernel`. Его единственный gameplay-вызов получает map size, center и radius и возвращает тот же отсортированный row-major `PackedInt32Array`. Вся семантика игрока/союза, source lifecycle, overlap counts, UNKNOWN/EXPLORED/VISIBLE, revision, snapshot и terrain-conforming presentation остаётся в `RoRFogOfWar`. Отсутствующая DLL или `--native-visibility=false` использует исходную GDScript-геометрию.
+
+Последовательный A/B после integer-key шага, `gather_economy 2×500 / 400×400 / 520+240`:
+
+| Метрика | GDScript geometry | Native visibility kernel |
+|---|---:|---:|
+| sample wall | 19,09 с | 16,56 с |
+| fixed tick p50 / p95 | 77,972 / 94,530 мс | 67,344 / 81,784 мс |
+| world advance p95 | 88,044 мс | 76,172 мс |
+| fog p50 / p95 | 17,172 / 20,722 мс | 9,837 / 10,987 мс |
+| collect sources p95 | 15,027 мс | 5,769 мс |
+| vision geometry p95 | 9,647 мс | 0,835 мс |
+| reconcile p95 | 5,126 мс | 4,523 мс |
+| unit orders p95 | 61,325 мс | 58,680 мс |
+| unit task p95 | 44,535 мс | 42,959 мс |
+
+Hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits и food `5060/5000` совпали. Exact native/GDScript footprints проверены для центра, границ, fractional и zero radius; fog/visibility, diplomacy, replay и save/load проходят. Observability test теперь корректно принимает как A* expanded nodes, так и direct-path resolution: открытый прямой маршрут не обязан искусственно запускать A*. Deadline `50` и comfort `35` мс ещё открыты; следующий измеренный owner — GDScript unit task/gather validation, а не дальнейшее расширение fog kernel без нового профиля.

@@ -26,6 +26,18 @@ func advance(context: Dictionary = {}) -> void:
 	movement_refresh_bucket = posmod(movement_refresh_bucket + 1, MOVEMENT_REFRESH_BUCKETS)
 
 
+func set_performance_probe(probe: Variant) -> void:
+	fog.set_performance_probe(probe)
+
+
+func set_native_enabled(enabled: bool) -> void:
+	fog.set_native_enabled(enabled)
+
+
+func uses_native_kernel() -> bool:
+	return fog.uses_native_kernel()
+
+
 func reset() -> void:
 	fog.reset()
 	movement_refresh_bucket = 0
