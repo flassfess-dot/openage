@@ -56,7 +56,11 @@ func set_viewport_size(viewport_size: Vector2) -> void:
 
 
 func set_snapshot(snapshot: Dictionary) -> void:
-	latest_snapshot = snapshot.duplicate(true)
+	# Presentation snapshots are immutable after publication and replaced as a
+	# whole by the main scene. Keeping the published reference avoids a deep copy
+	# of fog cells and every overview entity on every simulation tick while the
+	# menu is closed.
+	latest_snapshot = snapshot
 	if active_mode == MODE_DIPLOMACY:
 		_rebuild_diplomacy_rows()
 

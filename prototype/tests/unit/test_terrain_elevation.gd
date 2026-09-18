@@ -11,6 +11,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_original_slope_mapping()
 	test_hill_and_interpolated_height()
+	test_maximum_elevation_cache_tracks_lowering()
 	test_build_restrictions()
 	test_entity_elevation_propagation()
 
@@ -81,6 +82,16 @@ func test_hill_and_interpolated_height() -> void:
 		var screen := elevation.world_to_screen(world, 2.0, Vector2(320, 180))
 		var recovered := elevation.screen_to_world(screen, 2.0, Vector2(320, 180))
 		assert_true(recovered.distance_to(world) < 0.001, "elevated screen projection round-trips at %s" % world)
+
+
+func test_maximum_elevation_cache_tracks_lowering() -> void:
+	var elevation = TerrainElevation.new(Vector2i(1, 1))
+	elevation.clear(3)
+	assert_equal(elevation.maximum_vertex_level, 3, "uniform elevation seeds the cached maximum")
+	for vertex in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
+		elevation.set_vertex(vertex, 0)
+	elevation.screen_to_world(Vector2.ZERO, 1.0, Vector2.ZERO)
+	assert_equal(elevation.maximum_vertex_level, 0, "lowering the final maximum lazily refreshes the cache")
 
 
 func test_build_restrictions() -> void:

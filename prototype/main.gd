@@ -77,6 +77,9 @@ var player_control_state := PlayerControlState.new(PLAYER_TEAM)
 
 var units: Array = []
 var resource_nodes: Array = []
+var overview_units: Array = []
+var overview_resource_nodes: Array = []
+var overview_buildings: Array = []
 var presentation_snapshot: Dictionary = {}
 var formation := "RECTANGLE"
 var pending_build_kind := ""
@@ -119,6 +122,16 @@ var scenario_overlay: ScenarioOverlay
 var terrain_canvas: TerrainCanvas
 var cached_fog_revision: int = -1
 var cached_fog_runs: Array = []
+var cached_world_fog_mesh: ArrayMesh
+var cached_world_fog_revision: int = -1
+var cached_world_fog_bounds := Rect2i()
+var cached_world_fog_zoom := -1.0
+var cached_world_fog_terrain_revision: int = -1
+var cached_minimap_mesh: ArrayMesh
+var cached_minimap_mesh_tick: int = -1
+var cached_minimap_mesh_fog_revision: int = -1
+var cached_minimap_mesh_rectangle := Rect2()
+var cached_terrain_resource_signature: int = -1
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
@@ -295,11 +308,24 @@ func reset_game() -> void:
 	presentation_effect_timeline.reset()
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
+	cached_world_fog_mesh = null
+	cached_world_fog_revision = -1
+	cached_world_fog_bounds = Rect2i()
+	cached_world_fog_zoom = -1.0
+	cached_world_fog_terrain_revision = -1
+	cached_minimap_mesh = null
+	cached_minimap_mesh_tick = -1
+	cached_minimap_mesh_fog_revision = -1
+	cached_minimap_mesh_rectangle = Rect2()
+	cached_terrain_resource_signature = -1
 	command_marker_presentation.reset()
 	interaction_highlight_id = -1
 	interaction_cursor_semantic = "default"
 	units.clear()
 	resource_nodes.clear()
+	overview_units.clear()
+	overview_resource_nodes.clear()
+	overview_buildings.clear()
 
 	formation = "RECTANGLE"
 	pending_build_kind = ""
@@ -798,7 +824,7 @@ func assign_control_group(group_number: int) -> void:
 
 func recall_control_group(group_number: int, additive: bool) -> void:
 	var available_ids: Array[int] = []
-	for unit in units:
+	for unit in overview_units:
 		if unit["team"] == PLAYER_TEAM and unit["hp"] > 0.0:
 			available_ids.append(int(unit["id"]))
 	var result: Dictionary = control_groups.recall(group_number, available_ids, _selection_ids(selected_units()), additive)
@@ -1075,10 +1101,10 @@ func selected_entities() -> Array:
 
 func selectable_player_ids() -> Array[int]:
 	var ids: Array[int] = []
-	for unit in units:
+	for unit in overview_units:
 		if int(unit.get("team", 0)) == PLAYER_TEAM and float(unit.get("hp", 0.0)) > 0.0:
 			ids.append(int(unit["id"]))
-	for building in presentation_snapshot.get("buildings", []):
+	for building in overview_buildings:
 		if int(building.get("team", 0)) == PLAYER_TEAM and float(building.get("hp", 0.0)) > 0.0:
 			ids.append(int(building["id"]))
 	ids.sort()
@@ -1218,13 +1244,34 @@ func refresh_hud_model() -> void:
 func sync_world_state() -> void:
 	if simulation_world == null:
 		return
-	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, game_controller.tick_index if game_controller != null else 0, PLAYER_TEAM, {"include_navigation": false, "include_build_sites": false})
+	var snapshot_bounds := visible_tile_bounds(8)
+	var selected_ids := player_control_state.selected_ids()
+	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, game_controller.tick_index if game_controller != null else 0, PLAYER_TEAM, {
+		"include_navigation": false,
+		"include_build_sites": false,
+		"include_overview": true,
+		"entity_bounds": Rect2(Vector2(snapshot_bounds.position), Vector2(snapshot_bounds.size)),
+		"always_include_entity_ids": selected_ids,
+		"command_option_entity_ids": selected_ids,
+	})
 	presentation_snapshot["markers"] = match_definition.get("presentation_markers", [])
 	var visible_bounds := visible_tile_bounds()
 	var environment_bounds := Rect2i(visible_bounds.position - Vector2i(2, 2), visible_bounds.size + Vector2i(4, 4))
 	presentation_snapshot["environment"] = environment_presentation_field.query(environment_bounds)
 	units = presentation_snapshot.get("units", [])
 	resource_nodes = presentation_snapshot.get("resources", [])
+	var terrain_resource_signature := 17
+	for resource in resource_nodes:
+		if String(resource.get("kind", "")) == "tree" and int(resource.get("amount", 0)) > 0:
+			terrain_resource_signature = terrain_resource_signature * 31 + int(resource.get("id", -1))
+	if terrain_resource_signature != cached_terrain_resource_signature:
+		cached_terrain_resource_signature = terrain_resource_signature
+		if terrain_canvas != null:
+			terrain_canvas.invalidate_content()
+	var overview: Dictionary = presentation_snapshot.get("overview", {})
+	overview_units = overview.get("units", units)
+	overview_resource_nodes = overview.get("resources", resource_nodes)
+	overview_buildings = overview.get("buildings", presentation_snapshot.get("buildings", []))
 	player_control_state.prune(selectable_player_ids())
 	battle_over = bool(presentation_snapshot.get("battle_over", false))
 	refresh_hud_model()
@@ -1388,14 +1435,63 @@ func draw_fog_overlay() -> void:
 	var cells: Variant = presentation_snapshot.get("fog", {}).get("cells", [])
 	if cells.size() < map_size.x * map_size.y:
 		return
+	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
+	var terrain_revision := int(simulation_world.terrain_revision) if simulation_world != null else -1
+	if cached_world_fog_mesh == null or cached_world_fog_revision != fog_revision or not _tile_bounds_contains(cached_world_fog_bounds, bounds) or not is_equal_approx(cached_world_fog_zoom, view_zoom) or cached_world_fog_terrain_revision != terrain_revision:
+		cached_world_fog_bounds = _expanded_tile_bounds(bounds, 12)
+		cached_world_fog_mesh = _build_world_fog_mesh(cached_world_fog_bounds, cells)
+		cached_world_fog_revision = fog_revision
+		cached_world_fog_zoom = view_zoom
+		cached_world_fog_terrain_revision = terrain_revision
+	if cached_world_fog_mesh != null:
+		draw_set_transform(PixelScaling.snap_screen(view_offset))
+		draw_mesh(cached_world_fog_mesh, null)
+		draw_set_transform(Vector2.ZERO)
+
+
+func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
+	var vertices := PackedVector3Array()
+	var colors := PackedColorArray()
 	for y in range(bounds.position.y, bounds.end.y):
 		for x in range(bounds.position.x, bounds.end.x):
 			var state := int(cells[y * map_size.x + x])
 			if state == FogOfWar.VISIBLE:
 				continue
 			var color := FogPresentation.color_for_state(state)
-			for triangle in FogPresentation.terrain_conforming_cell_triangles(Vector2i(x, y), Callable(self, "world_to_screen")):
-				draw_colored_polygon(triangle, color)
+			for triangle in FogPresentation.terrain_conforming_cell_triangles(Vector2i(x, y), Callable(self, "_world_to_fog_mesh")):
+				for point in triangle:
+					vertices.append(Vector3(point.x, point.y, 0.0))
+					colors.append(color)
+	if vertices.is_empty():
+		return null
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colors
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+func _world_to_fog_mesh(world: Vector2) -> Vector2:
+	if simulation_world != null:
+		return simulation_world.terrain_elevation.world_to_screen(world, view_zoom, Vector2.ZERO)
+	return Coordinates.world_to_screen(world, view_zoom, Vector2.ZERO)
+
+
+func _expanded_tile_bounds(bounds: Rect2i, margin: int) -> Rect2i:
+	var start := Vector2i(maxi(0, bounds.position.x - margin), maxi(0, bounds.position.y - margin))
+	var finish := Vector2i(mini(map_size.x, bounds.end.x + margin), mini(map_size.y, bounds.end.y + margin))
+	return Rect2i(start, finish - start)
+
+
+func _tile_bounds_contains(outer: Rect2i, inner: Rect2i) -> bool:
+	return (
+		inner.position.x >= outer.position.x
+		and inner.position.y >= outer.position.y
+		and inner.end.x <= outer.end.x
+		and inner.end.y <= outer.end.y
+	)
 
 
 func draw_map_edge_guard() -> void:
@@ -1678,29 +1774,16 @@ func draw_minimap(rectangle: Rect2) -> void:
 	draw_colored_polygon(aperture, Color.BLACK)
 	var map_points := MinimapProjection.map_polygon(map_size, center, scale)
 	draw_colored_polygon(map_points, Color("3e7a35"))
-	for run_value in fog_runs():
-		var run: Dictionary = run_value
-		var y := int(run["y"])
-		var x_from := int(run["x_from"])
-		var x_to := int(run["x_to"])
-		var fog_points := PackedVector2Array([
-			minimap_position(Vector2(x_from, y), center, scale),
-			minimap_position(Vector2(x_to, y), center, scale),
-			minimap_position(Vector2(x_to, y + 1), center, scale),
-			minimap_position(Vector2(x_from, y + 1), center, scale),
-		])
-		var fog_color := FogPresentation.color_for_state(int(run["state"]), true)
-		draw_colored_polygon(fog_points, fog_color)
+	var snapshot_tick := int(presentation_snapshot.get("tick", -1))
+	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
+	if cached_minimap_mesh == null or cached_minimap_mesh_tick != snapshot_tick or cached_minimap_mesh_fog_revision != fog_revision or cached_minimap_mesh_rectangle != rectangle:
+		cached_minimap_mesh = _build_minimap_mesh(center, scale)
+		cached_minimap_mesh_tick = snapshot_tick
+		cached_minimap_mesh_fog_revision = fog_revision
+		cached_minimap_mesh_rectangle = rectangle
+	if cached_minimap_mesh != null:
+		draw_mesh(cached_minimap_mesh, null)
 	draw_polyline(PackedVector2Array([map_points[0], map_points[1], map_points[2], map_points[3], map_points[0]]), Color("d2bd7d"), 1.0)
-	for resource in resource_nodes:
-		if resource["amount"] > 0:
-			draw_circle(minimap_position(resource["pos"], center, scale), 1.5, Color("18591d"))
-	for unit in units:
-		if unit["hp"] > 0.0:
-			draw_circle(minimap_position(unit["pos"], center, scale), 2.0, Color("40b9ff") if unit["team"] == PLAYER_TEAM else Color("e33d31"))
-	for building in presentation_snapshot.get("buildings", []):
-		if building["hp"] > 0.0:
-			draw_circle(minimap_position(building["pos"], center, scale), 3.0, Color("f0d16d") if building["team"] == PLAYER_TEAM else Color("e33d31"))
 	var camera_world := PackedVector2Array([
 		Coordinates.clamp_world(screen_to_world(Vector2(0, HUD_TOP)), map_size),
 		Coordinates.clamp_world(screen_to_world(Vector2(get_viewport_rect().size.x, HUD_TOP)), map_size),
@@ -1713,6 +1796,60 @@ func draw_minimap(rectangle: Rect2) -> void:
 	if camera_points.size() >= 3:
 		camera_points.append(camera_points[0])
 		draw_polyline(camera_points, Color("f5e28d"), 1.0, true)
+
+
+func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
+	var vertices := PackedVector3Array()
+	var colors := PackedColorArray()
+	for run_value in fog_runs():
+		var run: Dictionary = run_value
+		var y := int(run["y"])
+		var x_from := int(run["x_from"])
+		var x_to := int(run["x_to"])
+		var points := PackedVector2Array([
+			minimap_position(Vector2(x_from, y), center, scale),
+			minimap_position(Vector2(x_to, y), center, scale),
+			minimap_position(Vector2(x_to, y + 1), center, scale),
+			minimap_position(Vector2(x_from, y + 1), center, scale),
+		])
+		_append_colored_quad(vertices, colors, points, FogPresentation.color_for_state(int(run["state"]), true))
+	for resource in overview_resource_nodes:
+		if resource["amount"] > 0:
+			_append_colored_circle(vertices, colors, minimap_position(resource["pos"], center, scale), 1.5, Color("18591d"))
+	for unit in overview_units:
+		if unit["hp"] > 0.0:
+			_append_colored_circle(vertices, colors, minimap_position(unit["pos"], center, scale), 2.0, Color("40b9ff") if unit["team"] == PLAYER_TEAM else Color("e33d31"))
+	for building in overview_buildings:
+		if building["hp"] > 0.0:
+			_append_colored_circle(vertices, colors, minimap_position(building["pos"], center, scale), 3.0, Color("f0d16d") if building["team"] == PLAYER_TEAM else Color("e33d31"))
+	if vertices.is_empty():
+		return null
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colors
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+func _append_colored_quad(vertices: PackedVector3Array, colors: PackedColorArray, points: PackedVector2Array, color: Color) -> void:
+	if points.size() < 4:
+		return
+	for index in [0, 1, 2, 0, 2, 3]:
+		var point := points[index]
+		vertices.append(Vector3(point.x, point.y, 0.0))
+		colors.append(color)
+
+
+func _append_colored_circle(vertices: PackedVector3Array, colors: PackedColorArray, center: Vector2, radius: float, color: Color) -> void:
+	const SEGMENTS := 8
+	for index in range(SEGMENTS):
+		var first_angle := TAU * float(index) / float(SEGMENTS)
+		var second_angle := TAU * float(index + 1) / float(SEGMENTS)
+		for point in [center, center + Vector2(cos(first_angle), sin(first_angle)) * radius, center + Vector2(cos(second_angle), sin(second_angle)) * radius]:
+			vertices.append(Vector3(point.x, point.y, 0.0))
+			colors.append(color)
 
 func minimap_position(world: Vector2, center: Vector2, scale: float) -> Vector2:
 	return MinimapProjection.world_to_minimap(world, center, scale)

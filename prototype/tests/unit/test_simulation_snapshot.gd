@@ -81,6 +81,22 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	assert_true(not snapshot["navigation"].get("frontier", {}).get("land", []).is_empty(), "presentation snapshot exposes compact reachable fog-frontier knowledge")
 	assert_true(snapshot["navigation"]["frontier"]["land"].all(func(point): return point in snapshot["navigation"]["land"]), "every land frontier point is part of known reachable navigation")
 	assert_true(snapshot["navigation"]["reachable_frontier"]["land"].all(func(point): return point in snapshot["navigation"]["reachable"]["land"]), "reachable frontier never crosses the observer's land component")
+	var bounded := SimulationSnapshot.presentation(world, 7, 1, {
+		"include_navigation": false,
+		"include_build_sites": false,
+		"include_overview": true,
+		"entity_bounds": Rect2(Vector2(3.0, 3.0), Vector2(2.0, 2.0)),
+		"command_option_entity_ids": [],
+	})
+	assert_equal(bounded["units"].map(func(unit): return int(unit["id"])), [int(player["id"])], "bounded presentation keeps only detailed viewport units")
+	assert_equal(bounded["overview"]["units"].size(), 2, "bounded presentation retains compact minimap knowledge")
+	var selected_outside := SimulationSnapshot.presentation(world, 7, 1, {
+		"include_navigation": false,
+		"include_build_sites": false,
+		"entity_bounds": Rect2(Vector2(3.0, 3.0), Vector2(2.0, 2.0)),
+		"always_include_entity_ids": [int(visible_enemy["id"])],
+	})
+	assert_equal(selected_outside["units"].size(), 2, "selected entity remains detailed outside viewport bounds")
 	snapshot["player_state"]["food"] = 0
 	snapshot["fog"]["cells"][0] = 99
 	assert_equal(world.get_food(), 180, "player economy snapshot is detached")

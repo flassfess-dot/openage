@@ -429,3 +429,24 @@ Canonical hash остался `c4244f120085360a47d0b53aaf786f4396e48ad135c73190f
 Внутри `8×500` p95 task равен `75,654` мс: gather `37,999`, attack `26,195`, move `14,514`; formation cohesion `17,091`, movement integration `15,591`, spatial update `6,614`, victory `3,828` мс. Рост близок к линейному, path runaway отсутствует. Это опровергает гипотезу о текущем доминировании A* и подтверждает другой владелец: вся активная логика, animation state и fog обновляются на полной частоте для каждого участника независимо от видимости и временной чувствительности.
 
 `50 мс` остаётся deadline одного fixed tick, а не нормой кадра: `2×500` находится на его шумовой границе и не выполняет comfort `35 мс`/30% reserve. `4×500` и `8×500` являются масштабными simulation gates, которым потребуется multi-rate/event-driven обслуживание нечувствительных систем и, после измерения плотных циклов, точечный native batch. Следующая обязательная контрольная точка — отдельный visible CPU/GPU/render workload: камера влияет только на presentation и частоту допустимых неавторитетных обновлений, но не на canonical simulation, команды, бой, экономику или replay.
+
+## 26. E6-022 — visible CPU/GPU/render baseline
+
+Реальный presentation workload запускает `main.tscn` в `SubViewport` 800×600 на GPU, создаёт карту `400×400` и полные 500 юнитов на каждую из двух сторон. По 80 юнитов каждой команды размещены в кадре; остальные остаются в авторитетном мире и продолжают входить в fog, population, spatial, victory и canonical lifecycle. Измеряются sync/presentation, построение drawables, завершённый GPU frame, pan, draw calls, objects/primitives и память.
+
+| Метрика | Исходный профиль | E6-022 | Изменение |
+|---|---:|---:|---:|
+| detailed snapshot units | 580 | 160 | `3,6×` меньше |
+| render drawables / экранных | 1179 / 325 | 331 / 325 | невидимое исключено только из presentation |
+| sync/snapshot p95 | 387,264 мс | 30,914 мс | `12,5×` |
+| drawable build p95 | 42,364 мс | 10,604 мс | `4,0×` |
+| fixed-camera frame p95 | 369,674 мс | 26,816 мс | `13,8×` |
+| pan frame p95 | не измерялось | 28,561 мс | отдельный camera gate |
+| draw calls p95 | 5516 | 340 | `16,2×` |
+| static / video memory | — | 606,4 / 124,9 МБ | RTX 3080 Ti, i7-7700 |
+
+Основные изменения: один atlas/mesh для видимого terrain и border layers; один цветной mesh для elevation-aware fog; один minimap mesh для fog runs и compact markers; camera-bounded detailed snapshot с always-detailed selection; compact overview всех известных сущностей для миникарты/control groups; кэш максимальной высоты карты. Последний устранил неожиданную постоянную стоимость: `TerrainElevation.screen_to_world()` четыре раза сканировал все 160 801 vertex values при каждом camera-bounds query. Теперь maximum поддерживается при `set_vertex`, а редкое понижение максимума вызывает один lazy refresh.
+
+Terrain и fog meshes строятся в локальных координатах с overscan. Обычный pan меняет только pixel-snapped transform; повторная геометрия требуется после выхода камеры из запаса, изменения zoom, terrain/fog revision или forest-floor content. Контрольный 1280×720 GPU capture подтвердил отсутствие atlas seams, цветной полосы map edge и рассогласования fog/terrain; targeted terrain/fog/viewport/render/snapshot/HUD и large-campaign gates проходят.
+
+Изолированный visible gate теперь укладывается в ранее заданный comfort `35 мс`, но не выполняет 60-FPS `16,67 мс` и не включает стоимость активного simulation tick в тот же кадр. Внутри sync чистый presentation snapshot p95 около `29,5` мс; вариант без overview остаётся около `24,4` мс, значит основной следующий владелец — глубокая полная projection 160 detailed entities, затем построение 331 drawables (`~10,6` мс). Следующий пакет должен ввести специализированный immutable render projection/retained drawable cache и измерить совместный active tick+render frame, сохранив selected/HUD privacy, fog и canonical isolation.

@@ -30,6 +30,8 @@ const SLOPE_BY_CORNER_MASK := {
 var size: Vector2i
 var vertex_levels: Dictionary = {}
 var nonzero_vertex_count: int = 0
+var maximum_vertex_level: int = 0
+var maximum_vertex_level_dirty: bool = false
 
 
 func _init(map_size: Vector2i = Vector2i.ONE) -> void:
@@ -41,6 +43,8 @@ func clear(level: int = 0) -> void:
 	vertex_levels.clear()
 	var safe_level := maxi(0, level)
 	nonzero_vertex_count = (size.x + 1) * (size.y + 1) if safe_level > 0 else 0
+	maximum_vertex_level = safe_level
+	maximum_vertex_level_dirty = false
 	for y in range(size.y + 1):
 		for x in range(size.x + 1):
 			vertex_levels[Vector2i(x, y)] = safe_level
@@ -56,6 +60,11 @@ func set_vertex(vertex: Vector2i, level: int) -> void:
 	elif previous > 0 and next <= 0:
 		nonzero_vertex_count -= 1
 	vertex_levels[vertex] = next
+	if next > maximum_vertex_level:
+		maximum_vertex_level = next
+		maximum_vertex_level_dirty = false
+	elif previous == maximum_vertex_level and next < previous:
+		maximum_vertex_level_dirty = true
 
 
 func vertex_elevation(vertex: Vector2i) -> int:
@@ -120,9 +129,7 @@ func world_to_screen(world: Vector2, zoom: float, view_offset: Vector2) -> Vecto
 
 func screen_to_world(screen: Vector2, zoom: float, view_offset: Vector2) -> Vector2:
 	var flat_world := Coordinates.screen_to_world(screen, zoom, view_offset)
-	var maximum_level := 0
-	for level_value in vertex_levels.values():
-		maximum_level = maxi(maximum_level, int(level_value))
+	var maximum_level := _maximum_level()
 	if maximum_level <= 0:
 		return flat_world
 	var low := 0.0
@@ -136,6 +143,16 @@ func screen_to_world(screen: Vector2, zoom: float, view_offset: Vector2) -> Vect
 		else:
 			high = middle
 	return flat_world + Vector2((low + high) * 0.5, (low + high) * 0.5)
+
+
+func _maximum_level() -> int:
+	if not maximum_vertex_level_dirty:
+		return maximum_vertex_level
+	maximum_vertex_level = 0
+	for level_value in vertex_levels.values():
+		maximum_vertex_level = maxi(maximum_vertex_level, int(level_value))
+	maximum_vertex_level_dirty = false
+	return maximum_vertex_level
 
 
 func terrain_frame(terrain_record: Dictionary, profile: Dictionary, cell: Vector2i, map_seed: int) -> int:

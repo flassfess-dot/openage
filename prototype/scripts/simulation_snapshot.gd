@@ -26,6 +26,14 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var include_projectiles := bool(options.get("include_projectiles", true))
 	var include_scenario := bool(options.get("include_scenario", true))
 	var include_worker_command_options := bool(options.get("include_worker_command_options", true))
+	var include_overview := bool(options.get("include_overview", false))
+	var entity_bounds: Variant = options.get("entity_bounds")
+	var has_entity_bounds: bool = false
+	if entity_bounds is Rect2:
+		has_entity_bounds = (entity_bounds as Rect2).has_area()
+	var always_include_entity_ids: Array = options.get("always_include_entity_ids", [])
+	var command_option_entity_ids: Array = options.get("command_option_entity_ids", [])
+	var restrict_command_options := options.has("command_option_entity_ids")
 	var requested_production_only := bool(options.get("requested_production_only", false))
 	var production_requests: Array = options.get("production_requests", [])
 	var planning_technology_ids: Array = options.get("planning_technology_ids", [])
@@ -45,18 +53,28 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				if bool(option.get("accepted", false)):
 					available_requested_build_site_kinds.append(String(option.get("kind", "")))
 	var units: Array = []
+	var overview_units: Array = []
 	for unit in world.get_units():
 		if observer_team <= 0 or world.is_entity_visible_to(observer_team, unit):
+			if include_overview:
+				overview_units.append(_overview_entity(unit))
+			if has_entity_bounds and not _entity_in_bounds(unit, entity_bounds) and not always_include_entity_ids.has(int(unit.get("id", -1))):
+				continue
 			var presentation_unit := _presentation_entity(unit, observer_team, compact_entities)
-			if observer_team > 0 and int(unit.get("team", 0)) == observer_team and world.entity_is_worker(unit):
+			if observer_team > 0 and int(unit.get("team", 0)) == observer_team and world.entity_is_worker(unit) and (not restrict_command_options or command_option_entity_ids.has(int(unit.get("id", -1)))):
 				if not requested_build_options.is_empty():
 					presentation_unit["command_options"] = {"build": requested_build_options}
 				elif include_worker_command_options:
 					presentation_unit["command_options"] = {"build": world.get_build_options(observer_team)}
 			units.append(presentation_unit)
 	var resources: Array = []
+	var overview_resources: Array = []
 	for resource in world.get_resources():
 		if observer_team <= 0 or world.is_entity_visible_to(observer_team, resource, true):
+			if include_overview:
+				overview_resources.append(_overview_entity(resource))
+			if has_entity_bounds and not _entity_in_bounds(resource, entity_bounds) and not always_include_entity_ids.has(int(resource.get("id", -1))):
+				continue
 			resources.append(_presentation_entity(resource, observer_team, compact_entities))
 	var objectives: Array = []
 	for objective in world.victory_objectives:
@@ -65,13 +83,18 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		if observer_team <= 0 or world.is_entity_visible_to(observer_team, objective, true):
 			objectives.append(_presentation_entity(objective, observer_team, compact_entities))
 	var buildings: Array = []
+	var overview_buildings: Array = []
 	for building in world.get_buildings():
 		if observer_team <= 0 or world.is_entity_visible_to(observer_team, building, true):
+			if include_overview:
+				overview_buildings.append(_overview_entity(building))
+			if has_entity_bounds and not _entity_in_bounds(building, entity_bounds) and not always_include_entity_ids.has(int(building.get("id", -1))):
+				continue
 			var presentation_building := _presentation_entity(building, observer_team, compact_entities)
 			presentation_building["target_domains"] = world.combat_target_domains(building)
 			if world.trade_system.is_trade_dock(building):
 				presentation_building["trade"] = world.trade_system.presentation_for_dock(building)
-			if observer_team > 0 and int(building.get("team", 0)) == observer_team:
+			if observer_team > 0 and int(building.get("team", 0)) == observer_team and (not restrict_command_options or command_option_entity_ids.has(int(building.get("id", -1)))):
 				presentation_building["builder_count"] = building.get("builders", {}).size()
 				if String(building.get("state", "complete")) == "foundation":
 					presentation_building["reachable_builder_ids"] = world.reachable_builder_ids(building)
@@ -113,6 +136,11 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		"objectives": _sort_entity_copies(objectives),
 		"buildings": _sort_entity_copies(buildings),
 		"projectiles": _sort_entity_copies(projectiles),
+		"overview": {
+			"units": _sort_entity_copies(overview_units),
+			"resources": _sort_entity_copies(overview_resources),
+			"buildings": _sort_entity_copies(overview_buildings),
+		},
 		"ai_distress_signals": world.get_attack_distress_signals(observer_team) if observer_team > 0 else [],
 		"navigation": _presentation_navigation(world, fog, observer_team) if include_navigation else {},
 		"build_sites": build_sites,
@@ -217,6 +245,23 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 		for private_field in ["target_dock_id", "home_dock_id", "selected_input_resource_type_id", "approach_position", "cargo_goods", "cargo_gold", "trip_count"]:
 			trade.erase(private_field)
 	return result
+
+
+static func _entity_in_bounds(entity: Dictionary, bounds: Rect2) -> bool:
+	return bounds.has_point(Vector2(entity.get("pos", entity.get("position", Vector2.ZERO))))
+
+
+static func _overview_entity(entity: Dictionary) -> Dictionary:
+	return {
+		"id": int(entity.get("id", -1)),
+		"team": int(entity.get("team", 0)),
+		"kind": String(entity.get("kind", "")),
+		"entity_type": String(entity.get("entity_type", "")),
+		"pos": Vector2(entity.get("pos", entity.get("position", Vector2.ZERO))),
+		"hp": float(entity.get("hp", 0.0)),
+		"max_hp": float(entity.get("max_hp", 0.0)),
+		"amount": int(entity.get("amount", 0)),
+	}
 
 
 static func _compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Dictionary:
