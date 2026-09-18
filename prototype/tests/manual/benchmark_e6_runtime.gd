@@ -10,6 +10,9 @@ const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
 const GATHERERS_PER_RESOURCE := 2
 const RESOURCES_PER_DROP_SITE := 8
+const MIXED_GATHER_SHARE := 0.40
+const MIXED_MARCH_SHARE := 0.20
+const MIXED_COMBAT_SHARE := 0.20
 
 
 func _initialize() -> void:
@@ -47,7 +50,7 @@ func _run_case(options: Dictionary) -> Dictionary:
 	world.pathfinder.set_native_enabled(bool(options["native_pathfinding"]))
 	world.visibility_system.set_native_enabled(bool(options["native_visibility"]))
 	var workload := String(options["workload"])
-	if workload == "gather_economy":
+	if workload in ["gather_economy", "mixed_match"]:
 		var catalog = ResourceCatalog.new()
 		catalog.load()
 		world.set_gamespec(catalog.gamespec_data)
@@ -56,12 +59,16 @@ func _run_case(options: Dictionary) -> Dictionary:
 		world.set_runtime_catalog(catalog.runtime_catalog_data)
 	var players: Array = []
 	var unit_ids_by_team: Dictionary = {}
+	var mixed_role_ids_by_team: Dictionary = {}
 	var formation_start_positions: Dictionary = {}
 	var gather_resource_ids_by_team: Dictionary = {}
-	if workload == "formation_march":
-		var local_slots := FormationGeometry.local_slots(units_per_player, FormationGeometry.BLOCK, 1.0)
+	var mixed_counts := _mixed_role_counts(units_per_player)
+	if workload in ["formation_march", "mixed_match"]:
+		var formation_member_count := units_per_player if workload == "formation_march" else int(mixed_counts["march"])
+		var local_slots := FormationGeometry.local_slots(formation_member_count, FormationGeometry.BLOCK, 1.0)
 		for team in range(1, player_count + 1):
-			formation_start_positions[team] = FormationGeometry.world_slots(local_slots, _formation_start(team, player_count, map_side), Vector2.DOWN)
+			var start := _formation_start(team, player_count, map_side) if workload == "formation_march" else _mixed_formation_start(team, player_count, map_side)
+			formation_start_positions[team] = FormationGeometry.world_slots(local_slots, start, Vector2.DOWN)
 	for team in range(1, player_count + 1):
 		players.append({"team": team, "controller": "ai", "civilization_id": 13})
 	world.configure_players(players)
@@ -71,40 +78,65 @@ func _run_case(options: Dictionary) -> Dictionary:
 		var prepared_positions: Array = formation_start_positions.get(team, [])
 		var gather_resources: Array[int] = []
 		var gather_positions: Array[Vector2] = []
-		if workload == "gather_economy":
-			var resource_count := ceili(float(units_per_player) / float(GATHERERS_PER_RESOURCE))
+		var role_ids := {"gather": [], "march": [], "combat": [], "reserve": []}
+		if workload in ["gather_economy", "mixed_match"]:
+			var gatherer_count := units_per_player if workload == "gather_economy" else int(mixed_counts["gather"])
+			var resource_count := ceili(float(gatherer_count) / float(GATHERERS_PER_RESOURCE))
 			var drop_site_count := ceili(float(resource_count) / float(RESOURCES_PER_DROP_SITE))
 			for drop_site_index in range(drop_site_count):
+				var drop_site_position := (
+					_gather_drop_site_position(team, drop_site_index, drop_site_count, player_count, map_side)
+					if workload == "gather_economy"
+					else _mixed_gather_drop_site_position(team, drop_site_index, drop_site_count, player_count, map_side)
+				)
 				world.add_building(
 					1000000 + team * 1000 + drop_site_index,
 					"granary",
-					_gather_drop_site_position(team, drop_site_index, drop_site_count, player_count, map_side),
+					drop_site_position,
 					team
 				)
 			for resource_index in range(resource_count):
-				var resource_position := _gather_resource_position(team, resource_index, resource_count, player_count, map_side)
+				var resource_position := (
+					_gather_resource_position(team, resource_index, resource_count, player_count, map_side)
+					if workload == "gather_economy"
+					else _mixed_gather_resource_position(team, resource_index, resource_count, player_count, map_side)
+				)
 				var resource: Dictionary = world.add_scenario_resource("berries", resource_position, 10000)
 				gather_resources.append(int(resource["id"]))
 				gather_positions.append(Vector2(resource["pos"]))
 		for index in range(units_per_player):
 			var spawn_position: Vector2
-			if workload == "combat_contact":
+			var mixed_role := _mixed_role(index, mixed_counts) if workload == "mixed_match" else ""
+			var mixed_role_index := _mixed_role_index(index, mixed_role, mixed_counts) if workload == "mixed_match" else index
+			if workload == "mixed_match" and mixed_role == "gather":
+				spawn_position = _gather_worker_position(mixed_role_index, int(mixed_counts["gather"]), gather_positions)
+			elif workload == "mixed_match" and mixed_role == "march":
+				spawn_position = prepared_positions[mixed_role_index]
+			elif workload == "mixed_match" and mixed_role == "combat":
+				spawn_position = _combat_position(team, mixed_role_index, int(mixed_counts["combat"]), player_count, map_side)
+			elif workload == "mixed_match":
+				spawn_position = _mixed_reserve_position(team, mixed_role_index, int(mixed_counts["reserve"]), player_count, map_side)
+			elif workload == "combat_contact":
 				spawn_position = _combat_position(team, index, units_per_player, player_count, map_side)
 			elif workload == "gather_economy":
 				spawn_position = _gather_worker_position(index, units_per_player, gather_positions)
 			else:
 				spawn_position = prepared_positions[index] if index < prepared_positions.size() else _unit_position(team, index, player_count, map_side)
-			var unit_kind := "villager" if workload == "gather_economy" else "clubman"
+			var unit_kind := "villager" if workload == "gather_economy" or mixed_role == "gather" else "clubman"
 			var unit: Dictionary = world.add_unit(team, unit_kind, spawn_position, false)
 			unit["stance"] = "passive"
 			unit["attack_autonomous"] = false
 			unit["acquisition_range"] = 0.0
-			if workload == "combat_contact":
+			if workload == "combat_contact" or mixed_role == "combat":
 				unit["max_hp"] = 1000.0
 				unit["hp"] = 1000.0
 			team_unit_ids.append(int(unit["id"]))
+			if workload == "mixed_match":
+				role_ids[mixed_role].append(int(unit["id"]))
 		unit_ids_by_team[team] = team_unit_ids
-		if workload == "gather_economy":
+		if workload == "mixed_match":
+			mixed_role_ids_by_team[team] = role_ids
+		if workload in ["gather_economy", "mixed_match"]:
 			gather_resource_ids_by_team[team] = gather_resources
 	world.end_bulk_load()
 	var setup_microseconds := Time.get_ticks_usec() - setup_started
@@ -172,12 +204,12 @@ func _run_case(options: Dictionary) -> Dictionary:
 			"accepted": combat_assigned,
 			"rejected": player_count * units_per_player - combat_assigned,
 		}
-	elif workload == "gather_economy":
+	elif workload in ["gather_economy", "mixed_match"]:
 		probe.clear()
 		var gather_setup_started := Time.get_ticks_usec()
 		var gather_assigned := 0
 		for team in range(1, player_count + 1):
-			var ids: Array[int] = unit_ids_by_team[team]
+			var ids: Array = unit_ids_by_team[team] if workload == "gather_economy" else mixed_role_ids_by_team[team]["gather"]
 			var resource_ids: Array[int] = gather_resource_ids_by_team[team]
 			for resource_index in range(resource_ids.size()):
 				var workers: Array = []
@@ -187,11 +219,42 @@ func _run_case(options: Dictionary) -> Dictionary:
 					workers.append(world.find_unit(ids[worker_index]))
 				world.assign_command_gather(workers, resource_ids[resource_index])
 				gather_assigned += workers.filter(func(worker): return String(worker.get("task", "idle")) == "gather").size()
+		var combat_assigned := 0
+		var march_entities := 0
+		if workload == "mixed_match":
+			for first_team in range(1, player_count + 1, 2):
+				var second_team := first_team + 1
+				if second_team > player_count:
+					break
+				var first_ids: Array = mixed_role_ids_by_team[first_team]["combat"]
+				var second_ids: Array = mixed_role_ids_by_team[second_team]["combat"]
+				for index in range(mini(first_ids.size(), second_ids.size())):
+					combat_assigned += int(world.assign_command_attack([world.find_unit(first_ids[index])], second_ids[index]))
+					combat_assigned += int(world.assign_command_attack([world.find_unit(second_ids[index])], first_ids[index]))
+			for team in range(1, player_count + 1):
+				var march_ids: Array[int] = []
+				march_ids.assign(mixed_role_ids_by_team[team]["march"])
+				march_entities += march_ids.size()
+				controller.enqueue_command(Commands.FormationMoveCommand.new(
+					controller.tick_index + 1,
+					march_ids,
+					_mixed_formation_destination(team, player_count, map_side),
+					FormationGeometry.BLOCK,
+					Vector2.DOWN
+				), true, team)
+			controller.advance_frame(0.05, 1, 2)
+		var accepted_formation_commands := _command_result_count(controller.command_results, true) if workload == "mixed_match" else 0
+		var accepted_entities := gather_assigned + combat_assigned + (march_entities if accepted_formation_commands == player_count else 0)
+		var commanded_entities := player_count * units_per_player
+		if workload == "mixed_match":
+			commanded_entities -= player_count * int(mixed_counts["reserve"])
 		command_phase = {
 			"wall_microseconds": Time.get_ticks_usec() - gather_setup_started,
 			"probe": probe.report(),
-			"accepted": gather_assigned,
-			"rejected": player_count * units_per_player - gather_assigned,
+			"commanded": commanded_entities,
+			"accepted": accepted_entities,
+			"rejected": commanded_entities - accepted_entities,
+			"reserve": player_count * int(mixed_counts["reserve"]) if workload == "mixed_match" else 0,
 		}
 	for _tick in range(warmup_ticks):
 		controller.advance_frame(0.05, 1, 2)
@@ -219,7 +282,7 @@ func _run_case(options: Dictionary) -> Dictionary:
 		"command_phase": command_phase,
 		"sample_wall_microseconds": benchmark_microseconds,
 		"active_units_after_sample": world.get_units().filter(func(unit): return String(unit.get("task", "idle")) != "idle").size(),
-		"workload_state": _workload_state(world, player_count, workload),
+		"workload_state": _workload_state(world, player_count, workload, mixed_counts),
 		"canonical_hash": final_hash,
 		"probe": probe.report(),
 		"process": {
@@ -232,8 +295,8 @@ func _run_case(options: Dictionary) -> Dictionary:
 	}
 
 
-func _workload_state(world, player_count: int, workload: String) -> Dictionary:
-	if workload != "gather_economy":
+func _workload_state(world, player_count: int, workload: String, mixed_counts: Dictionary = {}) -> Dictionary:
+	if workload not in ["gather_economy", "mixed_match"]:
 		return {}
 	var gather_cycles := 0
 	var deposit_cycles := 0
@@ -245,7 +308,7 @@ func _workload_state(world, player_count: int, workload: String) -> Dictionary:
 	var food_by_team: Dictionary = {}
 	for team in range(1, player_count + 1):
 		food_by_team[String.num_int64(team)] = world.get_resource_amount(team, 0)
-	return {
+	var result := {
 		"resource_nodes": world.get_resources().size(),
 		"drop_sites": world.get_buildings().size(),
 		"gather_cycles": gather_cycles,
@@ -253,6 +316,14 @@ func _workload_state(world, player_count: int, workload: String) -> Dictionary:
 		"carrying_units": carrying_units,
 		"food_by_team": food_by_team,
 	}
+	if workload == "mixed_match":
+		result["role_counts_per_player"] = mixed_counts.duplicate()
+		var tasks: Dictionary = {}
+		for unit in world.get_units():
+			var task := String(unit.get("task", "idle"))
+			tasks[task] = int(tasks.get(task, 0)) + 1
+		result["task_counts"] = tasks
+	return result
 
 
 func _unit_position(team: int, index: int, player_count: int, map_side: int) -> Vector2:
@@ -268,6 +339,39 @@ func _unit_position(team: int, index: int, player_count: int, map_side: int) -> 
 	return Vector2(clampi(x, 1, map_side - 2), clampi(y, 1, map_side - 2)) + Vector2(0.5, 0.5)
 
 
+func _mixed_role_counts(units_per_player: int) -> Dictionary:
+	var gather := floori(float(units_per_player) * MIXED_GATHER_SHARE)
+	var march := floori(float(units_per_player) * MIXED_MARCH_SHARE)
+	var combat := floori(float(units_per_player) * MIXED_COMBAT_SHARE)
+	return {
+		"gather": gather,
+		"march": march,
+		"combat": combat,
+		"reserve": units_per_player - gather - march - combat,
+	}
+
+
+func _mixed_role(index: int, counts: Dictionary) -> String:
+	if index < int(counts["gather"]):
+		return "gather"
+	if index < int(counts["gather"]) + int(counts["march"]):
+		return "march"
+	if index < int(counts["gather"]) + int(counts["march"]) + int(counts["combat"]):
+		return "combat"
+	return "reserve"
+
+
+func _mixed_role_index(index: int, role: String, counts: Dictionary) -> int:
+	match role:
+		"march":
+			return index - int(counts["gather"])
+		"combat":
+			return index - int(counts["gather"]) - int(counts["march"])
+		"reserve":
+			return index - int(counts["gather"]) - int(counts["march"]) - int(counts["combat"])
+	return index
+
+
 func _formation_destination(team: int, player_count: int, map_side: int) -> Vector2:
 	var region_columns := ceili(sqrt(float(player_count)))
 	var region_rows := ceili(float(player_count) / float(region_columns))
@@ -279,6 +383,24 @@ func _formation_destination(team: int, player_count: int, map_side: int) -> Vect
 		region_column * region_width + region_width * 0.5,
 		region_row * region_height + region_height - 24.0
 	)
+
+
+func _mixed_formation_start(team: int, player_count: int, map_side: int) -> Vector2:
+	var region := _team_region(team, player_count, map_side)
+	return region.position + Vector2(region.size.x * 0.68, region.size.y * 0.16)
+
+
+func _mixed_formation_destination(team: int, player_count: int, map_side: int) -> Vector2:
+	var region := _team_region(team, player_count, map_side)
+	return region.position + Vector2(region.size.x * 0.68, region.size.y * 0.84)
+
+
+func _mixed_reserve_position(team: int, index: int, reserve_count: int, player_count: int, map_side: int) -> Vector2:
+	var region := _team_region(team, player_count, map_side)
+	var columns := maxi(1, ceili(sqrt(float(reserve_count))))
+	var column := index % columns
+	var row := index / columns
+	return region.position + Vector2(region.size.x * 0.82, region.size.y * 0.12) + Vector2(float(column), float(row)) * 0.72
 
 
 func _individual_destination(team: int, index: int, player_count: int, map_side: int) -> Vector2:
@@ -344,6 +466,20 @@ func _gather_drop_site_position(team: int, drop_site_index: int, drop_site_count
 	)
 
 
+func _mixed_gather_drop_site_position(team: int, drop_site_index: int, drop_site_count: int, player_count: int, map_side: int) -> Vector2:
+	var region := _team_region(team, player_count, map_side)
+	var columns := ceili(sqrt(float(drop_site_count)))
+	var rows := ceili(float(drop_site_count) / float(columns))
+	var column := drop_site_index % columns
+	var row := drop_site_index / columns
+	var area := Vector2(region.size.x * 0.48, region.size.y * 0.76)
+	var origin := region.position + Vector2(8.0, region.size.y * 0.12)
+	return origin + Vector2(
+		(float(column) + 0.5) * area.x / float(columns),
+		(float(row) + 0.5) * area.y / float(rows)
+	)
+
+
 func _gather_resource_position(team: int, resource_index: int, resource_count: int, player_count: int, map_side: int) -> Vector2:
 	var drop_site_index := resource_index / RESOURCES_PER_DROP_SITE
 	var drop_site_count := ceili(float(resource_count) / float(RESOURCES_PER_DROP_SITE))
@@ -361,6 +497,17 @@ func _gather_resource_position(team: int, resource_index: int, resource_count: i
 	# Integer-centered source footprints leave stable perimeter cells around the
 	# source on the navigation grid; fractional centers can turn the benchmark
 	# into a placement-geometry rejection test instead of an economy workload.
+	return (center + offsets[resource_index % RESOURCES_PER_DROP_SITE]).round()
+
+
+func _mixed_gather_resource_position(team: int, resource_index: int, resource_count: int, player_count: int, map_side: int) -> Vector2:
+	var drop_site_index := resource_index / RESOURCES_PER_DROP_SITE
+	var drop_site_count := ceili(float(resource_count) / float(RESOURCES_PER_DROP_SITE))
+	var center := _mixed_gather_drop_site_position(team, drop_site_index, drop_site_count, player_count, map_side)
+	var offsets := [
+		Vector2(0.0, -5.0), Vector2(3.5, -3.5), Vector2(5.0, 0.0), Vector2(3.5, 3.5),
+		Vector2(0.0, 5.0), Vector2(-3.5, 3.5), Vector2(-5.0, 0.0), Vector2(-3.5, -3.5),
+	]
 	return (center + offsets[resource_index % RESOURCES_PER_DROP_SITE]).round()
 
 
@@ -420,7 +567,7 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 			result[key] = value.to_lower() not in ["false", "0", "no", "off"]
 		elif key in ["case", "output", "workload"]:
 			result[key] = value
-	if String(result["workload"]) not in ["passive_full_population", "formation_march", "formation_assemble", "individual_crossing", "group_click_reservation", "combat_contact", "gather_economy"]:
+	if String(result["workload"]) not in ["passive_full_population", "formation_march", "formation_assemble", "individual_crossing", "group_click_reservation", "combat_contact", "gather_economy", "mixed_match"]:
 		result["workload"] = "passive_full_population"
 	result["players"] = clampi(int(result["players"]), 2, 8)
 	result["units_per_player"] = maxi(1, int(result["units_per_player"]))
