@@ -28,6 +28,8 @@ func test_workflow_is_separated() -> void:
 	assert_true(import_script.contains("extract_terrain_catalog.py"), "asset import owns terrain extraction")
 	assert_true(validation_script.contains("validate_cache.py"), "validation owns report generation")
 	assert_true(build_script.contains("--export-pack"), "build owns package export")
+	assert_true(build_script.contains("build_native_pathfinding.ps1"), "build compiles the measured native path kernel")
+	assert_true(build_script.contains("ror_pathfinding.windows.template_release.x86_64.dll"), "build packages the native path kernel beside the executable")
 	assert_true(not build_script.contains("import_assets.js"), "build does not convert original assets")
 	assert_true(run_script.contains("Start-Process"), "run launches packaged application")
 	for forbidden in ["import_assets.js", "extract_", "validate_cache.py", "node ", "py -3", "--import", "--export"]:

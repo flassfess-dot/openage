@@ -186,4 +186,30 @@ Gameplay fog переведён с полного сброса visible-сост�
 5. Повторить после retained fog chunks и общего world/minimap cache; camera pan не должен менять canonical hash или инициировать полный authoritative rebuild.
 6. Не переходить на MultiMesh, сторонний ECS, C# или GDExtension без профиля соответствующего владельца. E6-010 теперь разрешает узкий прототип GDExtension для path/flow/local-movement массивов: публичный command/order API, authoritative экономика и сериализация остаются движковыми, а чистый вычислительный kernel обязан иметь GDScript fallback, одинаковый deterministic outcome и lifecycle/save/replay regressions. Намеренное улучшение movement/formation может создать новый hash baseline только после отдельного UX/collision/stress/replay gate; изменение характеристик, экономики или правил боя этим не разрешается.
 
-Текущий обязательный 50-мс tick budget ещё не достигнут: true-march даёт p95 `236,04` мс, individual crossing `313,89` мс и combat contact около `493` мс на 8×500; полный gather-cycle уже даёт `150,92` мс на 2×500. Значения 4/8×500 для экономики выполняются после устранения измеренного path burst, чтобы не тратить многоминутный прогон на известный синхронный blocker. E6 остаётся открытым; после достижения бюджета для будущих механик требуется ещё не менее 30% p95-запаса.
+Текущий deadline фиксированного 20-Гц тика `50 мс` ещё не достигнут: true-march даёт p95 `236,04` мс, individual crossing `313,89` мс и combat contact около `493` мс на экстремальном `8×500 all-active`; полный gather-cycle даёт `150,92` мс на `2×500`. Эти числа не следует трактовать как FPS или как обычную экранную нагрузку. Значения 4/8×500 для экономики выполняются после устранения измеренного path burst, чтобы не тратить многоминутный прогон на известный синхронный blocker. E6 остаётся открытым.
+
+Performance gates с E6-011 разделены:
+
+1. **Simulation deadline:** `p95 < 50 мс` означает, что 20-Гц авторитетная симуляция не накапливает долг.
+2. **Comfort/headroom:** реалистичный смешанный матч `2/4/8 × 500` должен иметь `p95 ≤ 35 мс`, оставляя не менее 30% бюджета для новых механик.
+3. **Main-thread/render:** пока симуляция и presentation делят главный поток, отдельно измеряется sim slice на tick-кадрах (`8–15 мс` как целевой диапазон) и полный CPU/GPU frame против `16,67 мс` для 60 FPS. Видимая сцена тестируется отдельно от общего числа сущностей матча.
+4. **Extreme stress:** `8×500 all-active` одновременно заставляет 4 000 сущностей двигаться, искать путь или сражаться. Это ворота на отсутствие runaway, многосекундных stalls и неограниченного simulation debt, а не обещание, что все 4 000 обычно находятся на экране или принимают сложное решение каждый тик.
+5. **Offscreen authority:** камера разрешает culling и batching только presentation. Дальние idle/маршевые группы удешевляются через event-driven/sparse systems, activity sectors и общий групповой маршрут, сохраняя детерминированный исход мира.
+
+## 15. E6-011 — нативный deterministic A* без переноса правил игры
+
+Измеренный A* owner вынесен в отдельный `RoRPathKernel` GDExtension. Он хранит плоские arrays стоимости/родителей/generation stamp и бинарную кучу без per-node Dictionary allocations. Входом служит revisioned byte mask базовой проходимости для одной пары movement-domain/restriction; clearance вычисляется внутри kernel по тому же четырёхточечному footprint contract. Direction order, diagonal corner rule, octile heuristic и score/y/x tie-break повторяют fallback. GDScript по-прежнему выбирает nearest goal, проверяет прямой путь, сглаживает raw cells и владеет command/order/economy/save/replay. Отсутствующая DLL автоматически оставляет прежний путь активным.
+
+Контрольный последовательный A/B, `gather_economy 2×500 / 400×400 / 520 warmup + 240 sample`:
+
+| Метрика | GDScript | Native kernel |
+|---|---:|---:|
+| command wall | 1171,38 мс | 649,89 мс |
+| sample wall | 23,11 с | 21,37 с |
+| fixed tick p50 / p95 / max | 90,27 / 149,42 / 263,04 мс | 90,51 / 106,51 / 126,70 мс |
+| world advance p95 | 143,74 мс | 100,38 мс |
+| unit orders p95 | 117,17 мс | 74,39 мс |
+| task p95 | 106,17 мс | 63,41 мс |
+| path query p50 / p95 / max | 3,759 / 8,588 / 12,849 мс | 0,786 / 0,944 / 1,267 мс |
+
+В обоих прогонах выполнены 893 path request: 324 прямых и 569 A*. Результат полностью совпадает — 11 671 gather, 988 deposits, food `5060/5000`, canonical SHA-256 `3a2e5d64f4f800028f5b3689015bf178139da9efbf00913bc969cbe1ab9b49d7`. До prewarm построение маски занимало 1846,85 мс внутри первой массовой команды; теперь уникальные movement/restriction masks активных unit готовятся после bulk-load. Это увеличивает стадию загрузки карты, но устраняет пользовательский first-click hitch. Следующая оптимизация должна атаковать оставшиеся `63,41` мс task dispatch и синхронность волны return/deposit, а не переносить экономику или весь мир в C++.

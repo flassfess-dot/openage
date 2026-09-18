@@ -316,6 +316,7 @@ func end_bulk_load() -> void:
 		return
 	refresh_building_connectivity()
 	rebuild_spatial_index()
+	pathfinder.prepare_native_kernels_for_units(units)
 	update_fog_of_war()
 
 

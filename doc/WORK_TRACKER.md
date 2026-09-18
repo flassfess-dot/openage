@@ -1427,3 +1427,18 @@ ext_unit_id.
 - Исходный профиль: fixed p50/p95 `137,89 / 204,11` мс, fog `60,00 / 69,99`, task `51,83 / 115,66`. Полный пересчёт fog заменён per-source footprint delta и per-cell overlap counts; движение распределено по четырём stable-ID buckets с максимумом 150 мс, а death/spawn/alliance/explicit refresh остаются немедленными.
 - Повтор того же профиля: fixed `91,52 / 150,92` мс, fog `17,62 / 21,45`, sample wall `35,21 → 23,18` с при идентичном экономическом результате. Hash обновлён из-за намеренно bounded fog cadence. Fog/visibility/diplomacy/combat-awareness и gather/dropoff/return tests проходят.
 - Измеренный следующий owner: `unit_orders.task 49,04 / 106,65` мс и burst из сотен индивидуальных A* при одновременном возврате. Теперь допускается узкий GDExtension/data-oriented прототип для path/flow/local movement с обязательным GDScript fallback; характеристики экономики и публичный order/save/replay contract не переносятся и не меняются.
+
+### Уточнение performance gate (2026-09-18)
+
+- Прежняя формулировка объединяла deadline симуляции, плавность кадра и экстремальный `8×500 all-active` stress. Теперь это независимые ворота.
+- `50 мс` — только предел шага фиксированной симуляции 20 Гц, после которого накапливается отставание. Реалистичный смешанный матч `2/4/8 × 500` целится в `p95 ≤ 35 мс`, то есть с 30% резервом.
+- Пока симуляция остаётся на главном потоке, отдельно измеряется её `8–15 мс` slice на tick-кадрах и полный CPU/GPU render frame против `16,67 мс` для цели 60 FPS. Видимое количество объектов проверяется отдельным render workload.
+- `8×500 all-active` остаётся обязательным stress-тестом на runaway, stalls и simulation debt, но не считается обычной экранной нагрузкой. Невидимые сущности остаются авторитетными; их удешевление строится на activity state, разреженных/event-driven обновлениях и общем маршруте группы, а не на положении камеры.
+
+### Прогресс (2026-09-18, E6-011 — native path kernel)
+
+- Добавлен минимальный GDExtension `RoRPathKernel`, ускоряющий только raw-cell A*. Маска проходимости, правила domain/restriction/clearance, direct path, nearest goal, smoothing, приказы, экономика, snapshot/save/replay и автоматический fallback остаются в GDScript.
+- Сборка закреплена на официальном `godot-cpp 10.0.0-stable` commit `507ed9d840c01a3c5b2a39af8bb4000bfac30bf5`, использует минимальный 81-file profile, повторно собирается меньше секунды и интегрирована в `build-game.ps1`; MIT notice включён в distribution.
+- Детерминированный path A/B и 13 целевых navigation/economy/formation/replay/save tests проходят. Полный `gather_economy 2×500` сохраняет hash `3a2e5d64…b49d7`, 11 671 gather, 988 deposits и food `5060/5000`.
+- На этом A/B path p95 `8,588 → 0,944` мс, task p95 `106,17 → 63,41` мс, fixed p95 `149,42 → 106,51` мс, fixed max `263,04 → 126,70` мс, command wall `1171 → 650` мс. Mask build перенесён из первого приказа в bulk-load.
+- Следующий measured owner — оставшийся per-unit task dispatch и синхронная волна source/drop-site return; затем mixed 4/8×500 и отдельный видимый CPU/GPU/render профиль. E6 comfort gate `p95 ≤ 35 мс` ещё открыт.

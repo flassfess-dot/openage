@@ -1,0 +1,10 @@
+[configuration]
+
+entry_symbol = "ror_pathfinding_init"
+compatibility_minimum = "4.7"
+reloadable = false
+
+[libraries]
+
+windows.release.x86_64 = "res://bin/ror_pathfinding.windows.template_release.x86_64.dll"
+windows.debug.x86_64 = "res://bin/ror_pathfinding.windows.template_release.x86_64.dll"

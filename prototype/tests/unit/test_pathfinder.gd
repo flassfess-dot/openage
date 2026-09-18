@@ -14,6 +14,7 @@ func _initialize() -> void:
 	test_same_cell_exact_endpoints_do_not_alias()
 	test_clearance_aware_route_avoids_narrow_shore()
 	test_simulation_routes_around_town_center()
+	test_native_kernel_matches_gdscript()
 
 	if failures.is_empty():
 		print("N-004 pathfinder tests passed")
@@ -96,6 +97,30 @@ func test_simulation_routes_around_town_center() -> void:
 		var next := Vector2i(floori(waypoint.x), floori(waypoint.y))
 		assert_true(world.pathfinder.line_walkable(previous, next), "simulation waypoint segment is walkable")
 		previous = next
+
+
+func test_native_kernel_matches_gdscript() -> void:
+	var native_finder = Pathfinder.new(open_grid(Vector2i(18, 15)))
+	if not native_finder.uses_native_kernel():
+		print("Native path kernel unavailable; deterministic fallback remains active")
+		return
+	var script_finder = Pathfinder.new(native_finder.grid)
+	script_finder.set_native_enabled(false)
+	for cell in [Vector2i(6, 1), Vector2i(6, 2), Vector2i(6, 3), Vector2i(6, 4), Vector2i(6, 5), Vector2i(6, 7), Vector2i(6, 8), Vector2i(6, 9), Vector2i(6, 10), Vector2i(6, 11), Vector2i(6, 12), Vector2i(11, 4), Vector2i(12, 4), Vector2i(13, 4)]:
+		native_finder.grid.set_terrain(cell, "water")
+	var pairs := [
+		[Vector2i(2, 2), Vector2i(15, 12)],
+		[Vector2i(15, 12), Vector2i(2, 2)],
+		[Vector2i(3, 11), Vector2i(14, 2)],
+		[Vector2i(7, 6), Vector2i(14, 6)],
+	]
+	for pair in pairs:
+		var expected: Array[Vector2i] = script_finder.find_cell_path(pair[0], pair[1])
+		var actual: Array[Vector2i] = native_finder.find_cell_path(pair[0], pair[1])
+		assert_equal(actual, expected, "native A* preserves deterministic path %s -> %s" % [pair[0], pair[1]])
+	var native_clearance: Array[Vector2i] = native_finder.find_cell_path(Vector2i(2, 2), Vector2i(15, 12), "land", -1, 0.3)
+	var script_clearance: Array[Vector2i] = script_finder.find_cell_path(Vector2i(2, 2), Vector2i(15, 12), "land", -1, 0.3)
+	assert_equal(native_clearance, script_clearance, "native A* preserves clearance-aware path")
 
 
 func open_grid(size: Vector2i):

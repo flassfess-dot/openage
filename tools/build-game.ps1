@@ -13,6 +13,8 @@ $godotApplication = Join-Path $godotRoot "Godot_v4.7.2-stable_win64.exe"
 $godotHeadless = $godotApplication
 $application = Join-Path $distributionRoot "Rise of Rome Prototype.exe"
 $package = Join-Path $distributionRoot "Rise of Rome Prototype.pck"
+$nativeBuildScript = Join-Path $repositoryRoot "tools\build_native_pathfinding.ps1"
+$nativeLibrary = Join-Path $projectRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll"
 
 $requiredGeneratedFiles = @(
     "assets.json",
@@ -47,6 +49,11 @@ if (-not (Test-Path -LiteralPath $godotApplication)) {
 
 New-Item -ItemType Directory -Force -Path $distributionRoot | Out-Null
 
+& $nativeBuildScript
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $nativeLibrary)) {
+    throw "Native pathfinding build did not produce $nativeLibrary"
+}
+
 function Invoke-GodotBuildStep {
     param(
         [Parameter(Mandatory = $true)]
@@ -73,5 +80,9 @@ Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--impo
 Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--export-pack", "Windows Desktop", $package) -Description "Godot package export"
 
 Copy-Item -LiteralPath $godotApplication -Destination $application -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "bin") | Out-Null
+Copy-Item -LiteralPath $nativeLibrary -Destination (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "legal\MIT") | Out-Null
+Copy-Item -LiteralPath (Join-Path $repositoryRoot "legal\MIT\godot-cpp.md") -Destination (Join-Path $distributionRoot "legal\MIT\godot-cpp.md") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $distributionRoot "README.md") -Force
 Write-Host "Build complete: $application"

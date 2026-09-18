@@ -12,10 +12,14 @@ var grid
 var cache: Dictionary = {}
 var cache_hits: int = 0
 var performance_probe: Variant = null
+var native_enabled: bool = true
+var native_available: bool = false
+var native_kernels: Dictionary = {}
 
 
 func _init(navigation_grid = null) -> void:
 	grid = navigation_grid
+	native_available = ClassDB.class_exists("RoRPathKernel")
 
 
 func set_performance_probe(probe: Variant) -> void:
@@ -25,6 +29,30 @@ func set_performance_probe(probe: Variant) -> void:
 func clear_cache() -> void:
 	cache.clear()
 	cache_hits = 0
+	native_kernels.clear()
+
+
+func set_native_enabled(enabled: bool) -> void:
+	native_enabled = enabled
+
+
+func uses_native_kernel() -> bool:
+	return native_enabled and native_available
+
+
+func prepare_native_kernels_for_units(units: Array) -> void:
+	if not uses_native_kernel():
+		return
+	var configurations: Dictionary = {}
+	for unit in units:
+		var movement_domain := String(unit.get("movement_domain", "land"))
+		var restriction_id := int(unit.get("terrain_restriction", -1))
+		configurations["%s:%d" % [movement_domain, restriction_id]] = [movement_domain, restriction_id]
+	var keys := configurations.keys()
+	keys.sort()
+	for key in keys:
+		var configuration: Array = configurations[key]
+		_native_kernel_for(String(configuration[0]), int(configuration[1]))
 
 
 func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2]:
@@ -85,6 +113,8 @@ func _finish_path_observation(started: int, path: Array[Vector2], cache_hit: boo
 func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
 	if grid == null or not grid.contains(start) or not grid.contains(goal) or not _cell_walkable(goal, movement_domain, restriction_id, clearance_radius):
 		return []
+	if uses_native_kernel():
+		return _find_native_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
 	var expanded_nodes := 0
 	var frontier: Array = []
 	_frontier_push(frontier, {"cell": start, "score": 0.0, "cost": 0.0})
@@ -121,6 +151,44 @@ func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "
 	if performance_probe != null:
 		performance_probe.increment("navigation.expanded_nodes", expanded_nodes)
 	return reversed
+
+
+func _find_native_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String, restriction_id: int, clearance_radius: float) -> Array[Vector2i]:
+	var kernel = _native_kernel_for(movement_domain, restriction_id)
+	var packed: PackedInt32Array = kernel.find_cell_path(start, goal, clearance_radius)
+	if performance_probe != null:
+		performance_probe.increment("navigation.native_path_queries")
+		performance_probe.increment("navigation.expanded_nodes", int(kernel.get_last_expanded_nodes()))
+	var result: Array[Vector2i] = []
+	result.resize(packed.size() / 2)
+	var result_index := 0
+	for packed_index in range(0, packed.size(), 2):
+		result[result_index] = Vector2i(packed[packed_index], packed[packed_index + 1])
+		result_index += 1
+	return result
+
+
+func _native_kernel_for(movement_domain: String, restriction_id: int):
+	var key := "%s:%d" % [movement_domain, restriction_id]
+	var kernel = native_kernels.get(key)
+	if kernel == null:
+		kernel = ClassDB.instantiate("RoRPathKernel")
+		native_kernels[key] = kernel
+	if int(kernel.get_revision()) == int(grid.revision) and bool(kernel.is_configured()):
+		return kernel
+	var started := Time.get_ticks_usec() if performance_probe != null else 0
+	var mask := PackedByteArray()
+	mask.resize(grid.size.x * grid.size.y)
+	var index := 0
+	for y in range(grid.size.y):
+		for x in range(grid.size.x):
+			mask[index] = 1 if grid.is_walkable_for(Vector2i(x, y), movement_domain, restriction_id) else 0
+			index += 1
+	kernel.configure(grid.size.x, grid.size.y, grid.revision, mask)
+	if performance_probe != null:
+		performance_probe.increment("navigation.native_mask_rebuilds")
+		performance_probe.observe_microseconds("navigation.native_mask_rebuild", Time.get_ticks_usec() - started)
+	return kernel
 
 
 func _frontier_push(frontier: Array, entry: Dictionary) -> void:
