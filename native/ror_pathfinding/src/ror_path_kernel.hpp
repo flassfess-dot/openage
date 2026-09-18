@@ -20,6 +20,7 @@ class RoRPathKernel : public RefCounted {
 public:
     void configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable);
     PackedInt32Array find_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
+    PackedInt32Array find_smoothed_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
     void configure_movement_snapshot(
         const PackedInt32Array &ids,
         const PackedVector2Array &positions,
@@ -30,6 +31,7 @@ public:
     Vector4 calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta);
     int64_t get_revision() const;
     int32_t get_last_expanded_nodes() const;
+    bool get_last_path_was_direct() const;
     bool is_configured() const;
 
 protected:
@@ -46,6 +48,7 @@ private:
     int32_t height_ = 0;
     int64_t revision_ = -1;
     int32_t last_expanded_nodes_ = 0;
+    bool last_path_was_direct_ = false;
     uint32_t search_generation_ = 0;
     std::vector<uint8_t> walkable_;
     std::vector<double> costs_;
@@ -68,6 +71,8 @@ private:
     bool cell_walkable(int32_t x, int32_t y) const;
     bool cell_walkable_for(int32_t x, int32_t y, double clearance_radius) const;
     bool can_step(int32_t current, int32_t next, double clearance_radius) const;
+    bool direct_path(int32_t start, int32_t goal, double clearance_radius, std::vector<int32_t> *result = nullptr) const;
+    PackedInt32Array pack_cells(const std::vector<int32_t> &cells) const;
     double heuristic(int32_t left, int32_t right) const;
     bool frontier_less(const FrontierEntry &left, const FrontierEntry &right) const;
     void frontier_push(const FrontierEntry &entry);

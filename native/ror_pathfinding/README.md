@@ -2,13 +2,15 @@
 
 This optional GDExtension accelerates the measured dense A*, local-avoidance
 and visibility-footprint hot loops used by the authoritative GDScript
-simulation. Terrain/restriction rules, endpoint selection, direct-path checks,
-smoothing, fog ownership/counts, orders, integration, stuck recovery, economy,
+simulation. Terrain/restriction rules and endpoint selection remain in
+GDScript; the same revisioned mask now also handles measured direct-cell and
+smoothing geometry. Fog ownership/counts, orders, integration, stuck recovery, economy,
 save/load and replay remain in GDScript.
 
 The kernel consumes a revisioned byte mask produced by `RoRPathfinder`, uses
-the same direction order, diagonal corner rule, octile heuristic and stable
-score/y/x heap tie-break as the fallback, and returns the raw cell path. If the
+the same direction order, diagonal corner rule, octile heuristic, smoothing
+contract and stable score/y/x heap tie-break as the fallback, and returns the
+raw or smoothed cell path requested by the caller. If the
 extension cannot be loaded, `RoRPathfinder` automatically uses its original
 GDScript implementation. The local-movement kernel consumes one immutable
 per-tick snapshot, reproduces stable-ID neighbor order and the existing

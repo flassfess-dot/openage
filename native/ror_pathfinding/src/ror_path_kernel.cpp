@@ -23,10 +23,12 @@ constexpr int32_t DIRECTIONS[8][2] = {
 void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("configure", "width", "height", "revision", "walkable"), &RoRPathKernel::configure);
     ClassDB::bind_method(D_METHOD("find_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_cell_path, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("find_smoothed_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_smoothed_cell_path, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("configure_movement_snapshot", "ids", "positions", "radii", "clearances", "priorities", "health"), &RoRPathKernel::configure_movement_snapshot);
     ClassDB::bind_method(D_METHOD("calculate_movement", "unit_id", "target", "speed", "cohesion_scale", "delta"), &RoRPathKernel::calculate_movement);
     ClassDB::bind_method(D_METHOD("get_revision"), &RoRPathKernel::get_revision);
     ClassDB::bind_method(D_METHOD("get_last_expanded_nodes"), &RoRPathKernel::get_last_expanded_nodes);
+    ClassDB::bind_method(D_METHOD("get_last_path_was_direct"), &RoRPathKernel::get_last_path_was_direct);
     ClassDB::bind_method(D_METHOD("is_configured"), &RoRPathKernel::is_configured);
 }
 
@@ -249,12 +251,64 @@ PackedInt32Array RoRPathKernel::find_cell_path(const Vector2i &start, const Vect
     return result;
 }
 
+PackedInt32Array RoRPathKernel::find_smoothed_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius) {
+    last_path_was_direct_ = false;
+    if (!is_configured() || !contains(start.x, start.y) || !contains(goal.x, goal.y)) {
+        last_expanded_nodes_ = 0;
+        return PackedInt32Array();
+    }
+    const int32_t start_index = start.y * width_ + start.x;
+    const int32_t goal_index = goal.y * width_ + goal.x;
+    std::vector<int32_t> direct_cells;
+    if (direct_path(start_index, goal_index, clearance_radius, &direct_cells)) {
+        last_expanded_nodes_ = 0;
+        last_path_was_direct_ = true;
+        if (direct_cells.size() > 1) {
+            direct_cells = {direct_cells.front(), direct_cells.back()};
+        }
+        return pack_cells(direct_cells);
+    }
+
+    const PackedInt32Array raw_packed = find_cell_path(start, goal, clearance_radius);
+    if (raw_packed.is_empty()) {
+        return PackedInt32Array();
+    }
+    std::vector<int32_t> raw;
+    raw.reserve(static_cast<size_t>(raw_packed.size() / 2));
+    for (int64_t index = 0; index + 1 < raw_packed.size(); index += 2) {
+        raw.push_back(raw_packed[index + 1] * width_ + raw_packed[index]);
+    }
+    if (raw.size() <= 2) {
+        return pack_cells(raw);
+    }
+    std::vector<int32_t> smoothed;
+    smoothed.reserve(raw.size());
+    smoothed.push_back(raw.front());
+    size_t anchor = 0;
+    while (anchor + 1 < raw.size()) {
+        size_t furthest = anchor + 1;
+        for (size_t candidate = raw.size() - 1; candidate > anchor; --candidate) {
+            if (direct_path(raw[anchor], raw[candidate], clearance_radius)) {
+                furthest = candidate;
+                break;
+            }
+        }
+        smoothed.push_back(raw[furthest]);
+        anchor = furthest;
+    }
+    return pack_cells(smoothed);
+}
+
 int64_t RoRPathKernel::get_revision() const {
     return revision_;
 }
 
 int32_t RoRPathKernel::get_last_expanded_nodes() const {
     return last_expanded_nodes_;
+}
+
+bool RoRPathKernel::get_last_path_was_direct() const {
+    return last_path_was_direct_;
 }
 
 bool RoRPathKernel::is_configured() const {
@@ -299,6 +353,58 @@ bool RoRPathKernel::can_step(int32_t current, int32_t next, double clearance_rad
             && cell_walkable_for(current_x, current_y + delta_y, clearance_radius);
     }
     return true;
+}
+
+bool RoRPathKernel::direct_path(int32_t start, int32_t goal, double clearance_radius, std::vector<int32_t> *result) const {
+    const int32_t start_x = start % width_;
+    const int32_t start_y = start / width_;
+    const int32_t goal_x = goal % width_;
+    const int32_t goal_y = goal / width_;
+    if (!cell_walkable_for(start_x, start_y, clearance_radius) || !cell_walkable_for(goal_x, goal_y, clearance_radius)) {
+        return false;
+    }
+    if (result != nullptr) {
+        result->clear();
+        result->push_back(start);
+    }
+    if (start == goal) {
+        return true;
+    }
+    const int32_t difference_x = goal_x - start_x;
+    const int32_t difference_y = goal_y - start_y;
+    const int32_t steps = std::max(std::abs(difference_x), std::abs(difference_y));
+    int32_t previous = start;
+    for (int32_t index = 1; index <= steps; ++index) {
+        const double ratio = static_cast<double>(index) / static_cast<double>(steps);
+        const int32_t current_x = static_cast<int32_t>(std::round(static_cast<double>(start_x) + static_cast<double>(difference_x) * ratio));
+        const int32_t current_y = static_cast<int32_t>(std::round(static_cast<double>(start_y) + static_cast<double>(difference_y) * ratio));
+        const int32_t current = current_y * width_ + current_x;
+        if (current == previous) {
+            continue;
+        }
+        if (!can_step(previous, current, clearance_radius)) {
+            if (result != nullptr) {
+                result->clear();
+            }
+            return false;
+        }
+        if (result != nullptr) {
+            result->push_back(current);
+        }
+        previous = current;
+    }
+    return true;
+}
+
+PackedInt32Array RoRPathKernel::pack_cells(const std::vector<int32_t> &cells) const {
+    PackedInt32Array result;
+    result.resize(static_cast<int64_t>(cells.size()) * 2);
+    int64_t output = 0;
+    for (const int32_t cell : cells) {
+        result.set(output++, cell % width_);
+        result.set(output++, cell / width_);
+    }
+    return result;
 }
 
 double RoRPathKernel::heuristic(int32_t left, int32_t right) const {

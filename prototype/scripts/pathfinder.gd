@@ -176,20 +176,26 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		var cached_path: Array[Vector2] = []
 		cached_path.assign(cache[key])
 		return _finish_path_observation(started, cached_path, true)
-	var cells := direct_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
-	var direct_path := not cells.is_empty()
-	if not direct_path:
-		cells = find_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
-	if cells.is_empty():
+	var smoothed: Array[Vector2i]
+	var direct_path := false
+	if uses_native_kernel():
+		var native_result := _find_native_smoothed_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+		smoothed = native_result["path"]
+		direct_path = bool(native_result["direct"])
+	else:
+		var cells := direct_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+		direct_path = not cells.is_empty()
+		if not direct_path:
+			cells = find_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+		if direct_path and cells.size() > 1:
+			smoothed = [cells[0], cells[cells.size() - 1]]
+		else:
+			smoothed = smooth_cells(cells, movement_domain, restriction_id, clearance_radius)
+	if smoothed.is_empty():
 		cache[key] = []
 		return _finish_path_observation(started, [], false)
 	if direct_path and performance_probe != null:
 		performance_probe.increment("navigation.direct_path_hits")
-	var smoothed: Array[Vector2i]
-	if direct_path and cells.size() > 1:
-		smoothed = [cells[0], cells[cells.size() - 1]]
-	else:
-		smoothed = smooth_cells(cells, movement_domain, restriction_id, clearance_radius)
 	var result: Array[Vector2] = []
 	for index in range(1, smoothed.size()):
 		var cell: Vector2i = smoothed[index]
@@ -272,6 +278,21 @@ func _find_native_cell_path(start: Vector2i, goal: Vector2i, movement_domain: St
 		result[result_index] = Vector2i(packed[packed_index], packed[packed_index + 1])
 		result_index += 1
 	return result
+
+
+func _find_native_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String, restriction_id: int, clearance_radius: float) -> Dictionary:
+	var kernel = _native_kernel_for(movement_domain, restriction_id)
+	var packed: PackedInt32Array = kernel.find_smoothed_cell_path(start, goal, clearance_radius)
+	if performance_probe != null:
+		performance_probe.increment("navigation.native_path_queries")
+		performance_probe.increment("navigation.expanded_nodes", int(kernel.get_last_expanded_nodes()))
+	var result: Array[Vector2i] = []
+	result.resize(packed.size() / 2)
+	var result_index := 0
+	for packed_index in range(0, packed.size(), 2):
+		result[result_index] = Vector2i(packed[packed_index], packed[packed_index + 1])
+		result_index += 1
+	return {"path": result, "direct": bool(kernel.get_last_path_was_direct())}
 
 
 func _native_kernel_for(movement_domain: String, restriction_id: int):

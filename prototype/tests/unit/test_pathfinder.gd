@@ -16,6 +16,7 @@ func _initialize() -> void:
 	test_clearance_aware_route_avoids_narrow_shore()
 	test_simulation_routes_around_town_center()
 	test_native_kernel_matches_gdscript()
+	test_native_smoothed_path_matches_gdscript()
 	test_native_local_movement_matches_gdscript()
 	test_native_local_movement_keeps_mixed_configuration_routing()
 
@@ -140,6 +141,32 @@ func test_native_local_movement_matches_gdscript() -> void:
 	LocalMovement.calculate_runtime_unit_into(expected, Vector2(9.5, 5.5), [units[1], units[2]], finder.grid, 0.05)
 	var native: Vector4 = finder.calculate_native_movement(units[0], Vector2(9.5, 5.5), 0.05)
 	assert_vector_close(Vector2(native.x, native.y), Vector2(expected["actual_velocity"]), 0.00001, "native local avoidance preserves velocity")
+
+
+func test_native_smoothed_path_matches_gdscript() -> void:
+	var native_finder = Pathfinder.new(open_grid(Vector2i(20, 16)))
+	if not native_finder.uses_native_kernel():
+		return
+	var script_finder = Pathfinder.new(open_grid(Vector2i(20, 16)))
+	script_finder.set_native_enabled(false)
+	var blocked := [
+		Vector2i(7, 2), Vector2i(7, 3), Vector2i(7, 4), Vector2i(7, 5),
+		Vector2i(7, 6), Vector2i(7, 8), Vector2i(7, 9), Vector2i(7, 10),
+		Vector2i(11, 7), Vector2i(12, 7), Vector2i(13, 7), Vector2i(14, 7),
+	]
+	for cell in blocked:
+		native_finder.grid.set_terrain(cell, "water")
+		script_finder.grid.set_terrain(cell, "water")
+	var pairs := [
+		[Vector2(2.15, 2.25), Vector2(17.75, 12.35), 0.0],
+		[Vector2(17.75, 12.35), Vector2(2.15, 2.25), 0.0],
+		[Vector2(3.4, 12.2), Vector2(16.6, 2.8), 0.3],
+		[Vector2(8.2, 6.2), Vector2(17.4, 6.8), 0.0],
+	]
+	for pair in pairs:
+		var expected: Array[Vector2] = script_finder.find_path(pair[0], pair[1], "land", -1, pair[2])
+		var actual: Array[Vector2] = native_finder.find_path(pair[0], pair[1], "land", -1, pair[2])
+		assert_equal(actual, expected, "native direct/A*/smoothing geometry preserves world path %s -> %s" % [pair[0], pair[1]])
 
 
 func test_native_local_movement_keeps_mixed_configuration_routing() -> void:

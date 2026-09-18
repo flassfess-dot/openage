@@ -305,3 +305,24 @@ Canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747
 Hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits, food `5060/5000` и 693 carrying units совпали. Gather/return/naval economy, pathfinder mixed-domain и deterministic replay gates проходят.
 
 Дополнительный aggregate профиль не изменяет симуляцию и суммирует уже измеренное время path запросов внутри одного тика. Он показал `simulation.navigation.path_queries` p95 `10,041` мс, max `20,972` мс при p95 отдельного запроса `0,937` мс. Расширенный exact-cache эксперимент не дал попаданий или улучшения: волна состоит из разных текущих позиций и конечных slots, поэтому изменение ключа удалено. Следующий архитектурный owner — revisioned source/drop-site corridor: один дальний маршрут на группу с индивидуальными конечными слотами/local avoidance и автоматическим fallback при препятствии или изменении navigation revision.
+
+## 20. E6-016 — native direct-cell и smoothing geometry
+
+Перед введением нового flow/corridor контракта измерена стоимость уже существующего request. После нативного A* каждый запрос по-прежнему выполнял GDScript direct-cell traversal и greedy smoothing с повторными line-of-sight проверками. Обе операции являются чистой геометрией над той же revisioned byte mask, поэтому добавлены в `RoRPathKernel`; ближайшая допустимая цель, exact world endpoint, movement domain/restriction/clearance selection, `NavigationService` envelope, order/path lifecycle и fallback остались в GDScript.
+
+Новый parity test сравнивает полные world paths native/fallback на прямом пути, препятствиях, обратном направлении и clearance. Direction order, diagonal corner rule, heap tie-break и smoothing contract сохранены. Последовательный A/B `gather_economy 2×500 / 400×400 / 520+240`:
+
+| Метрика | E6-015 aggregate profile | E6-016 |
+|---|---:|---:|
+| sample wall | 14,14 с | 13,84 с |
+| fixed tick p50 / p95 / max | 57,644 / 71,076 / 88,280 мс | 57,271 / 65,622 / 74,122 мс |
+| world advance p95 | 65,512 мс | 58,604 мс |
+| unit orders p95 | 48,959 мс | 41,376 мс |
+| unit task p95 | 36,170 мс | 27,539 мс |
+| returning p95 | 24,193 мс | 21,439 мс |
+| aggregate path p95 / max | 10,041 / 20,972 мс | 1,329 / 3,290 мс |
+| single path request p95 | 0,937 мс | 0,095 мс |
+
+Оба прогона: 893 запроса, 324 direct hits, 569 A*, 9324 expanded nodes, canonical hash `c4244f120085360a47d0b53aaf786f4396e48ad135c73190fa66ffaa90bcc747`, 11 671 gather, 988 deposits, food `5060/5000`, 693 carriers. Pathfinder/navigation stress, gather/return/naval economy, deterministic replay и save/load gates проходят.
+
+Deadline `50` и comfort `35` мс ещё открыты. После снятия route burst основные владельцы — movement integration p95 `8,451` мс, fog `11,693`, per-unit preparation `6,412` и оставшийся task `27,539`. Следующий профиль должен сначала разделить эти уже измеренные расходы; source/drop-site flow/corridor вводится только если mixed 4/8×500 подтвердит повтор дальних маршрутов, а не как обязательное усложнение однородного теста.
