@@ -212,6 +212,10 @@ func presentation_options() -> Dictionary:
 			"requested_build_site_kinds": requested_build_site_kinds,
 			"maximum_build_sites_per_kind": maximum_build_sites_per_kind,
 			"build_site_search_radius": source_city_plan.recommended_search_radius() if source_city_plan != null and source_city_plan.enabled else 12,
+			# Static navigation revision and worker land-component membership both
+			# invalidate this cache. A long time cap prevents periodic full placement
+			# scans from coinciding with every strategic decision.
+			"build_site_cache_ticks": 1200,
 			"minimum_structure_gap": float(economic_policy.get("minimum_structure_gap", 0.0)),
 			"preferred_build_sites": preferred_build_sites,
 			"strict_preferred_build_site_kinds": strict_preferred_build_site_kinds,

@@ -18,9 +18,24 @@ static func canonical(world, tick: int, controller = null) -> Dictionary:
 
 
 static func presentation(world, tick: int, observer_team: int = 0, options: Dictionary = {}) -> Dictionary:
+	var snapshot_probe: Variant = options.get("performance_probe")
+	var snapshot_prefix := String(options.get("performance_prefix", "presentation.snapshot"))
+	var snapshot_stage_started := Time.get_ticks_usec() if snapshot_probe != null else 0
 	var fog = world.get_fog_of_war()
+	var observer_states := PackedByteArray()
+	var observer_allies: Dictionary = {}
+	if observer_team > 0:
+		# Snapshot projection can touch thousands of entities. Resolve the
+		# observer's immutable visibility inputs once instead of routing every
+		# entity through world -> visibility system -> fog dictionaries.
+		fog.ensure_player(observer_team)
+		observer_states = fog.states_by_player[observer_team]
+		observer_allies = fog.allies_by_player.get(observer_team, {})
+	var fog_map_size: Vector2i = fog.map_size
 	var compact_entities := bool(options.get("compact_entities", false))
 	var compact_render_entities := bool(options.get("compact_render_entities", false))
+	var borrow_visible_render_entities := bool(options.get("borrow_visible_render_entities", false))
+	var borrow_overview_entities := bool(options.get("borrow_overview_entities", false))
 	var include_navigation := bool(options.get("include_navigation", true))
 	var include_build_sites := bool(options.get("include_build_sites", true))
 	var include_fog_cells := bool(options.get("include_fog_cells", true))
@@ -34,6 +49,12 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		has_entity_bounds = (entity_bounds as Rect2).has_area()
 	var always_include_entity_ids: Array = options.get("always_include_entity_ids", [])
 	var command_option_entity_ids: Array = options.get("command_option_entity_ids", [])
+	var always_include_entity_lookup: Dictionary = {}
+	for entity_id_value in always_include_entity_ids:
+		always_include_entity_lookup[int(entity_id_value)] = true
+	var command_option_entity_lookup: Dictionary = {}
+	for entity_id_value in command_option_entity_ids:
+		command_option_entity_lookup[int(entity_id_value)] = true
 	var restrict_command_options := options.has("command_option_entity_ids")
 	var requested_production_only := bool(options.get("requested_production_only", false))
 	var production_requests: Array = options.get("production_requests", [])
@@ -41,36 +62,93 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var requested_build_site_kinds: Array = options.get("requested_build_site_kinds", [])
 	var maximum_build_sites_per_kind := maxi(1, int(options.get("maximum_build_sites_per_kind", 4)))
 	var build_site_search_radius := maxi(1, int(options.get("build_site_search_radius", 12)))
+	var build_site_cache_ticks := maxi(0, int(options.get("build_site_cache_ticks", 0)))
 	var minimum_structure_gap := maxf(0.0, float(options.get("minimum_structure_gap", 0.0)))
 	var preferred_build_sites: Dictionary = options.get("preferred_build_sites", {})
 	var strict_preferred_build_site_kinds: Array = options.get("strict_preferred_build_site_kinds", [])
+	var compact_render_projector: Callable = Callable(world, "compact_render_projection") if compact_render_entities and world.has_method("compact_render_projection") else Callable()
 	var requested_build_options: Array = []
 	var worker_build_options: Array = []
 	var worker_build_options_ready := false
 	var available_requested_build_site_kinds: Array = []
 	if observer_team > 0 and not requested_build_site_kinds.is_empty():
-		for option_value in world.get_build_options(observer_team):
+		var build_options: Array = world.get_build_options_for_kinds(observer_team, requested_build_site_kinds) if world.has_method("get_build_options_for_kinds") else world.get_build_options(observer_team)
+		for option_value in build_options:
 			var option: Dictionary = option_value
 			if String(option.get("kind", "")) in requested_build_site_kinds:
 				requested_build_options.append(option)
 				if bool(option.get("accepted", false)):
 					available_requested_build_site_kinds.append(String(option.get("kind", "")))
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".setup", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_stage_started = Time.get_ticks_usec()
 	var units: Array = []
 	var overview_units: Array = []
-	for unit in world.get_units():
-		if observer_team <= 0 or world.is_entity_visible_to(observer_team, unit):
-			if include_overview:
-				overview_units.append(_overview_entity(unit))
-			if has_entity_bounds and not _entity_in_bounds(unit, entity_bounds) and not always_include_entity_ids.has(int(unit.get("id", -1))):
+	var unit_control_projection_microseconds := 0
+	var unit_render_projection_microseconds := 0
+	var unit_acquisition_microseconds := 0
+	var unit_overview_microseconds := 0
+	var unit_detail_loop_microseconds := 0
+	var unit_worker_options_microseconds := 0
+	# The simulation spatial hash uses fine two-tile buckets for collision work.
+	# On a sparse campaign viewport, visiting thousands of empty buckets costs
+	# more than scanning a few hundred units. Switch to the bounded query only at
+	# the population scale where it becomes cheaper and enables future 500-unit
+	# players without penalizing today's campaign missions.
+	var use_bounded_unit_query: bool = has_entity_bounds and world.has_method("get_units_in_bounds") and world.get_units().size() >= 512
+	var unit_substage_started := Time.get_ticks_usec() if snapshot_probe != null else 0
+	var detail_units: Array = world.get_units_in_bounds(entity_bounds) if use_bounded_unit_query else world.get_units()
+	if has_entity_bounds and not always_include_entity_lookup.is_empty():
+		var detailed_ids: Dictionary = {}
+		for unit_value in detail_units:
+			detailed_ids[int(unit_value.get("id", -1))] = true
+		for entity_id_value in always_include_entity_lookup.keys():
+			var entity_id := int(entity_id_value)
+			if detailed_ids.has(entity_id):
 				continue
+			var selected_unit: Variant = world.find_unit(entity_id)
+			if selected_unit != null:
+				detail_units.append(selected_unit)
+	if snapshot_probe != null:
+		unit_acquisition_microseconds = Time.get_ticks_usec() - unit_substage_started
+		unit_substage_started = Time.get_ticks_usec()
+	if include_overview:
+		for unit_value in world.get_units():
+			var overview_unit: Dictionary = unit_value
+			if _entity_visible_to_observer(overview_unit, observer_team, observer_states, observer_allies, fog_map_size):
+				overview_units.append(overview_unit if borrow_overview_entities else _overview_entity(overview_unit))
+	if snapshot_probe != null:
+		unit_overview_microseconds = Time.get_ticks_usec() - unit_substage_started
+		unit_substage_started = Time.get_ticks_usec()
+	for unit in detail_units:
+		if has_entity_bounds and not use_bounded_unit_query and not _entity_in_bounds(unit, entity_bounds) and not always_include_entity_lookup.has(int(unit.get("id", -1))):
+			continue
+		if _entity_visible_to_observer(unit, observer_team, observer_states, observer_allies, fog_map_size):
 			var unit_id := int(unit.get("id", -1))
-			var presentation_unit := _presentation_entity(
-				unit,
-				observer_team,
-				compact_entities,
-				compact_render_entities and not always_include_entity_ids.has(unit_id)
-			)
-			if observer_team > 0 and int(unit.get("team", 0)) == observer_team and world.entity_is_worker(unit) and (not restrict_command_options or command_option_entity_ids.has(int(unit.get("id", -1)))):
+			var presentation_unit: Dictionary
+			if compact_render_entities and always_include_entity_lookup.has(unit_id):
+				var projection_started := Time.get_ticks_usec() if snapshot_probe != null else 0
+				presentation_unit = _compact_control_entity(unit, observer_team, compact_render_projector)
+				if snapshot_probe != null:
+					unit_control_projection_microseconds += Time.get_ticks_usec() - projection_started
+			elif compact_render_entities and borrow_visible_render_entities:
+				# The in-process renderer is a trusted read-only consumer on the same
+				# thread. Borrow unchanged visible records rather than copying dozens
+				# of fields every fixed tick. Selected/control entities stay detached.
+				presentation_unit = unit
+			else:
+				var projection_started := Time.get_ticks_usec() if snapshot_probe != null else 0
+				presentation_unit = _presentation_entity(
+					unit,
+					observer_team,
+					compact_entities,
+					compact_render_entities,
+					compact_render_projector
+				)
+				if snapshot_probe != null:
+					unit_render_projection_microseconds += Time.get_ticks_usec() - projection_started
+			if observer_team > 0 and int(unit.get("team", 0)) == observer_team and world.entity_is_worker(unit) and (not restrict_command_options or command_option_entity_lookup.has(int(unit.get("id", -1)))):
+				var worker_options_started := Time.get_ticks_usec() if snapshot_probe != null else 0
 				if not requested_build_options.is_empty():
 					presentation_unit["command_options"] = {"build": requested_build_options}
 				elif include_worker_command_options:
@@ -81,47 +159,93 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 						worker_build_options = world.get_build_options(observer_team)
 						worker_build_options_ready = true
 					presentation_unit["command_options"] = {"build": worker_build_options}
+				if snapshot_probe != null:
+					unit_worker_options_microseconds += Time.get_ticks_usec() - worker_options_started
 			units.append(presentation_unit)
+	if snapshot_probe != null:
+		unit_detail_loop_microseconds = Time.get_ticks_usec() - unit_substage_started
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".units", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.acquire", unit_acquisition_microseconds)
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.overview", unit_overview_microseconds)
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.detail_loop", unit_detail_loop_microseconds)
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.worker_options", unit_worker_options_microseconds)
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.control_projection", unit_control_projection_microseconds)
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.render_projection", unit_render_projection_microseconds)
+		snapshot_stage_started = Time.get_ticks_usec()
 	var resources: Array = []
 	var overview_resources: Array = []
-	for resource in world.get_resources():
-		if observer_team <= 0 or world.is_entity_visible_to(observer_team, resource, true):
-			if include_overview:
-				overview_resources.append(_overview_entity(resource))
-			if has_entity_bounds and not _entity_in_bounds(resource, entity_bounds) and not always_include_entity_ids.has(int(resource.get("id", -1))):
-				continue
-			var resource_id := int(resource.get("id", -1))
+	var resources_are_preordered: bool = observer_team > 0 and world.has_method("get_known_resources")
+	var resources_use_shared_ai_projection: bool = (
+		compact_entities
+		and observer_team > 0
+		and not has_entity_bounds
+		and not include_overview
+		and world.has_method("get_known_ai_resources")
+	)
+	var known_resources: Array
+	if resources_use_shared_ai_projection:
+		known_resources = world.get_known_ai_resources(observer_team)
+	elif resources_are_preordered and has_entity_bounds and world.has_method("get_known_resources_in_bounds"):
+		known_resources = world.get_known_resources_in_bounds(observer_team, entity_bounds)
+	elif resources_are_preordered:
+		known_resources = world.get_known_resources(observer_team)
+	else:
+		known_resources = world.get_resources()
+	if include_overview:
+		var overview_source_resources: Array = world.get_known_resources(observer_team) if resources_are_preordered else world.get_resources()
+		for resource_value in overview_source_resources:
+			overview_resources.append(resource_value if borrow_overview_entities else _overview_entity(resource_value))
+	for resource in known_resources:
+		var resource_id := int(resource.get("id", -1))
+		if resources_use_shared_ai_projection or (compact_render_entities and borrow_visible_render_entities and not always_include_entity_lookup.has(resource_id)):
+			resources.append(resource)
+		else:
 			resources.append(_presentation_entity(
-				resource,
-				observer_team,
-				compact_entities,
-				compact_render_entities and not always_include_entity_ids.has(resource_id)
-			))
+					resource,
+					observer_team,
+					compact_entities,
+					compact_render_entities and not always_include_entity_lookup.has(resource_id),
+					compact_render_projector
+				))
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".resources", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_stage_started = Time.get_ticks_usec()
 	var objectives: Array = []
 	for objective in world.victory_objectives:
 		if not bool(objective.get("active", true)):
 			continue
-		if observer_team <= 0 or world.is_entity_visible_to(observer_team, objective, true):
+		if _entity_visible_to_observer(objective, observer_team, observer_states, observer_allies, fog_map_size, true):
 			objectives.append(_presentation_entity(objective, observer_team, compact_entities))
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".objectives", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_stage_started = Time.get_ticks_usec()
 	var buildings: Array = []
 	var overview_buildings: Array = []
 	for building in world.get_buildings():
-		if observer_team <= 0 or world.is_entity_visible_to(observer_team, building, true):
+		var building_in_detail_bounds := not has_entity_bounds or _entity_in_bounds(building, entity_bounds) or always_include_entity_lookup.has(int(building.get("id", -1)))
+		if not include_overview and not building_in_detail_bounds:
+			continue
+		if _entity_visible_to_observer(building, observer_team, observer_states, observer_allies, fog_map_size, true):
 			if include_overview:
-				overview_buildings.append(_overview_entity(building))
-			if has_entity_bounds and not _entity_in_bounds(building, entity_bounds) and not always_include_entity_ids.has(int(building.get("id", -1))):
+				overview_buildings.append(building if borrow_overview_entities else _overview_entity(building))
+			if not building_in_detail_bounds:
 				continue
 			var building_id := int(building.get("id", -1))
-			var presentation_building := _presentation_entity(
-				building,
-				observer_team,
-				compact_entities,
-				compact_render_entities and not always_include_entity_ids.has(building_id)
-			)
+			var presentation_building: Dictionary
+			if compact_render_entities and always_include_entity_lookup.has(building_id):
+				presentation_building = _compact_control_entity(building, observer_team, compact_render_projector)
+			else:
+				presentation_building = _presentation_entity(
+					building,
+					observer_team,
+					compact_entities,
+					compact_render_entities,
+					compact_render_projector
+				)
 			presentation_building["target_domains"] = world.combat_target_domains(building)
 			if world.trade_system.is_trade_dock(building):
 				presentation_building["trade"] = world.trade_system.presentation_for_dock(building)
-			if observer_team > 0 and int(building.get("team", 0)) == observer_team and (not restrict_command_options or command_option_entity_ids.has(int(building.get("id", -1)))):
+			if observer_team > 0 and int(building.get("team", 0)) == observer_team and (not restrict_command_options or command_option_entity_lookup.has(int(building.get("id", -1)))):
 				presentation_building["builder_count"] = building.get("builders", {}).size()
 				if String(building.get("state", "complete")) == "foundation":
 					presentation_building["reachable_builder_ids"] = world.reachable_builder_ids(building)
@@ -135,51 +259,92 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				if not planning_technology_ids.is_empty():
 					_append_planning_research_options(world, presentation_building, building, observer_team, planning_technology_ids)
 			buildings.append(presentation_building)
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".buildings", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_stage_started = Time.get_ticks_usec()
 	var projectiles: Array = []
 	if include_projectiles:
 		for projectile in world.get_projectiles():
-			if observer_team <= 0 or world.is_entity_visible_to(observer_team, projectile):
+			if _entity_visible_to_observer(projectile, observer_team, observer_states, observer_allies, fog_map_size):
 				projectiles.append(_presentation_entity(projectile, observer_team, compact_entities))
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".projectiles", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_stage_started = Time.get_ticks_usec()
 	var build_sites: Dictionary = {}
 	if observer_team > 0 and not requested_build_site_kinds.is_empty():
-		build_sites = world.get_local_build_sites(
-			observer_team,
-			available_requested_build_site_kinds,
-			maximum_build_sites_per_kind,
-			build_site_search_radius,
-			preferred_build_sites,
-			strict_preferred_build_site_kinds,
-			minimum_structure_gap
-		)
+		if build_site_cache_ticks > 0 and world.has_method("get_cached_local_build_sites"):
+			build_sites = world.get_cached_local_build_sites(
+				observer_team,
+				available_requested_build_site_kinds,
+				tick,
+				build_site_cache_ticks,
+				maximum_build_sites_per_kind,
+				build_site_search_radius,
+				preferred_build_sites,
+				strict_preferred_build_site_kinds,
+				minimum_structure_gap
+			)
+		else:
+			build_sites = world.get_local_build_sites(
+				observer_team,
+				available_requested_build_site_kinds,
+				maximum_build_sites_per_kind,
+				build_site_search_radius,
+				preferred_build_sites,
+				strict_preferred_build_site_kinds,
+				minimum_structure_gap
+			)
 	elif observer_team > 0 and include_build_sites:
 		build_sites = world.get_mixed_domain_build_sites(observer_team)
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".build_sites", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_stage_started = Time.get_ticks_usec()
+	var navigation: Dictionary = _presentation_navigation(world, fog, observer_team) if include_navigation else {}
+	var presented_fog: Dictionary = _presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []}
+	var player_state: Dictionary = _presentation_player_state(world, observer_team)
+	var scenario: Dictionary = world.scenario_system.presentation_state(observer_team) if include_scenario else {}
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".state", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_stage_started = Time.get_ticks_usec()
+	var sorted_units := _sort_entity_copies(units)
+	# get_known_resources maintains its cache in stable entity-ID order. Avoid
+	# sorting thousands of copied forest nodes again for every AI decision.
+	var sorted_resources := resources if resources_are_preordered else _sort_entity_copies(resources)
+	var sorted_objectives := _sort_entity_copies(objectives)
+	var sorted_buildings := _sort_entity_copies(buildings)
+	var sorted_projectiles := _sort_entity_copies(projectiles)
+	var sorted_overview_units := _sort_entity_copies(overview_units)
+	var sorted_overview_resources := _sort_entity_copies(overview_resources)
+	var sorted_overview_buildings := _sort_entity_copies(overview_buildings)
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".sort", Time.get_ticks_usec() - snapshot_stage_started)
 	return {
 		"format_version": FORMAT_VERSION,
 		"tick": tick,
 		"observer_team": observer_team,
 		"map_size": world.map_size,
-		"units": _sort_entity_copies(units),
-		"resources": _sort_entity_copies(resources),
-		"objectives": _sort_entity_copies(objectives),
-		"buildings": _sort_entity_copies(buildings),
-		"projectiles": _sort_entity_copies(projectiles),
+		"units": sorted_units,
+		"resources": sorted_resources,
+		"objectives": sorted_objectives,
+		"buildings": sorted_buildings,
+		"projectiles": sorted_projectiles,
 		"overview": {
-			"units": _sort_entity_copies(overview_units),
-			"resources": _sort_entity_copies(overview_resources),
-			"buildings": _sort_entity_copies(overview_buildings),
+			"units": sorted_overview_units,
+			"resources": sorted_overview_resources,
+			"buildings": sorted_overview_buildings,
 		},
 		"ai_distress_signals": world.get_attack_distress_signals(observer_team) if observer_team > 0 else [],
-		"navigation": _presentation_navigation(world, fog, observer_team) if include_navigation else {},
+		"navigation": navigation,
 		"build_sites": build_sites,
 		# Rendering only depends on this observer's grid. Enemy and neutral fog
 		# changes must not invalidate the local player's cached fog mesh.
 		"fog_revision": int(fog.revision_for_player(observer_team)),
-		"fog": _presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []},
-		"player_state": _presentation_player_state(world, observer_team),
+		"fog": presented_fog,
+		"player_state": player_state,
 		"battle_over": bool(world.battle_over),
 		"battle_message": String(world.battle_message),
 		"match_result": world.get_victory_result(),
-		"scenario": world.scenario_system.presentation_state(observer_team) if include_scenario else {},
+		"scenario": scenario,
 	}
 
 
@@ -255,10 +420,12 @@ static func _sorted_entities(source: Array) -> Array:
 	return result
 
 
-static func _presentation_entity(entity: Dictionary, observer_team: int = 0, compact: bool = false, compact_render: bool = false) -> Dictionary:
+static func _presentation_entity(entity: Dictionary, observer_team: int = 0, compact: bool = false, compact_render: bool = false, compact_render_projector: Callable = Callable()) -> Dictionary:
 	if compact:
 		return _compact_ai_entity(entity, observer_team)
 	if compact_render:
+		if compact_render_projector.is_valid():
+			return compact_render_projector.call(entity)
 		return _compact_render_entity(entity)
 	var result: Dictionary = entity.duplicate(true)
 	EntityComponents.sync_dynamic(result)
@@ -334,8 +501,67 @@ static func _compact_render_entity(entity: Dictionary) -> Dictionary:
 	return result
 
 
+static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, compact_render_projector: Callable = Callable()) -> Dictionary:
+	# Selected objects need gameplay/HUD data, but not authoritative paths,
+	# destination reservations, AI bookkeeping or the full technology payload.
+	# Keeping this explicit contract avoids two deep copies of large unit records
+	# every presentation tick while preserving every player-facing control field.
+	var result: Dictionary = compact_render_projector.call(entity).duplicate(true) if compact_render_projector.is_valid() else _compact_render_entity(entity)
+	for key in [
+		"stance", "attack_damage", "attack_range", "attack_range_min", "attack_period",
+		"carry_capacity", "carried_resource_type_id", "resource_id", "gather_stage",
+		"worker_role_source_unit_id", "dropoff_id", "diagnostic_reason",
+		"construction_progress", "production_progress", "rally_point",
+	]:
+		if entity.has(key):
+			result[key] = entity[key]
+	if entity.has("production_queue"):
+		result["production_queue"] = entity.get("production_queue", []).duplicate(true)
+	var source_components: Dictionary = entity.get("components", {})
+	var components: Dictionary = result.get("components", {}).duplicate(true)
+	for component_name in ["combat", "conversion", "healing", "resource_carrier"]:
+		var component: Dictionary = source_components.get(component_name, {})
+		if not component.is_empty():
+			components[component_name] = component.duplicate(true)
+	var cargo: Dictionary = source_components.get("cargo", {})
+	if not cargo.is_empty():
+		components["cargo"] = cargo.duplicate(true)
+		if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
+			components["cargo"].erase("passenger_ids")
+	var trade: Dictionary = source_components.get("trade", {})
+	if not trade.is_empty():
+		components["trade"] = trade.duplicate(true)
+		if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
+			for private_field in ["target_dock_id", "home_dock_id", "selected_input_resource_type_id", "approach_position", "cargo_goods", "cargo_gold", "trip_count"]:
+				components["trade"].erase(private_field)
+	result["components"] = components
+	return result
+
+
 static func _entity_in_bounds(entity: Dictionary, bounds: Rect2) -> bool:
 	return bounds.has_point(Vector2(entity.get("pos", entity.get("position", Vector2.ZERO))))
+
+
+static func _entity_visible_to_observer(
+	entity: Dictionary,
+	observer_team: int,
+	observer_states: PackedByteArray,
+	observer_allies: Dictionary,
+	fog_map_size: Vector2i,
+	allow_explored_static: bool = false
+) -> bool:
+	if observer_team <= 0:
+		return true
+	var owner := int(entity.get("team", 0))
+	if owner > 0 and bool(observer_allies.get(owner, false)):
+		return true
+	var position := Vector2(entity.get("pos", entity.get("position", Vector2.ZERO)))
+	var cell_x := floori(position.x)
+	var cell_y := floori(position.y)
+	if cell_x < 0 or cell_y < 0 or cell_x >= fog_map_size.x or cell_y >= fog_map_size.y:
+		return false
+	var state := int(observer_states[cell_y * fog_map_size.x + cell_x])
+	return state == 2 or (allow_explored_static and state == 1)
 
 
 static func _overview_entity(entity: Dictionary) -> Dictionary:

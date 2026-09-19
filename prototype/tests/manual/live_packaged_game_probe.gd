@@ -20,6 +20,7 @@ const PAN_FRAMES := 90
 var game: Node
 var output_directory := ""
 var frame_post_draw_received := false
+var boot_metrics: Dictionary = {}
 
 
 func _initialize() -> void:
@@ -33,23 +34,34 @@ func _initialize() -> void:
 	root.size = options["size"]
 	await process_frame
 
+	var boot_started := Time.get_ticks_usec()
 	var entry := MatchRegistry.resolve(String(options["match"]))
 	if entry.is_empty() or not bool(entry.get("available", false)):
 		push_error("Live packaged probe cannot resolve match: %s" % options["match"])
 		quit(1)
 		return
+	var scene_load_started := Time.get_ticks_usec()
 	var scene: PackedScene = load("res://main.tscn")
+	boot_metrics["scene_load_microseconds"] = Time.get_ticks_usec() - scene_load_started
 	if scene == null:
 		push_error("Live packaged probe cannot load main.tscn")
 		quit(1)
 		return
+	var instantiate_started := Time.get_ticks_usec()
 	game = scene.instantiate()
+	boot_metrics["scene_instantiate_microseconds"] = Time.get_ticks_usec() - instantiate_started
 	game.match_path = String(entry["path"])
+	var attach_started := Time.get_ticks_usec()
 	root.add_child(game)
+	boot_metrics["scene_attach_ready_microseconds"] = Time.get_ticks_usec() - attach_started
 	current_scene = game
+	await process_frame
+	boot_metrics["first_frame_microseconds"] = Time.get_ticks_usec() - boot_started
+	var overlay_state := _dismiss_blocking_overlays()
 
 	for _frame in range(WARMUP_FRAMES):
 		await process_frame
+	boot_metrics["warm_ready_microseconds"] = Time.get_ticks_usec() - boot_started
 	var subsystem_probe = PerformanceProbe.new(IDLE_FRAMES + MOVEMENT_FRAMES + PAN_FRAMES + 64)
 	game.game_controller.set_performance_probe(subsystem_probe)
 
@@ -58,6 +70,8 @@ func _initialize() -> void:
 		"kind": "live_packaged_game_probe",
 		"match": String(options["match"]),
 		"viewport_size": [int(options["size"].x), int(options["size"].y)],
+		"boot": boot_metrics,
+		"overlays": overlay_state,
 		"stages": {},
 		"captures": {},
 	}
@@ -184,16 +198,27 @@ func _measure_frames(count: int, pan: bool = false) -> Dictionary:
 
 
 func _select_local_group() -> Dictionary:
-	var points: Array[Vector2] = []
-	var ids: Array[int] = []
+	var candidates: Array[Dictionary] = []
+	var gameplay_rect := Rect2(Vector2(8.0, 24.0), Vector2(root.size.x - 16, root.size.y - 164))
 	for unit_value in game.simulation_world.get_units():
 		var unit: Dictionary = unit_value
 		if int(unit.get("team", 0)) != int(game.PLAYER_TEAM) or float(unit.get("hp", 0.0)) <= 0.0:
 			continue
-		points.append(game.world_to_screen(Vector2(unit.get("pos", Vector2.ZERO))))
-		ids.append(int(unit.get("id", -1)))
-		if points.size() >= 8:
-			break
+		var screen: Vector2 = game.world_to_screen(Vector2(unit.get("pos", Vector2.ZERO)))
+		if gameplay_rect.has_point(screen):
+			candidates.append({"id": int(unit.get("id", -1)), "screen": screen})
+	candidates.sort_custom(func(left, right):
+		var left_screen: Vector2 = left["screen"]
+		var right_screen: Vector2 = right["screen"]
+		if not is_equal_approx(left_screen.y, right_screen.y):
+			return left_screen.y < right_screen.y
+		return int(left["id"]) < int(right["id"])
+	)
+	var points: Array[Vector2] = []
+	var ids: Array[int] = []
+	for candidate in candidates.slice(0, mini(8, candidates.size())):
+		points.append(Vector2(candidate["screen"]))
+		ids.append(int(candidate["id"]))
 	if points.is_empty():
 		return {"attempted_ids": [], "selected_ids": []}
 	var minimum := points[0]
@@ -204,7 +229,43 @@ func _select_local_group() -> Dictionary:
 	_mouse_button(minimum - Vector2(14.0, 14.0), MOUSE_BUTTON_LEFT, true)
 	_mouse_motion(maximum + Vector2(14.0, 14.0), MOUSE_BUTTON_MASK_LEFT)
 	_mouse_button(maximum + Vector2(14.0, 14.0), MOUSE_BUTTON_LEFT, false)
-	return {"attempted_ids": ids, "selected_ids": game.player_control_state.selected_ids()}
+	var selection_method := "input_drag"
+	if game.player_control_state.selected_ids().is_empty():
+		# The packaged probe feeds input directly into the game root rather than
+		# through an OS window. Re-run the same rectangle through the public game
+		# selection path when the synthetic drag is swallowed by viewport focus.
+		game.finish_selection(minimum - Vector2(14.0, 14.0), maximum + Vector2(14.0, 14.0))
+		selection_method = "selection_api"
+	if game.player_control_state.selected_ids().is_empty():
+		# Keep the movement benchmark useful even if a future input-layer change
+		# breaks synthetic pointer delivery. The report makes this fallback
+		# explicit so it cannot be mistaken for a successful UI interaction.
+		game.player_control_state.replace_or_add(ids, false)
+		game.refresh_hud_model()
+		selection_method = "state_fallback"
+	return {
+		"visible_candidates": candidates.size(),
+		"attempted_ids": ids,
+		"selected_ids": game.player_control_state.selected_ids(),
+		"selection_method": selection_method,
+	}
+
+
+func _dismiss_blocking_overlays() -> Dictionary:
+	var result := {
+		"scenario_was_blocking": false,
+		"scenario_dismissed": false,
+		"hud_modal_was_blocking": false,
+	}
+	if game.scenario_overlay != null and game.scenario_overlay.is_blocking():
+		result["scenario_was_blocking"] = true
+		if game.scenario_overlay.briefing_layer != null and game.scenario_overlay.briefing_layer.visible:
+			game.scenario_overlay._dismiss_briefing()
+			result["scenario_dismissed"] = not game.scenario_overlay.is_blocking()
+	if game.hud_modal_overlay != null and game.hud_modal_overlay.is_blocking():
+		result["hud_modal_was_blocking"] = true
+		game._close_hud_modal()
+	return result
 
 
 func _issue_formation_move() -> Dictionary:

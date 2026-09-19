@@ -99,7 +99,7 @@ func presentation_state(observer_team: int) -> Dictionary:
 func _evaluate_condition(condition: Dictionary, context: Dictionary) -> Dictionary:
 	match String(condition.get("type", "")):
 		"create_in_area":
-			var count := _count_entities_in_area(condition, context.get("units", []), context.get("buildings", []))
+			var count := _count_entities_in_area(condition, context)
 			var required := int(condition.get("required_count", 1))
 			return {"achieved": count >= required, "current": count, "required": required}
 		"destroy_player":
@@ -107,74 +107,65 @@ func _evaluate_condition(condition: Dictionary, context: Dictionary) -> Dictiona
 			var target_status := String(context.get("player_states", {}).get(target_team, {}).get("status", "active"))
 			if target_status != "active":
 				return {"achieved": true, "current": 0, "required": 0}
-			var remaining := 0
-			for unit in context.get("units", []):
-				if int(unit.get("team", 0)) == target_team and float(unit.get("hp", 0.0)) > 0.0:
-					remaining += 1
-			for building in context.get("buildings", []):
-				if int(building.get("team", 0)) == target_team and float(building.get("hp", 0.0)) > 0.0:
-					remaining += 1
+			var remaining := _alive_entity_count(context, target_team)
 			return {"achieved": remaining == 0, "current": 0 if remaining == 0 else 1, "required": 0}
 		"destroy_object":
 			var target_id := int(condition.get("target_scenario_object_id", -1))
-			for collection_name in ["units", "buildings", "resource_nodes", "objectives"]:
-				for entity in context.get(collection_name, []):
-					if int(entity.get("scenario_object_id", -1)) != target_id:
-						continue
-					var alive := bool(entity.get("active", true))
-					if entity.has("hp"):
-						alive = alive and float(entity.get("hp", 0.0)) > 0.0
-					elif entity.has("amount"):
-						alive = alive and int(entity.get("amount", 0)) > 0
-					return {"achieved": not alive, "current": 1 if alive else 0, "required": 0}
+			var entity: Variant = _scenario_entity(context, target_id)
+			if entity != null:
+				var alive := _entity_is_alive(entity)
+				return {"achieved": not alive, "current": 1 if alive else 0, "required": 0}
 			return {"achieved": true, "current": 0, "required": 0}
 		"destroy_count":
 			var target_ids: Array = condition.get("target_scenario_object_ids", [])
 			var alive_ids: Dictionary = {}
-			for collection_name in ["units", "buildings", "resource_nodes", "objectives"]:
-				for entity in context.get(collection_name, []):
-					var scenario_id := int(entity.get("scenario_object_id", -1))
-					if not target_ids.has(scenario_id):
-						continue
-					var alive := bool(entity.get("active", true))
-					if entity.has("hp"):
-						alive = alive and float(entity.get("hp", 0.0)) > 0.0
-					elif entity.has("amount"):
-						alive = alive and int(entity.get("amount", 0)) > 0
-					if alive:
-						alive_ids[scenario_id] = true
+			for scenario_id_value in target_ids:
+				var scenario_id := int(scenario_id_value)
+				var entity: Variant = _scenario_entity(context, scenario_id)
+				if entity != null and _entity_is_alive(entity):
+					alive_ids[scenario_id] = true
 			var destroyed := target_ids.size() - alive_ids.size()
 			var required := int(condition.get("required_count", 1))
 			return {"achieved": destroyed >= required, "current": destroyed, "required": required}
 		"bring_object_to_area":
 			var target_id := int(condition.get("target_scenario_object_id", -1))
 			var area: Array = condition.get("area", [])
-			for collection_name in ["units", "buildings", "resource_nodes", "objectives"]:
-				for entity in context.get(collection_name, []):
-					if int(entity.get("scenario_object_id", -1)) != target_id:
-						continue
-					var alive := bool(entity.get("active", true))
-					if entity.has("hp"):
-						alive = alive and float(entity.get("hp", 0.0)) > 0.0
-					var position: Vector2 = entity.get("pos", Vector2.ZERO)
-					var inside := alive and _position_in_area(position, area)
-					return {"achieved": inside, "current": 1 if inside else 0, "required": 1}
+			var entity: Variant = _scenario_entity(context, target_id)
+			if entity != null:
+				var position: Vector2 = entity.get("pos", Vector2.ZERO)
+				var inside := _entity_is_alive(entity) and _position_in_area(position, area)
+				return {"achieved": inside, "current": 1 if inside else 0, "required": 1}
 			return {"achieved": false, "current": 0, "required": 1}
 	return {"achieved": false, "current": 0, "required": 1}
 
 
-func _count_entities_in_area(condition: Dictionary, units: Array, buildings: Array) -> int:
-	return _count_collection_in_area(condition, units, false) + _count_collection_in_area(condition, buildings, true)
-
-
-func _count_collection_in_area(condition: Dictionary, entities: Array, require_complete: bool) -> int:
-	var count := 0
+func _count_entities_in_area(condition: Dictionary, context: Dictionary) -> int:
+	var cache: Dictionary = context.get("_scenario_candidate_cache", {})
+	if not context.has("_scenario_candidate_cache"):
+		context["_scenario_candidate_cache"] = cache
 	var team := int(condition.get("team", 0))
 	var source_unit_id := int(condition.get("source_unit_id", -1))
 	var kind := String(condition.get("kind", ""))
+	var cache_key := "%d:%d:%s" % [team, source_unit_id, kind]
+	if not cache.has(cache_key):
+		var candidates: Array = []
+		_append_matching_entities(candidates, condition, context.get("units", []), false)
+		_append_matching_entities(candidates, condition, context.get("buildings", []), true)
+		cache[cache_key] = candidates
+	var count := 0
 	var area: Array = condition.get("area", [])
 	if area.size() != 4:
 		return 0
+	for entity in cache[cache_key]:
+		if _position_in_area(Vector2(entity.get("pos", Vector2.ZERO)), area):
+			count += 1
+	return count
+
+
+func _append_matching_entities(result: Array, condition: Dictionary, entities: Array, require_complete: bool) -> void:
+	var team := int(condition.get("team", 0))
+	var source_unit_id := int(condition.get("source_unit_id", -1))
+	var kind := String(condition.get("kind", ""))
 	for entity in entities:
 		if int(entity.get("team", 0)) != team or float(entity.get("hp", 0.0)) <= 0.0:
 			continue
@@ -185,10 +176,41 @@ func _count_collection_in_area(condition: Dictionary, entities: Array, require_c
 				continue
 		elif String(entity.get("kind", "")) != kind:
 			continue
-		var position: Vector2 = entity.get("pos", Vector2.ZERO)
-		if _position_in_area(position, area):
-			count += 1
-	return count
+		result.append(entity)
+
+
+func _alive_entity_count(context: Dictionary, team: int) -> int:
+	var counts: Dictionary = context.get("_scenario_alive_counts", {})
+	if not context.has("_scenario_alive_counts"):
+		for collection_name in ["units", "buildings"]:
+			for entity in context.get(collection_name, []):
+				if float(entity.get("hp", 0.0)) <= 0.0:
+					continue
+				var entity_team := int(entity.get("team", 0))
+				counts[entity_team] = int(counts.get(entity_team, 0)) + 1
+		context["_scenario_alive_counts"] = counts
+	return int(counts.get(team, 0))
+
+
+func _scenario_entity(context: Dictionary, scenario_id: int) -> Variant:
+	var entities: Dictionary = context.get("_scenario_entities_by_id", {})
+	if not context.has("_scenario_entities_by_id"):
+		for collection_name in ["units", "buildings", "resource_nodes", "objectives"]:
+			for entity in context.get(collection_name, []):
+				var entity_scenario_id := int(entity.get("scenario_object_id", -1))
+				if entity_scenario_id >= 0 and not entities.has(entity_scenario_id):
+					entities[entity_scenario_id] = entity
+		context["_scenario_entities_by_id"] = entities
+	return entities.get(scenario_id)
+
+
+func _entity_is_alive(entity: Dictionary) -> bool:
+	var alive := bool(entity.get("active", true))
+	if entity.has("hp"):
+		alive = alive and float(entity.get("hp", 0.0)) > 0.0
+	elif entity.has("amount"):
+		alive = alive and int(entity.get("amount", 0)) > 0
+	return alive
 
 
 func _position_in_area(position: Vector2, area: Array) -> bool:

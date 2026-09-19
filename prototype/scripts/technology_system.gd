@@ -5,19 +5,23 @@ const AGE_TECHNOLOGY_IDS: Array[int] = [100, 101, 102, 103]
 
 var catalog: Dictionary = {}
 var team_states: Dictionary = {}
+var revision_by_team: Dictionary = {}
 
 
 func configure(object_catalog: Dictionary) -> void:
 	catalog = object_catalog
 	team_states.clear()
+	revision_by_team.clear()
 
 
 func reset() -> void:
 	team_states.clear()
+	revision_by_team.clear()
 
 
 func reset_team(team: int) -> void:
 	team_states.erase(team)
+	revision_by_team.erase(team)
 
 
 func initialize_team(team: int) -> Array:
@@ -32,6 +36,7 @@ func initialize_rule_resources(team: int, source_values: Array) -> void:
 	for resource_id in range(source_values.size()):
 		values[resource_id] = float(source_values[resource_id])
 	_state(team)["rule_resources"] = values
+	_touch_team(team)
 
 
 func rule_resource_value(team: int, resource_id: int, fallback: float = 0.0) -> float:
@@ -43,6 +48,7 @@ func apply_rule_resource_effect(team: int, resource_id: int, operator: int, valu
 	var current := float(state["rule_resources"].get(resource_id, 0.0))
 	var updated := _apply_operator(current, operator, value)
 	state["rule_resources"][resource_id] = updated
+	_touch_team(team)
 	return updated
 
 
@@ -121,16 +127,20 @@ func is_technology_disabled(team: int, technology_id: int) -> bool:
 
 
 func disable_technology(team: int, technology_id: int) -> void:
-	if technology_id >= 0:
+	if technology_id >= 0 and not bool(_state(team)["disabled_technologies"].get(technology_id, false)):
 		_state(team)["disabled_technologies"][technology_id] = true
+		_touch_team(team)
 
 
 func mark_researching(team: int, technology_id: int) -> void:
-	_state(team)["researching"][technology_id] = true
+	if not _state(team)["researching"].has(technology_id):
+		_state(team)["researching"][technology_id] = true
+		_touch_team(team)
 
 
 func cancel_research(team: int, technology_id: int) -> void:
-	_state(team)["researching"].erase(technology_id)
+	if _state(team)["researching"].erase(technology_id):
+		_touch_team(team)
 
 
 func complete_research(team: int, technology_id: int) -> Array:
@@ -139,6 +149,7 @@ func complete_research(team: int, technology_id: int) -> Array:
 	if state["researched"].has(technology_id):
 		return []
 	state["researched"][technology_id] = true
+	_touch_team(team)
 	if technology_id in AGE_TECHNOLOGY_IDS:
 		state["current_age"] = technology_id
 	var commands := effect_commands(technology_id)
@@ -217,12 +228,21 @@ func _is_automatic_connector(record: Dictionary, technology_id: int) -> bool:
 
 
 func set_object_enabled(team: int, object_id: int, enabled: bool) -> void:
-	_state(team)["object_availability"][object_id] = enabled
+	var state := _state(team)
+	if bool(state["object_availability"].get(object_id, not enabled)) != enabled or not state["object_availability"].has(object_id):
+		state["object_availability"][object_id] = enabled
+		_touch_team(team)
 
 
 func disable_scenario_object(team: int, object_id: int) -> void:
-	if object_id >= 0:
+	if object_id >= 0 and not bool(_state(team)["scenario_disabled_objects"].get(object_id, false)):
 		_state(team)["scenario_disabled_objects"][object_id] = true
+		_touch_team(team)
+
+
+func revision(team: int) -> int:
+	_state(team)
+	return int(revision_by_team.get(team, 0))
 
 
 func is_object_enabled(team: int, object_id: int, catalog_default: bool = true) -> bool:
@@ -328,6 +348,7 @@ func _register_persistent_effect(team: int, command_value: Variant) -> void:
 	var state := _state(team)
 	var raw_type := int(command.get("type_id", -1))
 	var effect_type := raw_type
+	var changed := true
 	if effect_type in [10, 11, 12, 13, 14, 15, 16]:
 		effect_type -= 10
 	elif effect_type in [20, 21, 22, 23, 24, 25, 26]:
@@ -354,6 +375,10 @@ func _register_persistent_effect(team: int, command_value: Variant) -> void:
 			if not state["technology_time_modifiers"].has(technology_id):
 				state["technology_time_modifiers"][technology_id] = []
 			state["technology_time_modifiers"][technology_id].append({"operator": 0 if int(command.get("attr_c", 0)) == 0 else 4, "value": float(command.get("attr_d", 0.0))})
+		_:
+			changed = false
+	if changed:
+		_touch_team(team)
 
 
 func _state(team: int) -> Dictionary:
@@ -371,7 +396,12 @@ func _state(team: int) -> Dictionary:
 			"technology_time_modifiers": {},
 			"rule_resources": {},
 		}
+		revision_by_team[team] = 0
 	return team_states[team]
+
+
+func _touch_team(team: int) -> void:
+	revision_by_team[team] = int(revision_by_team.get(team, 0)) + 1
 
 
 func _apply_operator(current: float, operator: int, value: float) -> float:

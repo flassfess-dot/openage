@@ -9,10 +9,24 @@ var perception := PerceptionService.new()
 const CANDIDATE_BUCKET_SIZE := 4.0
 const AGGRESSIVE_SCAN_INTERVAL_TICKS := 4
 const GUARDED_SCAN_INTERVAL_TICKS := 2
+const ROSTER_REFRESH_INTERVAL_TICKS := 4
+const CANDIDATE_INDEX_REFRESH_INTERVAL_TICKS := 2
+
+var cached_attackers: Array = []
+var cached_targets: Array = []
+var cached_entity_count := -1
+var cached_roster_tick := -1
+var cached_candidate_index: Dictionary = {}
+var cached_candidate_index_tick := -1
 
 
 func reset() -> void:
-	pass
+	cached_attackers.clear()
+	cached_targets.clear()
+	cached_entity_count = -1
+	cached_roster_tick = -1
+	cached_candidate_index.clear()
+	cached_candidate_index_tick = -1
 
 
 func collect_commands(world, tick: int) -> Array:
@@ -20,7 +34,8 @@ func collect_commands(world, tick: int) -> Array:
 		return []
 	var probe: Variant = world.tick_pipeline.performance_probe
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
-	var units: Array = world.get_combat_attackers()
+	var rosters := _combat_rosters(world, tick)
+	var units: Array = rosters["attackers"]
 	var has_active_observer := false
 	for unit_value in units:
 		var unit: Dictionary = unit_value
@@ -38,7 +53,7 @@ func collect_commands(world, tick: int) -> Array:
 	var attacker_metadata := _attacker_metadata(units)
 	var assigned: Dictionary = attacker_metadata["assigned"]
 	var retaliation_allies: Dictionary = attacker_metadata["retaliation"]
-	var candidate_index := _combat_candidate_index(world.get_combat_targets(false))
+	var candidate_index := _candidate_index(rosters["targets"], tick)
 	if probe != null:
 		probe.observe_microseconds("controller.autonomy.index", Time.get_ticks_usec() - stage_started)
 	var commands: Array = []
@@ -118,6 +133,34 @@ func collect_commands(world, tick: int) -> Array:
 		probe.observe_microseconds("controller.autonomy.perception", perception_microseconds)
 		probe.increment("controller.autonomy.combat_candidate_buckets", combat_candidate_cache.size())
 	return commands
+
+
+func _combat_rosters(world, tick: int) -> Dictionary:
+	var entity_count: int = int(world.get_units().size()) + int(world.get_buildings().size())
+	var refresh: bool = (
+		cached_roster_tick < 0
+		or tick < cached_roster_tick
+		or tick - cached_roster_tick >= ROSTER_REFRESH_INTERVAL_TICKS
+		or entity_count != cached_entity_count
+	)
+	if refresh:
+		cached_attackers = world.get_combat_attackers()
+		cached_targets = world.get_combat_targets(false)
+		cached_entity_count = entity_count
+		cached_roster_tick = tick
+	return {"attackers": cached_attackers, "targets": cached_targets}
+
+
+func _candidate_index(targets: Array, tick: int) -> Dictionary:
+	if (
+		cached_candidate_index_tick < 0
+		or tick < cached_candidate_index_tick
+		or tick - cached_candidate_index_tick >= CANDIDATE_INDEX_REFRESH_INTERVAL_TICKS
+		or cached_candidate_index.is_empty()
+	):
+		cached_candidate_index = _combat_candidate_index(targets)
+		cached_candidate_index_tick = tick
+	return cached_candidate_index
 
 
 func _eligible_for_awareness(world, unit: Dictionary) -> bool:

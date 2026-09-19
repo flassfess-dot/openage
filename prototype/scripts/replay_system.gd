@@ -24,7 +24,7 @@ func begin(seed_value: int) -> void:
 
 
 func record_command(command, issued_tick: int = 0) -> void:
-	command_records.append({
+	var record := {
 		"tick": int(command.tick),
 		"issued_tick": maxi(0, issued_tick),
 		"issuer_id": int(command.issuer_id),
@@ -32,9 +32,13 @@ func record_command(command, issued_tick: int = 0) -> void:
 		"type": String(command.command_type()),
 		"unit_ids": command.unit_ids.duplicate(),
 		"params": encode_variant(command.params),
-	})
-	command_records.sort_custom(_record_less)
-	_rebuild_issuance_records()
+	}
+	# Runtime commands already arrive with monotonically increasing issuance
+	# ticks and sequence IDs. Preserve the two replay orderings incrementally;
+	# sorting the entire history and duplicating it after every AI command made
+	# long campaign sessions progressively more expensive.
+	_insert_sorted(command_records, record, Callable(self, "_record_less"))
+	_insert_sorted(issuance_records, record, Callable(self, "_issuance_record_less"))
 
 
 func record_state(tick: int, world, controller = null) -> String:
@@ -123,6 +127,21 @@ func _record_less(left: Dictionary, right: Dictionary) -> bool:
 func _rebuild_issuance_records() -> void:
 	issuance_records = command_records.duplicate(false)
 	issuance_records.sort_custom(_issuance_record_less)
+
+
+func _insert_sorted(records: Array, record: Dictionary, less: Callable) -> void:
+	if records.is_empty() or not bool(less.call(record, records[records.size() - 1])):
+		records.append(record)
+		return
+	var lower := 0
+	var upper := records.size()
+	while lower < upper:
+		var middle := (lower + upper) / 2
+		if bool(less.call(record, records[middle])):
+			upper = middle
+		else:
+			lower = middle + 1
+	records.insert(lower, record)
 
 
 func _issuance_record_less(left: Dictionary, right: Dictionary) -> bool:

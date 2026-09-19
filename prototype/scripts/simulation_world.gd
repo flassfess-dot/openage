@@ -21,6 +21,7 @@ const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const CombatRules := preload("res://scripts/combat_rules.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const SimulationVisibilitySystem := preload("res://scripts/simulation_visibility_system.gd")
+const RenderEntityProjectionCache := preload("res://scripts/render_entity_projection_cache.gd")
 
 const GATHER_UPDATE_IDLE := 0
 const GATHER_UPDATE_MOVE := 1
@@ -58,7 +59,16 @@ var unit_removal_pending: bool = false
 var building_removal_pending: bool = false
 var resource_nodes: Array = []
 var resource_nodes_by_id: Dictionary = {}
+var resource_nodes_by_cell: Dictionary = {}
 var decaying_resource_nodes: Array = []
+var resource_roster_revision: int = 0
+var resource_minimap_revision: int = 0
+var known_resources_by_player: Dictionary = {}
+var compact_ai_resource_by_id: Dictionary = {}
+var known_ai_resources_by_player: Dictionary = {}
+var local_build_site_cache: Dictionary = {}
+var build_option_catalog_cache: Dictionary = {}
+var render_entity_projection_cache := RenderEntityProjectionCache.new()
 var static_obstructions: Array = []
 var buildings: Array = []
 var buildings_by_id: Dictionary = {}
@@ -284,7 +294,16 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	building_removal_pending = false
 	resource_nodes.clear()
 	resource_nodes_by_id.clear()
+	resource_nodes_by_cell.clear()
 	decaying_resource_nodes.clear()
+	resource_roster_revision += 1
+	resource_minimap_revision += 1
+	known_resources_by_player.clear()
+	compact_ai_resource_by_id.clear()
+	known_ai_resources_by_player.clear()
+	local_build_site_cache.clear()
+	build_option_catalog_cache.clear()
+	render_entity_projection_cache.clear()
 	static_obstructions.clear()
 	forest_resource_counts.clear()
 	buildings.clear()
@@ -618,6 +637,14 @@ func _add_resource(kind: String, position: Vector2, amount: int, resolve_placeme
 	apply_archetype_identity(resource, kind)
 	resource_nodes.append(resource)
 	resource_nodes_by_id[entity_id] = resource
+	var resource_cell_index := floori(position.y) * map_size.x + floori(position.x)
+	if not resource_nodes_by_cell.has(resource_cell_index):
+		resource_nodes_by_cell[resource_cell_index] = []
+	resource_nodes_by_cell[resource_cell_index].append(resource)
+	resource_roster_revision += 1
+	resource_minimap_revision += 1
+	known_resources_by_player.clear()
+	known_ai_resources_by_player.clear()
 	if float(resource.get("decay_rate", 0.0)) > 0.0:
 		decaying_resource_nodes.append(resource)
 	if safe_amount > 0 and kind == "tree":
@@ -1989,6 +2016,27 @@ func find_unit(id: int) -> Variant:
 	return units_by_id.get(id)
 
 
+func detach_unit_for_transport(id: int) -> Variant:
+	var unit: Variant = units_by_id.get(id)
+	if unit == null:
+		return null
+	units.erase(unit)
+	units_by_id.erase(id)
+	capturable_units.erase(unit)
+	return unit
+
+
+func restore_unit_from_transport(unit: Dictionary) -> bool:
+	var id := int(unit.get("id", -1))
+	if id < 0 or units_by_id.has(id):
+		return false
+	units.append(unit)
+	units_by_id[id] = unit
+	if entity_has_behavior_tag(unit, "capturable") and not capturable_units.has(unit):
+		capturable_units.append(unit)
+	return true
+
+
 func find_combat_target(id: int) -> Variant:
 	var unit = find_unit(id)
 	if unit != null and not entity_has_behavior_tag(unit, "noncombat_target"):
@@ -2177,7 +2225,11 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 	var carried_type := int(worker["carried_resource_type_id"])
 	if carried_type >= 0 and carried_type != resource_type_id and float(worker["carried_amount"]) > 0.0:
 		return 0.0
-	resource["amount"] = maxi(0, int(resource["amount"]) - int(amount))
+	var amount_before := int(resource["amount"])
+	resource["amount"] = maxi(0, amount_before - int(amount))
+	if amount_before > 0 and int(resource["amount"]) <= 0:
+		resource_minimap_revision += 1
+	_sync_compact_ai_resource(resource)
 	worker["carried_amount"] = float(worker["carried_amount"]) + amount
 	worker["carried_resource_type_id"] = resource_type_id
 	_emit_domain_event("resource_gathered", {
@@ -2425,45 +2477,104 @@ func get_build_options(team: int) -> Array:
 	var result: Array = []
 	if not data_repository.is_configured():
 		return result
-	for kind in data_repository.archetype_aliases("building"):
-		var base_source_id := int(data_repository.identifiers(kind).get("source_unit_id", -1))
-		if base_source_id < 0:
+	for template_value in _build_option_catalog(team).get("ordered", []):
+		result.append(_present_build_option(template_value, team))
+	return result
+
+
+func get_build_options_for_kinds(team: int, kinds: Array) -> Array:
+	var result: Array = []
+	if not data_repository.is_configured():
+		return result
+	var seen: Dictionary = {}
+	var catalog_by_kind: Dictionary = _build_option_catalog(team).get("by_kind", {})
+	for kind_value in kinds:
+		var kind := String(kind_value)
+		if seen.has(kind):
 			continue
-		var resolved_source_id: int = int(technology_system.resolved_unit_id(team, base_source_id))
-		var source: Dictionary = object_record_by_id(resolved_source_id, team)
-		var interface: Dictionary = source.get("interface", {})
-		if int(interface.get("button_id", -1)) <= 0:
+		seen[kind] = true
+		var template: Dictionary = catalog_by_kind.get(kind, {})
+		if not template.is_empty():
+			result.append(_present_build_option(template, team))
+	_sort_build_options(result)
+	return result
+
+
+func _build_option(team: int, kind: String) -> Dictionary:
+	var template: Dictionary = _build_option_catalog(team).get("by_kind", {}).get(kind, {})
+	return {} if template.is_empty() else _present_build_option(template, team)
+
+
+func _build_option_catalog(team: int) -> Dictionary:
+	var technology_revision := technology_system.revision(team)
+	var cached: Dictionary = build_option_catalog_cache.get(team, {})
+	if int(cached.get("technology_revision", -1)) == technology_revision:
+		return cached
+	var ordered: Array = []
+	var by_kind: Dictionary = {}
+	for kind_value in data_repository.archetype_aliases("building"):
+		var kind := String(kind_value)
+		var template := _build_option_template(team, kind)
+		if template.is_empty():
 			continue
-		var reason := ""
-		var required_technology_id := int(data_repository.runtime_metadata(kind).get("required_technology_id", -1))
-		if required_technology_id >= 0 and not technology_system.is_researched(team, required_technology_id):
-			reason = "building_unavailable"
-		elif not is_object_available(team, base_source_id):
-			reason = "building_unavailable"
-		if reason == "building_unavailable":
-			continue
-		var cost := building_cost(kind, team)
-		var option_footprint := Footprint.building(unit_stats(kind), Vector2.ZERO)
-		var option_half_size := Vector2(option_footprint.get("half_size", Vector2.ONE))
-		if reason.is_empty() and not can_afford_resource_cost(team, cost):
-			reason = "insufficient_resources"
-		result.append({
-			"kind": kind,
-			"source_unit_id": resolved_source_id,
-			"icon_id": int(interface.get("icon_id", -1)),
-			"button_id": int(interface.get("button_id", -1)),
-			"cost": cost.duplicate(true),
-			"duration": float(source.get("production", {}).get("creation_time", unit_stats(kind).get("creation_time", 0.0))),
-			"footprint_radius": maxf(option_half_size.x, option_half_size.y),
-			"accepted": reason.is_empty(),
-			"reason": reason,
-		})
-	result.sort_custom(func(left, right):
+		ordered.append(template)
+		by_kind[kind] = template
+	_sort_build_options(ordered)
+	cached = {
+		"technology_revision": technology_revision,
+		"ordered": ordered,
+		"by_kind": by_kind,
+	}
+	build_option_catalog_cache[team] = cached
+	return cached
+
+
+func _build_option_template(team: int, kind: String) -> Dictionary:
+	if not data_repository.has_archetype(kind) or data_repository.category(kind) != "building":
+		return {}
+	var base_source_id := int(data_repository.identifiers(kind).get("source_unit_id", -1))
+	if base_source_id < 0:
+		return {}
+	var resolved_source_id: int = int(technology_system.resolved_unit_id(team, base_source_id))
+	var source: Dictionary = object_record_by_id(resolved_source_id, team)
+	var interface: Dictionary = source.get("interface", {})
+	if int(interface.get("button_id", -1)) <= 0:
+		return {}
+	var required_technology_id := int(data_repository.runtime_metadata(kind).get("required_technology_id", -1))
+	if required_technology_id >= 0 and not technology_system.is_researched(team, required_technology_id):
+		return {}
+	if not is_object_available(team, base_source_id):
+		return {}
+	var cost := building_cost(kind, team)
+	var option_footprint := Footprint.building(unit_stats(kind), Vector2.ZERO)
+	var option_half_size := Vector2(option_footprint.get("half_size", Vector2.ONE))
+	return {
+		"kind": kind,
+		"source_unit_id": resolved_source_id,
+		"icon_id": int(interface.get("icon_id", -1)),
+		"button_id": int(interface.get("button_id", -1)),
+		"cost": cost,
+		"duration": float(source.get("production", {}).get("creation_time", unit_stats(kind).get("creation_time", 0.0))),
+		"footprint_radius": maxf(option_half_size.x, option_half_size.y),
+	}
+
+
+func _present_build_option(template: Dictionary, team: int) -> Dictionary:
+	var option := template.duplicate()
+	var cost: Dictionary = template.get("cost", {})
+	var reason := "" if can_afford_resource_cost(team, cost) else "insufficient_resources"
+	option["cost"] = cost.duplicate()
+	option["accepted"] = reason.is_empty()
+	option["reason"] = reason
+	return option
+
+
+func _sort_build_options(options: Array) -> void:
+	options.sort_custom(func(left, right):
 		if int(left.get("button_id", 0)) != int(right.get("button_id", 0)):
 			return int(left.get("button_id", 0)) < int(right.get("button_id", 0))
 		return String(left.get("kind", "")) < String(right.get("kind", ""))
 	)
-	return result
 
 
 func get_mixed_domain_build_sites(team: int, maximum_per_kind: int = 4) -> Dictionary:
@@ -2563,6 +2674,47 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 			result[kind] = sites
 	last_build_failure = previous_failure
 	return result
+
+
+func get_cached_local_build_sites(team: int, kinds: Array, tick: int, maximum_age_ticks: int, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
+	var cache_key := hash([team, kinds, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap])
+	var cached: Dictionary = local_build_site_cache.get(cache_key, {})
+	var navigation_revision := int(navigation_grid.revision) if navigation_grid != null else -1
+	var worker_component_signature := _build_site_worker_component_signature(team)
+	if (
+		not cached.is_empty()
+		and tick >= int(cached.get("tick", -1))
+		and tick - int(cached.get("tick", -1)) <= maxi(0, maximum_age_ticks)
+		and int(cached.get("navigation_revision", -2)) == navigation_revision
+		and int(cached.get("worker_component_signature", -1)) == worker_component_signature
+	):
+		# Foundation validity depends on the static navigation/obstruction map.
+		# Revalidating every returned cell repeated the full placement audit for
+		# every campaign AI even when that authoritative map had not changed.
+		return cached.get("sites", {})
+	var sites := get_local_build_sites(team, kinds, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
+	local_build_site_cache[cache_key] = {
+		"tick": tick,
+		"navigation_revision": navigation_revision,
+		"worker_component_signature": worker_component_signature,
+		"sites": sites.duplicate(true),
+	}
+	return sites
+
+
+func _build_site_worker_component_signature(team: int) -> int:
+	var components: Dictionary = {}
+	for unit_value in units:
+		var unit: Dictionary = unit_value
+		if int(unit.get("team", 0)) != team or float(unit.get("hp", 0.0)) <= 0.0 or not entity_is_worker(unit) or String(unit.get("movement_domain", "land")) != "land":
+			continue
+		var position := Vector2(unit.get("pos", Vector2.ZERO))
+		var component_id := navigation_grid.surface_component_id(Vector2i(floori(position.x), floori(position.y)), "land")
+		if component_id >= 0:
+			components[component_id] = true
+	var ids: Array = components.keys()
+	ids.sort()
+	return hash(ids)
 
 
 func _append_bounded_sites(sites: Array, fallback_sites: Array, maximum: int) -> void:
@@ -3174,7 +3326,11 @@ func advance_resource_lifecycle(delta: float) -> void:
 		resource["decay_accumulator"] = accumulator - float(lost)
 		if lost <= 0:
 			continue
-		resource["amount"] = maxi(0, int(resource["amount"]) - lost)
+		var amount_before := int(resource["amount"])
+		resource["amount"] = maxi(0, amount_before - lost)
+		if amount_before > 0 and int(resource["amount"]) <= 0:
+			resource_minimap_revision += 1
+		_sync_compact_ai_resource(resource)
 		update_resource_state(resource)
 		_emit_domain_event("resource_decayed", {
 			"resource_id": int(resource.get("id", -1)),
@@ -4263,8 +4419,173 @@ func get_embarked_units() -> Array:
 func get_units() -> Array:
 	return units
 
+
+func get_units_in_bounds(bounds: Rect2) -> Array:
+	var result: Array = spatial_index.query_aabb(bounds, "unit")
+	# The movement index intentionally contains living mobile entities only;
+	# presentation still needs short-lived dying/corpse records.
+	for unit_value in dying_units:
+		var unit: Dictionary = unit_value
+		if bounds.has_point(Vector2(unit.get("pos", Vector2.ZERO))):
+			result.append(unit)
+	if not dying_units.is_empty():
+		result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	return result
+
 func get_resources() -> Array:
 	return resource_nodes
+
+
+func compact_render_projection(entity: Dictionary) -> Dictionary:
+	return render_entity_projection_cache.project(entity)
+
+
+func get_known_resources(observer_team: int) -> Array:
+	if observer_team <= 0:
+		return resource_nodes
+	var fog = get_fog_of_war()
+	fog.ensure_player(observer_team)
+	var ally_ids: Array = fog.allies_by_player.get(observer_team, {}).keys()
+	ally_ids.sort()
+	var alliance_signature := hash(ally_ids)
+	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
+	if (
+		int(cached.get("resource_roster_revision", -1)) == resource_roster_revision
+		and int(cached.get("alliance_signature", 0)) == alliance_signature
+	):
+		var known: Array = cached.get("resources", [])
+		var known_ids: Dictionary = cached.get("ids", {})
+		var changed := false
+		for cell_index_value in fog.consume_newly_explored_cells(observer_team):
+			for resource_value in resource_nodes_by_cell.get(int(cell_index_value), []):
+				var resource: Dictionary = resource_value
+				var resource_id := int(resource.get("id", -1))
+				if not known_ids.has(resource_id):
+					known_ids[resource_id] = true
+					_insert_known_resource_sorted(known, resource)
+					changed = true
+		if changed:
+			cached["revision"] = int(cached.get("revision", 0)) + 1
+		return known
+	var states: PackedByteArray = fog.states_by_player[observer_team]
+	var allies: Dictionary = fog.allies_by_player.get(observer_team, {})
+	var known: Array = []
+	var known_ids: Dictionary = {}
+	for resource_value in resource_nodes:
+		var resource: Dictionary = resource_value
+		var owner := int(resource.get("team", 0))
+		if owner > 0 and bool(allies.get(owner, false)):
+			known.append(resource)
+			known_ids[int(resource.get("id", -1))] = true
+			continue
+		var position: Vector2 = resource.get("pos", Vector2.ZERO)
+		var cell_x := floori(position.x)
+		var cell_y := floori(position.y)
+		if cell_x < 0 or cell_y < 0 or cell_x >= fog.map_size.x or cell_y >= fog.map_size.y:
+			continue
+		if int(states[cell_y * fog.map_size.x + cell_x]) != FogOfWar.UNKNOWN:
+			known.append(resource)
+			known_ids[int(resource.get("id", -1))] = true
+	known.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	fog.consume_newly_explored_cells(observer_team)
+	known_resources_by_player[observer_team] = {
+		"resource_roster_revision": resource_roster_revision,
+		"alliance_signature": alliance_signature,
+		"resources": known,
+		"ids": known_ids,
+		"revision": int(cached.get("revision", 0)) + 1,
+	}
+	return known
+
+
+func get_known_ai_resources(observer_team: int) -> Array:
+	# Strategic planners only read a small, stable projection of resource nodes.
+	# Reuse those dictionaries between decisions instead of allocating and
+	# populating thousands of copies for every AI player every two seconds.
+	var known: Array = get_known_resources(observer_team)
+	if observer_team <= 0:
+		return known
+	var known_cache: Dictionary = known_resources_by_player.get(observer_team, {})
+	var known_revision := int(known_cache.get("revision", 0))
+	var cached: Dictionary = known_ai_resources_by_player.get(observer_team, {})
+	if (
+		int(cached.get("resource_roster_revision", -1)) == resource_roster_revision
+		and int(cached.get("known_revision", -1)) == known_revision
+	):
+		return cached.get("resources", [])
+	var result: Array = []
+	result.resize(known.size())
+	for index in range(known.size()):
+		result[index] = _compact_ai_resource(known[index])
+	known_ai_resources_by_player[observer_team] = {
+		"resource_roster_revision": resource_roster_revision,
+		"known_revision": known_revision,
+		"resources": result,
+	}
+	return result
+
+
+func _compact_ai_resource(resource: Dictionary) -> Dictionary:
+	var resource_id := int(resource.get("id", -1))
+	var result: Dictionary = compact_ai_resource_by_id.get(resource_id, {})
+	if result.is_empty():
+		result = {
+			"id": resource_id,
+			"team": int(resource.get("team", 0)),
+			"kind": String(resource.get("kind", "")),
+			"entity_type": String(resource.get("entity_type", "resource")),
+			"pos": Vector2(resource.get("pos", Vector2.ZERO)),
+			"movement_domain": String(resource.get("movement_domain", resource.get("placement_domain", "land"))),
+			"resource_type_id": int(resource.get("resource_type_id", -1)),
+			"harvestable": bool(resource.get("harvestable", true)),
+			"allowed_gatherer_domains": resource.get("allowed_gatherer_domains", []).duplicate(),
+		}
+		compact_ai_resource_by_id[resource_id] = result
+	result["amount"] = int(resource.get("amount", 0))
+	return result
+
+
+func _sync_compact_ai_resource(resource: Dictionary) -> void:
+	var resource_id := int(resource.get("id", -1))
+	if compact_ai_resource_by_id.has(resource_id):
+		var result: Dictionary = compact_ai_resource_by_id[resource_id]
+		result["amount"] = int(resource.get("amount", 0))
+
+
+func get_known_resources_in_bounds(observer_team: int, bounds: Rect2) -> Array:
+	if observer_team <= 0:
+		return resource_nodes.filter(func(resource): return bounds.has_point(Vector2(resource.get("pos", Vector2.ZERO))))
+	# Ensure the incremental exploration cache is current, then traverse only
+	# resource cells intersecting the camera rather than all source-map trees.
+	get_known_resources(observer_team)
+	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
+	var known_ids: Dictionary = cached.get("ids", {})
+	var start_x := clampi(floori(bounds.position.x), 0, map_size.x)
+	var start_y := clampi(floori(bounds.position.y), 0, map_size.y)
+	var end_x := clampi(ceili(bounds.end.x), 0, map_size.x)
+	var end_y := clampi(ceili(bounds.end.y), 0, map_size.y)
+	var result: Array = []
+	for y in range(start_y, end_y):
+		for x in range(start_x, end_x):
+			for resource_value in resource_nodes_by_cell.get(y * map_size.x + x, []):
+				var resource: Dictionary = resource_value
+				if known_ids.has(int(resource.get("id", -1))):
+					result.append(resource)
+	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	return result
+
+
+func _insert_known_resource_sorted(known: Array, resource: Dictionary) -> void:
+	var resource_id := int(resource.get("id", -1))
+	var lower := 0
+	var upper := known.size()
+	while lower < upper:
+		var middle := (lower + upper) / 2
+		if resource_id < int(known[middle].get("id", -1)):
+			upper = middle
+		else:
+			lower = middle + 1
+	known.insert(lower, resource)
 
 func get_static_obstructions() -> Array:
 	return static_obstructions

@@ -192,7 +192,10 @@ func _selected_entities(snapshot: Dictionary, selected_ids: Array[int]) -> Array
 		for entity_value in snapshot.get(collection_name, []):
 			var entity: Dictionary = entity_value
 			if requested.has(int(entity.get("id", -1))) and int(entity.get("team", 0)) == player_team and float(entity.get("hp", 0.0)) > 0.0:
-				result.append(entity.duplicate(true))
+				# The view model only reads the detached presentation snapshot. A
+				# second deep copy duplicated combat tables and production queues on
+				# every fixed tick without providing additional isolation.
+				result.append(entity)
 	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	return result
 

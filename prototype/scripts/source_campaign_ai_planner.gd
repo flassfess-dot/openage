@@ -1346,16 +1346,22 @@ static func _idle_worker_commands(snapshot: Dictionary, tick: int, own_units: Ar
 		var worker: Dictionary = worker_value
 		if excluded_workers.has(int(worker.get("id", -1))) or not bool(worker.get("components", {}).get("worker", {}).get("enabled", false)) or String(worker.get("task", "idle")) != "idle":
 			continue
-		var candidates: Array = resources.filter(func(resource): return _resource_allows_worker(resource, worker))
-		candidates.sort_custom(func(left, right):
-			var left_distance := Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(left.get("pos", Vector2.ZERO)))
-			var right_distance := Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(right.get("pos", Vector2.ZERO)))
-			if not is_equal_approx(left_distance, right_distance):
-				return left_distance < right_distance
-			return int(left.get("id", -1)) < int(right.get("id", -1))
-		)
-		if not candidates.is_empty():
-			commands.append(Commands.GatherCommand.new(tick, [int(worker.get("id", -1))], int(candidates[0].get("id", -1))))
+		var closest: Variant = null
+		var closest_distance := INF
+		var closest_id := 2147483647
+		var worker_position := Vector2(worker.get("pos", Vector2.ZERO))
+		for resource_value in resources:
+			var resource: Dictionary = resource_value
+			if not _resource_allows_worker(resource, worker):
+				continue
+			var distance := worker_position.distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO)))
+			var resource_id := int(resource.get("id", -1))
+			if distance < closest_distance - 0.000001 or (is_equal_approx(distance, closest_distance) and resource_id < closest_id):
+				closest = resource
+				closest_distance = distance
+				closest_id = resource_id
+		if closest != null:
+			commands.append(Commands.GatherCommand.new(tick, [int(worker.get("id", -1))], closest_id))
 	return commands
 
 

@@ -35,6 +35,7 @@ var replay_source: Variant = null
 var record_replay_state_hashes := true
 var last_replay_mismatch: String = ""
 var performance_probe: Variant = null
+var before_fixed_tick: Callable = Callable()
 
 func _init(world = null) -> void:
 	simulation_world = world
@@ -51,6 +52,10 @@ func set_performance_probe(probe: Variant) -> void:
 	performance_probe = probe
 	if simulation_world != null and simulation_world.has_method("set_performance_probe"):
 		simulation_world.set_performance_probe(probe)
+
+
+func set_before_fixed_tick(callback: Callable) -> void:
+	before_fixed_tick = callback
 
 func enqueue_command(command, record: bool = true, issuer_id: int = 0) -> void:
 	if command == null:
@@ -843,13 +848,21 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	accumulator_seconds += minf(frame_delta, 0.25) * get_speed_multiplier()
 	var steps := 0
 	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
-		_run_fixed_tick(player_team, enemy_team)
+		var expensive_planning_tick := _run_fixed_tick(player_team, enemy_team)
 		accumulator_seconds -= FIXED_STEP_SECONDS
 		steps += 1
+		# Do not let several independent AI planning phases accumulate inside
+		# one rendered frame. The remaining fixed-step debt is retained and is
+		# recovered by the following cheap ticks, preserving exact tick order.
+		if expensive_planning_tick:
+			break
 	return simulation_world.get_last_battle_message()
 
-func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
+func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 	var fixed_tick_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var expensive_planning_tick := false
+	if replay_source == null and before_fixed_tick.is_valid():
+		expensive_planning_tick = bool(before_fixed_tick.call(tick_index + 1))
 	_inject_replay_commands_for_current_tick()
 	tick_index += 1
 	simulation_world.begin_event_capture()
@@ -857,12 +870,16 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
 	process_commands()
 	var command_microseconds := Time.get_ticks_usec() - command_started if performance_probe != null else 0
 	var autonomy_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var wildlife_started := autonomy_started
 	for wildlife_command in wildlife_behavior.collect_commands(simulation_world, tick_index):
 		enqueue_command(wildlife_command, false, 0)
+	var wildlife_microseconds := Time.get_ticks_usec() - wildlife_started if performance_probe != null else 0
+	var awareness_started := Time.get_ticks_usec() if performance_probe != null else 0
 	for autonomous_command in combat_awareness.collect_commands(simulation_world, tick_index):
 		var attacker = simulation_world.find_combat_target(int(autonomous_command.unit_ids[0]))
 		if attacker != null:
 			enqueue_command(autonomous_command, false, int(attacker.get("team", 0)))
+	var awareness_microseconds := Time.get_ticks_usec() - awareness_started if performance_probe != null else 0
 	var autonomy_microseconds := Time.get_ticks_usec() - autonomy_started if performance_probe != null else 0
 	command_started = Time.get_ticks_usec() if performance_probe != null else 0
 	process_commands()
@@ -892,10 +909,13 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> void:
 	if performance_probe != null:
 		performance_probe.observe_microseconds("controller.commands", command_microseconds)
 		performance_probe.observe_microseconds("controller.autonomy", autonomy_microseconds)
+		performance_probe.observe_microseconds("controller.autonomy.wildlife", wildlife_microseconds)
+		performance_probe.observe_microseconds("controller.autonomy.combat", awareness_microseconds)
 		performance_probe.observe_microseconds("controller.world_advance", world_microseconds)
 		performance_probe.observe_microseconds("controller.formation_reconcile", formation_microseconds)
 		performance_probe.observe_microseconds("controller.events_replay", Time.get_ticks_usec() - event_started)
 		performance_probe.observe_microseconds("controller.fixed_tick", Time.get_ticks_usec() - fixed_tick_started)
+	return expensive_planning_tick
 
 
 func _inject_replay_commands_for_current_tick() -> void:

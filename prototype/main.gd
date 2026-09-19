@@ -54,7 +54,12 @@ const PLAYER_TEAM := 1
 const ENEMY_TEAM := 2
 const HUD_TOP := InterfaceLayout.TOP_HEIGHT
 const HUD_BOTTOM := InterfaceLayout.BOTTOM_HEIGHT
-const OVERVIEW_REFRESH_TICKS := 4
+# Minimap intelligence is intentionally decoupled from the 20 Hz simulation.
+# At the default 1.5x speed this publishes roughly three times per second while
+# the camera rectangle remains frame-smooth. The mesh no longer invalidates on
+# intermediate fog revisions, so the cadence actually bounds rebuild spikes.
+const OVERVIEW_REFRESH_TICKS := 10
+const WORLD_FOG_CHUNK_SIZE := 32
 
 @export_file("*.json") var match_path: String = MatchDefinition.DEFAULT_PATH
 var match_definition_override: Dictionary = {}
@@ -124,22 +129,27 @@ var scenario_overlay: ScenarioOverlay
 var terrain_canvas: TerrainCanvas
 var cached_fog_revision: int = -1
 var cached_fog_runs: Array = []
-var cached_world_fog_mesh: ArrayMesh
-var cached_world_fog_revision: int = -1
-var cached_world_fog_bounds := Rect2i()
+var cached_world_fog_chunks: Dictionary = {}
 var cached_world_fog_zoom := -1.0
 var cached_world_fog_terrain_revision: int = -1
+var cached_map_edge_chains: Array[PackedVector2Array] = []
+var cached_map_edge_zoom := -1.0
+var cached_map_edge_terrain_revision := -1
 var cached_minimap_mesh: ArrayMesh
 var cached_minimap_mesh_tick: int = -1
 var cached_minimap_mesh_fog_revision: int = -1
 var cached_minimap_mesh_rectangle := Rect2()
-var cached_terrain_resource_signature: int = -1
+var cached_minimap_resource_signature: int = 0
+var cached_minimap_resource_rectangle := Rect2()
+var cached_minimap_resource_pixels: Array[Vector2] = []
 var presentation_revision: int = 0
 var cached_presentation_tick: int = -1
 var cached_presentation_bounds := Rect2i()
 var cached_presentation_selection_signature: int = 0
 var cached_presentation_diagnostics := false
 var cached_overview_tick: int = -1
+var cached_environment_bounds := Rect2i()
+var cached_environment_items: Array = []
 var cached_world_drawables: Array = []
 var cached_world_drawables_revision: int = -1
 var cached_world_drawables_control_signature: int = 0
@@ -312,6 +322,7 @@ func reset_game() -> void:
 	game_controller.reset_timing()
 	game_controller.start_recording(map_seed, false)
 	configure_ai_players()
+	game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
 	control_groups.clear()
 	player_control_state.clear()
 	input_adapter.reset()
@@ -319,16 +330,23 @@ func reset_game() -> void:
 	presentation_effect_timeline.reset()
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
-	cached_world_fog_mesh = null
-	cached_world_fog_revision = -1
-	cached_world_fog_bounds = Rect2i()
+	cached_world_fog_chunks.clear()
 	cached_world_fog_zoom = -1.0
 	cached_world_fog_terrain_revision = -1
+	cached_map_edge_chains.clear()
+	cached_map_edge_zoom = -1.0
+	cached_map_edge_terrain_revision = -1
 	cached_minimap_mesh = null
 	cached_minimap_mesh_tick = -1
 	cached_minimap_mesh_fog_revision = -1
 	cached_minimap_mesh_rectangle = Rect2()
-	cached_terrain_resource_signature = -1
+	cached_minimap_resource_signature = 0
+	cached_minimap_resource_rectangle = Rect2()
+	cached_minimap_resource_pixels.clear()
+	cached_environment_bounds = Rect2i()
+	cached_environment_items.clear()
+	if render_world != null:
+		render_world.clear_caches()
 	command_marker_presentation.reset()
 	interaction_highlight_id = -1
 	interaction_cursor_semantic = "default"
@@ -410,10 +428,6 @@ func update_units(delta: float) -> void:
 		return
 	var probe: Variant = game_controller.performance_probe
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
-	queue_ai_commands()
-	if probe != null:
-		probe.observe_microseconds("presentation.update.ai", Time.get_ticks_usec() - stage_started)
-		stage_started = Time.get_ticks_usec()
 	var battle_text := game_controller.advance_frame(delta, PLAYER_TEAM, ENEMY_TEAM)
 	if probe != null:
 		probe.observe_microseconds("presentation.update.controller", Time.get_ticks_usec() - stage_started)
@@ -432,6 +446,21 @@ func update_units(delta: float) -> void:
 
 func configure_ai_players() -> void:
 	ai_players = _new_ai_players()
+	_configure_runtime_ai_cadence(ai_players)
+
+
+func _configure_runtime_ai_cadence(players: Array) -> void:
+	for ai_value in players:
+		var ai = ai_value
+		if String(ai.profile) != "source_campaign_v1":
+			continue
+		# Strategic economy and campaign group planning are deliberately slower
+		# than the 20 Hz tactical simulation. Explicit fast scenario cadences
+		# remain intact; imported one-second defaults receive a two-second floor.
+		if int(ai.economic_interval) >= 20:
+			ai.economic_interval = maxi(int(ai.economic_interval), 40)
+		if int(ai.military_interval) >= 20:
+			ai.military_interval = maxi(int(ai.military_interval), 40)
 
 
 func _new_ai_players() -> Array:
@@ -445,15 +474,43 @@ func _new_ai_players() -> Array:
 	return result
 
 
-func queue_ai_commands() -> void:
-	var next_tick := game_controller.tick_index + 1
+func queue_ai_commands(next_tick: int = -1) -> bool:
+	if next_tick < 0:
+		next_tick = game_controller.tick_index + 1
+	var probe: Variant = game_controller.performance_probe
+	var planned := false
 	for ai_value in ai_players:
 		var ai = ai_value
 		if not ai.needs_decision(next_tick):
 			continue
-		var knowledge := SimulationSnapshot.presentation(simulation_world, game_controller.tick_index, int(ai.team), ai.presentation_options())
-		for command in ai.collect_commands(knowledge, next_tick):
+		# Fresh AIs used to perform their expensive first economy and military
+		# plans on the same simulation tick. Give every team a stable phase so
+		# campaign starts do not turn six independent planners into one frame
+		# spike. The phase depends only on authoritative data, never render time.
+		if int(ai.last_economic_tick) < 0 and int(ai.last_military_tick) < 0:
+			var cadence := maxi(1, mini(int(ai.economic_interval), int(ai.military_interval)))
+			var initial_decision_tick := 1 + posmod(int(ai.team) - 1, cadence)
+			if next_tick < initial_decision_tick:
+				continue
+		planned = true
+		var stage_started := Time.get_ticks_usec() if probe != null else 0
+		var snapshot_options: Dictionary = ai.presentation_options()
+		if probe != null:
+			snapshot_options["performance_probe"] = probe
+			snapshot_options["performance_prefix"] = "presentation.ai.snapshot"
+		var knowledge := SimulationSnapshot.presentation(simulation_world, game_controller.tick_index, int(ai.team), snapshot_options)
+		if probe != null:
+			probe.observe_microseconds("presentation.ai.snapshot", Time.get_ticks_usec() - stage_started)
+			stage_started = Time.get_ticks_usec()
+		var commands: Array = ai.collect_commands(knowledge, next_tick)
+		if probe != null:
+			probe.observe_microseconds("presentation.ai.plan", Time.get_ticks_usec() - stage_started)
+			stage_started = Time.get_ticks_usec()
+		for command in commands:
 			game_controller.enqueue_command(command, true, int(ai.team))
+		if probe != null:
+			probe.observe_microseconds("presentation.ai.enqueue", Time.get_ticks_usec() - stage_started)
+	return planned
 
 
 func enqueue_with_feedback(command: Variant, accepted_message: String, sound_name: String, marker: Variant = null) -> void:
@@ -789,6 +846,7 @@ func load_game_from_path(path: String) -> bool:
 		return _load_failed("recording_history_invalid")
 
 	var restored_ai_players := _new_ai_players()
+	_configure_runtime_ai_cadence(restored_ai_players)
 	var ai_state_by_team: Dictionary = {}
 	for state_value in archive.get("ai_states", []):
 		var state: Dictionary = state_value
@@ -802,6 +860,7 @@ func load_game_from_path(path: String) -> bool:
 	simulation_world = restored_world
 	game_controller = restored_controller
 	ai_players = restored_ai_players
+	game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
 	var saved_controller: Dictionary = archive.get("controller_state", {})
 	game_controller.set_speed_multiplier(float(saved_controller.get("speed", 1.5)))
 	game_controller.set_paused(bool(saved_controller.get("paused", false)))
@@ -947,6 +1006,7 @@ func current_world_drawables() -> Array:
 	if cached_world_drawables_revision != presentation_revision or cached_world_drawables_control_signature != control_signature:
 		var retained_snapshot := presentation_snapshot.duplicate()
 		retained_snapshot["effects"] = []
+		render_world.performance_probe = game_controller.performance_probe if game_controller != null else null
 		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, PLAYER_TEAM, selected_ids)
 		cached_world_drawables_revision = presentation_revision
 		cached_world_drawables_control_signature = control_signature
@@ -1314,15 +1374,21 @@ func sync_world_state(force: bool = true) -> void:
 	var snapshot_bounds := visible_tile_bounds(8)
 	var previous_overview: Dictionary = presentation_snapshot.get("overview", {})
 	var refresh_overview := cached_overview_tick < 0 or current_tick < cached_overview_tick or current_tick - cached_overview_tick >= OVERVIEW_REFRESH_TICKS
-	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, current_tick, PLAYER_TEAM, {
+	var snapshot_options := {
 		"include_navigation": false,
 		"include_build_sites": false,
 		"include_overview": refresh_overview,
 		"compact_render_entities": not diagnostics_enabled,
+		"borrow_visible_render_entities": not diagnostics_enabled,
+		"borrow_overview_entities": not diagnostics_enabled,
 		"entity_bounds": Rect2(Vector2(snapshot_bounds.position), Vector2(snapshot_bounds.size)),
 		"always_include_entity_ids": selected_ids,
 		"command_option_entity_ids": selected_ids,
-	})
+	}
+	if probe != null:
+		snapshot_options["performance_probe"] = probe
+		snapshot_options["performance_prefix"] = "presentation.local.snapshot"
+	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, current_tick, PLAYER_TEAM, snapshot_options)
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.snapshot", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -1339,20 +1405,18 @@ func sync_world_state(force: bool = true) -> void:
 	presentation_snapshot["markers"] = match_definition.get("presentation_markers", [])
 	var visible_bounds := visible_tile_bounds()
 	var environment_bounds := Rect2i(visible_bounds.position - Vector2i(2, 2), visible_bounds.size + Vector2i(4, 4))
-	presentation_snapshot["environment"] = environment_presentation_field.query(environment_bounds)
+	if cached_environment_items.is_empty() or cached_environment_bounds != environment_bounds:
+		cached_environment_bounds = environment_bounds
+		cached_environment_items = environment_presentation_field.query(environment_bounds)
+	presentation_snapshot["environment"] = cached_environment_items
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.environment", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
 	units = presentation_snapshot.get("units", [])
 	resource_nodes = presentation_snapshot.get("resources", [])
-	var terrain_resource_signature := 17
-	for resource in resource_nodes:
-		if String(resource.get("kind", "")) == "tree" and int(resource.get("amount", 0)) > 0:
-			terrain_resource_signature = terrain_resource_signature * 31 + int(resource.get("id", -1))
-	if terrain_resource_signature != cached_terrain_resource_signature:
-		cached_terrain_resource_signature = terrain_resource_signature
-		if terrain_canvas != null:
-			terrain_canvas.invalidate_content()
+	# TerrainCanvas already keys its mesh by SimulationWorld.terrain_revision.
+	# A visible-tree signature confused exploration with terrain mutation and
+	# rebuilt the complete terrain mesh while units moved through fog.
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.resource_projection", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -1515,12 +1579,20 @@ func draw_terrain_border(tile_origin: Vector2, layer: Dictionary) -> void:
 
 func draw_world_objects() -> void:
 	if render_world != null:
-		for drawable in current_world_drawables():
+		var probe: Variant = game_controller.performance_probe if game_controller != null else null
+		var stage_started := Time.get_ticks_usec() if probe != null else 0
+		var drawables := current_world_drawables()
+		if probe != null:
+			probe.observe_microseconds("presentation.draw.world_prepare", Time.get_ticks_usec() - stage_started)
+			stage_started = Time.get_ticks_usec()
+		for drawable in drawables:
 			match drawable["kind"]:
 				"building", "building_part", "resource", "unit", "projectile", "effect", "marker", "environment": draw_render_body(drawable)
 				"shadow": draw_unit_shadow(drawable)
 				"selection": draw_unit_selection(drawable)
 				"health_bar": draw_unit_health(drawable)
+		if probe != null:
+			probe.observe_microseconds("presentation.draw.world_submit", Time.get_ticks_usec() - stage_started)
 	return
 
 
@@ -1553,22 +1625,74 @@ func draw_fog_overlay() -> void:
 		return
 	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
 	var terrain_revision := int(simulation_world.terrain_revision) if simulation_world != null else -1
-	if cached_world_fog_mesh == null or cached_world_fog_revision != fog_revision or not _tile_bounds_contains(cached_world_fog_bounds, bounds) or not is_equal_approx(cached_world_fog_zoom, view_zoom) or cached_world_fog_terrain_revision != terrain_revision:
-		var rebuild_started := Time.get_ticks_usec() if probe != null else 0
-		cached_world_fog_bounds = _expanded_tile_bounds(bounds, 12)
-		cached_world_fog_mesh = _build_world_fog_mesh(cached_world_fog_bounds, cells)
-		cached_world_fog_revision = fog_revision
+	if not is_equal_approx(cached_world_fog_zoom, view_zoom) or cached_world_fog_terrain_revision != terrain_revision:
+		cached_world_fog_chunks.clear()
 		cached_world_fog_zoom = view_zoom
 		cached_world_fog_terrain_revision = terrain_revision
-		if probe != null:
-			probe.observe_microseconds("presentation.fog.mesh_rebuild", Time.get_ticks_usec() - rebuild_started)
-	if cached_world_fog_mesh != null:
-		var submit_started := Time.get_ticks_usec() if probe != null else 0
-		draw_set_transform(PixelScaling.snap_screen(view_offset))
-		draw_mesh(cached_world_fog_mesh, null)
-		draw_set_transform(Vector2.ZERO)
-		if probe != null:
-			probe.observe_microseconds("presentation.fog.mesh_submit", Time.get_ticks_usec() - submit_started)
+	var expanded_bounds := _expanded_tile_bounds(bounds, 12)
+	var chunk_minimum := Vector2i(
+		floori(float(expanded_bounds.position.x) / float(WORLD_FOG_CHUNK_SIZE)),
+		floori(float(expanded_bounds.position.y) / float(WORLD_FOG_CHUNK_SIZE))
+	)
+	var chunk_maximum := Vector2i(
+		ceili(float(expanded_bounds.end.x) / float(WORLD_FOG_CHUNK_SIZE)),
+		ceili(float(expanded_bounds.end.y) / float(WORLD_FOG_CHUNK_SIZE))
+	)
+	var visible_meshes: Array[ArrayMesh] = []
+	var scan_started := Time.get_ticks_usec() if probe != null else 0
+	var rebuilt_chunks := 0
+	for chunk_y in range(chunk_minimum.y, chunk_maximum.y):
+		for chunk_x in range(chunk_minimum.x, chunk_maximum.x):
+			var chunk_key := Vector2i(chunk_x, chunk_y)
+			var chunk_bounds := _world_fog_chunk_bounds(chunk_key)
+			if chunk_bounds.size.x <= 0 or chunk_bounds.size.y <= 0:
+				continue
+			var entry: Dictionary = cached_world_fog_chunks.get(chunk_key, {})
+			if int(entry.get("revision", -1)) != fog_revision:
+				var signature := _world_fog_chunk_signature(chunk_bounds, cells)
+				if int(entry.get("signature", -1)) != signature:
+					var rebuild_started := Time.get_ticks_usec() if probe != null else 0
+					entry["mesh"] = _build_world_fog_mesh(chunk_bounds, cells)
+					entry["signature"] = signature
+					rebuilt_chunks += 1
+					if probe != null:
+						probe.observe_microseconds("presentation.fog.chunk_rebuild", Time.get_ticks_usec() - rebuild_started)
+				entry["revision"] = fog_revision
+				cached_world_fog_chunks[chunk_key] = entry
+			var mesh: Variant = entry.get("mesh")
+			if mesh is ArrayMesh:
+				visible_meshes.append(mesh)
+	if probe != null:
+		probe.observe_microseconds("presentation.fog.chunk_scan", Time.get_ticks_usec() - scan_started)
+		if rebuilt_chunks > 0:
+			probe.increment("presentation.fog.chunks_rebuilt", rebuilt_chunks)
+	var submit_started := Time.get_ticks_usec() if probe != null else 0
+	draw_set_transform(PixelScaling.snap_screen(view_offset))
+	for mesh in visible_meshes:
+		draw_mesh(mesh, null)
+	draw_set_transform(Vector2.ZERO)
+	if probe != null:
+		probe.observe_microseconds("presentation.fog.mesh_submit", Time.get_ticks_usec() - submit_started)
+
+
+func _world_fog_chunk_bounds(chunk_key: Vector2i) -> Rect2i:
+	var start := chunk_key * WORLD_FOG_CHUNK_SIZE
+	var finish := Vector2i(
+		mini(map_size.x, start.x + WORLD_FOG_CHUNK_SIZE),
+		mini(map_size.y, start.y + WORLD_FOG_CHUNK_SIZE)
+	)
+	start.x = maxi(0, start.x)
+	start.y = maxi(0, start.y)
+	return Rect2i(start, Vector2i(maxi(0, finish.x - start.x), maxi(0, finish.y - start.y)))
+
+
+func _world_fog_chunk_signature(bounds: Rect2i, cells: Variant) -> int:
+	var signature := 17
+	for y in range(bounds.position.y, bounds.end.y):
+		var row_offset := y * map_size.x
+		for x in range(bounds.position.x, bounds.end.x):
+			signature = signature * 31 + int(cells[row_offset + x])
+	return signature
 
 
 func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
@@ -1649,11 +1773,18 @@ func _tile_bounds_contains(outer: Rect2i, inner: Rect2i) -> bool:
 
 
 func draw_map_edge_guard() -> void:
-	for chain in FogPresentation.map_edge_guard_chains(map_size, Callable(self, "world_to_screen")):
+	var terrain_revision := int(simulation_world.terrain_revision) if simulation_world != null else -1
+	if cached_map_edge_chains.is_empty() or not is_equal_approx(cached_map_edge_zoom, view_zoom) or cached_map_edge_terrain_revision != terrain_revision:
+		cached_map_edge_chains = FogPresentation.map_edge_guard_chains(map_size, Callable(self, "_world_to_fog_mesh"))
+		cached_map_edge_zoom = view_zoom
+		cached_map_edge_terrain_revision = terrain_revision
+	draw_set_transform(PixelScaling.snap_screen(view_offset))
+	for chain in cached_map_edge_chains:
 		if chain.size() >= 2:
 			# A two-pixel centered stroke covers the one shared texel outside either
 			# rasterized edge orientation while consuming at most one pixel inside.
 			draw_polyline(chain, Color.BLACK, maxf(2.0, view_zoom * 2.0), false)
+	draw_set_transform(Vector2.ZERO)
 
 func render_item_frame_info(kind: String, data: Variant) -> Dictionary:
 	match kind:
@@ -1930,11 +2061,14 @@ func draw_minimap(rectangle: Rect2) -> void:
 	draw_colored_polygon(map_points, Color("3e7a35"))
 	var snapshot_tick := int(presentation_snapshot.get("overview_tick", presentation_snapshot.get("tick", -1)))
 	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
-	if cached_minimap_mesh == null or cached_minimap_mesh_tick != snapshot_tick or cached_minimap_mesh_fog_revision != fog_revision or cached_minimap_mesh_rectangle != rectangle:
+	# The overview tick is the minimap's publication boundary. Rebuilding the
+	# complete mesh for every intermediate fog revision defeated that cadence and
+	# produced a visible frame spike while the camera explored the map.
+	if cached_minimap_mesh == null or cached_minimap_mesh_tick != snapshot_tick or cached_minimap_mesh_rectangle != rectangle:
+		cached_minimap_mesh_rectangle = rectangle
 		cached_minimap_mesh = _build_minimap_mesh(center, scale)
 		cached_minimap_mesh_tick = snapshot_tick
 		cached_minimap_mesh_fog_revision = fog_revision
-		cached_minimap_mesh_rectangle = rectangle
 	if cached_minimap_mesh != null:
 		draw_mesh(cached_minimap_mesh, null)
 	draw_polyline(PackedVector2Array([map_points[0], map_points[1], map_points[2], map_points[3], map_points[0]]), Color("d2bd7d"), 1.0)
@@ -1953,6 +2087,8 @@ func draw_minimap(rectangle: Rect2) -> void:
 
 
 func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
+	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	var vertices := PackedVector3Array()
 	var colors := PackedColorArray()
 	for run_value in fog_runs():
@@ -1967,15 +2103,32 @@ func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
 			minimap_position(Vector2(x_from, y + 1), center, scale),
 		])
 		_append_colored_quad(vertices, colors, points, FogPresentation.color_for_state(int(run["state"]), true))
-	for resource in overview_resource_nodes:
-		if resource["amount"] > 0:
-			_append_colored_circle(vertices, colors, minimap_position(resource["pos"], center, scale), 1.5, Color("18591d"))
+	if probe != null:
+		probe.observe_microseconds("presentation.minimap.fog", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
+	# Imported campaigns may contain ten thousand individual trees. At minimap
+	# scale many of them land on the same two-pixel cell, so drawing a circle for
+	# every source entity only creates hundreds of thousands of overlapping
+	# vertices. Collapse them into deterministic screen-space resource pixels.
+	for pixel_center in _minimap_resource_pixels(center, scale, cached_minimap_mesh_rectangle):
+		_append_colored_quad(vertices, colors, PackedVector2Array([
+			pixel_center + Vector2(-1.0, -1.0),
+			pixel_center + Vector2(1.0, -1.0),
+			pixel_center + Vector2(1.0, 1.0),
+			pixel_center + Vector2(-1.0, 1.0),
+		]), Color("18591d"))
+	if probe != null:
+		probe.observe_microseconds("presentation.minimap.resources", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	for unit in overview_units:
 		if unit["hp"] > 0.0:
 			_append_colored_circle(vertices, colors, minimap_position(unit["pos"], center, scale), 2.0, Color("40b9ff") if unit["team"] == PLAYER_TEAM else Color("e33d31"))
 	for building in overview_buildings:
 		if building["hp"] > 0.0:
 			_append_colored_circle(vertices, colors, minimap_position(building["pos"], center, scale), 3.0, Color("f0d16d") if building["team"] == PLAYER_TEAM else Color("e33d31"))
+	if probe != null:
+		probe.observe_microseconds("presentation.minimap.entities", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	if vertices.is_empty():
 		return null
 	var arrays: Array = []
@@ -1984,7 +2137,40 @@ func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
 	arrays[Mesh.ARRAY_COLOR] = colors
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	if probe != null:
+		probe.observe_microseconds("presentation.minimap.surface", Time.get_ticks_usec() - stage_started)
 	return mesh
+
+
+func _minimap_resource_pixels(center: Vector2, scale: float, rectangle: Rect2) -> Array[Vector2]:
+	var first_id := -1
+	var last_id := -1
+	if not overview_resource_nodes.is_empty():
+		first_id = int(overview_resource_nodes.front().get("id", -1))
+		last_id = int(overview_resource_nodes.back().get("id", -1))
+	var resource_revision := int(simulation_world.resource_minimap_revision) if simulation_world != null else 0
+	var signature := hash([overview_resource_nodes.size(), first_id, last_id, resource_revision])
+	if signature == cached_minimap_resource_signature and rectangle == cached_minimap_resource_rectangle:
+		return cached_minimap_resource_pixels
+	var resource_pixels: Dictionary = {}
+	for resource in overview_resource_nodes:
+		if int(resource.get("amount", 0)) <= 0:
+			continue
+		var point := minimap_position(Vector2(resource.get("pos", Vector2.ZERO)), center, scale)
+		resource_pixels[Vector2i(floori(point.x * 0.5), floori(point.y * 0.5))] = true
+	var resource_pixel_keys: Array = resource_pixels.keys()
+	resource_pixel_keys.sort_custom(func(left, right):
+		if int(left.y) != int(right.y):
+			return int(left.y) < int(right.y)
+		return int(left.x) < int(right.x)
+	)
+	cached_minimap_resource_pixels.clear()
+	cached_minimap_resource_pixels.resize(resource_pixel_keys.size())
+	for index in range(resource_pixel_keys.size()):
+		cached_minimap_resource_pixels[index] = Vector2(resource_pixel_keys[index]) * 2.0 + Vector2.ONE
+	cached_minimap_resource_signature = signature
+	cached_minimap_resource_rectangle = rectangle
+	return cached_minimap_resource_pixels
 
 
 func _append_colored_quad(vertices: PackedVector3Array, colors: PackedColorArray, points: PackedVector2Array, color: Color) -> void:

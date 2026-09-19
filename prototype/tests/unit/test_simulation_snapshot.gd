@@ -12,6 +12,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_hash_covers_authoritative_subsystems()
 	test_presentation_snapshot_is_filtered_and_detached()
+	test_known_resource_cache_tracks_incremental_exploration()
 	if failures.is_empty():
 		print("I1-003 canonical snapshot tests passed")
 		quit(0)
@@ -107,10 +108,12 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	})
 	var render_player: Dictionary = compact_render["units"].filter(func(unit): return int(unit.get("id", -1)) == int(player["id"]))[0]
 	var render_enemy: Dictionary = compact_render["units"].filter(func(unit): return int(unit.get("id", -1)) == int(visible_enemy["id"]))[0]
-	assert_true(render_player.has("path"), "always-included selection retains its full command and HUD projection")
+	assert_true(not render_player.has("path"), "always-included selection omits authoritative navigation internals")
+	assert_true(render_player.get("components", {}).has("combat"), "always-included selection retains its compact command and HUD projection")
 	assert_true(not render_enemy.has("path"), "unselected render projection omits authoritative navigation paths")
 	assert_true(not render_enemy.get("components", {}).has("combat"), "unselected render projection omits heavyweight combat tables")
 	assert_true(render_enemy.has("footprint") and render_enemy.has("anim_state"), "unselected render projection retains picking and animation fields")
+	assert_equal(render_enemy.get("pos"), visible_enemy.get("pos"), "compact render projection retains the entity anchor")
 	render_enemy["footprint"]["selection_radius"] = Vector2(99.0, 99.0)
 	assert_not_equal(visible_enemy.get("footprint", {}).get("selection_radius"), Vector2(99.0, 99.0), "compact render footprint remains detached from simulation state")
 	snapshot["player_state"]["food"] = 0
@@ -130,6 +133,29 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	assert_equal(int(world.get_attack_distress_signals(1)[0].get("attacker_id", -1)), int(hidden_enemy["id"]), "distress presentation is detached from authoritative state")
 	world.ai_distress_system.advance({"delta": 4.0})
 	assert_true(world.get_attack_distress_signals(1).is_empty(), "bounded distress calls expire deterministically")
+
+
+func test_known_resource_cache_tracks_incremental_exploration() -> void:
+	var world = SimulationWorld.new(Vector2i(32, 32))
+	world.navigation_grid.configure_terrain(func(_cell): return "grass")
+	var scout: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	scout["components"]["vision"] = {"enabled": true, "range": 3.0}
+	var first: Dictionary = world.add_resource("tree", Vector2(5.0, 4.0), 75)
+	var second: Dictionary = world.add_resource("tree", Vector2(24.0, 24.0), 75)
+	world.update_fog_of_war()
+	var initial_ids: Array = world.get_known_resources(1).map(func(resource): return int(resource["id"]))
+	assert_true(int(first["id"]) in initial_ids, "initial resource cache includes explored resources")
+	assert_true(int(second["id"]) not in initial_ids, "initial resource cache excludes unknown resources")
+
+	scout["pos"] = Vector2(23.0, 24.0)
+	world.update_fog_of_war()
+	var expanded_ids: Array = world.get_known_resources(1).map(func(resource): return int(resource["id"]))
+	assert_true(int(first["id"]) in expanded_ids, "resource cache preserves explored resources outside current vision")
+	assert_true(int(second["id"]) in expanded_ids, "resource cache consumes newly explored cells incrementally")
+	var repeated_ids: Array = world.get_known_resources(1).map(func(resource): return int(resource["id"]))
+	assert_equal(repeated_ids.count(int(second["id"])), 1, "resource cache does not duplicate resources after repeated reads")
+	var bounded_ids: Array = world.get_known_resources_in_bounds(1, Rect2(Vector2(22.0, 22.0), Vector2(4.0, 4.0))).map(func(resource): return int(resource["id"]))
+	assert_equal(bounded_ids, [int(second["id"])], "bounded resource cache returns only explored resources intersecting the camera")
 
 
 func assert_not_equal(actual: Variant, expected: Variant, context: String) -> void:

@@ -15,6 +15,7 @@ func _initialize() -> void:
 	test_round_trip_and_identical_state(catalog)
 	test_same_tick_command_order(catalog)
 	test_issue_tick_preserves_autonomous_sequence(catalog)
+	test_incremental_recording_preserves_both_orders()
 	test_legacy_replay_envelope_migration(catalog)
 	test_cancel_production_round_trip()
 	test_resign_round_trip()
@@ -108,6 +109,19 @@ func test_issue_tick_preserves_autonomous_sequence(catalog) -> void:
 	var issued: Array = loaded.commands_issued_through_tick(4)
 	assert_equal(issued.size(), 1, "command appears on its original issue tick")
 	assert_equal(int(issued[0].sequence_id), 5, "issue-timed command preserves its envelope")
+
+
+func test_incremental_recording_preserves_both_orders() -> void:
+	var recorder := ReplaySystem.new()
+	recorder.begin(993)
+	var late_execution = Commands.StopCommand.new(9, [1])
+	late_execution.assign_envelope(2, 1)
+	var early_execution = Commands.MoveCommand.new(4, [1], Vector2(3.0, 3.0))
+	early_execution.assign_envelope(2, 2)
+	recorder.record_command(late_execution, 1)
+	recorder.record_command(early_execution, 2)
+	assert_equal(recorder.command_records.map(func(record): return int(record["tick"])), [4, 9], "incremental replay index remains ordered by execution tick")
+	assert_equal(recorder.issuance_records.map(func(record): return int(record["issued_tick"])), [1, 2], "incremental replay index remains ordered by issuance tick")
 
 
 func test_legacy_replay_envelope_migration(catalog) -> void:

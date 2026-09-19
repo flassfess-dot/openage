@@ -241,7 +241,7 @@ func _restore_passenger(transport: Dictionary, passenger: Dictionary, position: 
 	passenger["task"] = "idle"
 	passenger["selected"] = false
 	passenger["elevation"] = world.elevation_at(position)
-	world.units.append(passenger)
+	world.restore_unit_from_transport(passenger)
 	EntityComponents.sync_dynamic(passenger)
 	world.emit_domain_event("unit_unloaded", {
 		"passenger_id": passenger_id,
@@ -252,7 +252,4 @@ func _restore_passenger(transport: Dictionary, passenger: Dictionary, position: 
 
 
 func _remove_active_unit(passenger_id: int) -> void:
-	for index in range(world.units.size() - 1, -1, -1):
-		if int(world.units[index].get("id", -1)) == passenger_id:
-			world.units.remove_at(index)
-			return
+	world.detach_unit_for_transport(passenger_id)
