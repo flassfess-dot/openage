@@ -80,10 +80,13 @@
 
 - Выполнено A-002: отдельная система ID.
   - Добавлен prototype/scripts/entity_id.gd с EntityIdSequence.
-  - В main.gd ID юнитов и ресурсов выдаются через ntity_id_sequence / esource_id_sequence.
+  - В main.gd ID юнитов и ресурсов выдаются через ntity_id_sequence / 
+esource_id_sequence.
   - Удалён глобальный старый счётчик 
 ext_unit_id.
-  - Сбрасывание/инициализация IDs выполнено через eset() у последовательностей в eset_game().
+  - Сбрасывание/инициализация IDs выполнено через 
+eset() у последовательностей в 
+eset_game().
 
 - A-002 перепроверена после аудита:
   - юниты и ресурсы переведены на единое глобальное пространство EntityId;
@@ -1553,3 +1556,35 @@ ext_unit_id.
 - `HudViewModel` сейчас публикует build palette только при `selected.size() == 1`, хотя snapshot уже содержит одинаковые player-level options у каждого выбранного worker, а `BuildCommand` и world pipeline принимают группу ID. Gap принадлежит E3 gameplay core: общая палитра для совместимых работников, один фундамент/одна оплата и назначение всех допустимых builders.
 - Порядок пакета: (1) инвентаризация source action frames и registry; (2) перенос unit-action/build-menu/back/cancel на registry; (3) intersection build options для multi-selection; (4) controller/world проверка одной транзакции и builder assignment; (5) impact tests и HUD golden matrix; (6) расширение live packaged probe переходами single/multi/military и фактическим завершением общего фундамента.
 - Статус: `planned`, блокирует утверждение E2/E3 на уровне пользовательского `PARITY` и дальнейшее расширение кампаний, но не отменяет уже выполненные simulation/performance доказательства.
+
+### Прогресс (2026-09-19, E6-026 — аудит производительности и точечные оптимизации)
+
+- Проведён систематический аудит остаточных узких мест по коду (перцепция/бой, навигация/формации, fog/рендер, sim-core, AI) с проверкой каждой находки чтением кода. Крупнейшие: route-query достижимости на каждого кандидата цели; полная пересборка nav-грида с безусловным bump ревизии на каждый жизненный цикл (убивала конверты общего марша); O(C×N) скан capturable objectives; payload-словари событий до проверки флага захвата; duplicate+полная сортировка очереди отрисовки при активных эффектах; 1024-итерационная сигнатура fog-чанка; линейный скан ресурсов на клетку в презентационном terrain-провайдере.
+- Все правки сохраняют игровые правила. Эквивалентность: workload-итоги gather (`11 671 gather / 988 deposit / food 5060+5000`) и все probe-счётчики побитово равны HEAD; два прогона дают одинаковый hash; deterministic replay, formation, combat awareness, perception, render items и полный suite проходят.
+- Измерено (stash-HEAD A/B, native): `combat_contact 8×500` fixed p95 `534,73 → 420,72` мс, attack task `−22%`, animation `−26%`; `gather_economy 2×500` p95 в пределах шума, setup `−21%`, `capturable_objectives` p95 `1,11 → 0,01` мс. Canonical hash принят новый один раз (поле `path_grid_revision` — счётчик ревизий, не игровое состояние; прецедент E6-009).
+- Попутно найдены и задокументированы до-существующие дефекты/долги: (1) `test_order_pipeline` воспроизводит, что воркер, заспавненный вплотную к ресурсу, молча завершает gather-приказ без одного цикла сбора — падает и на HEAD, владелец I8 approach-slot контракт, не чинился заплаткой в perf-пакете; (2) `test_entity_lookup_index` не был обновлён под флаговый purge-контракт E6-019 — обновлён и проходит; (3) `test_cache_contract`/`test_slp_semantics` требуют `node`, отсутствующий в текущей среде прогона (падают идентично на HEAD).
+- Render-изменения (merge эффектов, единственная проекция на drawable, memcmp fog-чанков, O(1) лес-индекс панорамирования) доказаны тестами и reasoning, но требуют GPU-измерения через `benchmark_e6_visible`/live packaged probe — оставлены первым пунктом следующего пакета.
+
+### Запланировано (2026-09-19, E6-027 — следующие измеренные владельцы)
+
+- Presentation publication совмещённого active tick+frame кадра: повторить GPU-profile и live packaged probe для подтверждения frame-выигрышей E6-026.
+- Инкрементальные per-team счётчики живых юнитов/зданий для victory вместо полных сканов (`_tick_victory`); `_attacker_metadata` и roster-refresh без пересборки по entity-count.
+- Broad-phase изоляции формаций: AABB-hash групп + spatial-запрос вместо O(G²)+G×U против всех непригруппированных юнитов.
+- AI: пары рабочий×ресурс заменить ближайшим по spatial-запросу; навигационную проекцию карты кэшировать по (fog, surface, occupancy) ревизиям наблюдателя.
+- HUD: перестройка модели по сигнатуре входов (координировать с E3R-001 групповой строительной палитрой).
+- ~~Владелец I8: дефект молчаливого сброса gather-приказа при спавне вплотную к ресурсу (`test_order_pipeline`)~~ — закрыт пакетом 2026-09-19: нормализация `worker.enabled` на границе команды.
+
+### Прогресс (2026-09-19, закрытие трёх известных отказов suite — 214/0)
+
+- **`test_order_pipeline` (дефект «gather вплотную к ресурсу»)**. Диагностика: ордер принимался по совместимому предикату `entity_is_worker` (fallback для миров без DAT worker-команд), но первый же fixed-tick `update_gather_order` отбрасывал его как `not_a_worker`, потому что после E6-014 тиковый гейт строг к `components.worker.enabled` — расхождение двух предикатов «кто воркер» в gamespec-prototype мирах. Фикс по принципу самого E6-014 («совместимость на границах команд»): `assign_command_gather` нормализует `worker.enabled` при принятии ордера. В сконфигурированных мирах компонент уже включён — правка no-op, поведение/хеши реальных матчей не меняются.
+- **`test_cache_contract` / `test_slp_semantics` (отсутствие Node.js)**. Node требуется самому проекту (`tools/import-assets.ps1: "Node.js is required for SLP/WAV extraction"`, импортёр — `tools/ror_import/import_assets.js`), но не установлен на машине, а тихая установка MSI невозможна без UAC. Решение без изменения системы: портативный Node v22.23.2 win-x64 в `.tools/nodejs/` (как godot, gitignored) + общий резолвер `tests/test_support/node_runtime.gd` (PATH без спавна процесса → `.tools/nodejs/node.exe` → Program Files, при отсутствии — actionnable сообщение вместо CreateProcess-ошибки). `import-assets.ps1` получил тот же fallback.
+- Итоговый gate: `A-006 suite: 214 passed / 0 failed` — впервые полностью зелёный (на HEAD было 210/4, включая до-существующие отказы). Пункт «владелец I8: дефект gather вплотную» из плана E6-027 закрыт этим пакетом.
+
+### Граница пакета (2026-09-19, полная сборка с изменениями E6-026/E6-026b)
+
+- Инкрементальный импорт `tools/import-assets.ps1` выполнен с node-fallback (портативный `.tools/nodejs`): все девять матч-миссий пересобраны конвертером, byte-identical результаты не переписывались; обычный запуск по-прежнему ничего не конвертирует.
+- Cache validation: `0 errors / 181 source-owned warnings` (без изменений — пробелы локальной установки).
+- Нативная сборка: `ror_pathfinding.windows.template_release.x86_64.dll` пересобрана (cmake + mingw, godot-cpp pinned 10.0.0-stable).
+- Полный suite перед сборкой: `A-006: 214 passed / 0 failed`.
+- Windows export: PCK `261 656 500` байт, SHA-256 `ebf94c7048ae0464cff30a699b3665a0f148f125897134f2a2f0290d2c6f947f`; EXE + DLL + legal скопированы в `dist/Rise of Rome Prototype`.
+- Packaged smoke: `--headless --quit-after 900` на `prototype_skirmish` и `campaign_battle_of_mylae` — оба exit `0`, runtime/script errors `0`.

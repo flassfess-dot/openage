@@ -59,6 +59,20 @@ func best_target(observer: Dictionary, candidates: Array, options: Dictionary = 
 
 
 func best_combat_target(world, observer: Dictionary, candidates: Array, assigned_attackers: Dictionary, query_range: float, stance: String, allowed_target_id: int = -1, hostility_prevalidated: bool = false) -> Variant:
+	# Reachability runs a full route query per candidate, which dominated dense
+	# awareness loops. The ranking is a total order (entity ID breaks ties), so
+	# when the globally best candidate is reachable it is also the best of the
+	# reachable subset. Probe once; only an unreachable winner pays the exact
+	# filtered rescan.
+	var best: Variant = _best_combat_target_pass(world, observer, candidates, assigned_attackers, query_range, stance, allowed_target_id, hostility_prevalidated, false)
+	if best == null:
+		return null
+	if world.can_unit_reach_entity(observer, best):
+		return best
+	return _best_combat_target_pass(world, observer, candidates, assigned_attackers, query_range, stance, allowed_target_id, hostility_prevalidated, true)
+
+
+func _best_combat_target_pass(world, observer: Dictionary, candidates: Array, assigned_attackers: Dictionary, query_range: float, stance: String, allowed_target_id: int, hostility_prevalidated: bool, check_reachability: bool) -> Variant:
 	var observer_id := int(observer.get("id", -1))
 	var observer_team := int(observer.get("team", 0))
 	var observer_position := Vector2(observer.get("pos", Vector2.ZERO))
@@ -107,7 +121,7 @@ func best_combat_target(world, observer: Dictionary, candidates: Array, assigned
 		var combined_range := maxf(0.0, query_range) + observer_radius + float(candidate.get("footprint_radius", 0.0))
 		if distance_squared > combined_range * combined_range + 0.000001:
 			continue
-		if not world.can_unit_reach_entity(observer, candidate):
+		if check_reachability and not world.can_unit_reach_entity(observer, candidate):
 			continue
 		var threat_rank := _threat_rank(observer_id, candidate)
 		var assigned_count := int(assigned_attackers.get(candidate_id, 0))

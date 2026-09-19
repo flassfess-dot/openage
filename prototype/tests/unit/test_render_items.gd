@@ -27,12 +27,14 @@ func _initialize() -> void:
 
 
 func test_required_render_item_fields() -> void:
-	var item := RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, Vector2(2, 3), 48.0, 17, {}, {"frame_index": 4, "hotspot": Vector2(9, 22)}, 1.5, Color.BLUE, 0.75)
+	var item := RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, Vector2(2, 3), Vector2(4.0, 48.0), 17, {}, {"frame_index": 4, "hotspot": Vector2(9, 22)}, 1.5, Color.BLUE, 0.75)
 	for field in RenderItem.REQUIRED_FIELDS:
 		assert_true(item.has(field), "RenderItem provides %s" % field)
 	assert_equal(item["frame"], 4, "frame copied from descriptor")
 	assert_equal(item["hotspot"], Vector2(9, 22), "hotspot copied from descriptor")
 	assert_equal(item["opacity"], 0.75, "opacity retained")
+	assert_equal(item["screen_y"], 48.0, "depth key derives from the cached screen position")
+	assert_equal(item["screen_position"], Vector2(4.0, 48.0), "screen position cached for per-frame draws")
 
 
 func test_stable_layer_sorting_and_overlays() -> void:

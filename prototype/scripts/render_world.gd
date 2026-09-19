@@ -45,18 +45,19 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, building, true):
 			continue
 		var building_position: Vector2 = building["pos"]
+		var building_screen: Vector2 = world_to_screen.call(building_position)
 		var building_info := _frame_info(frame_info_provider, "building", building)
 		var building_id := int(building["id"])
 		var building_elevation := float(building.get("elevation", 0.0))
 		var base_sub_order := int(building_info.get("graphic_layer", 20)) * 1000
-		drawables.append(RenderItem.create("building", RenderItem.Layer.UNIT_BUILDING, building_position, world_to_screen.call(building_position).y, building_id, building, building_info, building_elevation, Color.WHITE, 1.0, base_sub_order))
+		drawables.append(RenderItem.create("building", RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, building_info, building_elevation, Color.WHITE, 1.0, base_sub_order))
 		var building_part_index := 0
 		for part in building_info.get("composite_parts", []):
 			building_part_index += 1
 			var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + building_part_index
-			drawables.append(RenderItem.create("building_part", RenderItem.Layer.UNIT_BUILDING, building_position, world_to_screen.call(building_position).y, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order))
+			drawables.append(RenderItem.create("building_part", RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order))
 		if selected_ids.has(building_id) or preview_ids.has(building_id):
-			drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, world_to_screen.call(building_position).y, building_id, building, building_info, building_elevation, RenderItem.color_for_team(int(building.get("team", 0))), 1.0, 1))
+			drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, building_screen, building_id, building, building_info, building_elevation, RenderItem.color_for_team(int(building.get("team", 0))), 1.0, 1))
 	_observe_stage("buildings", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	if not from_snapshot:
@@ -64,10 +65,12 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			if resource["amount"] > 0 or bool(resource.get("visible_when_depleted", false)):
 				if observer_team > 0 and not world_source.is_entity_visible_to(observer_team, resource, true):
 					continue
+				var resource_position: Vector2 = resource["pos"]
+				var resource_screen: Vector2 = world_to_screen.call(resource_position)
 				var resource_info := _frame_info(frame_info_provider, "resource", resource)
-				drawables.append(RenderItem.create("resource", RenderItem.Layer.BASE_RESOURCE, resource["pos"], world_to_screen.call(resource["pos"]).y, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0))))
+				drawables.append(RenderItem.create("resource", RenderItem.Layer.BASE_RESOURCE, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0))))
 				if preview_ids.has(int(resource["id"])):
-					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, resource["pos"], world_to_screen.call(resource["pos"]).y, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0)), Color("d6bc63"), 1.0, 1))
+					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0)), Color("d6bc63"), 1.0, 1))
 	for objective in source_objectives:
 		if not bool(objective.get("active", true)) or bool(objective.get("logical_only", false)):
 			continue
@@ -75,7 +78,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			continue
 		var objective_info := _frame_info(frame_info_provider, "objective", objective)
 		var objective_position: Vector2 = objective.get("pos", Vector2.ZERO)
-		drawables.append(RenderItem.create("objective", RenderItem.Layer.BASE_RESOURCE, objective_position, world_to_screen.call(objective_position).y, int(objective.get("id", -1)), objective, objective_info, float(objective.get("source_elevation", 0.0))))
+		drawables.append(RenderItem.create("objective", RenderItem.Layer.BASE_RESOURCE, objective_position, world_to_screen.call(objective_position), int(objective.get("id", -1)), objective, objective_info, float(objective.get("source_elevation", 0.0))))
 	for projectile in source_projectiles:
 		if not bool(projectile.get("active", true)):
 			continue
@@ -84,17 +87,17 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		var previous_position: Vector2 = projectile.get("previous_pos", projectile["pos"])
 		var render_position: Vector2 = previous_position.lerp(projectile["pos"], alpha)
 		var projectile_info := _frame_info(frame_info_provider, "projectile", projectile)
-		drawables.append(RenderItem.create("projectile", RenderItem.Layer.PROJECTILE_EFFECT, render_position, world_to_screen.call(render_position).y, int(projectile["id"]), projectile, projectile_info, float(projectile.get("elevation", 0.0)), RenderItem.color_for_team(int(projectile.get("team", 0)))))
+		drawables.append(RenderItem.create("projectile", RenderItem.Layer.PROJECTILE_EFFECT, render_position, world_to_screen.call(render_position), int(projectile["id"]), projectile, projectile_info, float(projectile.get("elevation", 0.0)), RenderItem.color_for_team(int(projectile.get("team", 0)))))
 	for effect in source_effects:
 		if not bool(effect.get("active", true)):
 			continue
 		var effect_position: Vector2 = effect.get("pos", Vector2.ZERO)
 		var effect_info := _frame_info(frame_info_provider, "effect", effect)
-		drawables.append(RenderItem.create("effect", RenderItem.Layer.PROJECTILE_EFFECT, effect_position, world_to_screen.call(effect_position).y, int(effect.get("id", -1)), effect, effect_info, float(effect.get("elevation", 0.0)), Color.WHITE, 1.0, int(effect_info.get("graphic_layer", 30)) * 1000))
+		drawables.append(RenderItem.create("effect", RenderItem.Layer.PROJECTILE_EFFECT, effect_position, world_to_screen.call(effect_position), int(effect.get("id", -1)), effect, effect_info, float(effect.get("elevation", 0.0)), Color.WHITE, 1.0, int(effect_info.get("graphic_layer", 30)) * 1000))
 	for marker in source_markers:
 		var marker_position: Vector2 = marker.get("position", Vector2.ZERO)
 		var marker_info := _frame_info(frame_info_provider, "marker", marker)
-		drawables.append(RenderItem.create("marker", RenderItem.Layer.UNIT_BUILDING, marker_position, world_to_screen.call(marker_position).y, int(marker.get("id", -1)), marker, marker_info, float(marker.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(marker_info.get("graphic_layer", 20)) * 1000))
+		drawables.append(RenderItem.create("marker", RenderItem.Layer.UNIT_BUILDING, marker_position, world_to_screen.call(marker_position), int(marker.get("id", -1)), marker, marker_info, float(marker.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(marker_info.get("graphic_layer", 20)) * 1000))
 	for environment_item in source_environment:
 		var environment_position: Vector2 = environment_item.get("position", Vector2.ZERO)
 		var environment_info := _frame_info(frame_info_provider, "environment", environment_item)
@@ -102,7 +105,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		match String(environment_item.get("presentation_layer", "scenery")):
 			"decal": layer = RenderItem.Layer.DECAL
 			"ambient_actor": layer = RenderItem.Layer.UNIT_BUILDING
-		drawables.append(RenderItem.create("environment", layer, environment_position, world_to_screen.call(environment_position).y, int(environment_item.get("id", -1)), environment_item, environment_info, float(environment_item.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(environment_info.get("graphic_layer", 0)) * 1000))
+		drawables.append(RenderItem.create("environment", layer, environment_position, world_to_screen.call(environment_position), int(environment_item.get("id", -1)), environment_item, environment_info, float(environment_item.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(environment_info.get("graphic_layer", 0)) * 1000))
 	_observe_stage("static_entities", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	for unit in source_units:
@@ -112,25 +115,25 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				continue
 			var previous_position: Vector2 = unit.get("previous_pos", unit["pos"])
 			var render_position: Vector2 = previous_position.lerp(unit["pos"], alpha)
-			var screen_y: float = world_to_screen.call(render_position).y
+			var unit_screen: Vector2 = world_to_screen.call(render_position)
 			var frame_info := _frame_info(frame_info_provider, "unit", unit)
 			var stable_id := int(unit["id"])
 			var elevation := float(unit.get("elevation", 0.0))
 			var player_color := RenderItem.color_for_team(int(unit.get("team", 0)))
 			if death_phase != "corpse":
-				drawables.append(RenderItem.create("shadow", RenderItem.Layer.SHADOW, render_position, screen_y, stable_id, unit, {}, elevation, Color(0.0, 0.0, 0.0, 0.32)))
+				drawables.append(RenderItem.create("shadow", RenderItem.Layer.SHADOW, render_position, unit_screen, stable_id, unit, {}, elevation, Color(0.0, 0.0, 0.0, 0.32)))
 			var unit_base_sub_order := int(frame_info.get("graphic_layer", 20)) * 1000
-			drawables.append(RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, render_position, screen_y, stable_id, unit, frame_info, elevation, player_color, 1.0, unit_base_sub_order))
+			drawables.append(RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, unit_base_sub_order))
 			var unit_part_index := 0
 			for part_value in frame_info.get("composite_parts", []):
 				var part: Dictionary = part_value
 				unit_part_index += 1
 				var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + unit_part_index
-				drawables.append(RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, screen_y, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order))
+				drawables.append(RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order))
 			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or preview_ids.has(stable_id)):
-				drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, screen_y, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
+				drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
 			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or preview_ids.has(stable_id)):
-				drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, screen_y, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
+				drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
 	_observe_stage("units", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	drawables.sort_custom(RenderItem.less)
@@ -175,11 +178,11 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var position: Vector2 = resource.get("pos", Vector2.ZERO)
 		var resource_id := int(resource.get("id", -1))
 		var resource_info := _frame_info(frame_info_provider, "resource", resource)
-		var screen_y := float(world_to_screen.call(position).y)
+		var resource_screen: Vector2 = world_to_screen.call(position)
 		var elevation := float(resource.get("elevation", 0.0))
-		cached_resource_drawables.append(RenderItem.create("resource", RenderItem.Layer.BASE_RESOURCE, position, screen_y, resource_id, resource, resource_info, elevation))
+		cached_resource_drawables.append(RenderItem.create("resource", RenderItem.Layer.BASE_RESOURCE, position, resource_screen, resource_id, resource, resource_info, elevation))
 		if preview_ids.has(resource_id):
-			cached_resource_drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, screen_y, resource_id, resource, resource_info, elevation, Color("d6bc63"), 1.0, 1))
+			cached_resource_drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, resource_screen, resource_id, resource, resource_info, elevation, Color("d6bc63"), 1.0, 1))
 	cached_resource_drawables.sort_custom(RenderItem.less)
 	return cached_resource_drawables
 
@@ -218,7 +221,7 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 			"environment",
 			layer,
 			position,
-			world_to_screen.call(position).y,
+			world_to_screen.call(position),
 			int(item.get("id", -1)),
 			item,
 			frame_info,
@@ -231,7 +234,10 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 	return {"static": cached_environment_drawables, "animated": animated}
 
 
-func _merge_sorted_drawables(first: Array, second: Array) -> Array:
+func merge_sorted_drawables(first: Array, second: Array) -> Array:
+	# Both inputs are sorted by the strict total RenderItem order (distinct
+	# entities never tie), so this linear merge yields exactly the order a full
+	# re-sort would produce while touching each item once.
 	var result: Array = []
 	result.resize(first.size() + second.size())
 	var first_index := 0
@@ -248,7 +254,14 @@ func _merge_sorted_drawables(first: Array, second: Array) -> Array:
 	return result
 
 
-func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interpolation_alpha: float = 1.0) -> Array:
+func _merge_sorted_drawables(first: Array, second: Array) -> Array:
+	return merge_sorted_drawables(first, second)
+
+
+const INTERPOLATED_KINDS := ["unit", "unit_part", "shadow", "selection", "health_bar"]
+
+
+func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interpolation_alpha: float = 1.0, projection_changed: bool = true) -> Array:
 	# Frame descriptors, composite parts and render-item dictionaries are stable
 	# for one published presentation revision. Between fixed simulation ticks only
 	# interpolation changes, so update anchors in place instead of rebuilding the
@@ -262,15 +275,24 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		var position: Variant = null
 		if kind == "projectile":
 			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), alpha)
-		elif kind in ["unit", "unit_part", "shadow", "selection", "health_bar"] and String(data.get("movement_domain", "land")) != "static":
+		elif kind in INTERPOLATED_KINDS and String(data.get("movement_domain", "land")) != "static":
 			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), alpha)
 		if position == null:
+			# Static drawables keep their world anchor; their screen position only
+			# changes with the camera, and the affine pan/zoom projection preserves
+			# relative depth order, so no re-sort is needed for them.
+			if projection_changed:
+				var static_screen: Vector2 = world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO)))
+				drawable["screen_position"] = static_screen
+				drawable["screen_y"] = static_screen.y
 			continue
 		var resolved_position: Vector2 = position
 		if not resolved_position.is_equal_approx(Vector2(drawable.get("world_anchor", resolved_position))):
 			moved = true
 		drawable["world_anchor"] = resolved_position
-		drawable["screen_y"] = float(world_to_screen.call(resolved_position).y)
+		var screen_position: Vector2 = world_to_screen.call(resolved_position)
+		drawable["screen_position"] = screen_position
+		drawable["screen_y"] = screen_position.y
 	if moved:
 		drawables.sort_custom(RenderItem.less)
 	return drawables

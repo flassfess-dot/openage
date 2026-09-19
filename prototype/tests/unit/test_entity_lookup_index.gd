@@ -15,6 +15,10 @@ func _initialize() -> void:
 
 	unit["removed"] = true
 	building["removed"] = true
+	# Purge is flag-gated (E6-019 active registries); the authoritative removal
+	# paths raise these flags, so a direct removal test must raise them too.
+	world.unit_removal_pending = true
+	world.building_removal_pending = true
 	world.purge_removed_units()
 	assert_true(world.find_unit(int(unit["id"])) == null, "purged unit leaves the index")
 	assert_true(world.find_building(90) == null, "purged building leaves the index")

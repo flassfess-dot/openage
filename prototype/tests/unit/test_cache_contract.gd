@@ -1,5 +1,7 @@
 extends SceneTree
 
+const NodeRuntime := preload("res://tests/test_support/node_runtime.gd")
+
 var failures: Array[String] = []
 
 
@@ -17,9 +19,13 @@ func _initialize() -> void:
 
 
 func test_cache_key_self_test() -> void:
+	var node_binary := NodeRuntime.resolve()
+	if node_binary.is_empty():
+		failures.append(NodeRuntime.unavailable_message())
+		return
 	var importer := ProjectSettings.globalize_path("res://../tools/ror_import/import_assets.js")
 	var output: Array = []
-	var exit_code := OS.execute("node", [importer, "--self-test-cache"], output, true)
+	var exit_code := OS.execute(node_binary, [importer, "--self-test-cache"], output, true)
 	assert_equal(exit_code, 0, "cache key self-test exit")
 	assert_true("\n".join(output).contains("D-001 asset cache key self-test passed"), "cache key self-test output")
 

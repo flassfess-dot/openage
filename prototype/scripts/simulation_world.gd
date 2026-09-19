@@ -83,6 +83,7 @@ var movement_native_neighbor_candidates: int = 0
 var formation_cohesion_active: bool = true
 var movement_neighbor_buffer: Array = []
 var open_movement_envelopes_by_id: Dictionary = {}
+var building_navigation_cells_by_id: Dictionary = {}
 
 var entity_id_sequence := EntityIds.new()
 var spatial_index := SpatialHash.new(2.0)
@@ -120,6 +121,7 @@ var gamespec_data: Dictionary = {}
 var object_catalog_data: Dictionary = {}
 var graphics_catalog_data: Dictionary = {}
 var attack_animation_spec_cache: Dictionary = {}
+var capture_radius_by_kind: Dictionary = {}
 var civilization_by_team: Dictionary = {1: 13, 2: 13}
 var population_by_team: Dictionary = {}
 var population_reserved_by_team: Dictionary = {}
@@ -304,6 +306,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	local_build_site_cache.clear()
 	build_option_catalog_cache.clear()
 	render_entity_projection_cache.clear()
+	capture_radius_by_kind.clear()
 	static_obstructions.clear()
 	forest_resource_counts.clear()
 	buildings.clear()
@@ -322,6 +325,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	resource_approach_slots.clear()
 	building_approach_slots.clear()
 	open_movement_envelopes_by_id.clear()
+	building_navigation_cells_by_id.clear()
 	last_build_failure = ""
 	production_system.reset()
 	transport_system.reset()
@@ -649,8 +653,8 @@ func _add_resource(kind: String, position: Vector2, amount: int, resolve_placeme
 		decaying_resource_nodes.append(resource)
 	if safe_amount > 0 and kind == "tree":
 		_register_forest_resource(resource)
-	if not is_bulk_loading():
-		rebuild_navigation_grid()
+	if not is_bulk_loading() and navigation_grid != null and safe_amount > 0:
+		navigation_grid.occupy(resource.get("footprint", {}).get("occupied_cells", [Vector2i(floori(position.x), floori(position.y))]), "resource", entity_id)
 	_emit_domain_event("entity_created", {
 		"entity_id": entity_id,
 		"entity_category": "resource",
@@ -801,7 +805,7 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 		activate_building_completion(building)
 	if not is_bulk_loading():
 		refresh_building_connectivity()
-		rebuild_navigation_grid()
+		_sync_building_navigation_occupancy(building)
 		update_fog_of_war()
 	_emit_domain_event("entity_created", {
 		"entity_id": int(building["id"]),
@@ -972,28 +976,45 @@ func update_capturable_objectives() -> void:
 		var objective_unit: Dictionary = objective_unit_value
 		if not entity_has_behavior_tag(objective_unit, "capturable") or float(objective_unit.get("hp", 0.0)) <= 0.0:
 			continue
-		var capture_radius := maxf(0.0, float(data_repository.runtime_metadata(String(objective_unit.get("kind", ""))).get("capture_radius", 1.0)))
-		var candidates: Array = []
-		for candidate_value in units:
+		var capture_radius := maxf(0.0, float(capture_radius_for_kind(String(objective_unit.get("kind", "")))))
+		var objective_position := Vector2(objective_unit.get("pos", Vector2.ZERO))
+		var objective_id := int(objective_unit.get("id", -1))
+		# The spatial index bounds the candidate set; the single best candidate
+		# is found with one min-scan using the sort's exact (distance, id) order.
+		var best_candidate: Dictionary = {}
+		var best_distance := INF
+		var best_candidate_id := 9223372036854775807
+		for candidate_value in query_units_near(objective_position, capture_radius + 1.5):
 			var candidate: Dictionary = candidate_value
-			if int(candidate.get("id", -1)) == int(objective_unit.get("id", -1)) or int(candidate.get("team", 0)) <= 0:
+			var candidate_id := int(candidate.get("id", -1))
+			if candidate_id == objective_id or int(candidate.get("team", 0)) <= 0:
 				continue
 			if float(candidate.get("hp", 0.0)) <= 0.0 or entity_has_behavior_tag(candidate, "capturable"):
 				continue
-			var distance := Vector2(candidate.get("pos", Vector2.ZERO)).distance_to(Vector2(objective_unit.get("pos", Vector2.ZERO)))
-			if distance <= capture_radius + 0.0001:
-				candidates.append({"unit": candidate, "distance": distance})
-		candidates.sort_custom(func(left, right):
-			if not is_equal_approx(float(left["distance"]), float(right["distance"])):
-				return float(left["distance"]) < float(right["distance"])
-			return int(left["unit"].get("id", -1)) < int(right["unit"].get("id", -1))
-		)
-		if not candidates.is_empty():
-			var new_team := int(candidates[0]["unit"].get("team", 0))
+			var distance := objective_position.distance_to(Vector2(candidate.get("pos", Vector2.ZERO)))
+			if distance > capture_radius + 0.0001:
+				continue
+			if not best_candidate.is_empty():
+				if not is_equal_approx(distance, best_distance):
+					if distance > best_distance:
+						continue
+				elif candidate_id > best_candidate_id:
+					continue
+			best_candidate = candidate
+			best_distance = distance
+			best_candidate_id = candidate_id
+		if not best_candidate.is_empty():
+			var new_team := int(best_candidate.get("team", 0))
 			var old_team := int(objective_unit.get("team", 0))
 			if new_team != old_team and (old_team <= 0 or not are_teams_allied(old_team, new_team)):
 				transfer_entity_ownership(objective_unit, new_team, -1, "proximity_capture", true)
 		sync_unit_victory_objective(objective_unit)
+
+
+func capture_radius_for_kind(kind: String) -> float:
+	if not capture_radius_by_kind.has(kind):
+		capture_radius_by_kind[kind] = data_repository.runtime_metadata(kind).get("capture_radius", 1.0)
+	return float(capture_radius_by_kind[kind])
 
 
 func sync_building_victory_objective(building: Dictionary) -> void:
@@ -1158,6 +1179,60 @@ func rebuild_navigation_grid() -> void:
 	if navigation_grid != null:
 		navigation_grid.configure_terrain_ids(Callable(self, "terrain_id_at_cell"))
 		navigation_grid.rebuild(resource_nodes, buildings, static_obstructions)
+		for building in buildings:
+			building_navigation_cells_by_id[int(building.get("id", -1))] = _building_navigation_cells(building)
+
+
+func _building_navigation_cells(building: Dictionary) -> Array:
+	if float(building.get("hp", 1.0)) <= 0.0:
+		return []
+	if bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", []):
+		return []
+	return building.get("occupied_cells", [])
+
+
+func _sync_building_navigation_occupancy(building: Dictionary) -> void:
+	# Footprint-local delta against the last synced cells so a single placement,
+	# destruction or age-upgrade never pays the full-map reconcile.
+	if navigation_grid == null:
+		return
+	var building_id := int(building.get("id", -1))
+	var desired: Array = _building_navigation_cells(building)
+	var previous: Array = building_navigation_cells_by_id.get(building_id, [])
+	if previous.is_empty() and desired.is_empty():
+		return
+	var desired_set := {}
+	for cell in desired:
+		desired_set[cell] = true
+	var previous_set := {}
+	for cell in previous:
+		previous_set[cell] = true
+	var released: Array = []
+	for cell in previous:
+		if not desired_set.has(cell):
+			released.append(cell)
+	var occupied: Array = []
+	for cell in desired:
+		if not previous_set.has(cell):
+			occupied.append(cell)
+	if not released.is_empty():
+		navigation_grid.release_occupant(released, "building", building_id)
+	if not occupied.is_empty():
+		navigation_grid.occupy(occupied, "building", building_id)
+	if desired.is_empty():
+		building_navigation_cells_by_id.erase(building_id)
+	else:
+		building_navigation_cells_by_id[building_id] = desired.duplicate()
+
+
+func _release_building_navigation_occupancy(building: Dictionary) -> void:
+	if navigation_grid == null:
+		return
+	var building_id := int(building.get("id", -1))
+	var cells: Array = building_navigation_cells_by_id.get(building_id, building.get("occupied_cells", []))
+	if not cells.is_empty():
+		navigation_grid.release_occupant(cells, "building", building_id)
+	building_navigation_cells_by_id.erase(building_id)
 
 
 func configure_demo_elevation(center: Vector2i, radius: int = 4, maximum_elevation: int = 2) -> void:
@@ -1179,8 +1254,11 @@ func terrain_id_at_cell(cell: Vector2i) -> int:
 
 func _register_forest_resource(resource: Dictionary) -> void:
 	var cell := Vector2i(floori(float(resource.get("pos", Vector2.ZERO).x)), floori(float(resource.get("pos", Vector2.ZERO).y)))
-	forest_resource_counts[cell] = int(forest_resource_counts.get(cell, 0)) + 1
+	var previous := int(forest_resource_counts.get(cell, 0))
+	forest_resource_counts[cell] = previous + 1
 	terrain_revision += 1
+	if navigation_grid != null and previous == 0:
+		navigation_grid.set_terrain_id(cell, int(TerrainRules.TERRAIN_IDS["forest_floor"]))
 
 
 func _unregister_forest_resource(resource: Dictionary) -> void:
@@ -1193,6 +1271,8 @@ func _unregister_forest_resource(resource: Dictionary) -> void:
 		forest_resource_counts[cell] = remaining
 	else:
 		forest_resource_counts.erase(cell)
+		if navigation_grid != null:
+			navigation_grid.set_terrain_id(cell, int(map_terrain_ids.get(cell, TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell)))))
 	terrain_revision += 1
 
 
@@ -1670,7 +1750,7 @@ func begin_building_destruction(building: Dictionary) -> void:
 	building["removed"] = false
 	EntityComponents.sync_dynamic(building)
 	refresh_building_connectivity()
-	rebuild_navigation_grid()
+	_sync_building_navigation_occupancy(building)
 
 
 func advance_death(unit: Dictionary, delta: float) -> void:
@@ -1808,8 +1888,9 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	if shared_motion_requested or not open_movement_envelopes_by_id.is_empty():
 		open_envelope = open_movement_envelopes_by_id.get(unit_id)
 	if open_envelope != null and int(open_envelope.get("grid_revision", -1)) != navigation_grid.revision:
-		open_movement_envelopes_by_id.erase(unit_id)
-		open_envelope = null
+		if not _envelope_survives_grid_change(open_envelope):
+			open_movement_envelopes_by_id.erase(unit_id)
+			open_envelope = null
 	var shared_motion := shared_motion_requested and open_envelope != null
 	var native_movement: bool = not shared_motion and open_envelope == null and pathfinder.has_native_movement_for(unit_id)
 	if shared_motion and bool(unit["formation_shared_isolated"]):
@@ -2232,14 +2313,15 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 	_sync_compact_ai_resource(resource)
 	worker["carried_amount"] = float(worker["carried_amount"]) + amount
 	worker["carried_resource_type_id"] = resource_type_id
-	_emit_domain_event("resource_gathered", {
-		"worker_id": int(worker["id"]),
-		"resource_id": int(resource["id"]),
-		"resource_type_id": resource_type_id,
-		"amount": amount,
-		"remaining": int(resource["amount"]),
-		"carried": float(worker["carried_amount"]),
-	})
+	if capture_domain_events:
+		_emit_domain_event("resource_gathered", {
+			"worker_id": int(worker["id"]),
+			"resource_id": int(resource["id"]),
+			"resource_type_id": resource_type_id,
+			"amount": amount,
+			"remaining": int(resource["amount"]),
+			"carried": float(worker["carried_amount"]),
+		})
 	update_resource_state(resource)
 	EntityComponents.sync_resource_carrier(worker)
 	return amount
@@ -2251,7 +2333,7 @@ func deposit_carried_resources(worker: Dictionary) -> int:
 	var resource_type_id := int(worker["carried_resource_type_id"])
 	if resource_type_id >= 0:
 		economy_system.change_resource_amount(team, resource_type_id, amount)
-	if amount > 0:
+	if amount > 0 and capture_domain_events:
 		_emit_domain_event("resources_deposited", {
 			"worker_id": int(worker["id"]),
 			"team": team,
@@ -2950,7 +3032,7 @@ func cancel_foundation(building_id: int) -> bool:
 				break
 	building_approach_slots.erase(building_id)
 	refresh_building_connectivity()
-	rebuild_navigation_grid()
+	_release_building_navigation_occupancy(building)
 	update_fog_of_war()
 	_emit_domain_event("foundation_cancelled", {
 		"building_id": building_id,
@@ -3009,7 +3091,7 @@ func reseed_harvestable_building(building: Dictionary, workers: Array = []) -> V
 	building["builders"] = {}
 	EntityComponents.sync_dynamic(building)
 	assign_workers_to_building(workers, building, "build")
-	rebuild_navigation_grid()
+	_sync_building_navigation_occupancy(building)
 	_emit_domain_event("foundation_placed", {
 		"building_id": int(building.get("id", -1)),
 		"kind": String(building.get("kind", "")),
@@ -3134,7 +3216,7 @@ func complete_foundation(building: Dictionary) -> void:
 				assign_command_gather([builder], building_id)
 				break
 	building_approach_slots.erase(building_id)
-	rebuild_navigation_grid()
+	_sync_building_navigation_occupancy(building)
 	update_fog_of_war()
 	_emit_domain_event("build_complete", {
 		"building_id": building_id,
@@ -3314,7 +3396,6 @@ func update_resource_state(resource: Dictionary) -> void:
 
 
 func advance_resource_lifecycle(delta: float) -> void:
-	var navigation_changed := false
 	for resource in decaying_resource_nodes:
 		if int(resource.get("amount", 0)) <= 0:
 			continue
@@ -3331,16 +3412,14 @@ func advance_resource_lifecycle(delta: float) -> void:
 		if amount_before > 0 and int(resource["amount"]) <= 0:
 			resource_minimap_revision += 1
 		_sync_compact_ai_resource(resource)
+		# update_resource_state releases the depleted footprint incrementally.
 		update_resource_state(resource)
-		_emit_domain_event("resource_decayed", {
-			"resource_id": int(resource.get("id", -1)),
-			"amount": lost,
-			"remaining": int(resource.get("amount", 0)),
-		})
-		if int(resource.get("amount", 0)) <= 0:
-			navigation_changed = true
-	if navigation_changed:
-		rebuild_navigation_grid()
+		if capture_domain_events:
+			_emit_domain_event("resource_decayed", {
+				"resource_id": int(resource.get("id", -1)),
+				"amount": lost,
+				"remaining": int(resource.get("amount", 0)),
+			})
 
 
 func _update_huntable_reaction(unit: Dictionary) -> void:
@@ -3417,6 +3496,29 @@ func _group_move_envelope_is_open(selected: Array, reserved_by_id: Dictionary) -
 			maximum = Vector2(maxf(maximum.x, position.x), maxf(maximum.y, position.y))
 		maximum_radius = maxf(maximum_radius, float(unit.get("footprint_radius", 0.3)))
 	return navigation_grid.is_world_rect_walkable_for(minimum, maximum, maximum_radius, movement_domain, restriction_id)
+
+func _envelope_survives_grid_change(open_envelope: Dictionary) -> bool:
+	# The grid journal knows which cells actually changed; an envelope whose
+	# rectangle misses every changed cell keeps its validated walkability and
+	# only fast-forwards its revision. Unknown history or any intersection
+	# invalidates conservatively.
+	var envelope_revision := int(open_envelope.get("grid_revision", -1))
+	var region: Variant = navigation_grid.change_region_since(envelope_revision)
+	if region == null:
+		return false
+	var changed_region: Rect2 = region
+	if changed_region.has_area():
+		# Envelope walkability was validated with the member footprint radius;
+		# a fixed 3-cell margin over-covers every unit radius in the source data.
+		var margin := 3.0
+		var minimum := Vector2(open_envelope.get("minimum", Vector2.ZERO))
+		var maximum := Vector2(open_envelope.get("maximum", Vector2.ZERO))
+		var envelope_rect := Rect2(minimum - Vector2.ONE * margin, (maximum - minimum) + Vector2.ONE * 2.0 * margin)
+		if envelope_rect.intersects(changed_region):
+			return false
+	open_envelope["grid_revision"] = navigation_grid.revision
+	return true
+
 
 func assign_command_attack_move(selected: Array, target: Vector2) -> bool:
 	var resolved_count := 0
@@ -3825,6 +3927,13 @@ func assign_command_gather(selected: Array, target_id: int) -> void:
 	for unit in selected:
 		if not entity_is_worker(unit):
 			continue
+		var worker_component: Dictionary = unit.get("components", {}).get("worker", {})
+		if not bool(worker_component.get("enabled", false)):
+			# entity_is_worker accepts the gamespec-prototype compatibility villager,
+			# but the fixed-tick gather loop gates strictly on the component (E6-014
+			# moved compatibility to command boundaries). Normalize here so an
+			# accepted gather order is never dropped as not_a_worker one tick later.
+			worker_component["enabled"] = true
 		conversion_system.cancel(unit, "new_order")
 		healing_system.cancel(unit, "new_order")
 		release_resource_approach_slot(unit)
@@ -4096,7 +4205,11 @@ func apply_technology_commands(team: int, commands: Array, resolve_automatic: bo
 		if int(entity.get("team", 0)) == team and not bool(entity.get("technology_locked", false)):
 			entity.get("components", {}).get("technology", {})["researched_ids"] = researched.duplicate()
 	if not is_bulk_loading():
-		rebuild_navigation_grid()
+		# Age upgrades can change building footprints (Town Center variants);
+		# each upgraded building reconciles only its own cells.
+		for entity in upgraded_entities:
+			if buildings_by_id.has(int(entity.get("id", -1))):
+				_sync_building_navigation_occupancy(entity)
 	if resolve_automatic:
 		resolve_automatic_technologies(team)
 

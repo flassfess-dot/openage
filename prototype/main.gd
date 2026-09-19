@@ -153,6 +153,8 @@ var cached_environment_items: Array = []
 var cached_world_drawables: Array = []
 var cached_world_drawables_revision: int = -1
 var cached_world_drawables_control_signature: int = 0
+var cached_projection_offset := Vector2(INF, INF)
+var cached_projection_zoom := -1.0
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
@@ -1011,14 +1013,17 @@ func current_world_drawables() -> Array:
 		cached_world_drawables_revision = presentation_revision
 		cached_world_drawables_control_signature = control_signature
 	else:
-		render_world.refresh_world_drawables(cached_world_drawables, Callable(self, "world_to_screen"), interpolation_alpha)
+		# Static drawables only need a fresh projection when the camera moved;
+		# the affine pan/zoom preserves their relative depth order.
+		var projection_changed := view_offset != cached_projection_offset or view_zoom != cached_projection_zoom
+		render_world.refresh_world_drawables(cached_world_drawables, Callable(self, "world_to_screen"), interpolation_alpha, projection_changed)
+	cached_projection_offset = view_offset
+	cached_projection_zoom = view_zoom
 	var effects: Array = presentation_snapshot.get("effects", [])
 	if effects.is_empty():
 		return cached_world_drawables
-	var combined: Array = cached_world_drawables.duplicate()
-	combined.append_array(render_world.create_world_drawables({"effects": effects}, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info")))
-	combined.sort_custom(RenderItem.less)
-	return combined
+	var effect_drawables: Array = render_world.create_world_drawables({"effects": effects}, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"))
+	return render_world.merge_sorted_drawables(cached_world_drawables, effect_drawables)
 
 
 func pick_stack_at(screen_position: Vector2) -> Array:
@@ -1558,10 +1563,11 @@ func terrain_at(x: int, y: int) -> String:
 
 
 func terrain_id_at_cell(cell: Vector2i) -> int:
-	for resource in resource_nodes:
-		if resource["amount"] > 0 and resource["kind"] == "tree" and Vector2i(floori(resource["pos"].x), floori(resource["pos"].y)) == cell:
-			return TerrainRules.TERRAIN_IDS["forest_floor"]
-	return simulation_world.terrain_id_at_cell(cell) if simulation_world != null else TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell))
+	# The world maintains an O(1) forest-cell index; the previous linear scan
+	# over every resource per cell multiplied pan-time terrain rebuilds.
+	if simulation_world != null:
+		return simulation_world.terrain_id_at_cell(cell)
+	return TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell))
 
 
 func draw_terrain_border(tile_origin: Vector2, layer: Dictionary) -> void:
@@ -1649,11 +1655,24 @@ func draw_fog_overlay() -> void:
 				continue
 			var entry: Dictionary = cached_world_fog_chunks.get(chunk_key, {})
 			if int(entry.get("revision", -1)) != fog_revision:
-				var signature := _world_fog_chunk_signature(chunk_bounds, cells)
-				if int(entry.get("signature", -1)) != signature:
+				# Row-slice memcmp replaces the 1024-iteration hash loop per chunk;
+				# unchanged chunks now cost one PackedByteArray compare per row.
+				var rows: Array = entry.get("rows", [])
+				var rows_match := rows.size() == bounds.size.y
+				if rows_match:
+					for row_index in range(bounds.size.y):
+						var row_offset := (bounds.position.y + row_index) * map_size.x + bounds.position.x
+						if cells.slice(row_offset, row_offset + bounds.size.x) != rows[row_index]:
+							rows_match = false
+							break
+				if not rows_match:
 					var rebuild_started := Time.get_ticks_usec() if probe != null else 0
 					entry["mesh"] = _build_world_fog_mesh(chunk_bounds, cells)
-					entry["signature"] = signature
+					var fresh_rows: Array = []
+					for row_index in range(bounds.size.y):
+						var fresh_offset := (bounds.position.y + row_index) * map_size.x + bounds.position.x
+						fresh_rows.append(cells.slice(fresh_offset, fresh_offset + bounds.size.x))
+					entry["rows"] = fresh_rows
 					rebuilt_chunks += 1
 					if probe != null:
 						probe.observe_microseconds("presentation.fog.chunk_rebuild", Time.get_ticks_usec() - rebuild_started)
@@ -1684,15 +1703,6 @@ func _world_fog_chunk_bounds(chunk_key: Vector2i) -> Rect2i:
 	start.x = maxi(0, start.x)
 	start.y = maxi(0, start.y)
 	return Rect2i(start, Vector2i(maxi(0, finish.x - start.x), maxi(0, finish.y - start.y)))
-
-
-func _world_fog_chunk_signature(bounds: Rect2i, cells: Variant) -> int:
-	var signature := 17
-	for y in range(bounds.position.y, bounds.end.y):
-		var row_offset := y * map_size.x
-		for x in range(bounds.position.x, bounds.end.x):
-			signature = signature * 31 + int(cells[row_offset + x])
-	return signature
 
 
 func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
@@ -1822,7 +1832,7 @@ func draw_render_body(item: Dictionary) -> void:
 	var frame_info: Dictionary = item["frame_info"]
 	if frame_info.is_empty() or frame_info.get("texture") == null:
 		return
-	var screen := PixelScaling.snap_screen(world_to_screen(item["world_anchor"]))
+	var screen := PixelScaling.snap_screen(item["screen_position"])
 	if item["kind"] == "projectile":
 		screen.y -= float(item["data"].get("visual_height", 0.0)) * TerrainElevation.ELEVATION_PIXEL_STEP * view_zoom
 	var screen_offset: Vector2 = frame_info.get("screen_offset", Vector2.ZERO)
@@ -1831,7 +1841,7 @@ func draw_render_body(item: Dictionary) -> void:
 
 func draw_unit_selection(item: Dictionary) -> void:
 	var unit: Dictionary = item["data"]
-	var screen := PixelScaling.snap_screen(world_to_screen(item["world_anchor"]))
+	var screen := PixelScaling.snap_screen(item["screen_position"])
 	var radius := Vector2(15.0, 6.5)
 	var half_size: Variant = unit.get("footprint", {}).get("half_size")
 	if half_size is Vector2:
@@ -1852,7 +1862,7 @@ func draw_unit_selection(item: Dictionary) -> void:
 
 func draw_unit_shadow(item: Dictionary) -> void:
 	var unit: Dictionary = item["data"]
-	var screen := PixelScaling.snap_screen(world_to_screen(item["world_anchor"]))
+	var screen := PixelScaling.snap_screen(item["screen_position"])
 	var radius := maxf(0.2, float(unit.get("footprint_radius", 0.3)))
 	draw_set_transform(screen + Vector2(0.0, 5.0 * view_zoom), 0.0, Vector2(1.0, 0.42))
 	draw_circle(Vector2.ZERO, radius * 34.0 * view_zoom, Color(0.0, 0.0, 0.0, 0.28))
@@ -1860,7 +1870,7 @@ func draw_unit_shadow(item: Dictionary) -> void:
 
 func draw_unit_health(item: Dictionary) -> void:
 	var unit: Dictionary = item["data"]
-	var screen := PixelScaling.snap_screen(world_to_screen(item["world_anchor"]))
+	var screen := PixelScaling.snap_screen(item["screen_position"])
 	var hotspot: Vector2 = item["hotspot"]
 	var ratio: float = clampf(float(unit["hp"]) / maxf(1.0, float(unit["max_hp"])), 0.0, 1.0)
 	# 50745 is the 50x7 selection-card meter. World-space selection bars in

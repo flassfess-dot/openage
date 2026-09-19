@@ -38,11 +38,14 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 	if not AnimationController.event_reached(unit, event_name, event_frame, frame_duration):
 		return
 	var damage := 0.0
-	world.emit_domain_event("attack", {
-		"attacker_id": int(unit["id"]),
-		"target_id": int(enemy["id"]),
-		"ranged": int(unit.get("projectile_id", -1)) >= 0,
-	})
+	# Payload dictionaries are built at the call site, so gate the hot combat
+	# emissions on the capture flag instead of relying on the emit-time early-out.
+	if world.capture_domain_events:
+		world.emit_domain_event("attack", {
+			"attacker_id": int(unit["id"]),
+			"target_id": int(enemy["id"]),
+			"ranged": int(unit.get("projectile_id", -1)) >= 0,
+		})
 	if int(unit.get("projectile_id", -1)) >= 0:
 		spawn_projectile(unit, enemy)
 	else:
@@ -50,17 +53,18 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 		enemy["hp"] -= damage
 		enemy["retaliation_target_id"] = int(unit.get("id", -1))
 		world.record_attack_distress(unit, enemy)
-		world.emit_domain_event("hit", {
-			"source_id": int(unit["id"]),
-			"target_id": int(enemy["id"]),
-			"projectile_id": -1,
-		})
-		world.emit_domain_event("damage", {
-			"source_id": int(unit["id"]),
-			"target_id": int(enemy["id"]),
-			"amount": damage,
-			"remaining_hp": maxf(0.0, float(enemy["hp"])),
-		})
+		if world.capture_domain_events:
+			world.emit_domain_event("hit", {
+				"source_id": int(unit["id"]),
+				"target_id": int(enemy["id"]),
+				"projectile_id": -1,
+			})
+			world.emit_domain_event("damage", {
+				"source_id": int(unit["id"]),
+				"target_id": int(enemy["id"]),
+				"amount": damage,
+				"remaining_hp": maxf(0.0, float(enemy["hp"])),
+			})
 		EntityComponents.sync_dynamic(enemy)
 	unit["cooldown"] = maxf(0.1, unit["attack_period"])
 	OrderPipeline.transition(unit, OrderPipeline.RECOVER)
@@ -163,33 +167,35 @@ func update_projectiles(delta: float, player_team: int) -> void:
 			projectile["direct_hit"] = bool(projectile.get("direct_hit", false)) or int(candidate.get("id", -1)) == int(projectile.get("target_id", -2))
 			projectile["hit_target_ids"].append(int(candidate.get("id", -1)))
 			projectile["damage"] = float(projectile.get("damage", 0.0)) + impact_damage
-			world.emit_domain_event("hit", {
-				"source_id": int(projectile.get("source_id", -1)),
-				"target_id": int(candidate["id"]),
-				"projectile_id": int(projectile["id"]),
-			})
-			world.emit_domain_event("damage", {
-				"source_id": int(projectile.get("source_id", -1)),
-				"target_id": int(candidate["id"]),
-				"projectile_id": int(projectile["id"]),
-				"amount": impact_damage,
-				"remaining_hp": maxf(0.0, float(candidate["hp"])),
-			})
+			if world.capture_domain_events:
+				world.emit_domain_event("hit", {
+					"source_id": int(projectile.get("source_id", -1)),
+					"target_id": int(candidate["id"]),
+					"projectile_id": int(projectile["id"]),
+				})
+				world.emit_domain_event("damage", {
+					"source_id": int(projectile.get("source_id", -1)),
+					"target_id": int(candidate["id"]),
+					"projectile_id": int(projectile["id"]),
+					"amount": impact_damage,
+					"remaining_hp": maxf(0.0, float(candidate["hp"])),
+				})
 			if candidate["hp"] <= 0.0:
 				world.begin_entity_death(candidate)
 				if int(projectile.get("team", 0)) == player_team and not world.are_teams_allied(int(projectile.get("team", 0)), int(candidate.get("team", 0))):
 					world.kills += 1
 			EntityComponents.sync_dynamic(candidate)
 		projectile["impact_position"] = Vector2(projectile["pos"])
-		world.emit_domain_event("projectile_impact", {
-			"projectile_id": int(projectile["id"]),
-			"source_id": int(projectile.get("source_id", -1)),
-			"team": int(projectile.get("team", 0)),
-			"position": Vector2(projectile["pos"]),
-			"impact_effect_graphic_id": int(projectile.get("impact_effect_graphic_id", -1)),
-			"blast_range": float(projectile.get("blast_range", 0.0)),
-			"hit_target_ids": projectile.get("hit_target_ids", []).duplicate(),
-		})
+		if world.capture_domain_events:
+			world.emit_domain_event("projectile_impact", {
+				"projectile_id": int(projectile["id"]),
+				"source_id": int(projectile.get("source_id", -1)),
+				"team": int(projectile.get("team", 0)),
+				"position": Vector2(projectile["pos"]),
+				"impact_effect_graphic_id": int(projectile.get("impact_effect_graphic_id", -1)),
+				"blast_range": float(projectile.get("blast_range", 0.0)),
+				"hit_target_ids": projectile.get("hit_target_ids", []).duplicate(),
+			})
 		projectile["active"] = false
 		resolved_projectiles.append(projectile)
 		if resolved_projectiles.size() > 100:

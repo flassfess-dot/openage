@@ -11,6 +11,7 @@ const DIRECTIONS := [
 var grid
 var cache: Dictionary = {}
 var cache_hits: int = 0
+var route_cache_revision: int = -1
 var performance_probe: Variant = null
 var native_enabled: bool = true
 var native_available: bool = false
@@ -172,6 +173,12 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	var started := Time.get_ticks_usec() if performance_probe != null else 0
 	if performance_probe != null:
 		performance_probe.increment("navigation.path_queries")
+	# Cache keys embed the revision, so entries from older revisions can never
+	# hit again; dropping them on the first post-change request bounds memory
+	# instead of accumulating every historical route.
+	if grid.revision != route_cache_revision:
+		cache.clear()
+		route_cache_revision = grid.revision
 	var start := Vector2i(floori(start_world.x), floori(start_world.y))
 	var requested_goal := Vector2i(floori(goal_world.x), floori(goal_world.y))
 	var goal := nearest_walkable(requested_goal, movement_domain, restriction_id, clearance_radius)

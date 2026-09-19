@@ -11,6 +11,49 @@ var slope_cells: Dictionary = {}
 var terrain_restrictions: Array = []
 var surface_component_cache: Dictionary = {}
 var revision: int = 0
+# Bounded journal of the exact cells changed by recent revision bumps. Consumers
+# (open movement envelopes, caches) ask change_region_since() whether a change
+# far away can affect them; null means the region is no longer bounded and the
+# caller must treat the whole grid as changed.
+var _change_log: Array = []
+
+
+func _record_change(cell: Vector2i) -> void:
+	# Invariant: the open entry stores the pre-bump revision and the single bump
+	# its batch performs, so consecutive entries chain entry.from == prev.to.
+	var region := Rect2(Vector2(cell), Vector2.ONE)
+	if not _change_log.is_empty():
+		var entry: Dictionary = _change_log[_change_log.size() - 1]
+		if int(entry["from"]) == revision:
+			entry["region"] = entry["region"].merge(region) if bool(entry["has_region"]) else region
+			entry["has_region"] = true
+			return
+	_change_log.append({"from": revision, "to": revision + 1, "region": region, "has_region": true})
+	if _change_log.size() > 96:
+		_change_log = _change_log.slice(_change_log.size() - 48)
+
+
+func change_region_since(old_revision: int) -> Variant:
+	# Rect2 covering every recorded change after old_revision, an empty Rect2
+	# when nothing changed, or null when history no longer bounds the region.
+	if old_revision == revision:
+		return Rect2()
+	if old_revision > revision:
+		return null
+	var covered_to := revision
+	var region := Rect2()
+	var have_region := false
+	for index in range(_change_log.size() - 1, -1, -1):
+		var entry: Dictionary = _change_log[index]
+		if int(entry["to"]) != covered_to:
+			return null
+		if bool(entry["has_region"]):
+			region = entry["region"].merge(region) if have_region else entry["region"]
+			have_region = true
+		covered_to = int(entry["from"])
+		if covered_to <= old_revision:
+			return region
+	return null
 
 
 func _init(grid_size: Vector2i = Vector2i.ONE) -> void:
@@ -34,11 +77,18 @@ func configure_terrain(provider: Callable = Callable()) -> void:
 
 func configure_terrain_ids(provider: Callable = Callable()) -> void:
 	surface_component_cache.clear()
+	var changed := false
 	for y in range(size.y):
 		for x in range(size.x):
 			var cell := Vector2i(x, y)
-			terrain_ids[cell] = int(provider.call(cell)) if provider.is_valid() else TerrainRules.terrain_id_for_logical(terrain(cell))
-	revision += 1
+			var value := int(provider.call(cell)) if provider.is_valid() else TerrainRules.terrain_id_for_logical(terrain(cell))
+			if int(terrain_ids.get(cell, -1)) == value:
+				continue
+			terrain_ids[cell] = value
+			_record_change(cell)
+			changed = true
+	if changed:
+		revision += 1
 
 
 func configure_restrictions(restrictions: Array) -> void:
@@ -60,6 +110,7 @@ func set_terrain_id(cell: Vector2i, terrain_id: int) -> void:
 	if not contains(cell) or int(terrain_ids.get(cell, -1)) == terrain_id:
 		return
 	terrain_ids[cell] = terrain_id
+	_record_change(cell)
 	surface_component_cache.clear()
 	revision += 1
 
@@ -91,33 +142,72 @@ func set_elevation(cell: Vector2i, level: int, slope: bool = false) -> void:
 
 
 func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []) -> void:
-	var previous := occupied_cells.duplicate(true)
-	occupied_cells.clear()
+	# Full reconcile into a fresh map, then diff against the live one so an
+	# unchanged world neither allocates a deep copy nor bumps the revision.
+	var desired: Dictionary = {}
 	for resource in resources:
 		if int(resource.get("amount", 0)) <= 0:
 			continue
 		var cells: Array = resource.get("footprint", {}).get("occupied_cells", [Vector2i(floori(resource["pos"].x), floori(resource["pos"].y))])
-		occupy(cells, "resource", int(resource["id"]))
+		_append_occupants(desired, cells, "resource", int(resource.get("id", -1)))
 	for building in buildings:
 		if float(building.get("hp", 1.0)) <= 0.0:
 			continue
 		if bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", []):
 			continue
-		occupy(building.get("occupied_cells", []), "building", int(building["id"]))
+		_append_occupants(desired, building.get("occupied_cells", []), "building", int(building.get("id", -1)))
 	for obstruction_value in static_obstructions:
 		var obstruction: Dictionary = obstruction_value
-		occupy(obstruction.get("occupied_cells", []), "static_obstruction", int(obstruction.get("id", -1)))
-	if occupied_cells != previous:
+		_append_occupants(desired, obstruction.get("occupied_cells", []), "static_obstruction", int(obstruction.get("id", -1)))
+	var changed := false
+	for cell_value in desired.keys():
+		if occupied_cells.get(cell_value) != desired[cell_value]:
+			_record_change(cell_value)
+			changed = true
+	for cell_value in occupied_cells.keys():
+		if not desired.has(cell_value):
+			_record_change(cell_value)
+			changed = true
+	occupied_cells = desired
+	if changed:
 		revision += 1
 
 
-func occupy(cells: Array, category: String, entity_id: int) -> void:
-	for cell in cells:
+func _append_occupants(target: Dictionary, cells: Array, category: String, entity_id: int) -> void:
+	for cell_value in cells:
+		var cell: Vector2i = cell_value
 		if not contains(cell):
 			continue
-		if not occupied_cells.has(cell):
-			occupied_cells[cell] = []
-		occupied_cells[cell].append({"category": category, "id": entity_id})
+		if not target.has(cell):
+			target[cell] = []
+		target[cell].append({"category": category, "id": entity_id})
+
+
+func occupy(cells: Array, category: String, entity_id: int) -> void:
+	# Idempotent: re-occupying cells that already hold this occupant neither
+	# duplicates entries nor bumps the revision.
+	var changed := false
+	for cell_value in cells:
+		var cell: Vector2i = cell_value
+		if not contains(cell):
+			continue
+		var current: Array = occupied_cells.get(cell, [])
+		var already_present := false
+		for occupant_value in current:
+			var occupant: Dictionary = occupant_value
+			if int(occupant.get("id", -1)) == entity_id and String(occupant.get("category", "")) == category:
+				already_present = true
+				break
+		if already_present:
+			continue
+		if occupied_cells.has(cell):
+			occupied_cells[cell].append({"category": category, "id": entity_id})
+		else:
+			occupied_cells[cell] = [{"category": category, "id": entity_id}]
+		_record_change(cell)
+		changed = true
+	if changed:
+		revision += 1
 
 
 func release_occupant(cells: Array, category: String, entity_id: int) -> void:
@@ -133,6 +223,7 @@ func release_occupant(cells: Array, category: String, entity_id: int) -> void:
 		if remaining.size() == previous.size():
 			continue
 		changed = true
+		_record_change(cell)
 		if remaining.is_empty():
 			occupied_cells.erase(cell)
 		else:

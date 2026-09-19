@@ -40,21 +40,29 @@ func collect_commands(world, tick: int) -> Array:
 		var aggression_range := maxf(0.0, float(metadata.get("aggression_range", predator.get("acquisition_range", 0.0))))
 		if aggression_range <= 0.0:
 			continue
-		var candidates: Array = world.query_units_near(Vector2(predator.get("pos", Vector2.ZERO)), aggression_range).filter(func(candidate):
+		# Reachability is a full route query, so rank cheaply first and probe the
+		# sorted order until the first reachable candidate: identical outcome to
+		# filtering by reachability before the sort.
+		var predator_position := Vector2(predator.get("pos", Vector2.ZERO))
+		var candidates: Array = world.query_units_near(predator_position, aggression_range).filter(func(candidate):
 			return int(candidate.get("team", 0)) > 0 \
-				and float(candidate.get("hp", 0.0)) > 0.0 \
-				and world.can_unit_reach_entity(predator, candidate)
+				and float(candidate.get("hp", 0.0)) > 0.0
 		)
 		candidates.sort_custom(func(left, right):
-			var left_distance := Vector2(predator.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(left.get("pos", Vector2.ZERO)))
-			var right_distance := Vector2(predator.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(right.get("pos", Vector2.ZERO)))
+			var left_distance := predator_position.distance_squared_to(Vector2(left.get("pos", Vector2.ZERO)))
+			var right_distance := predator_position.distance_squared_to(Vector2(right.get("pos", Vector2.ZERO)))
 			if not is_equal_approx(left_distance, right_distance):
 				return left_distance < right_distance
 			return int(left.get("id", -1)) < int(right.get("id", -1))
 		)
-		if candidates.is_empty():
+		var target: Variant = null
+		for candidate_value in candidates:
+			var candidate: Dictionary = candidate_value
+			if world.can_unit_reach_entity(predator, candidate):
+				target = candidate
+				break
+		if target == null:
 			continue
-		var target: Dictionary = candidates[0]
 		commands.append(Commands.AttackCommand.new(tick, [int(predator.get("id", -1))], int(target.get("id", -1)), {
 			"autonomous": true,
 			"trigger": "wildlife_predator",

@@ -30,8 +30,15 @@ function Invoke-ExternalStep {
 if (-not (Test-Path -LiteralPath (Join-Path $gameRoot "data2\empires.dat"))) {
     throw "Rise of Rome data2\empires.dat was not found under $gameRoot"
 }
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    throw "Node.js is required for SLP/WAV extraction."
+# Node.js resolves from PATH, then the repository-local portable toolchain
+# (unpack a node-v*-win-x64.zip into .tools\nodejs; gitignored).
+$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if ($nodeCommand) {
+    $nodeExecutable = "node"
+} elseif (Test-Path -LiteralPath (Join-Path $repositoryRoot ".tools\nodejs\node.exe")) {
+    $nodeExecutable = (Join-Path $repositoryRoot ".tools\nodejs\node.exe")
+} else {
+    throw "Node.js is required for SLP/WAV extraction: install it or unpack the portable zip into .tools\nodejs."
 }
 if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
     throw "Python launcher is required for catalog extraction."
@@ -39,7 +46,7 @@ if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
 
 New-Item -ItemType Directory -Force -Path $generatedRoot, $audioRoot | Out-Null
 
-Invoke-ExternalStep "prototype assets" "node" @(
+Invoke-ExternalStep "prototype assets" $nodeExecutable @(
     (Join-Path $importerRoot "import_assets.js"),
     "--game", $gameRoot,
     "--game-version", $GameVersion,
@@ -47,14 +54,14 @@ Invoke-ExternalStep "prototype assets" "node" @(
     "--interface-inventory", (Join-Path $generatedRoot "interface-source-inventory.json"),
     "--output", $generatedRoot
 )
-Invoke-ExternalStep "interface reference" "node" @(
+Invoke-ExternalStep "interface reference" $nodeExecutable @(
     (Join-Path $importerRoot "import_assets.js"),
     "--game", $gameRoot,
     "--game-version", $GameVersion,
     "--selection", (Join-Path $importerRoot "interface-selection.json"),
     "--output", (Join-Path $generatedRoot "interface")
 )
-Invoke-ExternalStep "palette reference" "node" @(
+Invoke-ExternalStep "palette reference" $nodeExecutable @(
     (Join-Path $importerRoot "import_assets.js"),
     "--game", $gameRoot,
     "--game-version", $GameVersion,

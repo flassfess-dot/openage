@@ -26,13 +26,14 @@ const REQUIRED_FIELDS := [
 ]
 
 
-static func create(kind: String, layer: int, world_anchor: Vector2, screen_y: float, stable_id: int, data: Variant = null, frame_info: Dictionary = {}, elevation: float = 0.0, player_color: Color = Color.WHITE, opacity: float = 1.0, sub_order: int = 0) -> Dictionary:
+static func create(kind: String, layer: int, world_anchor: Vector2, screen_position: Vector2, stable_id: int, data: Variant = null, frame_info: Dictionary = {}, elevation: float = 0.0, player_color: Color = Color.WHITE, opacity: float = 1.0, sub_order: int = 0) -> Dictionary:
 	return {
 		"kind": kind,
 		"layer": layer,
 		"elevation": elevation,
 		"world_anchor": world_anchor,
-		"screen_y": screen_y,
+		"screen_position": screen_position,
+		"screen_y": screen_position.y,
 		"stable_id": stable_id,
 		"frame": int(frame_info.get("frame_index", 0)),
 		"hotspot": frame_info.get("hotspot", Vector2.ZERO),

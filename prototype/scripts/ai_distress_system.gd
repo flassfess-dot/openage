@@ -36,8 +36,9 @@ func record(attacker: Dictionary, target: Dictionary) -> void:
 func advance(context: Dictionary) -> void:
 	var delta := float(context.get("delta", 0.0))
 	var expired: Array[int] = []
+	# Decay is independent per signal and erasure is deferred, so iteration
+	# order is irrelevant here; the previous full key sort was pure overhead.
 	var target_ids: Array = signals_by_target_id.keys()
-	target_ids.sort()
 	for target_id_value in target_ids:
 		var target_id := int(target_id_value)
 		var distress: Dictionary = signals_by_target_id[target_id]
