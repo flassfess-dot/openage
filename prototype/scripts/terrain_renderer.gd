@@ -26,5 +26,41 @@ static func tile_drawable(cell: Vector2i, terrain_id: int, terrain_provider: Cal
 		"position": tile_origin,
 		"size": texture.get_size() * zoom,
 		"profile": profile,
+		"underlay": _slope_underlay(cell, terrain_kind, terrain_record, profile, frames, resource_catalog, flat_center, zoom, map_seed),
 		"borders": TerrainRules.border_layers(cell, terrain_provider, resource_catalog.terrain_catalog_data, map_seed),
 	}
+
+
+static func _slope_underlay(cell: Vector2i, terrain_kind: String, terrain_record: Dictionary, profile: Dictionary, frames: Array, resource_catalog, flat_center: Vector2, zoom: float, map_seed: int) -> Variant:
+	# Genie's two-corner slope sprites (TOP|RIGHT and friends) are sheared
+	# half-cliffs: their alpha leaves a transparent notch over part of the cell
+	# that the original engine covers with neighbouring tiles. Rendering the
+	# cell's flat variant beneath the slope closes that notch with base terrain
+	# instead of the black canvas background.
+	var slope_index := int(profile.get("slope_index", -1))
+	if slope_index <= 0:
+		return null
+	var base_elevation := int(profile.get("base_elevation", 0))
+	var flat_frame: int = terrain_elevation_flat_frame(terrain_record, cell, map_seed)
+	flat_frame = clampi(flat_frame, 0, frames.size() - 1)
+	var texture: Texture2D = frames[flat_frame]
+	if texture == null:
+		return null
+	var flat_origin: Vector2 = flat_center - Vector2(texture.get_size().x * 0.5, Coordinates.TILE_HEIGHT * 0.5 + float(base_elevation) * RoRTerrainElevation.ELEVATION_PIXEL_STEP) * zoom
+	return {
+		"texture": texture,
+		"frame": flat_frame,
+		"position": flat_origin,
+		"size": texture.get_size() * zoom,
+	}
+
+
+static func terrain_elevation_flat_frame(terrain_record: Dictionary, cell: Vector2i, map_seed: int) -> int:
+	var elevation_graphics: Array = terrain_record.get("elevation_graphics", [])
+	if elevation_graphics.is_empty():
+		return 0
+	var graphic: Dictionary = elevation_graphics[0]
+	var frame_count := int(graphic.get("frame_count", 0))
+	if frame_count <= 0:
+		return 0
+	return int(graphic.get("shape_id", 0)) + TerrainRules.tile_variant(cell, "terrain", map_seed, frame_count)

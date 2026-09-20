@@ -1558,6 +1558,9 @@ func draw_terrain() -> void:
 			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_provider, resource_catalog, simulation_world.terrain_elevation, view_zoom, view_offset, map_seed)
 			if drawable.is_empty():
 				continue
+			var underlay: Variant = drawable.get("underlay")
+			if underlay is Dictionary:
+				draw_texture_rect(underlay["texture"], Rect2(PixelScaling.snap_screen(underlay["position"]), underlay["size"]), false)
 			draw_texture_rect(drawable["texture"], Rect2(PixelScaling.snap_screen(drawable["position"]), drawable["size"]), false)
 			for layer in drawable["borders"]:
 				draw_terrain_border(drawable["position"], layer)
@@ -1767,7 +1770,16 @@ func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
 
 func _world_to_fog_mesh(world: Vector2) -> Vector2:
 	if simulation_world != null:
-		return simulation_world.terrain_elevation.world_to_screen(world, view_zoom, Vector2.ZERO)
+		var elevation: float = simulation_world.terrain_elevation.elevation_at_world(world)
+		# Terrain sprites quantize the elevation rise into 17/33/49px bitmaps
+		# while the fog lattice lifts vertices by exact 16px steps, so on slopes
+		# the fog edge can overshoot painted terrain by a few pixels and leave
+		# black slivers on visible ground. Tucking elevated fog vertices slightly
+		# under the painted slope removes those wedges until the exact per-cell
+		# E1 fog-geometry contract lands; flat boundaries keep their exact seam.
+		if elevation > 0.0:
+			elevation = maxf(0.0, elevation - 0.18)
+		return Coordinates.world_to_screen(world, view_zoom, Vector2.ZERO) + simulation_world.terrain_elevation.screen_offset(elevation, view_zoom)
 	return Coordinates.world_to_screen(world, view_zoom, Vector2.ZERO)
 
 

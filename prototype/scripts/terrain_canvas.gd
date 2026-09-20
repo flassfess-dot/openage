@@ -78,6 +78,9 @@ func _draw_terrain_fallback() -> void:
 			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_id_provider, resource_catalog, simulation_world.terrain_elevation, view_zoom, view_offset, map_seed)
 			if drawable.is_empty():
 				continue
+			var underlay: Variant = drawable.get("underlay")
+			if underlay is Dictionary:
+				draw_texture_rect(underlay["texture"], Rect2(PixelScaling.snap_screen(underlay["position"]), underlay["size"]), false)
 			draw_texture_rect(drawable["texture"], Rect2(PixelScaling.snap_screen(drawable["position"]), drawable["size"]), false)
 			for layer_value in drawable["borders"]:
 				_draw_terrain_border(drawable["position"], layer_value)
@@ -170,6 +173,9 @@ func _rebuild_terrain_mesh() -> void:
 			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_id_provider, resource_catalog, simulation_world.terrain_elevation, view_zoom, Vector2.ZERO, map_seed)
 			if drawable.is_empty():
 				continue
+			var underlay: Variant = drawable.get("underlay")
+			if underlay is Dictionary:
+				_append_texture_quad(vertices, uvs, indices, underlay["texture"], PixelScaling.snap_screen(underlay["position"]), underlay["size"])
 			_append_texture_quad(vertices, uvs, indices, drawable["texture"], PixelScaling.snap_screen(drawable["position"]), drawable["size"])
 			for layer_value in drawable["borders"]:
 				var layer: Dictionary = layer_value
