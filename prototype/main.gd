@@ -1010,6 +1010,10 @@ func current_world_drawables() -> Array:
 		retained_snapshot["effects"] = []
 		render_world.performance_probe = game_controller.performance_probe if game_controller != null else null
 		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, PLAYER_TEAM, selected_ids)
+		# Cached resource/environment statics keep the screen position of their
+		# last refresh; a publication frame may skip refresh entirely, so force
+		# one static re-projection pass or panned scenery lags one frame behind.
+		render_world.refresh_world_drawables(cached_world_drawables, Callable(self, "world_to_screen"), interpolation_alpha, true)
 		cached_world_drawables_revision = presentation_revision
 		cached_world_drawables_control_signature = control_signature
 	else:

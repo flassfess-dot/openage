@@ -1588,3 +1588,12 @@ eset_game().
 - Полный suite перед сборкой: `A-006: 214 passed / 0 failed`.
 - Windows export: PCK `261 656 500` байт, SHA-256 `ebf94c7048ae0464cff30a699b3665a0f148f125897134f2a2f0290d2c6f947f`; EXE + DLL + legal скопированы в `dist/Rise of Rome Prototype`.
 - Packaged smoke: `--headless --quit-after 900` на `prototype_skirmish` и `campaign_battle_of_mylae` — оба exit `0`, runtime/script errors `0`.
+
+### Прогресс (2026-09-20, E6-026c — пользовательский дефект «деревья скользят с камерой»)
+
+- Симптом (сообщен пользователем): при панорамировании природные объекты (деревья, ягоды; вероятно и камень/золото) остаются «прикреплены» к камере, потом перерисовываются правильно, потом снова отстают.
+- Воспроизведение headless на настоящем `main.tscn` (birth-of-rome) с интерливингом пана и fixed-tick перепубликации: на кадрах публикации `create_world_drawables` возвращает кэшированные resource/environment статики со `screen_position` предыдущего refresh, а ветка refresh в эти кадры не выполняется — ровно одношаговое (23 px на контрольном прогоне) отставание на каждом тике публикации. До E6-026 draw-функции перепроецировали каждый drawable каждый кадр, поэтому дефекта не было; его внес кэш `screen_position` из E6-026.
+- Фикс: после rebuild-ветки `current_world_drawables` выполняется принудительный `refresh_world_drawables(..., projection_changed=true)` — один проход статической перепроекции на кадрах публикации. Контрольный прогон (60 кадров пана + зум с тиками): 0 расхождений с live-проекцией; было 16.
+- Регрессионный тест `tests/integration/test_panned_static_projection.gd`: реальная сцена, пан/зум с перепубликацией, каждая статика обязана совпадать с `world_to_screen(anchor)` в каждом кадре.
+- Попутно (не связано с фиксом): после полной сборки 2026-09-19 матрицы кампаний (`rise_of_rome_campaign.json`, `source_campaign_portfolio.json`) стали несовместимы по `runtime_catalog_cache_key` с перегенерированным локальным `runtime-catalog.json` — обе перегенерированы штатными аудитами (`audit_rise_of_rome_campaign.ps1`, `audit_campaign_portfolio.ps1`), диф каждой — ровно одна строка ключа, контент миссий идентичен.
+- Граница: полный suite `A-006: 215 passed / 0 failed` (214 + новый регрессионный тест); Windows export PCK `261 659 280` байт, SHA-256 `29fceb9430438f3b55aa94afd208c6496c9d8ea47707ca21447fcce496ada802`; packaged smoke `prototype_skirmish` и `campaign_battle_of_mylae` по 900 кадров — exit `0`, ошибок `0`.
