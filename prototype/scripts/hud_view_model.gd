@@ -129,8 +129,14 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 				"active": resource_type_id == selected_resource,
 				"reason": "battle_over" if bool(model["battle_over"]) else "",
 			})
-	if selected.size() == 1 and _category(selected[0]) == "unit" and _is_worker(selected[0]):
-		var worker: Dictionary = selected[0]
+	var selected_worker: Dictionary = {}
+	for entity_value in selected:
+		var entity: Dictionary = entity_value
+		if _category(entity) == "unit" and _is_worker(entity):
+			selected_worker = entity
+			break
+	if not selected_worker.is_empty():
+		var worker: Dictionary = selected_worker
 		for option_value in worker.get("command_options", {}).get("build", []):
 			var option: Dictionary = option_value
 			if not _command_option_is_visible(option):

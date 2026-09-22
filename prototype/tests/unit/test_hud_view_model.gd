@@ -84,6 +84,9 @@ func _initialize() -> void:
 	assert_equal(first_command(model["commands"], "unit_action", "stance").get("icon_id"), 7, "stance cycling uses a distinct source order glyph")
 	assert_equal(first_command(model["commands"], "unit_action", "stance").get("stance"), "defensive", "stance action derives the next mode from authoritative selection state")
 	assert_equal(model["selection"]["leader"].get("stance"), "aggressive", "selection presentation exposes the authoritative stance")
+	model = view_model.build(SimulationSnapshot.presentation(world, 12, 1), [int(first["id"]), int(worker["id"])], "RECTANGLE", "ru")
+	assert_true(not first_command(model["commands"], "build", "house").is_empty(), "mixed unit selection exposes construction when it contains a worker")
+	assert_equal(model["commands"].filter(func(command): return command["type"] == "build" and command["id"] == "house").size(), 1, "mixed worker selection does not duplicate the construction palette")
 
 	var trader: Dictionary = world.add_unit(1, "trade_boat", Vector2(5.5, 5.5), false)
 	model = view_model.build(SimulationSnapshot.presentation(world, 12, 1), [int(trader["id"])], "RECTANGLE", "ru")

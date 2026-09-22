@@ -12,6 +12,7 @@ func _initialize() -> void:
 	catalog.load()
 	test_original_worker_contract(catalog)
 	test_unique_approach_slots(catalog)
+	test_group_foraging_cycle(catalog)
 	test_complete_gather_cycle(catalog)
 
 	if failures.is_empty():
@@ -48,6 +49,28 @@ func test_unique_approach_slots(catalog) -> void:
 	assert_true(Vector2(first["resource_approach_slot"]).distance_squared_to(second["resource_approach_slot"]) >= 0.09, "workers receive distinct approach slots")
 	world.halt_unit(first, "test_stop")
 	assert_equal(first["resource_approach_slot"], null, "stop releases resource approach slot")
+
+
+func test_group_foraging_cycle(catalog) -> void:
+	var world = original_world(catalog)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
+	world.add_building(900, "town_center", Vector2(12.0, 12.0), 1)
+	var berries: Dictionary = world.add_resource("berries", Vector2(8.1, 8.9), 20)
+	var first: Dictionary = world.add_unit(1, "villager", Vector2(6.6, 8.4), false)
+	var second: Dictionary = world.add_unit(1, "villager", Vector2(6.6, 9.3), false)
+	world.assign_command_gather([first, second], int(berries["id"]))
+	assert_equal(first["task"], "gather", "first worker accepts a berry order")
+	assert_equal(second["task"], "gather", "second worker accepts the same berry order")
+	assert_true(first["resource_approach_slot"] is Vector2 and not first.get("path", []).is_empty(), "first forager receives an immediate reachable route")
+	assert_true(second["resource_approach_slot"] is Vector2 and not second.get("path", []).is_empty(), "second forager receives an immediate reachable route")
+	var starting_food: int = world.get_food()
+	for unused in range(1200):
+		world.update_units(0.05, 1, 2)
+		world.rebuild_spatial_index()
+		if int(berries["amount"]) <= 0 and first["task"] == "idle" and second["task"] == "idle":
+			break
+	assert_equal(berries["amount"], 0, "workers can deplete a berry bush together")
+	assert_equal(world.get_food(), starting_food + 20, "foraged berries reach the team stockpile")
 
 
 func test_complete_gather_cycle(catalog) -> void:

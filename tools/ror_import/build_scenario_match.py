@@ -15,7 +15,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
-IMPORTER_VERSION = "scenario-match-35"
+IMPORTER_VERSION = "scenario-match-36"
 SUPPORTED_RUNTIME_CATEGORIES = {"unit", "building", "resource", "objective"}
 VICTORY_COMMAND_NAMES = {
     0: "capture",
@@ -127,6 +127,13 @@ SOURCE_AI_DOCUMENTED_NOOP_MARKERS = (
 PRESENTATION_ONLY_SOURCE_IDS = {162, 330}
 SOURCE_AI_MARKER_IDS = {112}
 PREDATOR_SOURCE_IDS = {1, 126}
+# Flat clumps, bones and cracks are source terrain decoration. They must never
+# enter the depth-sorted scenery layer where they could cover moving units.
+SOURCE_GROUND_DECAL_IDS = {
+    168, 171, 173, 174, 175, 176, 177,
+    178, 179, 180, 181, 182, 183,
+    187, 188, 189, 190, 191,
+}
 PRESENTATION_ENVIRONMENT_CATEGORIES = {
     "terrain_feature",
     "presentation_scenery",
@@ -1044,7 +1051,7 @@ def runtime_entities(
                     "map_size": [width, height],
                     "presentation_layer": (
                         "decal"
-                        if owner_category == "terrain_feature"
+                        if owner_category == "terrain_feature" or source_id in SOURCE_GROUND_DECAL_IDS
                         else "ambient_actor"
                         if owner_category == "ambient_actor"
                         else "scenery"

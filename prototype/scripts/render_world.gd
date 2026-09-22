@@ -6,6 +6,14 @@ const AMBIENT_WANDER_RADIUS := 8.0
 const AMBIENT_MIN_WAYPOINT_RADIUS := 5.0
 const AMBIENT_HASH_MODULUS := 2_147_483_647
 
+# These Gaia decorations are flat source artwork. Keeping the compatibility
+# mapping here also fixes already packed scenarios produced by older importers.
+const GROUND_DECAL_SOURCE_IDS := {
+	168: true, 171: true, 173: true, 174: true, 175: true, 176: true, 177: true,
+	178: true, 179: true, 180: true, 181: true, 182: true, 183: true,
+	187: true, 188: true, 189: true, 190: true, 191: true,
+}
+
 var cached_resource_signature: int = 0
 var cached_resource_drawables: Array = []
 var cached_environment_signature: int = 0
@@ -112,10 +120,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			environment_data["presentation_tick"] = presentation_tick
 			environment_data["movement_direction"] = ambient_actor_direction(environment_data, environment_tick)
 		var environment_info := _frame_info(frame_info_provider, "environment", environment_data)
-		var layer := RenderItem.Layer.UNIT_BUILDING
-		match String(environment_item.get("presentation_layer", "scenery")):
-			"decal": layer = RenderItem.Layer.DECAL
-			"ambient_actor": layer = RenderItem.Layer.UNIT_BUILDING
+		var layer := environment_layer(environment_item)
 		drawables.append(RenderItem.create("environment", layer, environment_position, world_to_screen.call(environment_position), int(environment_data.get("id", -1)), environment_data, environment_info, float(environment_data.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(environment_info.get("graphic_layer", 0)) * 1000))
 	_observe_stage("static_entities", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
@@ -194,6 +199,17 @@ static func ambient_actor_direction(item: Dictionary, tick: float) -> Vector2:
 
 static func _is_ambient_actor(item: Dictionary) -> bool:
 	return String(item.get("presentation_layer", "scenery")) == "ambient_actor"
+
+
+static func environment_layer(item: Dictionary) -> int:
+	match String(item.get("presentation_layer", "scenery")):
+		"decal":
+			return RenderItem.Layer.DECAL
+		"ambient_actor":
+			return RenderItem.Layer.AIRBORNE
+	if GROUND_DECAL_SOURCE_IDS.has(int(item.get("source_unit_id", -1))):
+		return RenderItem.Layer.DECAL
+	return RenderItem.Layer.UNIT_BUILDING
 
 
 static func _ambient_offset(entity_id: int, cycle: int) -> Vector2:
@@ -276,10 +292,7 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 			continue
 		var position: Vector2 = item.get("position", Vector2.ZERO)
 		var frame_info := _frame_info(frame_info_provider, "environment", item)
-		var layer := RenderItem.Layer.UNIT_BUILDING
-		match String(item.get("presentation_layer", "scenery")):
-			"decal": layer = RenderItem.Layer.DECAL
-			"ambient_actor": layer = RenderItem.Layer.UNIT_BUILDING
+		var layer := environment_layer(item)
 		cached_environment_drawables.append(RenderItem.create(
 			"environment",
 			layer,

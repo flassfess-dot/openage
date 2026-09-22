@@ -7,6 +7,7 @@ enum Layer {
 	SHADOW,
 	UNIT_BUILDING,
 	PROJECTILE_EFFECT,
+	AIRBORNE,
 	HEALTH_BAR,
 	WORLD_MESSAGE,
 	UI,
@@ -47,10 +48,10 @@ static func create(kind: String, layer: int, world_anchor: Vector2, screen_posit
 static func less(left: Dictionary, right: Dictionary) -> bool:
 	if int(left["layer"]) != int(right["layer"]):
 		return int(left["layer"]) < int(right["layer"])
-	if not is_equal_approx(float(left["elevation"]), float(right["elevation"])):
-		return float(left["elevation"]) < float(right["elevation"])
 	if not is_equal_approx(float(left["screen_y"]), float(right["screen_y"])):
 		return float(left["screen_y"]) < float(right["screen_y"])
+	if not is_equal_approx(float(left["elevation"]), float(right["elevation"])):
+		return float(left["elevation"]) < float(right["elevation"])
 	if int(left["stable_id"]) != int(right["stable_id"]):
 		return int(left["stable_id"]) < int(right["stable_id"])
 	return int(left.get("sub_order", 0)) < int(right.get("sub_order", 0))

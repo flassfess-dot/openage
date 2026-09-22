@@ -13,6 +13,7 @@ func _initialize() -> void:
 	catalog.load()
 	verify_source_contract(catalog)
 	verify_hunter_to_carcass_pipeline(catalog)
+	verify_military_kill_leaves_no_food(catalog)
 	verify_carcass_decay(catalog)
 	verify_huntable_reactions(catalog)
 	verify_predator_command_and_carcass_pipeline(catalog)
@@ -113,6 +114,26 @@ func verify_hunter_to_carcass_pipeline(catalog) -> void:
 	assert_true(world.get_resource_amount(1, 0) > food_before, "hunted food reaches authoritative stockpile (%s)" % hunter_context)
 
 
+func verify_military_kill_leaves_no_food(catalog) -> void:
+	var world = configured_world(catalog)
+	var soldier: Dictionary = world.add_unit(1, "clubman", Vector2(8.0, 8.0), false)
+	var gazelle: Dictionary = world.add_unit(0, "gazelle", Vector2(8.6, 8.0), false)
+	gazelle["hp"] = 1.0
+	assert_true(world.assign_command_attack([soldier], int(gazelle["id"])), "military unit can attack a huntable")
+	for unused in range(400):
+		world.advance(0.05, 1, 2)
+		if String(gazelle.get("death_phase", "alive")) != "alive":
+			break
+	assert_true(float(gazelle.get("hp", 1.0)) <= 0.0, "military attack kills the huntable")
+	assert_equal(gazelle.get("killed_by_worker"), false, "killing blow records a non-worker source")
+	for unused in range(400):
+		world.advance(0.05, 1, 2)
+		if bool(gazelle.get("huntable_death_resolved", false)):
+			break
+	var carcasses: Array = world.get_resources().filter(func(resource): return String(resource.get("kind", "")) == "gazelle_carcass")
+	assert_equal(carcasses.size(), 0, "military-killed huntable leaves no gatherable food")
+
+
 func verify_carcass_decay(catalog) -> void:
 	var world = configured_world(catalog)
 	var carcass: Dictionary = world.add_resource("gazelle_carcass", Vector2(8.0, 8.0), 10)
@@ -150,7 +171,7 @@ func verify_predator_command_and_carcass_pipeline(catalog) -> void:
 	assert_equal(lion.get("target_id"), villager.get("id"), "source predator selects the nearest living non-Gaia unit")
 	assert_true(bool(lion.get("attack_autonomous", false)), "predator attack retains an authoritative autonomous leash")
 	lion["hp"] = 0.0
-	world.begin_entity_death(lion)
+	world.begin_entity_death(lion, world.combat_source_context(villager))
 	world.advance_death_only(10.0)
 	var carcasses: Array = world.get_resources().filter(func(resource): return String(resource.get("kind", "")) == "lion_carcass")
 	assert_equal(carcasses.size(), 1, "dead Lion becomes one gatherable source carcass")

@@ -18,6 +18,18 @@ func _initialize() -> void:
 			break
 	assert_true(not worker.is_empty(), "main scene provides a controllable worker")
 	if not worker.is_empty():
+		var escort: Dictionary = {}
+		for unit_value in game.units:
+			var unit: Dictionary = unit_value
+			if int(unit.get("team", 0)) == game.PLAYER_TEAM and not game.simulation_world.entity_is_worker(unit):
+				escort = unit
+				break
+		assert_true(not escort.is_empty(), "main scene provides a non-worker for mixed-selection coverage")
+		if not escort.is_empty():
+			var mixed_ids: Array[int] = [int(escort["id"]), int(worker["id"])]
+			game.player_control_state.replace_or_add(mixed_ids, false)
+			game.refresh_hud_model()
+			assert_equal(String(game.hud_controls.active_train_commands[0].get("type", "")), "open_build_menu", "mixed group with a worker keeps construction in the HUD command grid")
 		var selected_worker_ids: Array[int] = [int(worker["id"])]
 		game.player_control_state.replace_or_add(selected_worker_ids, false)
 		game.refresh_hud_model()

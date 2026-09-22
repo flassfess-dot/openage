@@ -35,8 +35,9 @@ func _create_projection(entity: Dictionary) -> Dictionary:
 		"elevation", "source_elevation", "visual_height", "max_hp", "max_amount",
 		"logical_only", "visible_when_depleted", "harvestable", "resource_type_id",
 		"building_type", "movement_domain", "footprint_radius", "selection_radius",
-		"selection_height", "source_graphic_id", "source_graphic_asset_name",
-		"source_depleted_asset_name", "combat_enabled",
+		"selection_height", "source_frame", "source_graphic_id", "source_graphic_asset_name",
+		"source_requested_graphic_asset_name", "source_asset_fallback_reason",
+		"source_depleted_graphic_id", "source_depleted_asset_name", "combat_enabled",
 	]:
 		if entity.has(key):
 			result[key] = entity[key]

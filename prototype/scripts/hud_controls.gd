@@ -58,7 +58,7 @@ func build_controls() -> void:
 		var button := Button.new()
 		button.text = ""
 		button.icon = FORMATION_ICONS[formation_name]
-		button.expand_icon = false
+		button.expand_icon = true
 		button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		button.tooltip_text = definition[2]
 		button.toggle_mode = true
@@ -74,16 +74,30 @@ func build_controls() -> void:
 		add_child(button)
 
 	for index in range(18):
-		var button := Button.new()
-		button.visible = false
-		button.tooltip_text = "Команда производства"
-		button.focus_mode = Control.FOCUS_NONE
-		button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		apply_button_theme(button)
-		button.pressed.connect(_on_action_pressed.bind(index))
-		train_buttons.append(button)
-		add_child(button)
+		_append_action_button()
 	train_button = train_buttons[0]
+
+
+func _append_action_button() -> void:
+	var index := train_buttons.size()
+	var button := Button.new()
+	button.visible = false
+	button.tooltip_text = "Команда производства"
+	button.focus_mode = Control.FOCUS_NONE
+	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.expand_icon = true
+	button.clip_text = true
+	apply_button_theme(button)
+	button.pressed.connect(_on_action_pressed.bind(index))
+	train_buttons.append(button)
+	add_child(button)
+	if interface_skin != null:
+		apply_source_command_theme(button)
+
+
+func _ensure_action_button_capacity(required: int) -> void:
+	while train_buttons.size() < required:
+		_append_action_button()
 
 
 func configure_icons(registry) -> void:
@@ -128,6 +142,8 @@ func set_view_model(model: Dictionary) -> void:
 			"formation": formation_commands[String(command.get("id", ""))] = command
 			"build": build_commands.append(command)
 			"train", "research", "cancel_production", "trade_resource", "unit_action": active_train_commands.append(command)
+	if build_commands.is_empty():
+		build_menu_open = false
 	if not build_commands.is_empty():
 		var unit_actions := active_train_commands.filter(func(command): return String(command.get("type", "")) == "unit_action")
 		active_train_commands.clear()
@@ -140,7 +156,7 @@ func set_view_model(model: Dictionary) -> void:
 	for formation_name in formation_buttons:
 		var button: Button = formation_buttons[formation_name]
 		var command: Dictionary = formation_commands.get(formation_name, {})
-		button.visible = not command.is_empty()
+		button.visible = not build_menu_open and not command.is_empty()
 		if command.is_empty():
 			continue
 		button.text = ""
@@ -150,6 +166,7 @@ func set_view_model(model: Dictionary) -> void:
 		var hotkey := String(command.get("hotkey", ""))
 		var label := String(command.get("label", formation_name))
 		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else "%s%s" % [label, " (%s)" % hotkey if not hotkey.is_empty() else ""]
+	_ensure_action_button_capacity(active_train_commands.size())
 	for index in range(train_buttons.size()):
 		var button: Button = train_buttons[index]
 		button.visible = index < active_train_commands.size()
@@ -160,7 +177,7 @@ func set_view_model(model: Dictionary) -> void:
 		var label := String(command.get("label", command.get("id", "")))
 		var icon := command_icon(command)
 		button.icon = icon
-		button.expand_icon = false
+		button.expand_icon = true
 		var hotkey := String(command.get("hotkey", ""))
 		var short_label := String(command.get("short_label", label))
 		button.text = "" if icon != null else "%s%s" % ["%s\n" % hotkey if not hotkey.is_empty() else "", short_label]
@@ -177,24 +194,43 @@ func layout_controls() -> void:
 		current_layout = InterfaceLayout.for_viewport(size)
 	var command_rect: Rect2 = current_layout.get("command", Rect2(4, size.y - HUD_HEIGHT + 4, 300, HUD_HEIGHT - 8))
 	var local_rect := Rect2(command_rect.position - Vector2(0, size.y - HUD_HEIGHT), command_rect.size)
-	var cell_size := Vector2(54, 54)
-	var columns := 5
-	var slot := 0
+	var visible_buttons: Array[Button] = []
 	for button in train_buttons:
-		if not button.visible:
-			continue
+		if button.visible:
+			visible_buttons.append(button)
+	for definition in FORMATIONS:
+		var button: Button = formation_buttons[String(definition[0])]
+		if button.visible:
+			visible_buttons.append(button)
+	var grid := adaptive_grid(local_rect.size, visible_buttons.size())
+	var cell_size: Vector2 = grid["cell_size"]
+	var columns := int(grid["columns"])
+	for slot in range(visible_buttons.size()):
+		var button := visible_buttons[slot]
 		var column := slot % columns
-		var row := slot / columns
+		var row := floori(float(slot) / float(columns))
 		set_bottom_rect(button, Rect2(local_rect.position + Vector2(column * cell_size.x, row * cell_size.y), cell_size))
-		slot += 1
-	for formation_name in formation_buttons:
-		var button: Button = formation_buttons[formation_name]
-		if not button.visible:
-			continue
-		var column := slot % columns
-		var row := slot / columns
-		set_bottom_rect(button, Rect2(local_rect.position + Vector2(column * cell_size.x, row * cell_size.y), cell_size))
-		slot += 1
+
+
+static func adaptive_grid(available_size: Vector2, item_count: int, maximum_cell_size: float = 54.0) -> Dictionary:
+	if item_count <= 0:
+		return {"columns": 1, "rows": 0, "cell_size": Vector2.ZERO}
+	var best_columns := 1
+	var best_rows := item_count
+	var best_cell := 0.0
+	for rows in range(1, item_count + 1):
+		var columns := ceili(float(item_count) / float(rows))
+		var cell := floorf(minf(available_size.x / float(columns), available_size.y / float(rows)))
+		cell = minf(cell, maximum_cell_size)
+		if cell > best_cell or (is_equal_approx(cell, best_cell) and rows < best_rows):
+			best_cell = cell
+			best_columns = columns
+			best_rows = rows
+	return {
+		"columns": best_columns,
+		"rows": best_rows,
+		"cell_size": Vector2(best_cell, best_cell),
+	}
 
 func set_bottom_rect(control: Control, rectangle: Rect2) -> void:
 	control.anchor_left = 0.0

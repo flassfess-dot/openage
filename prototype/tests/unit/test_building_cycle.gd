@@ -1,6 +1,8 @@
 extends SceneTree
 
 const AnimationController := preload("res://scripts/animation_controller.gd")
+const Commands := preload("res://scripts/commands.gd")
+const GameController := preload("res://scripts/game_controller.gd")
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
@@ -12,6 +14,7 @@ func _initialize() -> void:
 	catalog.load()
 	test_original_building_contract(catalog)
 	test_placement_reservation_and_cancel(catalog)
+	test_mixed_selection_assigns_every_worker(catalog)
 	test_multiple_builders_and_repair(catalog)
 
 	if failures.is_empty():
@@ -53,6 +56,22 @@ func test_placement_reservation_and_cancel(catalog) -> void:
 	assert_equal(worker["building_approach_slot"], null, "cancel releases builder slot")
 
 
+func test_mixed_selection_assigns_every_worker(catalog) -> void:
+	var world = original_world(catalog)
+	world.wood = 500
+	var first: Dictionary = world.add_unit(1, "villager", Vector2(5.0, 6.5), false)
+	var soldier: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 5.0), false)
+	var second: Dictionary = world.add_unit(1, "villager", Vector2(5.0, 7.5), false)
+	var controller = GameController.new(world)
+	var command = Commands.BuildCommand.new(0, [int(first["id"]), int(soldier["id"]), int(second["id"])], "town_center", Vector2(7.0, 7.0))
+	controller.enqueue_command(command, true, 1)
+	controller.process_commands()
+	assert_true(bool(controller.get_command_result(command.sequence_id).get("accepted", false)), "mixed selection accepts construction through its workers")
+	assert_equal(first["task"], "build", "first worker in a mixed selection joins construction")
+	assert_equal(second["task"], "build", "every other worker in a mixed selection joins construction")
+	assert_equal(soldier["task"], "idle", "non-worker in a mixed selection is not assigned worker labor")
+
+
 func test_multiple_builders_and_repair(catalog) -> void:
 	var world = original_world(catalog)
 	world.wood = 500
@@ -63,6 +82,9 @@ func test_multiple_builders_and_repair(catalog) -> void:
 	if foundation == null:
 		return
 	assert_true(Vector2(first["building_approach_slot"]).distance_squared_to(second["building_approach_slot"]) >= 0.09, "builders receive unique approach slots")
+	assert_true(Vector2(first["building_approach_slot"]).x < Vector2(foundation["pos"]).x, "first builder receives a nearest-side slot instead of walking around the foundation")
+	assert_true(Vector2(second["building_approach_slot"]).x < Vector2(foundation["pos"]).x, "joint builder also receives a nearest-side free slot")
+	assert_true(not first.get("path", []).is_empty() and not second.get("path", []).is_empty(), "joint construction routes are ready when the order is accepted")
 	first["pos"] = first["building_approach_slot"]
 	second["pos"] = second["building_approach_slot"]
 	for unused in range(20):
@@ -84,11 +106,12 @@ func test_multiple_builders_and_repair(catalog) -> void:
 	assert_equal(second["task"], "idle", "second builder also finishes")
 
 	foundation["hp"] = float(foundation["max_hp"]) - 20.0
-	world.assign_command_repair([first], int(foundation["id"]))
+	world.assign_command_repair([first, second], int(foundation["id"]))
 	first["pos"] = first["building_approach_slot"]
+	second["pos"] = second["building_approach_slot"]
 	var wood_before_repair: int = world.get_wood()
 	world.update_units(0.1, 1, 2)
-	assert_true(float(foundation["hp"]) > float(foundation["max_hp"]) - 20.0, "repair restores health over time")
+	assert_float(float(foundation["hp"]), float(foundation["max_hp"]) - 18.0, "two repairers contribute their work in the same tick")
 	assert_equal(first["anim_state"], AnimationController.REPAIR, "repair uses work animation state")
 	for unused in range(100):
 		world.update_units(0.1, 1, 2)
@@ -97,6 +120,7 @@ func test_multiple_builders_and_repair(catalog) -> void:
 	assert_float(float(foundation["hp"]), float(foundation["max_hp"]), "repair stops exactly at maximum health")
 	assert_true(world.get_wood() < wood_before_repair, "repair consumes wood")
 	assert_equal(first["building_approach_slot"], null, "repair completion releases approach slot")
+	assert_equal(second["building_approach_slot"], null, "repair completion releases every worker approach slot")
 
 
 func original_world(catalog):

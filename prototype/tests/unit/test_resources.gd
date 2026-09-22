@@ -1,7 +1,8 @@
 extends SceneTree
 
-const RenderWorld := preload("res://scripts/render_world.gd")
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
+const RenderEntityProjectionCache := preload("res://scripts/render_entity_projection_cache.gd")
+const RenderWorld := preload("res://scripts/render_world.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
 var failures: Array[String] = []
@@ -10,10 +11,12 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_original_resource_contract()
 	test_source_forest_presentation()
+	test_cached_source_tree_switches_to_stump()
 	test_source_forest_variants_and_fallback()
 	test_corrupt_source_forest_frames_are_rejected()
 	test_footprints_and_overlap_resolution()
 	test_depletion_and_navigation_release()
+	test_carcasses_never_block_navigation()
 
 	if failures.is_empty():
 		print("T-005 forest and resource tests passed")
@@ -57,6 +60,43 @@ func test_source_forest_presentation() -> void:
 	var depleted_frame: Dictionary = catalog.resource_frame_info(source_tree)
 	assert_equal(depleted_frame.get("asset_name"), "graphic_634", "depleted forest node uses its source death/stump sequence")
 	assert_equal(depleted_frame.get("frame_index"), 4, "depleted forest node settles on the final source stump frame")
+
+
+func test_cached_source_tree_switches_to_stump() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	var source_tree := {
+		"id": 7002,
+		"entity_type": "resource",
+		"kind": "tree",
+		"pos": Vector2(4.0, 4.0),
+		"elevation": 0.0,
+		"amount": 40,
+		"max_amount": 40,
+		"state": "available",
+		"depletion_stage": 0,
+		"resource_type_id": 1,
+		"visible_when_depleted": true,
+		"source_frame": -1,
+		"source_graphic_id": 650,
+		"source_graphic_asset_name": "graphic_650",
+		"source_depleted_graphic_id": 634,
+		"source_depleted_asset_name": "graphic_634",
+	}
+	var projection_cache = RenderEntityProjectionCache.new()
+	var projected: Dictionary = projection_cache.project(source_tree)
+	var renderer = RenderWorld.new()
+	var snapshot := {"buildings": [], "resources": [projected], "objectives": [], "projectiles": [], "effects": [], "units": [], "markers": [], "environment": []}
+	var live_items := renderer.create_world_drawables(snapshot, func(position: Vector2) -> Vector2: return position, 1.0, func(_kind: String, data: Dictionary) -> Dictionary: return catalog.resource_frame_info(data))
+	assert_equal(live_items[0].get("frame_info", {}).get("asset_name"), "graphic_650", "cached render projection starts with the live source tree")
+	source_tree["amount"] = 0
+	source_tree["state"] = "depleted"
+	source_tree["depletion_stage"] = 2
+	projected = projection_cache.project(source_tree)
+	snapshot["resources"] = [projected]
+	var depleted_items := renderer.create_world_drawables(snapshot, func(position: Vector2) -> Vector2: return position, 1.0, func(_kind: String, data: Dictionary) -> Dictionary: return catalog.resource_frame_info(data))
+	assert_equal(projected.get("source_depleted_graphic_id"), 634, "compact resource projection retains the source stump graphic ID")
+	assert_equal(depleted_items[0].get("frame_info", {}).get("asset_name"), "graphic_634", "retained resource rendering switches a felled tree to its stump")
 
 
 func test_source_forest_variants_and_fallback() -> void:
@@ -138,6 +178,41 @@ func test_depletion_and_navigation_release() -> void:
 	var resource_ids: Array = items.filter(func(item): return item["kind"] == "resource").map(func(item): return item["stable_id"])
 	assert_true(resource_ids.has(tree["id"]), "depleted tree leaves a stump drawable")
 	assert_true(not resource_ids.has(berries["id"]), "depleted berry bush disappears")
+
+
+func test_carcasses_never_block_navigation() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load_generated_data()
+	var world = SimulationWorld.new(Vector2i(20, 20))
+	world.navigation_grid.configure_terrain(func(_cell): return "grass")
+	world.set_gamespec(catalog.gamespec_data)
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
+	var carcass_cells: Array[Vector2i] = []
+	var carcass_kinds := ["gazelle_carcass", "elephant_carcass", "alligator_carcass", "lion_carcass"]
+	for index in range(carcass_kinds.size()):
+		var position := Vector2(5.25 + float(index) * 3.0, 8.25)
+		var carcass: Dictionary = world.add_scenario_resource(carcass_kinds[index], position, 10)
+		var cell := Vector2i(floori(position.x), floori(position.y))
+		carcass_cells.append(cell)
+		assert_true(not bool(carcass.get("blocks_navigation", true)), "%s is explicitly passable" % carcass_kinds[index])
+		assert_true(world.navigation_grid.is_walkable(cell), "%s does not block any land unit when spawned" % carcass_kinds[index])
+
+	world.rebuild_navigation_grid()
+	for index in range(carcass_cells.size()):
+		assert_true(world.navigation_grid.is_walkable(carcass_cells[index]), "%s stays passable after navigation rebuild" % carcass_kinds[index])
+
+	var lion_position := Vector2(14.25, 8.25)
+	var mover: Dictionary = world.add_unit(1, "villager", lion_position, false)
+	var start: Vector2 = mover["pos"]
+	assert_true(world.assign_command_move([mover], Vector2(17.5, 8.5)), "unit can receive a move order while standing on a carcass")
+	for unused in range(10):
+		world.update_units(0.05, 1, 2)
+	assert_true(Vector2(mover["pos"]).distance_to(start) > 0.05, "unit leaves a carcass before it decays")
+
+	var tree: Dictionary = world.add_scenario_resource("tree", Vector2(4.25, 13.25), 75)
+	var tree_cell := Vector2i(floori(float(tree["pos"].x)), floori(float(tree["pos"].y)))
+	assert_true(not world.navigation_grid.is_walkable(tree_cell), "ordinary solid resources still block navigation")
 
 
 func assert_true(value: bool, context: String) -> void:

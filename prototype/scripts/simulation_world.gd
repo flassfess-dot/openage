@@ -607,6 +607,8 @@ func _add_resource(kind: String, position: Vector2, amount: int, resolve_placeme
 	var source := resource_stats(kind)
 	var footprint := Footprint.resource(kind, source)
 	var runtime_metadata: Dictionary = data_repository.runtime_metadata(kind)
+	var behavior_tags := data_repository.behavior_tags(kind)
+	var blocks_navigation := bool(runtime_metadata.get("blocks_navigation", "carcass" not in behavior_tags))
 	var terrain_restriction := int(runtime_metadata.get("placement_terrain_restriction_id", source.get("links", {}).get("terrain_restriction", -1)))
 	var placement_domain := String(runtime_metadata.get("placement_domain", "water" if terrain_restriction == 3 else "land"))
 	if resolve_placement:
@@ -627,6 +629,7 @@ func _add_resource(kind: String, position: Vector2, amount: int, resolve_placeme
 		"placement_domain": placement_domain,
 		"allowed_gatherer_domains": runtime_metadata.get("allowed_gatherer_domains", []).duplicate(),
 		"terrain_restriction": terrain_restriction,
+		"blocks_navigation": blocks_navigation,
 		"state": "available" if safe_amount > 0 else "depleted",
 		"depletion_stage": 0 if safe_amount > 0 else 2,
 		"visible_when_depleted": bool(data_repository.runtime_metadata(kind).get("visible_when_depleted", kind == "tree")),
@@ -653,7 +656,7 @@ func _add_resource(kind: String, position: Vector2, amount: int, resolve_placeme
 		decaying_resource_nodes.append(resource)
 	if safe_amount > 0 and kind == "tree":
 		_register_forest_resource(resource)
-	if not is_bulk_loading() and navigation_grid != null and safe_amount > 0:
+	if not is_bulk_loading() and navigation_grid != null and safe_amount > 0 and blocks_navigation:
 		navigation_grid.occupy(resource.get("footprint", {}).get("occupied_cells", [Vector2i(floori(position.x), floori(position.y))]), "resource", entity_id)
 	_emit_domain_event("entity_created", {
 		"entity_id": entity_id,
@@ -860,6 +863,14 @@ func entity_is_worker(entity: Dictionary) -> bool:
 		return true
 	# Compatibility for worlds configured only with gamespec-prototype v4.
 	return entity.get("behavior_tags", []).is_empty() and String(entity.get("kind", "")) == "villager"
+
+
+func combat_source_context(entity: Dictionary) -> Dictionary:
+	return {
+		"entity_id": int(entity.get("id", -1)),
+		"team": int(entity.get("team", 0)),
+		"is_worker": entity_is_worker(entity),
+	}
 
 
 func configure_entity_combat_awareness(entity: Dictionary) -> void:
@@ -1718,8 +1729,12 @@ func begin_death(unit: Dictionary) -> void:
 	EntityComponents.sync_dynamic(unit)
 
 
-func begin_entity_death(entity: Dictionary) -> void:
+func begin_entity_death(entity: Dictionary, source_context: Dictionary = {}) -> void:
 	if find_unit(int(entity.get("id", -1))) != null:
+		if String(entity.get("death_phase", "alive")) == "alive" and entity_has_behavior_tag(entity, "huntable"):
+			entity["killed_by_worker"] = bool(source_context.get("is_worker", false))
+			entity["killer_entity_id"] = int(source_context.get("entity_id", -1))
+			entity["killer_team"] = int(source_context.get("team", 0))
 		begin_death(entity)
 		return
 	begin_building_destruction(entity)
@@ -1782,7 +1797,15 @@ func advance_death(unit: Dictionary, delta: float) -> void:
 
 
 func _complete_huntable_death(huntable: Dictionary) -> void:
-	if bool(huntable.get("huntable_carcass_spawned", false)):
+	if bool(huntable.get("huntable_death_resolved", false)):
+		return
+	huntable["huntable_death_resolved"] = true
+	if not bool(huntable.get("killed_by_worker", false)):
+		for candidate in units:
+			if int(candidate.get("pending_hunt_target_id", -1)) == int(huntable.get("id", -1)):
+				candidate["pending_hunt_target_id"] = -1
+				if String(candidate.get("task", "idle")) == "idle":
+					worker_role_system.clear(candidate)
 		return
 	var metadata: Dictionary = data_repository.runtime_metadata(String(huntable.get("kind", "")))
 	var carcass_alias := String(metadata.get("carcass_alias", ""))
@@ -2355,42 +2378,24 @@ func deposit_carried_resources(worker: Dictionary) -> int:
 
 
 func prepare_resource_approach(worker: Dictionary, resource: Dictionary) -> bool:
-	var slot: Variant = reserve_resource_approach_slot(worker, resource)
-	if not slot is Vector2:
-		return false
 	worker["gather_stage"] = "approaching"
 	worker["dropoff_id"] = -1
 	worker["dropoff_position"] = null
-	return assign_unit_destination(worker, slot, false) or worker["pos"].distance_squared_to(slot) <= 0.0144
-
-
-func reserve_resource_approach_slot(worker: Dictionary, resource: Dictionary) -> Variant:
 	if worker.get("resource_approach_slot") is Vector2:
-		return worker["resource_approach_slot"]
+		return _resume_approach(worker, worker["resource_approach_slot"])
 	var resource_id := int(resource["id"])
 	var reservations: Dictionary = resource_approach_slots.get(resource_id, {})
 	var runtime_metadata: Dictionary = data_repository.runtime_metadata(String(resource.get("kind", "")))
 	var maximum_gatherers := maxi(0, int(runtime_metadata.get("max_gatherers", 0)))
 	if maximum_gatherers > 0 and reservations.size() >= maximum_gatherers:
-		return null
-	var candidates := resource_approach_candidates(worker, resource, runtime_metadata)
-	for offset in range(candidates.size()):
-		var slot_index := posmod(int(worker["id"]) + offset, candidates.size())
-		var candidate: Vector2 = candidates[slot_index]
-		if not navigation_grid.is_position_walkable_for(candidate, float(worker.get("footprint_radius", 0.3)), String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1))):
-			continue
-		var occupied := false
-		for existing_value in reservations.values():
-			if Vector2(existing_value).distance_squared_to(candidate) < 0.09:
-				occupied = true
-				break
-		if occupied:
-			continue
-		reservations[int(worker["id"])] = candidate
-		resource_approach_slots[resource_id] = reservations
-		worker["resource_approach_slot"] = candidate
-		return candidate
-	return null
+		return false
+	var slot: Variant = _assign_reachable_approach_slot(worker, resource_approach_candidates(worker, resource, runtime_metadata), reservations)
+	if not slot is Vector2:
+		return false
+	reservations[int(worker["id"])] = slot
+	resource_approach_slots[resource_id] = reservations
+	worker["resource_approach_slot"] = slot
+	return true
 
 
 func resource_approach_candidates(worker: Dictionary, resource: Dictionary, runtime_metadata: Dictionary = {}) -> Array[Vector2]:
@@ -3130,10 +3135,7 @@ func assign_workers_to_building(selected: Array, building: Dictionary, order_typ
 		worker["task"] = order_type
 		worker["target_building_id"] = int(building["id"])
 		OrderPipeline.begin(worker, order_type, int(building["id"]), building["pos"], true)
-		var slot: Variant = reserve_building_approach_slot(worker, building)
-		if slot is Vector2:
-			assign_unit_destination(worker, slot, false)
-		else:
+		if not prepare_building_approach(worker, building):
 			finish_building_order(worker, "no_approach_slot")
 
 
@@ -3149,11 +3151,9 @@ func update_building_order(worker: Dictionary, delta: float) -> Dictionary:
 		finish_building_order(worker, "repair_complete")
 		return {"moving": false, "animation_state": AnimationController.IDLE}
 	if not worker.get("building_approach_slot") is Vector2:
-		var slot: Variant = reserve_building_approach_slot(worker, building)
-		if not slot is Vector2:
+		if not prepare_building_approach(worker, building):
 			finish_building_order(worker, "no_approach_slot")
 			return {"moving": false, "animation_state": AnimationController.IDLE}
-		assign_unit_destination(worker, slot, false)
 	var destination: Vector2 = worker["building_approach_slot"]
 	if worker["pos"].distance_squared_to(destination) > 0.0144:
 		ensure_navigation_destination(worker, destination)
@@ -3215,11 +3215,13 @@ func complete_foundation(building: Dictionary) -> void:
 			finish_building_order(unit, "construction_complete")
 	var runtime_metadata: Dictionary = data_repository.runtime_metadata(String(building.get("kind", "")))
 	if bool(runtime_metadata.get("auto_gather_on_complete", false)) and int(building.get("amount", 0)) > 0:
+		var gatherers: Array = []
 		for builder_id in completing_builder_ids:
 			var builder: Variant = find_unit(int(builder_id))
 			if builder != null and float(builder.get("hp", 0.0)) > 0.0 and entity_is_worker(builder):
-				assign_command_gather([builder], building_id)
-				break
+				gatherers.append(builder)
+		if not gatherers.is_empty():
+			assign_command_gather(gatherers, building_id)
 	building_approach_slots.erase(building_id)
 	_sync_building_navigation_occupancy(building)
 	update_fog_of_war()
@@ -3332,22 +3334,73 @@ func reserve_building_approach_slot(worker: Dictionary, building: Dictionary) ->
 		return worker["building_approach_slot"]
 	var building_id := int(building["id"])
 	var reservations: Dictionary = building_approach_slots.get(building_id, {})
-	var candidates := building_perimeter_candidates(worker, building)
-	for offset in range(candidates.size()):
-		var slot_index := posmod(int(worker["id"]) + offset, candidates.size())
-		var candidate: Vector2 = candidates[slot_index]
-		if not navigation_grid.is_position_walkable_for(candidate, float(worker.get("footprint_radius", 0.3)), String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1))):
-			continue
+	var candidates := _available_approach_slots(worker, building_perimeter_candidates(worker, building), reservations)
+	for candidate in candidates:
 		var route: Array[Vector2] = pathfinder.find_path(Vector2(worker.get("pos", Vector2.ZERO)), candidate, String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1)))
 		if route.is_empty():
-			continue
-		if reservations.values().any(func(existing): return Vector2(existing).distance_squared_to(candidate) < 0.09):
 			continue
 		reservations[int(worker["id"])] = candidate
 		building_approach_slots[building_id] = reservations
 		worker["building_approach_slot"] = candidate
 		return candidate
 	return null
+
+
+func prepare_building_approach(worker: Dictionary, building: Dictionary) -> bool:
+	if worker.get("building_approach_slot") is Vector2:
+		return _resume_approach(worker, worker["building_approach_slot"])
+	var building_id := int(building["id"])
+	var reservations: Dictionary = building_approach_slots.get(building_id, {})
+	var slot: Variant = _assign_reachable_approach_slot(worker, building_perimeter_candidates(worker, building), reservations)
+	if not slot is Vector2:
+		return false
+	reservations[int(worker["id"])] = slot
+	building_approach_slots[building_id] = reservations
+	worker["building_approach_slot"] = slot
+	return true
+
+
+func _assign_reachable_approach_slot(worker: Dictionary, candidates: Array[Vector2], reservations: Dictionary) -> Variant:
+	for candidate in _available_approach_slots(worker, candidates, reservations):
+		if _resume_approach(worker, candidate):
+			return candidate
+	return null
+
+
+func _available_approach_slots(worker: Dictionary, candidates: Array[Vector2], reservations: Dictionary) -> Array[Vector2]:
+	var result: Array[Vector2] = []
+	var radius := float(worker.get("footprint_radius", 0.3))
+	var domain := String(worker.get("movement_domain", "land"))
+	var restriction := int(worker.get("terrain_restriction", -1))
+	for candidate in candidates:
+		if not navigation_grid.is_position_walkable_for(candidate, radius, domain, restriction):
+			continue
+		if reservations.values().any(func(existing): return Vector2(existing).distance_squared_to(candidate) < 0.09):
+			continue
+		result.append(candidate)
+	var origin := Vector2(worker.get("pos", Vector2.ZERO))
+	result.sort_custom(func(left: Vector2, right: Vector2):
+		var left_distance := origin.distance_squared_to(left)
+		var right_distance := origin.distance_squared_to(right)
+		if not is_equal_approx(left_distance, right_distance):
+			return left_distance < right_distance
+		if not is_equal_approx(left.y, right.y):
+			return left.y < right.y
+		return left.x < right.x
+	)
+	return result
+
+
+func _resume_approach(worker: Dictionary, slot: Vector2) -> bool:
+	if Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(slot) <= 0.0144:
+		worker["destination"] = slot
+		worker["target"] = slot
+		worker["path"] = []
+		worker["path_index"] = 0
+		return true
+	if Vector2(worker.get("destination", worker.get("pos", Vector2.ZERO))).distance_squared_to(slot) <= 0.0001 and not worker.get("path", []).is_empty():
+		return true
+	return assign_unit_destination(worker, slot, false)
 
 
 func release_building_approach_slot(worker: Dictionary) -> void:

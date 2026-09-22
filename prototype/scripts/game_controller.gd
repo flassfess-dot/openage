@@ -417,7 +417,7 @@ func _apply_gather(command) -> String:
 		return "resource_not_owned"
 	if workers.any(func(worker): return not simulation_world.resource_allows_worker(resource, worker)):
 		return "incompatible_gatherer"
-	_detach_units_from_formations(selected)
+	_detach_units_from_formations(workers)
 	simulation_world.assign_command_gather(workers, command.resource_id)
 	return ""
 
@@ -427,7 +427,7 @@ func _apply_return_resources(command) -> String:
 	var workers: Array = selected.filter(func(unit): return simulation_world.entity_is_worker(unit) and float(unit.get("carried_amount", 0.0)) > 0.0)
 	if workers.is_empty():
 		return "no_carried_resources"
-	_detach_units_from_formations(selected)
+	_detach_units_from_formations(workers)
 	return "" if simulation_world.assign_command_return_resources(workers, int(command.target_building_id)) else "invalid_dropoff"
 
 
@@ -471,19 +471,21 @@ func _apply_trade(command) -> String:
 
 func _apply_build(command) -> String:
 	var selected = _units_for_ids(command.unit_ids, command.issuer_id)
-	if selected.is_empty():
-		return "no_eligible_units"
-	_detach_units_from_formations(selected)
-	var foundation = simulation_world.assign_command_build(selected, command.building_type, command.target)
+	var workers: Array = selected.filter(func(unit): return simulation_world.entity_is_worker(unit))
+	if workers.is_empty():
+		return "no_eligible_workers"
+	_detach_units_from_formations(workers)
+	var foundation = simulation_world.assign_command_build(workers, command.building_type, command.target)
 	return "" if foundation != null else String(simulation_world.last_build_failure if not simulation_world.last_build_failure.is_empty() else "build_rejected")
 
 
 func _apply_repair(command) -> String:
 	var selected = _units_for_ids(command.unit_ids, command.issuer_id)
-	if selected.is_empty():
-		return "no_eligible_units"
-	_detach_units_from_formations(selected)
-	return "" if simulation_world.assign_command_repair(selected, command.target_building_id) else "repair_rejected"
+	var workers: Array = selected.filter(func(unit): return simulation_world.entity_is_worker(unit))
+	if workers.is_empty():
+		return "no_eligible_workers"
+	_detach_units_from_formations(workers)
+	return "" if simulation_world.assign_command_repair(workers, command.target_building_id) else "repair_rejected"
 
 func _apply_train(command) -> String:
 	if int(command.issuer_id) > 0 and int(command.team) != int(command.issuer_id):

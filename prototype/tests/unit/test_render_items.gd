@@ -11,12 +11,14 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_required_render_item_fields()
 	test_stable_layer_sorting_and_overlays()
+	test_projected_depth_precedes_source_elevation()
 	test_scenery_and_units_share_depth_order()
 	test_health_bars_follow_selection_visibility()
 	test_retained_queue_refreshes_interpolated_anchors()
 	test_presentation_marker_is_a_non_selectable_drawable()
 	test_objective_is_a_non_selectable_drawable()
 	test_environment_field_culls_and_renders_non_selectable_items()
+	test_environment_layer_contracts()
 	test_ambient_wildlife_flies_without_simulation_paths()
 
 	if failures.is_empty():
@@ -60,6 +62,15 @@ func test_stable_layer_sorting_and_overlays() -> void:
 	assert_true(selection_item["layer"] < bodies[0]["layer"], "selection ground marker precedes the selected body")
 	assert_equal(resource_item["layer"], bodies[0]["layer"], "resources and units share one depth-sorted layer")
 	assert_true(items.find(resource_item) > items.find(bodies[1]), "foreground tree renders after units behind it")
+
+
+func test_projected_depth_precedes_source_elevation() -> void:
+	var upper_cliff := RenderItem.create("environment", RenderItem.Layer.UNIT_BUILDING, Vector2.ZERO, Vector2(0.0, 272.0), -1, {}, {}, 4.0)
+	var lower_cliff := RenderItem.create("environment", RenderItem.Layer.UNIT_BUILDING, Vector2.ZERO, Vector2(0.0, 278.0), -2, {}, {}, 3.5)
+	var items := [lower_cliff, upper_cliff]
+	items.sort_custom(RenderItem.less)
+	assert_equal(items[0], upper_cliff, "projected screen depth assembles elevated cliff segments back to front")
+	assert_equal(items[1], lower_cliff, "lower screen segment occludes the segment behind it regardless of source elevation")
 
 
 func test_scenery_and_units_share_depth_order() -> void:
@@ -174,6 +185,15 @@ func test_environment_field_culls_and_renders_non_selectable_items() -> void:
 	assert_equal(items.size(), 1, "visible source scenery creates one render item")
 	assert_equal(items[0]["kind"], "environment", "source scenery stays in the environment presentation layer")
 	assert_equal(items.filter(func(item): return item["kind"] == "selection").size(), 0, "environment item is not selectable")
+
+
+func test_environment_layer_contracts() -> void:
+	assert_equal(RenderWorld.environment_layer({"source_unit_id": 168, "presentation_layer": "scenery"}), RenderItem.Layer.DECAL, "flat grass clump remains below every unit even in an older packed scenario")
+	assert_equal(RenderWorld.environment_layer({"source_unit_id": 181, "presentation_layer": "scenery"}), RenderItem.Layer.DECAL, "flat bones remain terrain decoration")
+	assert_equal(RenderWorld.environment_layer({"source_unit_id": 304, "presentation_layer": "scenery"}), RenderItem.Layer.UNIT_BUILDING, "upright rock keeps normal world depth sorting")
+	assert_equal(RenderWorld.environment_layer({"source_unit_id": 96, "presentation_layer": "ambient_actor"}), RenderItem.Layer.AIRBORNE, "eagle renders above all world bodies")
+	assert_true(RenderItem.Layer.AIRBORNE > RenderItem.Layer.PROJECTILE_EFFECT, "airborne wildlife stays above ordinary world effects")
+	assert_true(RenderItem.Layer.AIRBORNE < RenderItem.Layer.HEALTH_BAR, "airborne wildlife does not obscure status overlays")
 
 
 func test_ambient_wildlife_flies_without_simulation_paths() -> void:

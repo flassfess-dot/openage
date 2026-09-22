@@ -70,7 +70,7 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 	OrderPipeline.transition(unit, OrderPipeline.RECOVER)
 	unit["last_damage"] = damage
 	if damage > 0.0 and enemy["hp"] <= 0.0:
-		world.begin_entity_death(enemy)
+		world.begin_entity_death(enemy, world.combat_source_context(unit))
 		if unit["team"] == player_team:
 			world.kills += 1
 
@@ -98,6 +98,7 @@ func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
 		"projectile_unit_id": projectile_unit_id,
 		"team": int(attacker.get("team", 0)),
 		"source_id": int(attacker.get("id", -1)),
+		"source_is_worker": world.entity_is_worker(attacker),
 		"target_id": int(target.get("id", -1)),
 		"pos": spawn,
 		"previous_pos": spawn,
@@ -181,7 +182,11 @@ func update_projectiles(delta: float, player_team: int) -> void:
 					"remaining_hp": maxf(0.0, float(candidate["hp"])),
 				})
 			if candidate["hp"] <= 0.0:
-				world.begin_entity_death(candidate)
+				world.begin_entity_death(candidate, {
+					"entity_id": int(projectile.get("source_id", -1)),
+					"team": int(projectile.get("team", 0)),
+					"is_worker": bool(projectile.get("source_is_worker", false)),
+				})
 				if int(projectile.get("team", 0)) == player_team and not world.are_teams_allied(int(projectile.get("team", 0)), int(candidate.get("team", 0))):
 					world.kills += 1
 			EntityComponents.sync_dynamic(candidate)

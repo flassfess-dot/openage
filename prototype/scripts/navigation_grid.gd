@@ -146,7 +146,7 @@ func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []
 	# unchanged world neither allocates a deep copy nor bumps the revision.
 	var desired: Dictionary = {}
 	for resource in resources:
-		if int(resource.get("amount", 0)) <= 0:
+		if int(resource.get("amount", 0)) <= 0 or not resource_blocks_navigation(resource):
 			continue
 		var cells: Array = resource.get("footprint", {}).get("occupied_cells", [Vector2i(floori(resource["pos"].x), floori(resource["pos"].y))])
 		_append_occupants(desired, cells, "resource", int(resource.get("id", -1)))
@@ -171,6 +171,12 @@ func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []
 	occupied_cells = desired
 	if changed:
 		revision += 1
+
+
+func resource_blocks_navigation(resource: Dictionary) -> bool:
+	if resource.has("blocks_navigation"):
+		return bool(resource["blocks_navigation"])
+	return "carcass" not in resource.get("behavior_tags", [])
 
 
 func _append_occupants(target: Dictionary, cells: Array, category: String, entity_id: int) -> void:

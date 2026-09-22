@@ -461,8 +461,9 @@ static func _compact_render_entity(entity: Dictionary) -> Dictionary:
 		"footprint_radius", "selection_radius", "selection_height",
 		"anim", "anim_state", "facing", "presentation_facing",
 		"death_phase", "death_elapsed", "construction_stage",
-		"display_graphic_id", "source_graphic_id", "source_graphic_asset_name",
-		"source_depleted_asset_name", "combat_enabled", "task", "target_id",
+		"display_graphic_id", "source_frame", "source_graphic_id", "source_graphic_asset_name",
+		"source_requested_graphic_asset_name", "source_asset_fallback_reason",
+		"source_depleted_graphic_id", "source_depleted_asset_name", "combat_enabled", "task", "target_id",
 		"target_building_id", "formation_forward", "carried_amount",
 	]:
 		if entity.has(key):

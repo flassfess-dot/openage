@@ -73,6 +73,7 @@ func test_buttons_and_signals() -> void:
 	var build_request := [""]
 	hud.build_requested.connect(func(kind: String): build_request[0] = kind)
 	hud.set_view_model({"commands": [
+		{"type": "formation", "id": "LINE", "label": "Линия", "hotkey": "F5", "enabled": true, "active": true, "reason": ""},
 		{"type": "build", "id": "house", "label": "Дом", "cost_text": "30 WOOD", "duration": 20.0, "enabled": true, "reason": ""},
 		{"type": "unit_action", "id": "stop", "label": "Остановиться", "short_label": "СТОП", "hotkey": "X", "enabled": true, "reason": ""},
 	]})
@@ -81,6 +82,7 @@ func test_buttons_and_signals() -> void:
 	hud.train_button.emit_signal("pressed")
 	assert_equal(hud.active_train_commands[0].get("type"), "build", "build-menu command opens the building choices")
 	assert_equal(hud.active_train_commands.size(), 2, "open build submenu replaces common orders with build choices and back")
+	assert_true(not hud.formation_buttons["LINE"].visible, "open build submenu owns the command grid and hides formations")
 	hud.train_button.emit_signal("pressed")
 	assert_equal(build_request[0], "house", "build signal preserves selected building kind")
 	assert_equal(hud.build_menu_open, false, "choosing a building closes the presentation submenu")
@@ -99,6 +101,27 @@ func test_buttons_and_signals() -> void:
 	hud.train_button.emit_signal("pressed")
 	assert_equal(unit_action_request[0], "hold", "unit-order button preserves its semantic action")
 	assert_true(hud.train_button.text.contains("H") and hud.train_button.text.contains("ДЕРЖ"), "an unconfigured icon registry keeps the readable text fallback")
+
+	var dense_commands: Array = []
+	for index in range(22):
+		dense_commands.append({"type": "build", "id": "building_%d" % index, "label": "Здание %d" % index, "enabled": true, "reason": ""})
+	dense_commands.append({"type": "formation", "id": "LINE", "label": "Линия", "enabled": true, "active": true, "reason": ""})
+	hud.set_view_model({"selection": {"category": "unit", "leader": {"id": 77, "kind": "villager"}}, "commands": dense_commands})
+	hud.train_button.emit_signal("pressed")
+	hud.size = Vector2(640, 126)
+	hud.set_layout({"command": Rect2(4, 8, 270, 118)})
+	assert_equal(hud.active_train_commands.size(), 23, "dense build palette retains every command plus Back")
+	assert_true(hud.train_buttons.size() >= 23, "action button pool grows with the data-driven command set")
+	var grid: Dictionary = HUDControls.adaptive_grid(Vector2(270, 118), hud.active_train_commands.size())
+	assert_true(float(grid["cell_size"].x) > 0.0, "adaptive grid keeps dense commands usable")
+	assert_true(int(grid["columns"]) * float(grid["cell_size"].x) <= 270.0, "adaptive grid fits the command width")
+	assert_true(int(grid["rows"]) * float(grid["cell_size"].y) <= 118.0, "adaptive grid fits the command height")
+	for index in range(hud.active_train_commands.size()):
+		var button: Button = hud.train_buttons[index]
+		assert_true(button.offset_left >= 4.0 and button.offset_right <= 274.0, "dense command %d remains inside the HUD command width" % index)
+		assert_true(126.0 + button.offset_top >= 8.0 and 126.0 + button.offset_bottom <= 126.0, "dense command %d remains inside the HUD command height" % index)
+	var sparse_grid: Dictionary = HUDControls.adaptive_grid(Vector2(270, 118), 4)
+	assert_equal(sparse_grid["columns"], 4, "small command sets preserve the familiar single-row layout")
 	hud.free()
 
 
