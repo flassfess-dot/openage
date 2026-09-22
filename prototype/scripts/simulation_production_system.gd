@@ -111,7 +111,7 @@ func unit_options(building_id: int, team: int) -> Array:
 		if expected_location < 0 or not lineage.has(expected_location):
 			continue
 		var option := _unit_availability(building, team, alias, true)
-		if String(option.get("reason", "")) == "unit_replaced":
+		if String(option.get("reason", "")) in ["unit_replaced", "unit_unavailable"]:
 			continue
 		result.append(option)
 	result.sort_custom(func(left, right): return String(left.get("kind", "")) < String(right.get("kind", "")))

@@ -1248,7 +1248,7 @@ func terrain_profile_at(cell: Vector2i) -> Dictionary:
 
 func terrain_id_at_cell(cell: Vector2i) -> int:
 	if int(forest_resource_counts.get(cell, 0)) > 0:
-		return TerrainRules.TERRAIN_IDS["forest_floor"]
+		return _terrain_id_with_forest_resource(cell)
 	return int(map_terrain_ids.get(cell, TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell))))
 
 
@@ -1258,7 +1258,7 @@ func _register_forest_resource(resource: Dictionary) -> void:
 	forest_resource_counts[cell] = previous + 1
 	terrain_revision += 1
 	if navigation_grid != null and previous == 0:
-		navigation_grid.set_terrain_id(cell, int(TerrainRules.TERRAIN_IDS["forest_floor"]))
+		navigation_grid.set_terrain_id(cell, _terrain_id_with_forest_resource(cell))
 
 
 func _unregister_forest_resource(resource: Dictionary) -> void:
@@ -1274,6 +1274,11 @@ func _unregister_forest_resource(resource: Dictionary) -> void:
 		if navigation_grid != null:
 			navigation_grid.set_terrain_id(cell, int(map_terrain_ids.get(cell, TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell)))))
 	terrain_revision += 1
+
+
+func _terrain_id_with_forest_resource(cell: Vector2i) -> int:
+	var source_terrain_id := int(map_terrain_ids.get(cell, TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell))))
+	return source_terrain_id if TerrainRules.is_source_forest_terrain_id(source_terrain_id) else int(TerrainRules.TERRAIN_IDS["forest_floor"])
 
 
 func terrain_kind_at_cell(cell: Vector2i) -> String:

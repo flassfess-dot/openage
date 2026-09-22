@@ -7,6 +7,9 @@ const TERRAIN_FRAME_COUNTS := {
 }
 
 const TERRAIN_IDS := {"grass": 0, "water": 1, "sand": 6, "forest_floor": 10}
+const WATER_TERRAIN_IDS := [1, 4, 22]
+const OPEN_WATER_TERRAIN_IDS := [1, 22]
+const SOURCE_FOREST_TERRAIN_IDS := [10, 13, 19, 20]
 
 const EDGE_NEGATIVE_X := 1
 const EDGE_NEGATIVE_Y := 2
@@ -26,6 +29,14 @@ const BORDER_ASSET_NAMES := {
 	5: "border_grass_forest",
 	6: "border_grass_desert2",
 }
+const BORDER_DESERT_WATER := 2
+const BORDER_GRASS_WATER := 3
+const STYLE0_CORNER_MASKS := [
+	EDGE_NEGATIVE_X | EDGE_NEGATIVE_Y,
+	EDGE_NEGATIVE_Y | EDGE_POSITIVE_X,
+	EDGE_POSITIVE_X | EDGE_POSITIVE_Y,
+	EDGE_POSITIVE_Y | EDGE_NEGATIVE_X,
+]
 
 
 static func terrain_at(cell: Vector2i) -> String:
@@ -82,10 +93,11 @@ static func terrain_id_for_logical(terrain_kind: String) -> int:
 
 static func logical_for_terrain_id(terrain_id: int) -> String:
 	match terrain_id:
-		1, 22: return "water"
+		1, 4, 22: return "water"
 		2: return "shore"
 		6: return "sand"
-		10: return "forest_floor"
+		10, 19, 20: return "forest_floor"
+		13: return "sand"
 		_: return "grass"
 
 
@@ -97,6 +109,7 @@ static func base_texture_kind(terrain_id: int, terrain_catalog: Dictionary) -> S
 		match current_id:
 			0: return "grass"
 			1, 22: return "water"
+			4: return "sand"
 			6: return "sand"
 		var record: Dictionary = terrain_catalog.get("terrains", {}).get(str(current_id), {})
 		var replacement_id := int(record.get("replacement_terrain_id", -1))
@@ -136,9 +149,10 @@ static func border_layers(cell: Vector2i, terrain_provider: Callable, terrain_ca
 				if mask & bit:
 					layers.append(make_border_layer(border_id, style1_frame_for_edge(bit), mask))
 		else:
-			var frame := style0_frame_for_mask(mask, cell, map_seed)
+			var diagonal_neighbor_id := corner_diagonal_neighbor_id(cell, mask, terrain_provider)
+			var frame := style0_frame_for_mask(mask, cell, map_seed, current_id, diagonal_neighbor_id, border_id, terrain_catalog)
 			if frame >= 0:
-				layers.append(make_border_layer(border_id, frame, mask))
+				layers.append(make_border_layer(style0_sprite_border_id(border_id, mask), frame, mask))
 	return layers
 
 
@@ -160,23 +174,66 @@ static func style1_frame_for_edge(edge_bit: int) -> int:
 	return -1
 
 
-static func style0_frame_for_mask(mask: int, cell: Vector2i, map_seed: int) -> int:
+static func style0_sprite_border_id(border_id: int, mask: int) -> int:
+	# Grass/water's flat corner pairs are byte-identical in the source SLP, so
+	# they cannot distinguish a small cape from a small bay. Desert/water uses
+	# the same shoreline palette and contains the intended convex/concave pair.
+	if border_id == BORDER_GRASS_WATER and mask in STYLE0_CORNER_MASKS:
+		return BORDER_DESERT_WATER
+	return border_id
+
+
+static func style0_frame_for_mask(mask: int, cell: Vector2i, map_seed: int, current_id: int = -1, diagonal_neighbor_id: int = -1, border_id: int = -1, terrain_catalog: Dictionary = {}) -> int:
 	match mask:
 		EDGE_NEGATIVE_X: return 8
 		EDGE_NEGATIVE_Y: return 11
 		EDGE_POSITIVE_X: return 9
 		EDGE_POSITIVE_Y: return 10
 		EDGE_NEGATIVE_X | EDGE_NEGATIVE_Y:
-			return 1 if tile_variant(cell, "border", map_seed, 2) == 0 else 6
+			return 1 if _style0_corner_is_external(current_id, diagonal_neighbor_id, border_id, terrain_catalog) else 6
 		EDGE_NEGATIVE_Y | EDGE_POSITIVE_X:
-			return 3 if tile_variant(cell, "border", map_seed, 2) == 0 else 4
+			return 3 if _style0_corner_is_external(current_id, diagonal_neighbor_id, border_id, terrain_catalog) else 4
 		EDGE_POSITIVE_X | EDGE_POSITIVE_Y:
-			return 2 if tile_variant(cell, "border", map_seed, 2) == 0 else 5
+			return 2 if _style0_corner_is_external(current_id, diagonal_neighbor_id, border_id, terrain_catalog) else 5
 		EDGE_POSITIVE_Y | EDGE_NEGATIVE_X:
-			return 0 if tile_variant(cell, "border", map_seed, 2) == 0 else 7
+			return 0 if _style0_corner_is_external(current_id, diagonal_neighbor_id, border_id, terrain_catalog) else 7
 	# Opposite and three-sided cases are split into stable single-edge masks.
 	# Valid RoR map tiles normally resolve these by choosing the other underlay.
 	for edge in EDGE_DIRECTIONS:
 		if mask & int(edge["bit"]):
-			return style0_frame_for_mask(int(edge["bit"]), cell, map_seed)
+			return style0_frame_for_mask(int(edge["bit"]), cell, map_seed, current_id, diagonal_neighbor_id, border_id, terrain_catalog)
 	return -1
+
+
+static func corner_diagonal_neighbor_id(cell: Vector2i, mask: int, terrain_provider: Callable) -> int:
+	if not terrain_provider.is_valid():
+		return -1
+	var offset := Vector2i.ZERO
+	match mask:
+		EDGE_NEGATIVE_X | EDGE_NEGATIVE_Y:
+			offset = Vector2i(-1, -1)
+		EDGE_NEGATIVE_Y | EDGE_POSITIVE_X:
+			offset = Vector2i(1, -1)
+		EDGE_POSITIVE_X | EDGE_POSITIVE_Y:
+			offset = Vector2i(1, 1)
+		EDGE_POSITIVE_Y | EDGE_NEGATIVE_X:
+			offset = Vector2i(-1, 1)
+		_:
+			return -1
+	return int(terrain_provider.call(cell + offset))
+
+
+static func _style0_corner_is_external(current_id: int, diagonal_neighbor_id: int, border_id: int, terrain_catalog: Dictionary) -> bool:
+	if current_id < 0 or diagonal_neighbor_id < 0 or border_id < 0:
+		return true
+	if diagonal_neighbor_id == current_id:
+		return false
+	var current: Dictionary = terrain_catalog.get("terrains", {}).get(str(current_id), {})
+	var border_table: Array = current.get("borders", [])
+	if diagonal_neighbor_id >= border_table.size():
+		return true
+	return int(border_table[diagonal_neighbor_id]) == border_id
+
+
+static func is_source_forest_terrain_id(terrain_id: int) -> bool:
+	return terrain_id in SOURCE_FOREST_TERRAIN_IDS

@@ -5,6 +5,12 @@ const ASSET_NAMES := {
 	"object": "unit_icon",
 	"unit": "unit_icon",
 	"technology": "technology_icon",
+	"command": "hud_glyph_50721",
+	"building_0": "building_icon_0",
+	"building_1": "building_icon_1",
+	"building_2": "building_icon_2",
+	"building_3": "building_icon_3",
+	"building_4": "building_icon_4",
 }
 
 var records_by_sheet: Dictionary = {}

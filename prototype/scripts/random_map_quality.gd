@@ -1,7 +1,7 @@
 class_name RoRRandomMapQuality
 extends RefCounted
 
-const WATER_TERRAINS := [1, 22]
+const TerrainRules := preload("res://scripts/terrain_rules.gd")
 
 
 static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
@@ -28,7 +28,7 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 	if starts.size() > 1 and minimum_distance + 0.0001 < required_distance:
 		errors.append("random_map_start_distance_below_minimum")
 
-	var water_cells := terrain_ids.filter(func(value): return int(value) in WATER_TERRAINS).size()
+	var water_cells := terrain_ids.filter(func(value): return int(value) in TerrainRules.WATER_TERRAIN_IDS).size()
 	var water_ratio := float(water_cells) / float(maxi(1, terrain_ids.size()))
 	var ratio_range: Array = generator.get("water_ratio", [0.0, 1.0])
 	if ratio_range.size() >= 2 and (water_ratio + 0.0001 < float(ratio_range[0]) or water_ratio - 0.0001 > float(ratio_range[1])):
@@ -122,4 +122,4 @@ static func _land_component(start: Vector2i, size: Vector2i, terrain_ids: Array)
 
 
 static func _is_water(cell: Vector2i, size: Vector2i, terrain_ids: Array) -> bool:
-	return cell.x < 0 or cell.y < 0 or cell.x >= size.x or cell.y >= size.y or int(terrain_ids[cell.y * size.x + cell.x]) in WATER_TERRAINS
+	return cell.x < 0 or cell.y < 0 or cell.x >= size.x or cell.y >= size.y or int(terrain_ids[cell.y * size.x + cell.x]) in TerrainRules.WATER_TERRAIN_IDS

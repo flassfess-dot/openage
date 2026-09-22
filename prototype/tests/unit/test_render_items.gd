@@ -11,11 +11,13 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_required_render_item_fields()
 	test_stable_layer_sorting_and_overlays()
+	test_scenery_and_units_share_depth_order()
 	test_health_bars_follow_selection_visibility()
 	test_retained_queue_refreshes_interpolated_anchors()
 	test_presentation_marker_is_a_non_selectable_drawable()
 	test_objective_is_a_non_selectable_drawable()
 	test_environment_field_culls_and_renders_non_selectable_items()
+	test_ambient_wildlife_flies_without_simulation_paths()
 
 	if failures.is_empty():
 		print("G-001/G-002/G-003 render item tests passed")
@@ -53,8 +55,39 @@ func test_stable_layer_sorting_and_overlays() -> void:
 	assert_equal(bodies[1]["stable_id"], second["id"], "second stable ID follows")
 	assert_equal(items.filter(func(item): return item["kind"] == "selection").size(), 1, "selection is a separate overlay")
 	assert_equal(items.filter(func(item): return item["kind"] == "health_bar").size(), 1, "health bar is a separate overlay")
+	var selection_item: Dictionary = items.filter(func(item): return item["kind"] == "selection")[0]
 	var resource_item: Dictionary = items.filter(func(item): return item["kind"] == "resource")[0]
-	assert_true(resource_item["layer"] < bodies[0]["layer"], "resource layer precedes units")
+	assert_true(selection_item["layer"] < bodies[0]["layer"], "selection ground marker precedes the selected body")
+	assert_equal(resource_item["layer"], bodies[0]["layer"], "resources and units share one depth-sorted layer")
+	assert_true(items.find(resource_item) > items.find(bodies[1]), "foreground tree renders after units behind it")
+
+
+func test_scenery_and_units_share_depth_order() -> void:
+	var snapshot := {
+		"buildings": [],
+		"resources": [],
+		"objectives": [],
+		"projectiles": [],
+		"effects": [],
+		"units": [{"id": 7, "kind": "clubman", "team": 1, "pos": Vector2(5.0, 5.0), "previous_pos": Vector2(5.0, 5.0), "hp": 20.0, "max_hp": 20.0, "death_phase": "alive"}],
+		"markers": [],
+		"environment": [
+			{"id": -20, "kind": "presentation_scenery", "position": Vector2(4.0, 4.0), "presentation_layer": "scenery"},
+			{"id": -21, "kind": "presentation_scenery", "position": Vector2(6.0, 6.0), "presentation_layer": "scenery"},
+		],
+	}
+	var renderer = RenderWorld.new()
+	var items: Array = renderer.create_world_drawables(snapshot, func(position: Vector2) -> Vector2: return position * 10.0, 1.0, Callable(self, "fake_frame_info"))
+	var body: Dictionary = items.filter(func(item): return item["kind"] == "unit")[0]
+	var scenery: Array = items.filter(func(item): return item["kind"] == "environment")
+	assert_equal(scenery[0]["layer"], body["layer"], "upright scenery participates in entity depth sorting")
+	assert_true(items.find(scenery[0]) < items.find(body), "scenery behind a unit renders first")
+	assert_true(items.find(scenery[1]) > items.find(body), "scenery in front of a unit occludes it")
+	var unit: Dictionary = snapshot["units"][0]
+	unit["previous_pos"] = unit["pos"]
+	unit["pos"] = Vector2(7.0, 7.0)
+	renderer.refresh_world_drawables(items, func(position: Vector2) -> Vector2: return position * 10.0, 1.0, false)
+	assert_true(items.find(scenery[1]) < items.find(body), "moving unit is re-merged after foreground scenery without re-sorting static items")
 
 
 func test_health_bars_follow_selection_visibility() -> void:
@@ -139,6 +172,19 @@ func test_environment_field_culls_and_renders_non_selectable_items() -> void:
 	assert_equal(items.size(), 1, "visible source scenery creates one render item")
 	assert_equal(items[0]["kind"], "environment", "source scenery stays in the environment presentation layer")
 	assert_equal(items.filter(func(item): return item["kind"] == "selection").size(), 0, "environment item is not selectable")
+
+
+func test_ambient_wildlife_flies_without_simulation_paths() -> void:
+	var eagle := {"id": -200001, "kind": "ambient_actor", "position": Vector2(8.0, 9.0), "presentation_layer": "ambient_actor"}
+	var origin := Vector2(eagle["position"])
+	assert_equal(RenderWorld.ambient_actor_position(eagle, 0.0), origin, "ambient wildlife starts at its source position")
+	var moving := RenderWorld.ambient_actor_position(eagle, 30.0)
+	assert_true(moving.distance_to(origin) > 0.01, "ambient wildlife flies continuously instead of resting")
+	assert_true(moving.distance_to(origin) <= RenderWorld.AMBIENT_WANDER_RADIUS + 0.01, "ambient wildlife remains inside its cheap presentation radius")
+	assert_true(RenderWorld.ambient_actor_position(eagle, 60.0).distance_to(moving) > 0.01, "ambient wildlife continues toward the next waypoint")
+	assert_equal(RenderWorld.ambient_actor_position(eagle, 30.0), moving, "ambient wildlife motion is deterministic")
+	var scenery := {"id": -200002, "position": origin, "presentation_layer": "scenery"}
+	assert_equal(RenderWorld.ambient_actor_position(scenery, 30.0), origin, "static scenery is not moved by ambient wildlife animation")
 
 
 func fake_frame_info(_kind: String, _data: Variant) -> Dictionary:

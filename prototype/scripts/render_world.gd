@@ -1,6 +1,9 @@
 class_name RoRRenderWorld
 
 const RenderItem := preload("res://scripts/render_item.gd")
+const AMBIENT_TRAVEL_TICKS := 60
+const AMBIENT_WANDER_RADIUS := 1.75
+const AMBIENT_HASH_MODULUS := 2_147_483_647
 
 var cached_resource_signature: int = 0
 var cached_resource_drawables: Array = []
@@ -23,6 +26,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	var drawables: Array = []
 	var alpha := clampf(interpolation_alpha, 0.0, 1.0)
 	var from_snapshot := world_source is Dictionary
+	var presentation_tick := float(world_source.get("tick", 0)) if from_snapshot else 0.0
 	var source_buildings: Array = world_source.get("buildings", []) if from_snapshot else world_source.get_buildings()
 	var source_resources: Array = world_source.get("resources", []) if from_snapshot else world_source.get_resources()
 	var source_objectives: Array = world_source.get("objectives", []) if from_snapshot else world_source.victory_objectives
@@ -68,7 +72,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				var resource_position: Vector2 = resource["pos"]
 				var resource_screen: Vector2 = world_to_screen.call(resource_position)
 				var resource_info := _frame_info(frame_info_provider, "resource", resource)
-				drawables.append(RenderItem.create("resource", RenderItem.Layer.BASE_RESOURCE, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0))))
+				drawables.append(RenderItem.create("resource", RenderItem.Layer.UNIT_BUILDING, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0))))
 				if preview_ids.has(int(resource["id"])):
 					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0)), Color("d6bc63"), 1.0, 1))
 	for objective in source_objectives:
@@ -78,7 +82,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			continue
 		var objective_info := _frame_info(frame_info_provider, "objective", objective)
 		var objective_position: Vector2 = objective.get("pos", Vector2.ZERO)
-		drawables.append(RenderItem.create("objective", RenderItem.Layer.BASE_RESOURCE, objective_position, world_to_screen.call(objective_position), int(objective.get("id", -1)), objective, objective_info, float(objective.get("source_elevation", 0.0))))
+		drawables.append(RenderItem.create("objective", RenderItem.Layer.UNIT_BUILDING, objective_position, world_to_screen.call(objective_position), int(objective.get("id", -1)), objective, objective_info, float(objective.get("source_elevation", 0.0))))
 	for projectile in source_projectiles:
 		if not bool(projectile.get("active", true)):
 			continue
@@ -99,9 +103,9 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		var marker_info := _frame_info(frame_info_provider, "marker", marker)
 		drawables.append(RenderItem.create("marker", RenderItem.Layer.UNIT_BUILDING, marker_position, world_to_screen.call(marker_position), int(marker.get("id", -1)), marker, marker_info, float(marker.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(marker_info.get("graphic_layer", 20)) * 1000))
 	for environment_item in source_environment:
-		var environment_position: Vector2 = environment_item.get("position", Vector2.ZERO)
+		var environment_position := ambient_actor_position(environment_item, presentation_tick)
 		var environment_info := _frame_info(frame_info_provider, "environment", environment_item)
-		var layer := RenderItem.Layer.BASE_RESOURCE
+		var layer := RenderItem.Layer.UNIT_BUILDING
 		match String(environment_item.get("presentation_layer", "scenery")):
 			"decal": layer = RenderItem.Layer.DECAL
 			"ambient_actor": layer = RenderItem.Layer.UNIT_BUILDING
@@ -148,6 +152,33 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	return result
 
 
+static func ambient_actor_position(item: Dictionary, tick: float) -> Vector2:
+	var origin := Vector2(item.get("position", Vector2.ZERO))
+	if String(item.get("presentation_layer", "scenery")) != "ambient_actor":
+		return origin
+	var cycle := floori(maxf(0.0, tick) / float(AMBIENT_TRAVEL_TICKS))
+	var cycle_tick := maxf(0.0, tick) - float(cycle * AMBIENT_TRAVEL_TICKS)
+	var from_offset := _ambient_offset(int(item.get("id", 0)), cycle)
+	var to_offset := _ambient_offset(int(item.get("id", 0)), cycle + 1)
+	var progress := clampf(cycle_tick / float(AMBIENT_TRAVEL_TICKS), 0.0, 1.0)
+	return origin + from_offset.lerp(to_offset, progress)
+
+
+static func _ambient_offset(entity_id: int, cycle: int) -> Vector2:
+	if cycle <= 0:
+		return Vector2.ZERO
+	var angle_index := _ambient_roll(entity_id, cycle, 31, 32)
+	var radius_roll := float(_ambient_roll(entity_id, cycle, 47, 1000)) / 999.0
+	var radius := lerpf(0.75, AMBIENT_WANDER_RADIUS, radius_roll)
+	return Vector2.RIGHT.rotated(TAU * float(angle_index) / 32.0) * radius
+
+
+static func _ambient_roll(entity_id: int, cycle: int, salt: int, limit: int) -> int:
+	var state := posmod(entity_id * 48_271 + cycle * 69_621 + salt * 17, AMBIENT_HASH_MODULUS)
+	state = posmod(state * 48_271 + 1, AMBIENT_HASH_MODULUS)
+	return posmod(state, maxi(1, limit))
+
+
 func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, frame_info_provider: Callable, preview_ids: Array[int]) -> Array:
 	if resources.is_empty():
 		return []
@@ -180,7 +211,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var resource_info := _frame_info(frame_info_provider, "resource", resource)
 		var resource_screen: Vector2 = world_to_screen.call(position)
 		var elevation := float(resource.get("elevation", 0.0))
-		cached_resource_drawables.append(RenderItem.create("resource", RenderItem.Layer.BASE_RESOURCE, position, resource_screen, resource_id, resource, resource_info, elevation))
+		cached_resource_drawables.append(RenderItem.create("resource", RenderItem.Layer.UNIT_BUILDING, position, resource_screen, resource_id, resource, resource_info, elevation))
 		if preview_ids.has(resource_id):
 			cached_resource_drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, resource_screen, resource_id, resource, resource_info, elevation, Color("d6bc63"), 1.0, 1))
 	cached_resource_drawables.sort_custom(RenderItem.less)
@@ -213,7 +244,7 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 			continue
 		var position: Vector2 = item.get("position", Vector2.ZERO)
 		var frame_info := _frame_info(frame_info_provider, "environment", item)
-		var layer := RenderItem.Layer.BASE_RESOURCE
+		var layer := RenderItem.Layer.UNIT_BUILDING
 		match String(item.get("presentation_layer", "scenery")):
 			"decal": layer = RenderItem.Layer.DECAL
 			"ambient_actor": layer = RenderItem.Layer.UNIT_BUILDING
@@ -273,9 +304,7 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		var kind := String(drawable.get("kind", ""))
 		var data: Dictionary = drawable.get("data", {})
 		var position: Variant = null
-		if kind == "projectile":
-			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), alpha)
-		elif kind in INTERPOLATED_KINDS and String(data.get("movement_domain", "land")) != "static":
+		if _is_interpolated_drawable(kind, data):
 			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), alpha)
 		if position == null:
 			# Static drawables keep their world anchor; their screen position only
@@ -294,8 +323,24 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		drawable["screen_position"] = screen_position
 		drawable["screen_y"] = screen_position.y
 	if moved:
-		drawables.sort_custom(RenderItem.less)
+		var static_drawables: Array = []
+		var moving_drawables: Array = []
+		for drawable_value in drawables:
+			var drawable: Dictionary = drawable_value
+			var data: Dictionary = drawable.get("data", {})
+			if _is_interpolated_drawable(String(drawable.get("kind", "")), data):
+				moving_drawables.append(drawable)
+			else:
+				static_drawables.append(drawable)
+		moving_drawables.sort_custom(RenderItem.less)
+		var merged := merge_sorted_drawables(static_drawables, moving_drawables)
+		for index in range(drawables.size()):
+			drawables[index] = merged[index]
 	return drawables
+
+
+func _is_interpolated_drawable(kind: String, data: Dictionary) -> bool:
+	return kind == "projectile" or (kind in INTERPOLATED_KINDS and String(data.get("movement_domain", "land")) != "static")
 
 
 func _frame_info(provider: Callable, kind: String, data: Variant) -> Dictionary:

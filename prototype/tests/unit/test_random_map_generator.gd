@@ -2,6 +2,7 @@ extends SceneTree
 
 const MatchDefinition := preload("res://scripts/match_definition.gd")
 const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
+const TerrainRules := preload("res://scripts/terrain_rules.gd")
 
 var failures: Array[String] = []
 
@@ -24,11 +25,11 @@ func _initialize() -> void:
 	assert_equal(whales.size(), 1, "seeded map includes source Whale 370")
 	assert_true(deep_fish.all(func(resource):
 		var pos := Vector2(resource["position"])
-		return int(first["terrain_ids"][floori(pos.y) * 24 + floori(pos.x)]) in [1, 22]
+		return int(first["terrain_ids"][floori(pos.y) * 24 + floori(pos.x)]) in TerrainRules.WATER_TERRAIN_IDS
 	), "deep fish remain in water cells")
 	assert_true(whales.all(func(resource):
 		var pos := Vector2(resource["position"])
-		return int(first["terrain_ids"][floori(pos.y) * 24 + floori(pos.x)]) in [1, 22]
+		return int(first["terrain_ids"][floori(pos.y) * 24 + floori(pos.x)]) in TerrainRules.WATER_TERRAIN_IDS
 	), "Whale remains in deep navigable water")
 	assert_true(shore_fish.all(func(resource): return String(resource.get("placement_domain", "")) == "shore_water"), "shore fish retain shore-water placement intent")
 	assert_true(first["vertex_levels"].max() == 2, "declared hill reaches maximum elevation")

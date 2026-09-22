@@ -27,13 +27,14 @@ func _initialize() -> void:
 	assert_equal(model["age"]["label"], "Каменный век", "age has localized display model")
 	assert_equal(model["selection"]["leader"]["name"], "Казармы", "selected entity name comes from localization catalog")
 	assert_equal(model["selection"]["leader"]["civilization_name"], "Римляне", "selection card resolves the source civilization label")
+	assert_equal(model["selection"]["leader"]["icon_kind"], "building_4", "Roman building selection uses the source Roman architecture icon sheet")
 	assert_true(model["selection"]["leader"].has("attack") and model["selection"]["leader"].has("armor"), "selection card receives authoritative combat values")
 	var train: Dictionary = first_command(model["commands"], "train", "clubman")
 	assert_true(not train.is_empty(), "Barracks exposes its data-driven train command")
 	assert_true(bool(train["enabled"]), "authoritative availability enables affordable Clubman")
 	assert_equal(train["cost"], {0: 50}, "command shows authoritative modified cost")
 	assert_equal(train["cost_text"], "50 FOOD", "command formats cost without changing it")
-	assert_equal(train["icon_kind"], "object", "train command identifies the object icon sheet")
+	assert_equal(train["icon_kind"], "unit", "train command identifies the unit icon sheet")
 	assert_equal(train["icon_id"], 2, "train command preserves Clubman DAT icon ID")
 
 	world.set_resource_amount(1, 0, 0)
@@ -65,6 +66,7 @@ func _initialize() -> void:
 	var house: Dictionary = first_command(model["commands"], "build", "house")
 	assert_equal(model["command_title"], "BUILD", "single worker opens the build palette")
 	assert_true(not house.is_empty() and bool(house.get("enabled", false)), "worker exposes affordable House construction")
+	assert_equal(house.get("icon_kind"), "building_4", "Roman worker uses the source Roman building icon sheet")
 	assert_equal(house.get("icon_id"), 15, "build command preserves House DAT icon ID")
 	assert_equal(house.get("source_unit_id"), 70, "build command preserves resolved source object ID")
 	assert_true(first_command(model["commands"], "build", "government_center").is_empty(), "locked future building is absent from worker palette")
@@ -75,6 +77,11 @@ func _initialize() -> void:
 	assert_equal(model["commands"].filter(func(command): return command["type"] == "formation").size(), 5, "mobile group receives formation palette")
 	assert_true(bool(first_command(model["commands"], "formation", "WEDGE")["active"]), "current formation is marked active")
 	assert_equal(model["commands"].filter(func(command): return command["type"] == "unit_action").size(), 4, "mobile selection exposes its complete order palette")
+	assert_equal(first_command(model["commands"], "unit_action", "attack_move").get("icon_id"), 4, "attack-move uses the source attack glyph")
+	assert_equal(first_command(model["commands"], "unit_action", "stop").get("icon_id"), 3, "stop uses the source raised-hand glyph")
+	assert_equal(first_command(model["commands"], "unit_action", "hold").get("icon_id"), 12, "hold-position uses the source guarded-stance glyph")
+	assert_equal(first_command(model["commands"], "unit_action", "hold").get("icon_kind"), "command", "unit orders identify the source command glyph sheet")
+	assert_equal(first_command(model["commands"], "unit_action", "stance").get("icon_id"), 7, "stance cycling uses a distinct source order glyph")
 	assert_equal(first_command(model["commands"], "unit_action", "stance").get("stance"), "defensive", "stance action derives the next mode from authoritative selection state")
 	assert_equal(model["selection"]["leader"].get("stance"), "aggressive", "selection presentation exposes the authoritative stance")
 
@@ -84,6 +91,15 @@ func _initialize() -> void:
 	assert_equal(model["commands"].filter(func(command): return command["type"] == "trade_resource").size(), 3, "Trade Boat can choose food, wood, or stone")
 	assert_true(bool(first_command(model["commands"], "trade_resource", "1")["active"]), "source default trade resource is wood")
 	assert_true(bool(model["selection"]["leader"]["trade_enabled"]), "selection model exposes own Trade Boat state")
+
+	var hidden_snapshot := SimulationSnapshot.presentation(world, 13, 1)
+	var hidden_building := presentation_entity(hidden_snapshot.get("buildings", []), int(barracks["id"]))
+	var hidden_options: Dictionary = hidden_building.get("command_options", {})
+	hidden_options.get("train", []).append({"kind": "locked_test_unit", "accepted": false, "reason": "unit_unavailable"})
+	hidden_options.get("research", []).append({"technology_id": 9999, "accepted": false, "reason": "missing_prerequisites"})
+	model = view_model.build(hidden_snapshot, [int(barracks["id"])], "RECTANGLE", "ru")
+	assert_true(first_command(model["commands"], "train", "locked_test_unit").is_empty(), "technology-locked units are absent instead of translucent")
+	assert_true(first_command(model["commands"], "research", "9999").is_empty(), "prerequisite-locked research is absent instead of translucent")
 
 	if failures.is_empty():
 		print("I10-001 HUD view model tests passed")
@@ -99,6 +115,14 @@ func first_command(commands: Array, command_type: String, command_id: String) ->
 		var command: Dictionary = command_value
 		if String(command.get("type", "")) == command_type and String(command.get("id", "")) == command_id:
 			return command
+	return {}
+
+
+func presentation_entity(entities: Array, entity_id: int) -> Dictionary:
+	for entity_value in entities:
+		var entity: Dictionary = entity_value
+		if int(entity.get("id", -1)) == entity_id:
+			return entity
 	return {}
 
 

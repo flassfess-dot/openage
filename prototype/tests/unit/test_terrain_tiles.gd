@@ -1,6 +1,9 @@
 extends SceneTree
 
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
+const SimulationWorld := preload("res://scripts/simulation_world.gd")
+const TerrainElevation := preload("res://scripts/terrain_elevation.gd")
+const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 
 var failures: Array[String] = []
@@ -9,6 +12,10 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_original_frame_sets()
 	test_seeded_variation()
+	test_slope_tiles_have_base_and_raised_underlays()
+	test_water_corner_frames_follow_diagonal_terrain()
+	test_shallows_do_not_render_as_open_water()
+	test_forest_resources_preserve_source_forest_terrain()
 
 	if failures.is_empty():
 		print("T-001 terrain tile tests passed")
@@ -55,6 +62,96 @@ func test_seeded_variation() -> void:
 		assert_true(first != second_seed, "%s changes with seed" % terrain_kind)
 		assert_equal(used.size(), count, "%s reaches every imported frame" % terrain_kind)
 		assert_no_repeated_stripes(first, 32, terrain_kind)
+
+
+func test_slope_tiles_have_base_and_raised_underlays() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	var elevation = TerrainElevation.new(Vector2i(2, 2))
+	elevation.clear()
+	elevation.set_vertex(Vector2i(0, 0), 1)
+	elevation.set_vertex(Vector2i(1, 0), 1)
+	var drawable := TerrainRenderer.tile_drawable(
+		Vector2i.ZERO,
+		int(TerrainRules.TERRAIN_IDS["grass"]),
+		Callable(self, "grass_terrain_id"),
+		catalog,
+		elevation,
+		1.0,
+		Vector2.ZERO,
+		41721
+	)
+	var underlays: Array = drawable.get("underlays", [])
+	assert_equal(underlays.size(), 2, "raised slope has both base and raised underlays")
+	assert_true(Vector2(underlays[0]["position"]) != Vector2(underlays[1]["position"]), "slope underlays cover different vertical bands")
+
+
+func test_water_corner_frames_follow_diagonal_terrain() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	var external_map := {
+		Vector2i(1, 1): 0,
+		Vector2i(0, 1): 1,
+		Vector2i(1, 0): 1,
+		Vector2i(0, 0): 1,
+	}
+	var external_layers := TerrainRules.border_layers(Vector2i(1, 1), Callable(self, "terrain_from_external_corner_map").bind(external_map), catalog.terrain_catalog_data, 41721)
+	assert_equal(external_layers.size(), 1, "external water corner emits one border layer")
+	assert_equal(int(external_layers[0]["border_id"]), 2, "grass shoreline uses the rounded desert/water corner sprite")
+	assert_equal(String(external_layers[0]["asset_name"]), "border_desert_water", "external water corner resolves the non-degenerate sprite set")
+	assert_equal(int(external_layers[0]["frame"]), 1, "land protruding into water uses the external corner frame")
+
+	var internal_map := external_map.duplicate()
+	internal_map[Vector2i(0, 0)] = 0
+	var internal_layers := TerrainRules.border_layers(Vector2i(1, 1), Callable(self, "terrain_from_external_corner_map").bind(internal_map), catalog.terrain_catalog_data, 41721)
+	assert_equal(internal_layers.size(), 1, "internal water corner emits one border layer")
+	assert_equal(int(internal_layers[0]["border_id"]), 2, "internal grass shoreline uses the matching desert/water corner sprite")
+	assert_equal(int(internal_layers[0]["frame"]), 6, "diagonal land uses the internal corner frame")
+
+	var straight_map := {
+		Vector2i(1, 1): 0,
+		Vector2i(0, 1): 1,
+	}
+	var straight_layers := TerrainRules.border_layers(Vector2i(1, 1), Callable(self, "terrain_from_external_corner_map").bind(straight_map), catalog.terrain_catalog_data, 41721)
+	assert_equal(int(straight_layers[0]["border_id"]), 3, "straight shoreline keeps the grass/water sprite set")
+	assert_equal(int(straight_layers[0]["frame"]), 8, "straight shoreline keeps its original edge frame")
+
+
+func test_shallows_do_not_render_as_open_water() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	assert_equal(TerrainRules.base_texture_kind(4, catalog.terrain_catalog_data), "sand", "source Shallows does not use the flat open-water placeholder")
+	assert_true(4 in TerrainRules.WATER_TERRAIN_IDS, "source Shallows remains water-domain terrain for scenario placement")
+
+
+func test_forest_resources_preserve_source_forest_terrain() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	var world := SimulationWorld.new(Vector2i(3, 3))
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
+	world.set_terrain_catalog(catalog.terrain_catalog_data)
+	var terrain_ids: Array[int] = []
+	terrain_ids.resize(9)
+	terrain_ids.fill(0)
+	terrain_ids[1 * 3 + 1] = 13
+	var vertex_levels: Array[int] = []
+	vertex_levels.resize(16)
+	vertex_levels.fill(0)
+	world.configure_map_data({"terrain_ids": terrain_ids, "vertex_levels": vertex_levels})
+	world.add_scenario_resource("tree", Vector2(1.5, 1.5), 40)
+	assert_equal(world.terrain_id_at_cell(Vector2i(1, 1)), 13, "source DesertPalm terrain survives tree registration")
+
+	world.add_scenario_resource("tree", Vector2(2.5, 2.5), 40)
+	assert_equal(world.terrain_id_at_cell(Vector2i(2, 2)), int(TerrainRules.TERRAIN_IDS["forest_floor"]), "generated tree on plain grass still synthesizes forest floor")
+
+
+func grass_terrain_id(_cell: Vector2i) -> int:
+	return int(TerrainRules.TERRAIN_IDS["grass"])
+
+
+func terrain_from_external_corner_map(cell: Vector2i, terrain_map: Dictionary) -> int:
+	return int(terrain_map.get(cell, 0))
 
 
 func assert_no_repeated_stripes(values: Array[int], width: int, context: String) -> void:

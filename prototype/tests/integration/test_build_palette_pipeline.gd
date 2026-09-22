@@ -28,6 +28,8 @@ func _initialize() -> void:
 		if build_index >= 0:
 			var button: Button = game.hud_controls.train_buttons[build_index]
 			assert_true(button.icon != null and not button.disabled, "House action uses its imported source icon and is enabled")
+			assert_true(button.icon == game.resource_catalog.interface_icons.texture("building_4", 15), "Roman House resolves frame 15 from the Roman building sheet")
+			assert_true(button.icon != game.resource_catalog.interface_icons.texture("unit", 15), "House action cannot regress to the Catapult unit icon")
 			button.emit_signal("pressed")
 			assert_equal(game.pending_build_kind, "house", "HUD click enters placement mode")
 

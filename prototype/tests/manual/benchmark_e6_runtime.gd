@@ -260,9 +260,13 @@ func _run_case(options: Dictionary) -> Dictionary:
 		controller.advance_frame(0.05, 1, 2)
 	probe.clear()
 	var benchmark_started := Time.get_ticks_usec()
+	var tick_wall_samples: Array[int] = []
 	for _tick in range(sample_ticks):
+		var tick_started := Time.get_ticks_usec()
 		controller.advance_frame(0.05, 1, 2)
+		tick_wall_samples.append(Time.get_ticks_usec() - tick_started)
 	var benchmark_microseconds := Time.get_ticks_usec() - benchmark_started
+	var phase_split := maxi(1, floori(float(tick_wall_samples.size()) / 2.0))
 	var replay = ReplaySystem.new()
 	var final_hash := replay.world_state_hash(world, controller.tick_index, controller)
 	return {
@@ -281,6 +285,9 @@ func _run_case(options: Dictionary) -> Dictionary:
 		"setup_microseconds": setup_microseconds,
 		"command_phase": command_phase,
 		"sample_wall_microseconds": benchmark_microseconds,
+		"sample_tick_wall_microseconds": PerformanceProbe.summarize(tick_wall_samples),
+		"sample_first_half_tick_wall_microseconds": PerformanceProbe.summarize(tick_wall_samples.slice(0, phase_split)),
+		"sample_last_half_tick_wall_microseconds": PerformanceProbe.summarize(tick_wall_samples.slice(phase_split)),
 		"active_units_after_sample": world.get_units().filter(func(unit): return String(unit.get("task", "idle")) != "idle").size(),
 		"workload_state": _workload_state(world, player_count, workload, mixed_counts),
 		"canonical_hash": final_hash,

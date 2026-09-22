@@ -11,6 +11,7 @@ func _initialize() -> void:
 	test_original_resource_contract()
 	test_source_forest_presentation()
 	test_source_forest_variants_and_fallback()
+	test_corrupt_source_forest_frames_are_rejected()
 	test_footprints_and_overlap_resolution()
 	test_depletion_and_navigation_release()
 
@@ -67,6 +68,24 @@ func test_source_forest_variants_and_fallback() -> void:
 	assert_equal(catalog.resource_frame_info(first_variant).get("asset_name"), "graphic_928", "first Punic tree variant resolves its source asset")
 	assert_equal(catalog.resource_frame_info(second_variant).get("asset_name"), "graphic_929", "second Punic tree variant resolves its source asset")
 	assert_equal(catalog.resource_frame_info(unavailable_source).get("asset_name"), "tree", "missing source SLP uses the declared semantic tree fallback")
+
+
+func test_corrupt_source_forest_frames_are_rejected() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	var source_tree := {
+		"id": 7001,
+		"kind": "tree",
+		"amount": 75,
+		"source_unit_id": 140,
+		"source_graphic_id": 607,
+		"source_graphic_asset_name": "graphic_607",
+	}
+	var frame: Dictionary = catalog.resource_frame_info(source_tree)
+	var texture: Texture2D = frame.get("texture")
+	assert_equal(frame.get("asset_name"), "graphic_607", "oak variant keeps its exact source asset")
+	assert_equal(frame.get("frame_index"), 0, "oak variant ignores corrupt trailing source frames")
+	assert_true(texture != null and texture.get_width() < 256 and texture.get_height() < 256, "oak variant never exposes a full-screen framebuffer artifact")
 
 
 func test_footprints_and_overlap_resolution() -> void:

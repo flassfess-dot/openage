@@ -16,9 +16,31 @@ const STANCE_LABELS_RU := {
 	"stand_ground": "Держать позицию",
 	"passive": "Не атаковать",
 }
+const UNIT_ACTION_ICON_IDS := {
+	"attack_move": 4,
+	"stop": 3,
+	"hold": 12,
+	"stance": 7,
+}
+const HIDDEN_COMMAND_REASONS := {
+	"building_unavailable": true,
+	"unit_unavailable": true,
+	"unit_replaced": true,
+	"unknown_unit_type": true,
+	"wrong_production_location": true,
+	"invalid_production_building": true,
+	"unknown_technology": true,
+	"technology_disabled": true,
+	"missing_prerequisites": true,
+	"already_researched": true,
+	"already_researching": true,
+	"wrong_research_location": true,
+	"invalid_research_building": true,
+}
 
 var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
+var building_icon_set_by_civilization: Dictionary = {}
 var localization
 
 
@@ -26,6 +48,12 @@ func configure(runtime_data: Dictionary, localization_catalog, object_data: Dict
 	runtime_catalog = runtime_data
 	localization = localization_catalog
 	object_catalog = object_data
+	building_icon_set_by_civilization.clear()
+	for civilization_value in object_catalog.get("civilizations", []):
+		var civilization: Dictionary = civilization_value
+		var civilization_id := int(civilization.get("civilization_id", -1))
+		var icon_set := int(civilization.get("icon_set", 1))
+		building_icon_set_by_civilization[civilization_id] = clampi(icon_set, 0, 4)
 
 
 func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: String, locale: String = "ru") -> Dictionary:
@@ -66,6 +94,8 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 		]:
 			var action: Dictionary = action_value
 			action["type"] = "unit_action"
+			action["icon_kind"] = "command"
+			action["icon_id"] = int(UNIT_ACTION_ICON_IDS.get(String(action.get("id", "")), -1))
 			action["enabled"] = disabled_reason.is_empty()
 			action["active"] = false
 			action["reason"] = disabled_reason
@@ -103,13 +133,15 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 		var worker: Dictionary = selected[0]
 		for option_value in worker.get("command_options", {}).get("build", []):
 			var option: Dictionary = option_value
+			if not _command_option_is_visible(option):
+				continue
 			var kind := String(option.get("kind", ""))
 			var reason := "battle_over" if bool(model["battle_over"]) else String(option.get("reason", ""))
 			model["commands"].append({
 				"type": "build",
 				"id": kind,
 				"label": _name_for_kind(kind, worker, locale),
-				"icon_kind": "object",
+				"icon_kind": _building_icon_kind(worker),
 				"icon_id": int(option.get("icon_id", _icon_id_for_kind(kind, worker))),
 				"source_unit_id": int(option.get("source_unit_id", -1)),
 				"button_id": int(option.get("button_id", -1)),
@@ -124,13 +156,15 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 		var building: Dictionary = selected[0]
 		for option_value in building.get("command_options", {}).get("train", []):
 			var option: Dictionary = option_value
+			if not _command_option_is_visible(option):
+				continue
 			var reason := "battle_over" if bool(model["battle_over"]) else String(option.get("reason", ""))
 			model["commands"].append({
 				"type": "train",
 				"id": String(option.get("kind", "")),
 				"building_id": int(building.get("id", -1)),
 				"label": _name_for_kind(String(option.get("kind", "")), building, locale),
-				"icon_kind": "object",
+				"icon_kind": "unit",
 				"icon_id": _icon_id_for_kind(String(option.get("kind", "")), building),
 				"cost": option.get("cost", {}).duplicate(true),
 				"cost_text": _cost_text(option.get("cost", {})),
@@ -142,6 +176,8 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 			})
 		for option_value in building.get("command_options", {}).get("research", []):
 			var option: Dictionary = option_value
+			if not _command_option_is_visible(option):
+				continue
 			var reason := "battle_over" if bool(model["battle_over"]) else String(option.get("reason", ""))
 			var technology_id := int(option.get("technology_id", -1))
 			model["commands"].append({
@@ -239,7 +275,7 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 			"trade_stage": String(trade.get("stage", "idle")),
 			"trade_resource_type_id": int(trade.get("selected_input_resource_type_id", -1)),
 			"trade_cargo_gold": int(trade.get("cargo_gold", 0)),
-			"icon_kind": "object",
+			"icon_kind": _building_icon_kind(leader) if category == "building" else "unit",
 			"icon_id": _icon_id_for_kind(String(leader.get("kind", "")), leader),
 		},
 		"summary": _name_for_kind(String(leader.get("kind", "")), leader, locale) if selected.size() == 1 else "%d × %s" % [selected.size(), _name_for_kind(String(leader.get("kind", "")), leader, locale)] if homogeneous else "%d %s" % [selected.size(), "объектов" if locale == "ru" else "objects"],
@@ -332,6 +368,17 @@ func _icon_id_for_kind(kind: String, entity: Dictionary) -> int:
 	var records: Dictionary = archetype.get("records", {})
 	var record: Dictionary = records.get(String.num_int64(civilization_id), records.get(String.num_int64(default_civilization_id), {}))
 	return int(record.get("presentation", {}).get("icon_id", -1))
+
+
+func _building_icon_kind(entity: Dictionary) -> String:
+	var default_civilization_id := int(runtime_catalog.get("default_civilization_id", 13))
+	var civilization_id := int(entity.get("components", {}).get("ownership", {}).get("civilization_id", default_civilization_id))
+	var icon_set := int(building_icon_set_by_civilization.get(civilization_id, building_icon_set_by_civilization.get(default_civilization_id, 0)))
+	return "building_%d" % clampi(icon_set, 0, 4)
+
+
+func _command_option_is_visible(option: Dictionary) -> bool:
+	return not HIDDEN_COMMAND_REASONS.has(String(option.get("reason", "")))
 
 
 func _category(entity: Dictionary) -> String:

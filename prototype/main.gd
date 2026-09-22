@@ -132,6 +132,8 @@ var cached_fog_runs: Array = []
 var cached_world_fog_chunks: Dictionary = {}
 var cached_world_fog_zoom := -1.0
 var cached_world_fog_terrain_revision: int = -1
+var cached_fog_slope_neighbor_cells := PackedByteArray()
+var cached_fog_slope_neighbor_terrain_revision: int = -1
 var cached_map_edge_chains: Array[PackedVector2Array] = []
 var cached_map_edge_zoom := -1.0
 var cached_map_edge_terrain_revision := -1
@@ -335,6 +337,8 @@ func reset_game() -> void:
 	cached_world_fog_chunks.clear()
 	cached_world_fog_zoom = -1.0
 	cached_world_fog_terrain_revision = -1
+	cached_fog_slope_neighbor_cells.resize(0)
+	cached_fog_slope_neighbor_terrain_revision = -1
 	cached_map_edge_chains.clear()
 	cached_map_edge_zoom = -1.0
 	cached_map_edge_terrain_revision = -1
@@ -1558,8 +1562,7 @@ func draw_terrain() -> void:
 			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_provider, resource_catalog, simulation_world.terrain_elevation, view_zoom, view_offset, map_seed)
 			if drawable.is_empty():
 				continue
-			var underlay: Variant = drawable.get("underlay")
-			if underlay is Dictionary:
+			for underlay in drawable.get("underlays", []):
 				draw_texture_rect(underlay["texture"], Rect2(PixelScaling.snap_screen(underlay["position"]), underlay["size"]), false)
 			draw_texture_rect(drawable["texture"], Rect2(PixelScaling.snap_screen(drawable["position"]), drawable["size"]), false)
 			for layer in drawable["borders"]:
@@ -1642,6 +1645,9 @@ func draw_fog_overlay() -> void:
 		cached_world_fog_chunks.clear()
 		cached_world_fog_zoom = view_zoom
 		cached_world_fog_terrain_revision = terrain_revision
+	if cached_fog_slope_neighbor_terrain_revision != terrain_revision:
+		cached_fog_slope_neighbor_cells.resize(0)
+		cached_fog_slope_neighbor_terrain_revision = terrain_revision
 	var expanded_bounds := _expanded_tile_bounds(bounds, 12)
 	var chunk_minimum := Vector2i(
 		floori(float(expanded_bounds.position.x) / float(WORLD_FOG_CHUNK_SIZE)),
@@ -1665,21 +1671,17 @@ func draw_fog_overlay() -> void:
 				# Row-slice memcmp replaces the 1024-iteration hash loop per chunk;
 				# unchanged chunks now cost one PackedByteArray compare per row.
 				var rows: Array = entry.get("rows", [])
-				var rows_match := rows.size() == bounds.size.y
+				var rows_match := rows.size() == chunk_bounds.size.y
 				if rows_match:
-					for row_index in range(bounds.size.y):
-						var row_offset := (bounds.position.y + row_index) * map_size.x + bounds.position.x
-						if cells.slice(row_offset, row_offset + bounds.size.x) != rows[row_index]:
+					var current_rows := _fog_rows_for_bounds(cells, chunk_bounds)
+					for row_index in range(chunk_bounds.size.y):
+						if current_rows[row_index] != rows[row_index]:
 							rows_match = false
 							break
 				if not rows_match:
 					var rebuild_started := Time.get_ticks_usec() if probe != null else 0
 					entry["mesh"] = _build_world_fog_mesh(chunk_bounds, cells)
-					var fresh_rows: Array = []
-					for row_index in range(bounds.size.y):
-						var fresh_offset := (bounds.position.y + row_index) * map_size.x + bounds.position.x
-						fresh_rows.append(cells.slice(fresh_offset, fresh_offset + bounds.size.x))
-					entry["rows"] = fresh_rows
+					entry["rows"] = _fog_rows_for_bounds(cells, chunk_bounds)
 					rebuilt_chunks += 1
 					if probe != null:
 						probe.observe_microseconds("presentation.fog.chunk_rebuild", Time.get_ticks_usec() - rebuild_started)
@@ -1712,6 +1714,14 @@ func _world_fog_chunk_bounds(chunk_key: Vector2i) -> Rect2i:
 	return Rect2i(start, Vector2i(maxi(0, finish.x - start.x), maxi(0, finish.y - start.y)))
 
 
+func _fog_rows_for_bounds(cells: Variant, bounds: Rect2i) -> Array:
+	var rows: Array = []
+	for row_index in range(bounds.size.y):
+		var row_offset := (bounds.position.y + row_index) * map_size.x + bounds.position.x
+		rows.append(cells.slice(row_offset, row_offset + bounds.size.x))
+	return rows
+
+
 func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
 	# Project the shared terrain lattice once. The previous implementation built
 	# two temporary triangle arrays and projected four corners independently for
@@ -1727,9 +1737,13 @@ func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
 			var world := Vector2(bounds.position + Vector2i(local_x, local_y))
 			projected[local_y * lattice_width + local_x] = PixelScaling.snap_screen(_world_to_fog_mesh(world))
 	var covered_cells := 0
+	var cover_flags := PackedByteArray()
+	cover_flags.resize(bounds.size.x * bounds.size.y)
 	for y in range(bounds.position.y, bounds.end.y):
 		for x in range(bounds.position.x, bounds.end.x):
-			if int(cells[y * map_size.x + x]) != FogOfWar.VISIBLE:
+			var cover_index := (y - bounds.position.y) * bounds.size.x + (x - bounds.position.x)
+			if _fog_cell_should_cover(Vector2i(x, y), cells):
+				cover_flags[cover_index] = 1
 				covered_cells += 1
 	if covered_cells == 0:
 		return null
@@ -1741,7 +1755,7 @@ func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
 	for y in range(bounds.position.y, bounds.end.y):
 		for x in range(bounds.position.x, bounds.end.x):
 			var state := int(cells[y * map_size.x + x])
-			if state == FogOfWar.VISIBLE:
+			if int(cover_flags[(y - bounds.position.y) * bounds.size.x + (x - bounds.position.x)]) == 0:
 				continue
 			var color := FogPresentation.color_for_state(state)
 			var local_x := x - bounds.position.x
@@ -1770,17 +1784,57 @@ func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
 
 func _world_to_fog_mesh(world: Vector2) -> Vector2:
 	if simulation_world != null:
-		var elevation: float = simulation_world.terrain_elevation.elevation_at_world(world)
-		# Terrain sprites quantize the elevation rise into 17/33/49px bitmaps
-		# while the fog lattice lifts vertices by exact 16px steps, so on slopes
-		# the fog edge can overshoot painted terrain by a few pixels and leave
-		# black slivers on visible ground. Tucking elevated fog vertices slightly
-		# under the painted slope removes those wedges until the exact per-cell
-		# E1 fog-geometry contract lands; flat boundaries keep their exact seam.
-		if elevation > 0.0:
-			elevation = maxf(0.0, elevation - 0.18)
-		return Coordinates.world_to_screen(world, view_zoom, Vector2.ZERO) + simulation_world.terrain_elevation.screen_offset(elevation, view_zoom)
+		return simulation_world.terrain_elevation.world_to_screen(world, view_zoom, Vector2.ZERO)
 	return Coordinates.world_to_screen(world, view_zoom, Vector2.ZERO)
+
+
+func _fog_cell_should_cover(cell: Vector2i, cells: Variant) -> bool:
+	var index := cell.y * map_size.x + cell.x
+	if index < 0 or index >= cells.size() or int(cells[index]) == FogOfWar.VISIBLE:
+		return false
+	_ensure_fog_slope_neighbor_cache()
+	if index >= cached_fog_slope_neighbor_cells.size() or int(cached_fog_slope_neighbor_cells[index]) == 0:
+		return true
+	if _fog_cell_touches_visible(cell, cells):
+		return false
+	return true
+
+
+func _fog_cell_touches_visible(cell: Vector2i, cells: Variant) -> bool:
+	for y_offset in range(-1, 2):
+		for x_offset in range(-1, 2):
+			if x_offset == 0 and y_offset == 0:
+				continue
+			if _fog_state_at_cell(cells, cell + Vector2i(x_offset, y_offset)) == FogOfWar.VISIBLE:
+				return true
+	return false
+
+
+func _fog_state_at_cell(cells: Variant, cell: Vector2i) -> int:
+	if cell.x < 0 or cell.y < 0 or cell.x >= map_size.x or cell.y >= map_size.y:
+		return FogOfWar.UNKNOWN
+	var index := cell.y * map_size.x + cell.x
+	if index < 0 or index >= cells.size():
+		return FogOfWar.UNKNOWN
+	return int(cells[index])
+
+
+func _ensure_fog_slope_neighbor_cache() -> void:
+	var expected_size := map_size.x * map_size.y
+	if simulation_world == null or cached_fog_slope_neighbor_cells.size() == expected_size:
+		return
+	cached_fog_slope_neighbor_cells.resize(expected_size)
+	for y in range(map_size.y):
+		for x in range(map_size.x):
+			var cell := Vector2i(x, y)
+			var profile: Dictionary = simulation_world.terrain_elevation.cell_profile(cell)
+			var uses_slope_art := int(profile.get("slope_index", 0)) > 0 or not bool(profile.get("is_valid", true))
+			if uses_slope_art:
+				for y_offset in range(-1, 2):
+					for x_offset in range(-1, 2):
+						var neighbor := cell + Vector2i(x_offset, y_offset)
+						if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < map_size.x and neighbor.y < map_size.y:
+							cached_fog_slope_neighbor_cells[neighbor.y * map_size.x + neighbor.x] = 1
 
 
 func _expanded_tile_bounds(bounds: Rect2i, margin: int) -> Rect2i:
@@ -1880,7 +1934,7 @@ func draw_unit_shadow(item: Dictionary) -> void:
 	var unit: Dictionary = item["data"]
 	var screen := PixelScaling.snap_screen(item["screen_position"])
 	var radius := maxf(0.2, float(unit.get("footprint_radius", 0.3)))
-	draw_set_transform(screen + Vector2(0.0, 5.0 * view_zoom), 0.0, Vector2(1.0, 0.42))
+	draw_set_transform(screen, 0.0, Vector2(1.0, 0.42))
 	draw_circle(Vector2.ZERO, radius * 34.0 * view_zoom, Color(0.0, 0.0, 0.0, 0.28))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 

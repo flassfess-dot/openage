@@ -42,6 +42,7 @@ var composite_textures: Dictionary = {}
 var composite_descriptors: Dictionary = {}
 var scenario_marker_textures: Dictionary = {}
 var source_resource_textures: Dictionary = {}
+var source_resource_frame_metadata: Dictionary = {}
 var building_presentations := BuildingPresentationRegistry.new()
 var resource_presentations := ResourcePresentationRegistry.new()
 var unit_presentations := UnitPresentationRegistry.new()
@@ -54,6 +55,7 @@ func load() -> void:
 	load_generated_data()
 	scenario_marker_textures.clear()
 	source_resource_textures.clear()
+	source_resource_frame_metadata.clear()
 	terrain_textures = {
 		"grass": load_frames("terrain_grass", 9),
 		"sand": load_frames("terrain_sand", 9),
@@ -231,13 +233,7 @@ func source_resource_frame_info(resource: Dictionary) -> Dictionary:
 	if graphic_id < 0 or asset_name.is_empty() or spec.is_empty():
 		return {}
 	if not source_resource_textures.has(asset_name):
-		var frame_count := maxi(1, int(spec.get("slp", {}).get("frame_count", 1)))
-		if frame_count == 1 and ResourceLoader.exists("res://assets/generated/%s.png" % asset_name):
-			source_resource_textures[asset_name] = [load("res://assets/generated/%s.png" % asset_name)]
-		elif ResourceLoader.exists("res://assets/generated/%s_00.png" % asset_name):
-			source_resource_textures[asset_name] = load_frames(asset_name, frame_count)
-		else:
-			return {}
+		_cache_source_resource_frames(asset_name)
 	var frames: Array = source_resource_textures.get(asset_name, [])
 	if frames.is_empty():
 		return {}
@@ -247,7 +243,8 @@ func source_resource_frame_info(resource: Dictionary) -> Dictionary:
 	var texture: Texture2D = frames[frame_index]
 	if texture == null:
 		return {}
-	var metadata := get_texture_metadata(asset_name, frame_index)
+	var frame_metadata: Array = source_resource_frame_metadata.get(asset_name, [])
+	var metadata: Dictionary = frame_metadata[frame_index] if frame_index < frame_metadata.size() else {}
 	var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
 	if metadata.has("hotspot"):
 		hotspot = Vector2(float(metadata["hotspot"][0]), float(metadata["hotspot"][1]))
@@ -260,6 +257,23 @@ func source_resource_frame_info(resource: Dictionary) -> Dictionary:
 		"mirrored": false,
 		"graphic_layer": int(spec.get("layer", 20)),
 	}
+
+
+func _cache_source_resource_frames(asset_name: String) -> void:
+	var frames: Array = []
+	var frame_metadata: Array = []
+	# The generated manifest is authoritative. Files left behind by an older
+	# import must never increase a source graphic's frame count at runtime.
+	if resource_presentations.has_frame_records(asset_name):
+		for record_value in resource_presentations.valid_frame_records(asset_name):
+			var record: Dictionary = record_value
+			var texture: Texture2D = load("res://assets/generated/%s" % String(record.get("file", "")))
+			if texture == null:
+				continue
+			frames.append(texture)
+			frame_metadata.append(record.duplicate(true))
+	source_resource_textures[asset_name] = frames
+	source_resource_frame_metadata[asset_name] = frame_metadata
 
 
 func projectile_frame_info(projectile: Dictionary) -> Dictionary:
@@ -277,13 +291,7 @@ func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Di
 	if graphic_id < 0 or asset_name.is_empty() or spec.is_empty():
 		return {}
 	if not source_resource_textures.has(asset_name):
-		var frame_count := maxi(1, int(spec.get("slp", {}).get("frame_count", 1)))
-		if frame_count == 1 and ResourceLoader.exists("res://assets/generated/%s.png" % asset_name):
-			source_resource_textures[asset_name] = [load("res://assets/generated/%s.png" % asset_name)]
-		elif ResourceLoader.exists("res://assets/generated/%s_00.png" % asset_name):
-			source_resource_textures[asset_name] = load_frames(asset_name, frame_count)
-		else:
-			return {}
+		_cache_source_resource_frames(asset_name)
 	var frames: Array = source_resource_textures.get(asset_name, [])
 	if frames.is_empty():
 		return {}
@@ -296,7 +304,8 @@ func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Di
 	var texture: Texture2D = frames[frame_index]
 	if texture == null:
 		return {}
-	var metadata := get_texture_metadata(asset_name, frame_index)
+	var frame_metadata: Array = source_resource_frame_metadata.get(asset_name, [])
+	var metadata: Dictionary = frame_metadata[frame_index] if frame_index < frame_metadata.size() else {}
 	var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
 	if metadata.has("hotspot"):
 		hotspot = Vector2(float(metadata["hotspot"][0]), float(metadata["hotspot"][1]))

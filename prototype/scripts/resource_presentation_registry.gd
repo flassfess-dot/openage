@@ -34,19 +34,40 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 func _load_asset(asset_name: String) -> void:
 	if asset_name.is_empty() or frames_by_asset.has(asset_name):
 		return
-	var records: Array = records_by_asset.get(asset_name, [])
+	var records := valid_frame_records(asset_name)
 	if not records.is_empty():
-		records.sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
 		var frames: Array = []
 		for record_value in records:
 			var record: Dictionary = record_value
 			var texture: Texture2D = load("res://assets/generated/%s" % String(record.get("file", "")))
 			if texture == null:
 				continue
+			var loaded_frame_index := frames.size()
 			frames.append(texture)
-			metadata_by_asset_frame[_key(asset_name, int(record.get("frame", 0)))] = record.duplicate(true)
+			metadata_by_asset_frame[_key(asset_name, loaded_frame_index)] = record.duplicate(true)
 		if not frames.is_empty():
 			frames_by_asset[asset_name] = frames
+
+
+func has_frame_records(asset_name: String) -> bool:
+	return records_by_asset.has(asset_name)
+
+
+func valid_frame_records(asset_name: String) -> Array:
+	var records: Array = records_by_asset.get(asset_name, []).duplicate()
+	records.sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
+	return records.filter(func(record): return not _is_invalid_resource_frame(record))
+
+
+func _is_invalid_resource_frame(record: Dictionary) -> bool:
+	# A few data2 SLPs contain trailing 640x480 frames made from unrelated
+	# framebuffer data. They are fully opaque and far larger than any resource.
+	var width := int(record.get("width", 0))
+	var height := int(record.get("height", 0))
+	if width < 256 or height < 256:
+		return false
+	var semantic_pixels: Dictionary = record.get("semanticPixels", {})
+	return int(semantic_pixels.get("transparency", -1)) == 0
 
 
 func frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:

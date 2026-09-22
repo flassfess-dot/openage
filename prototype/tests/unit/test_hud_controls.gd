@@ -83,7 +83,7 @@ func test_buttons_and_signals() -> void:
 	]})
 	hud.train_button.emit_signal("pressed")
 	assert_equal(unit_action_request[0], "hold", "unit-order button preserves its semantic action")
-	assert_true(hud.train_button.text.contains("H") and hud.train_button.text.contains("ДЕРЖ"), "unmeasured action uses a readable label instead of a guessed source glyph")
+	assert_true(hud.train_button.text.contains("H") and hud.train_button.text.contains("ДЕРЖ"), "an unconfigured icon registry keeps the readable text fallback")
 	hud.free()
 
 

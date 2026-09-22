@@ -236,8 +236,11 @@ func command_icon(command: Dictionary) -> Texture2D:
 	var command_type := String(command.get("type", ""))
 	if interface_skin != null and command_type == "open_build_menu":
 		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
-		return glyphs[2] if glyphs.size() > 2 else null
-	if interface_skin != null and command_type in ["close_build_menu", "cancel_production"]:
+		return glyphs[0] if not glyphs.is_empty() else null
+	if interface_skin != null and command_type == "cancel_production":
+		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
+		return glyphs[10] if glyphs.size() > 10 else null
+	if interface_skin != null and command_type == "close_build_menu":
 		var arrows: Array = interface_skin.command_arrow_frames(interface_style_index)
 		return arrows[2] if arrows.size() > 2 else null
 	return icon_registry.texture(String(command.get("icon_kind", "")), int(command.get("icon_id", -1))) if icon_registry != null else null

@@ -1,6 +1,8 @@
 class_name RoRRandomMapGenerator
 extends RefCounted
 
+const TerrainRules := preload("res://scripts/terrain_rules.gd")
+
 
 static func generate(match_definition: Dictionary) -> Dictionary:
 	var map: Dictionary = match_definition.get("map", {})
@@ -143,11 +145,11 @@ static func _apply_shore_band(terrain_ids: Array[int], size: Vector2i) -> void:
 	for y in range(size.y):
 		for x in range(size.x):
 			var index := y * size.x + x
-			if int(water_mask[index]) in [1, 22]:
+			if int(water_mask[index]) in TerrainRules.WATER_TERRAIN_IDS:
 				continue
 			for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 				var neighbor: Vector2i = Vector2i(x, y) + Vector2i(offset)
-				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y and int(water_mask[neighbor.y * size.x + neighbor.x]) in [1, 22]:
+				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y and int(water_mask[neighbor.y * size.x + neighbor.x]) in TerrainRules.WATER_TERRAIN_IDS:
 					terrain_ids[index] = 2
 					break
 
@@ -495,7 +497,7 @@ static func _cell_matches_domain_with_clearance(cell: Vector2i, size: Vector2i, 
 static func _cell_matches_domain(cell: Vector2i, size: Vector2i, terrain_ids: Array[int], placement_domain: String) -> bool:
 	if cell.x < 0 or cell.y < 0 or cell.x >= size.x or cell.y >= size.y:
 		return false
-	var is_water := int(terrain_ids[cell.y * size.x + cell.x]) in [1, 22]
+	var is_water := int(terrain_ids[cell.y * size.x + cell.x]) in TerrainRules.WATER_TERRAIN_IDS
 	if placement_domain == "water":
 		return is_water
 	if placement_domain == "shore_water":
@@ -503,7 +505,7 @@ static func _cell_matches_domain(cell: Vector2i, size: Vector2i, terrain_ids: Ar
 			return false
 		for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			var neighbor: Vector2i = cell + offset
-			if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y and int(terrain_ids[neighbor.y * size.x + neighbor.x]) not in [1, 22]:
+			if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y and int(terrain_ids[neighbor.y * size.x + neighbor.x]) not in TerrainRules.WATER_TERRAIN_IDS:
 				return true
 		return false
 	return not is_water

@@ -786,6 +786,7 @@ if (selectionPath) {
   const previousEntries = previousCache.entries || {};
   const cacheEntries = {};
   const currentKeys = new Map();
+  const selectedNames = new Set(selection.map((item) => item.name));
   const exported = [];
   let cacheHits = 0;
   let cacheMisses = 0;
@@ -858,6 +859,18 @@ if (selectionPath) {
       cacheEntries[filename] = {key, components, asset};
     }
   }
+  let staleFilesRemoved = 0;
+  for (const entry of fs.readdirSync(outputDir, {withFileTypes: true})) {
+    if (!entry.isFile()) continue;
+    const sourceFilename = entry.name.endsWith(".import") ? entry.name.slice(0, -7) : entry.name;
+    if (currentKeys.has(sourceFilename) || path.extname(sourceFilename).toLowerCase() !== ".png") continue;
+    const stem = path.basename(sourceFilename, ".png");
+    const numberedFrame = stem.match(/^(.*)_\d+$/);
+    const belongsToSelectedAsset = selectedNames.has(stem) || (numberedFrame && selectedNames.has(numberedFrame[1]));
+    if (!belongsToSelectedAsset) continue;
+    fs.rmSync(path.join(outputDir, entry.name));
+    staleFilesRemoved += 1;
+  }
   fs.writeFileSync(path.join(outputDir, "assets.json"), `${JSON.stringify(exported, null, 2)}\n`);
   const assetCache = {
     formatVersion: CACHE_SCHEMA_VERSION,
@@ -868,7 +881,7 @@ if (selectionPath) {
     entries: cacheEntries,
   };
   fs.writeFileSync(assetCachePath, `${JSON.stringify(assetCache, null, 2)}\n`);
-  console.log(`exported ${exported.length} selected assets to ${outputDir} (${cacheHits} cache hits, ${cacheMisses} misses)`);
+  console.log(`exported ${exported.length} selected assets to ${outputDir} (${cacheHits} cache hits, ${cacheMisses} misses, ${staleFilesRemoved} stale files removed)`);
 }
 
 if (!catalogArchive && !selectionPath) {

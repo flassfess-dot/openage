@@ -64,6 +64,8 @@ func verify_stable_cavalry_line(catalog) -> void:
 	assert_unit_variant(catalog, cavalry, 37, "cavalry", 150.0, 8.0, "Cavalry")
 
 	assert_true(not world.is_object_available(1, 40), "Chariot remains unavailable without Wheel")
+	var locked_option_kinds: Array = world.get_unit_production_options(int(stable["id"]), 1).map(func(option): return String(option.get("kind", "")))
+	assert_true(not locked_option_kinds.has("chariot"), "technology-locked Chariot is absent instead of disabled in the production palette")
 	world.grant_technology(1, 28)
 	assert_true(world.get_researched_technologies(1).has(68), "Wheel resolves the Chariot zero-time availability connector")
 	assert_true(world.is_object_available(1, 40), "Chariot becomes available through technology 68")
