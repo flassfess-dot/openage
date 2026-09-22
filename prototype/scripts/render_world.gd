@@ -1,8 +1,9 @@
 class_name RoRRenderWorld
 
 const RenderItem := preload("res://scripts/render_item.gd")
-const AMBIENT_TRAVEL_TICKS := 60
-const AMBIENT_WANDER_RADIUS := 1.75
+const AMBIENT_TRAVEL_TICKS := 160
+const AMBIENT_WANDER_RADIUS := 8.0
+const AMBIENT_MIN_WAYPOINT_RADIUS := 5.0
 const AMBIENT_HASH_MODULUS := 2_147_483_647
 
 var cached_resource_signature: int = 0
@@ -103,13 +104,19 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		var marker_info := _frame_info(frame_info_provider, "marker", marker)
 		drawables.append(RenderItem.create("marker", RenderItem.Layer.UNIT_BUILDING, marker_position, world_to_screen.call(marker_position), int(marker.get("id", -1)), marker, marker_info, float(marker.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(marker_info.get("graphic_layer", 20)) * 1000))
 	for environment_item in source_environment:
-		var environment_position := ambient_actor_position(environment_item, presentation_tick)
-		var environment_info := _frame_info(frame_info_provider, "environment", environment_item)
+		var environment_data: Dictionary = environment_item
+		var environment_tick := presentation_tick + alpha
+		var environment_position := ambient_actor_position(environment_data, environment_tick)
+		if _is_ambient_actor(environment_data):
+			environment_data = environment_item.duplicate(false)
+			environment_data["presentation_tick"] = presentation_tick
+			environment_data["movement_direction"] = ambient_actor_direction(environment_data, environment_tick)
+		var environment_info := _frame_info(frame_info_provider, "environment", environment_data)
 		var layer := RenderItem.Layer.UNIT_BUILDING
 		match String(environment_item.get("presentation_layer", "scenery")):
 			"decal": layer = RenderItem.Layer.DECAL
 			"ambient_actor": layer = RenderItem.Layer.UNIT_BUILDING
-		drawables.append(RenderItem.create("environment", layer, environment_position, world_to_screen.call(environment_position), int(environment_item.get("id", -1)), environment_item, environment_info, float(environment_item.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(environment_info.get("graphic_layer", 0)) * 1000))
+		drawables.append(RenderItem.create("environment", layer, environment_position, world_to_screen.call(environment_position), int(environment_data.get("id", -1)), environment_data, environment_info, float(environment_data.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(environment_info.get("graphic_layer", 0)) * 1000))
 	_observe_stage("static_entities", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	for unit in source_units:
@@ -154,14 +161,39 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 
 static func ambient_actor_position(item: Dictionary, tick: float) -> Vector2:
 	var origin := Vector2(item.get("position", Vector2.ZERO))
-	if String(item.get("presentation_layer", "scenery")) != "ambient_actor":
+	if not _is_ambient_actor(item):
 		return origin
 	var cycle := floori(maxf(0.0, tick) / float(AMBIENT_TRAVEL_TICKS))
 	var cycle_tick := maxf(0.0, tick) - float(cycle * AMBIENT_TRAVEL_TICKS)
 	var from_offset := _ambient_offset(int(item.get("id", 0)), cycle)
 	var to_offset := _ambient_offset(int(item.get("id", 0)), cycle + 1)
 	var progress := clampf(cycle_tick / float(AMBIENT_TRAVEL_TICKS), 0.0, 1.0)
-	return origin + from_offset.lerp(to_offset, progress)
+	var eased_progress := progress * progress * (3.0 - 2.0 * progress)
+	var position := origin + from_offset.lerp(to_offset, eased_progress)
+	var map_size_value: Variant = item.get("map_size", Vector2.ZERO)
+	var map_size := Vector2.ZERO
+	if map_size_value is Vector2 or map_size_value is Vector2i:
+		map_size = Vector2(map_size_value)
+	elif map_size_value is Array and map_size_value.size() >= 2:
+		map_size = Vector2(float(map_size_value[0]), float(map_size_value[1]))
+	if map_size.x > 1.0 and map_size.y > 1.0:
+		position = position.clamp(Vector2(0.5, 0.5), map_size - Vector2(0.5, 0.5))
+	return position
+
+
+static func ambient_actor_direction(item: Dictionary, tick: float) -> Vector2:
+	if not _is_ambient_actor(item):
+		return Vector2.ZERO
+	var before := ambient_actor_position(item, maxf(0.0, tick - 0.5))
+	var after := ambient_actor_position(item, tick + 0.5)
+	var direction := after - before
+	if direction.length_squared() <= 0.000001:
+		direction = ambient_actor_position(item, tick + 1.0) - ambient_actor_position(item, tick)
+	return direction.normalized() if direction.length_squared() > 0.000001 else Vector2.RIGHT
+
+
+static func _is_ambient_actor(item: Dictionary) -> bool:
+	return String(item.get("presentation_layer", "scenery")) == "ambient_actor"
 
 
 static func _ambient_offset(entity_id: int, cycle: int) -> Vector2:
@@ -169,7 +201,7 @@ static func _ambient_offset(entity_id: int, cycle: int) -> Vector2:
 		return Vector2.ZERO
 	var angle_index := _ambient_roll(entity_id, cycle, 31, 32)
 	var radius_roll := float(_ambient_roll(entity_id, cycle, 47, 1000)) / 999.0
-	var radius := lerpf(0.75, AMBIENT_WANDER_RADIUS, radius_roll)
+	var radius := lerpf(AMBIENT_MIN_WAYPOINT_RADIUS, AMBIENT_WANDER_RADIUS, radius_roll)
 	return Vector2.RIGHT.rotated(TAU * float(angle_index) / 32.0) * radius
 
 
@@ -304,7 +336,11 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		var kind := String(drawable.get("kind", ""))
 		var data: Dictionary = drawable.get("data", {})
 		var position: Variant = null
-		if _is_interpolated_drawable(kind, data):
+		if kind == "environment" and _is_ambient_actor(data):
+			var ambient_tick := float(data.get("presentation_tick", 0.0)) + alpha
+			position = ambient_actor_position(data, ambient_tick)
+			data["movement_direction"] = ambient_actor_direction(data, ambient_tick)
+		elif _is_interpolated_drawable(kind, data):
 			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), alpha)
 		if position == null:
 			# Static drawables keep their world anchor; their screen position only
@@ -328,7 +364,7 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		for drawable_value in drawables:
 			var drawable: Dictionary = drawable_value
 			var data: Dictionary = drawable.get("data", {})
-			if _is_interpolated_drawable(String(drawable.get("kind", "")), data):
+			if _is_dynamic_drawable(String(drawable.get("kind", "")), data):
 				moving_drawables.append(drawable)
 			else:
 				static_drawables.append(drawable)
@@ -341,6 +377,10 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 
 func _is_interpolated_drawable(kind: String, data: Dictionary) -> bool:
 	return kind == "projectile" or (kind in INTERPOLATED_KINDS and String(data.get("movement_domain", "land")) != "static")
+
+
+func _is_dynamic_drawable(kind: String, data: Dictionary) -> bool:
+	return _is_interpolated_drawable(kind, data) or (kind == "environment" and _is_ambient_actor(data))
 
 
 func _frame_info(provider: Callable, kind: String, data: Variant) -> Dictionary:

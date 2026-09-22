@@ -19,12 +19,12 @@ const FORMATIONS := [
 	["WEDGE", "F8 WEDGE", "Wedge formation"],
 	["STAGGERED", "F9 STAGGER", "Staggered formation"],
 ]
-const FORMATION_SHORT_LABELS := {
-	"LINE": "ЛИН",
-	"RECTANGLE": "КАРЕ",
-	"COLUMN": "КОЛ",
-	"WEDGE": "КЛИН",
-	"STAGGERED": "ШАХ",
+const FORMATION_ICONS := {
+	"LINE": preload("res://assets/ui/formations/formation_line.png"),
+	"RECTANGLE": preload("res://assets/ui/formations/formation_rectangle.png"),
+	"COLUMN": preload("res://assets/ui/formations/formation_column.png"),
+	"WEDGE": preload("res://assets/ui/formations/formation_wedge.png"),
+	"STAGGERED": preload("res://assets/ui/formations/formation_staggered.png"),
 }
 
 var formation_buttons: Dictionary = {}
@@ -56,7 +56,10 @@ func build_controls() -> void:
 		var definition: Array = FORMATIONS[index]
 		var formation_name: String = definition[0]
 		var button := Button.new()
-		button.text = definition[1]
+		button.text = ""
+		button.icon = FORMATION_ICONS[formation_name]
+		button.expand_icon = false
+		button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		button.tooltip_text = definition[2]
 		button.toggle_mode = true
 		button.button_group = formation_group
@@ -89,7 +92,7 @@ func configure_icons(registry) -> void:
 
 func configure_interface_skin(skin, style_index: int = 0) -> void:
 	interface_skin = skin
-	interface_style_index = clampi(style_index, 0, 3)
+	interface_style_index = clampi(style_index, 0, 4)
 	for button_value in formation_buttons.values() + train_buttons:
 		apply_source_command_theme(button_value)
 
@@ -140,10 +143,13 @@ func set_view_model(model: Dictionary) -> void:
 		button.visible = not command.is_empty()
 		if command.is_empty():
 			continue
-		button.text = "%s\n%s" % [String(command.get("hotkey", "")), String(FORMATION_SHORT_LABELS.get(formation_name, formation_name))]
+		button.text = ""
+		button.icon = FORMATION_ICONS[formation_name]
 		button.disabled = not bool(command.get("enabled", false))
 		button.set_pressed_no_signal(bool(command.get("active", false)))
-		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else String(command.get("label", formation_name))
+		var hotkey := String(command.get("hotkey", ""))
+		var label := String(command.get("label", formation_name))
+		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else "%s%s" % [label, " (%s)" % hotkey if not hotkey.is_empty() else ""]
 	for index in range(train_buttons.size()):
 		var button: Button = train_buttons[index]
 		button.visible = index < active_train_commands.size()

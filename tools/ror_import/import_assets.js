@@ -205,26 +205,27 @@ function classifyInterfaceSprite(id, metadata) {
   if (metadata.frameCount === 1 && fullScreenDimensions.has(`${metadata.width}x${metadata.height}`)) {
     return {role: "fixed_resolution_background", confidence: "structural", basis: "single frame matches a supported full-screen canvas"};
   }
-  if ([50210, 50212, 50214, 50216].includes(id) && metadata.height === 138) {
+  if ([50210, 50212, 50214, 50216, 53100, 53101, 53102, 53103].includes(id) && metadata.height === 138) {
     return {role: "repeatable_ingame_panel", confidence: "source-reviewed", basis: "known 138px in-game panel family; dimensions verified from SLP"};
   }
   if ([50729, 50730].includes(id) && metadata.frameCount > 32) {
     return {role: "command_technology_object_icon_sheet", confidence: "source-reviewed", basis: "known multi-frame in-game icon family; frame structure verified from SLP"};
   }
-  if (id >= 50733 && id <= 50744 && metadata.frameCount === 2 && [640, 800, 1024].includes(metadata.width)) {
+  const expansionHudShellIds = new Set([53010, 53950, 53951, 53952, 53953, 53954, 54050, 54051, 54052, 54053, 54054]);
+  if (((id >= 50733 && id <= 50744) || expansionHudShellIds.has(id)) && metadata.frameCount === 2 && [640, 800, 1024].includes(metadata.width)) {
     return {role: "fixed_resolution_hud_shell", confidence: "source-reviewed", basis: "two-frame top/bottom HUD shell at a supported source resolution"};
   }
-  if (id >= 50713 && id <= 50716 && metadata.frameCount === 4 && metadata.width === 54 && metadata.height === 54) {
+  if (((id >= 50713 && id <= 50716) || (id >= 53300 && id <= 53304)) && metadata.frameCount === 4 && metadata.width === 54 && metadata.height === 54) {
     return {role: "square_control_backplate_candidate", confidence: "structural", basis: "four equal 54x54 frames; semantic role and executable composition require observation"};
   }
-  if (id >= 50725 && id <= 50728 && metadata.frameCount === 4 && metadata.width === 54 && metadata.height === 31) {
+  if (((id >= 50725 && id <= 50728) || id === 53009) && metadata.frameCount === 4 && metadata.width === 54 && metadata.height === 31) {
     return {role: "compact_control_family_candidate", confidence: "structural", basis: "four equal 54x31 frames; control role and executable composition require observation"};
   }
-  if (id >= 50717 && id <= 50719 && metadata.frameCount === 2 && metadata.width === 72 && metadata.height === 20) {
-    return {role: "text_button_backplate_candidate", confidence: "structural", basis: "two equal 72x20 frames; state and context require executable observation"};
+  if (((id >= 50717 && id <= 50719 && metadata.width === 72 && metadata.height === 20) || (id === 53007 && metadata.width === 73 && metadata.height === 19)) && metadata.frameCount === 2) {
+    return {role: "text_button_backplate_candidate", confidence: "structural", basis: "two equal small text-button frames; state and context require executable observation"};
   }
-  if (id >= 50747 && id <= 50750 && metadata.frameCount === 2 && metadata.width === 108 && metadata.height === 20) {
-    return {role: "wide_text_button_backplate_candidate", confidence: "structural", basis: "two equal 108x20 frames; state and context require executable observation"};
+  if (((id >= 50747 && id <= 50750 && metadata.height === 20) || (id === 53008 && metadata.height === 19)) && metadata.frameCount === 2 && metadata.width === 108) {
+    return {role: "wide_text_button_backplate_candidate", confidence: "structural", basis: "two equal wide text-button frames; state and context require executable observation"};
   }
   if (id === 50721 && metadata.frameCount === 15 && metadata.maxWidth <= 50 && metadata.maxHeight <= 51) {
     return {role: "command_glyph_sheet_candidate", confidence: "structural", basis: "15 small variable-size frames; glyph meaning and composition require executable observation"};

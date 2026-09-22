@@ -73,4 +73,4 @@ static func source_width_for(viewport_width: float) -> int:
 
 
 static func shell_asset_name(source_width: int, style_index: int = 0) -> String:
-	return "hud_shell_%d_%d" % [source_width, clampi(style_index, 0, 3)]
+	return "hud_shell_%d_%d" % [source_width, clampi(style_index, 0, 4)]

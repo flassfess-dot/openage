@@ -14,17 +14,23 @@ func _initialize() -> void:
 	await process_frame
 	var hud = game.hud_controls
 	assert_true(hud != null and hud.is_visible_in_tree(), "HUD control layer is visible")
+	assert_equal(game.interface_style_index, 4, "default Roman player selects the Rise of Rome HUD background")
+	assert_equal(hud.interface_style_index, 4, "command controls use the Roman HUD style")
 	var top_bar = game.top_bar_controls
 	assert_true(top_bar != null and top_bar.is_visible_in_tree(), "source top-bar control layer is visible")
-	assert_equal(top_bar.menu_button.get_global_rect(), Rect2(1208, 0, 72, 20), "menu uses exact right-aligned 50717 geometry")
-	assert_equal(top_bar.diplomacy_button.get_global_rect(), Rect2(1100, 0, 108, 20), "diplomacy uses exact 50747 geometry")
+	assert_equal(top_bar.style_index, 4, "top bar uses the Roman HUD style")
+	assert_equal(top_bar.menu_button.get_theme_color("font_color"), Color("f4e6c7"), "Roman menu label remains readable on the dark source button")
+	assert_equal(top_bar.diplomacy_button.get_theme_color("font_color"), Color("f4e6c7"), "Roman diplomacy label remains readable on the dark source button")
+	assert_equal(game.hud_modal_overlay.style_index, 4, "modal controls use the Roman HUD style")
+	assert_equal(top_bar.menu_button.get_global_rect(), Rect2(1207, 0, 73, 19), "menu uses exact right-aligned Roman 53007 geometry")
+	assert_equal(top_bar.diplomacy_button.get_global_rect(), Rect2(1099, 0, 108, 19), "diplomacy uses exact Roman 53008 geometry")
 	assert_equal(game.health_status_frames.size(), 26, "main scene enables every source health-strip frame")
 	assert_true(hud.formation_buttons["RECTANGLE"].is_visible_in_tree(), "selected mobile group exposes formation controls")
 	var button_rect: Rect2 = hud.formation_buttons["RECTANGLE"].get_global_rect()
 	assert_true(button_rect.size.x > 1.0, "formation button owns a drawable rectangle")
 	assert_true(button_rect.position.y >= 594.0 and button_rect.end.y <= 720.0, "formation button is laid out inside exact 126px bottom HUD: %s" % button_rect)
 	assert_true(button_rect.position.x >= 136.0 and button_rect.end.x <= 406.0, "formation button stays inside the source command grid: %s" % button_rect)
-	assert_true(String(hud.formation_buttons["RECTANGLE"].text).contains("\n"), "formation command uses a compact two-line label")
+	assert_true(String(hud.formation_buttons["RECTANGLE"].text).is_empty() and hud.formation_buttons["RECTANGLE"].icon != null, "formation command uses its dedicated icon")
 	assert_equal(game.hud_model.get("selection", {}).get("count", 0), 7, "main scene selection reaches HudViewModel")
 	assert_equal(game.hud_model.get("commands", []).filter(func(command): return command["type"] == "formation").size(), 5, "main scene exposes all formation actions")
 
@@ -69,8 +75,8 @@ func _initialize() -> void:
 	await process_frame
 	await process_frame
 	assert_vector_close(hud.size, Vector2(1024, 600), 0.01, "HUD follows real viewport resize")
-	assert_equal(top_bar.menu_button.get_global_rect(), Rect2(952, 0, 72, 20), "menu remains pinned to resized source top bar")
-	assert_equal(top_bar.diplomacy_button.get_global_rect(), Rect2(844, 0, 108, 20), "diplomacy remains adjacent after resize")
+	assert_equal(top_bar.menu_button.get_global_rect(), Rect2(951, 0, 73, 19), "menu remains pinned to resized Roman top bar")
+	assert_equal(top_bar.diplomacy_button.get_global_rect(), Rect2(843, 0, 108, 19), "diplomacy remains adjacent after resize")
 	assert_vector_close(game.hud_modal_overlay.size, Vector2(1024, 600), 0.01, "modal input layer follows real viewport resize")
 	button_rect = hud.formation_buttons["RECTANGLE"].get_global_rect()
 	assert_true(button_rect.position.y >= 474.0 and button_rect.end.y <= 600.0, "formation controls remain inside resized source bottom panel: %s" % button_rect)

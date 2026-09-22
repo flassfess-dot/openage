@@ -10,16 +10,27 @@ var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
 var graphics_catalog: Dictionary = {}
 var asset_metadata: Dictionary = {}
+var frame_records_by_name: Dictionary = {}
 var textures_by_key: Dictionary = {}
 var descriptors_by_key: Dictionary = {}
+var resolved_graphic_keys: Dictionary = {}
+var source_records_by_key: Dictionary = {}
+var presentation_facing_by_key: Dictionary = {}
+var civilization_icon_sets: Dictionary = {}
 
 
-func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, metadata: Dictionary) -> void:
+func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, metadata: Dictionary, indexed_frame_records: Dictionary = {}) -> void:
 	runtime_catalog = runtime_data
 	object_catalog = object_data
 	graphics_catalog = graphics_data
 	asset_metadata = metadata
-	_load_imported_graphics()
+	source_records_by_key.clear()
+	presentation_facing_by_key.clear()
+	civilization_icon_sets.clear()
+	for civilization_value in object_catalog.get("civilizations", []):
+		var civilization: Dictionary = civilization_value
+		civilization_icon_sets[int(civilization.get("civilization_id", -1))] = int(civilization.get("icon_set", 0))
+	_index_imported_graphics(indexed_frame_records)
 
 
 func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary:
@@ -70,112 +81,122 @@ func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary
 
 
 func has_graphic(graphic_id: int, player: int = 1) -> bool:
-	return textures_by_key.has(_graphic_key(graphic_id, _player_asset_id(player)))
+	return not _frame_records(graphic_id, _player_asset_id(player)).is_empty()
 
 
 func imported_frame_count(graphic_id: int, player: int = 1) -> int:
-	return textures_by_key.get(_graphic_key(graphic_id, _player_asset_id(player)), []).size()
+	return _frame_records(graphic_id, _player_asset_id(player)).size()
 
 
-func _load_imported_graphics() -> void:
+func _index_imported_graphics(indexed_frame_records: Dictionary) -> void:
 	textures_by_key.clear()
 	descriptors_by_key.clear()
-	var prefixes: Dictionary = {}
+	resolved_graphic_keys.clear()
+	if not indexed_frame_records.is_empty():
+		frame_records_by_name = indexed_frame_records.duplicate()
+		return
+	frame_records_by_name.clear()
 	for metadata_value in asset_metadata.values():
 		var metadata: Dictionary = metadata_value
 		var name := String(metadata.get("name", ""))
 		if not name.begins_with("graphic_") or not name.contains("_p"):
 			continue
-		prefixes[name] = true
-	var ordered_prefixes: Array = prefixes.keys()
-	ordered_prefixes.sort()
-	for prefix_value in ordered_prefixes:
-		var prefix := String(prefix_value)
-		var identity := _parse_prefix(prefix)
-		if identity.is_empty():
-			continue
-		var frame_records: Array = []
-		for metadata_value in asset_metadata.values():
-			var metadata: Dictionary = metadata_value
-			if String(metadata.get("name", "")) == prefix:
-				frame_records.append(metadata)
-		frame_records.sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
-		var frames: Array = []
-		var hotspots: Array[Vector2] = []
-		for metadata in frame_records:
-			var texture: Texture2D = load("res://assets/generated/%s" % String(metadata.get("file", "")))
-			if texture == null:
-				continue
-			frames.append(texture)
-			var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
-			if metadata.has("hotspot"):
-				hotspot = Vector2(float(metadata["hotspot"][0]), float(metadata["hotspot"][1]))
-			hotspots.append(hotspot)
-		if frames.is_empty():
-			continue
-		var graphic_id := int(identity["graphic_id"])
-		var key := _graphic_key(graphic_id, int(identity["player"]))
-		var spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
-		var sequence_type := int(spec.get("sequence_type", 0))
-		var descriptor := GraphicDescriptor.new(prefix, spec, frames.size(), sequence_type != 0 and (sequence_type & 0x08) == 0)
-		descriptor.set_hotspots(hotspots)
-		textures_by_key[key] = frames
-		descriptors_by_key[key] = descriptor
+		if not frame_records_by_name.has(name):
+			frame_records_by_name[name] = []
+		frame_records_by_name[name].append(metadata)
+	for records_value in frame_records_by_name.values():
+		var records: Array = records_value
+		records.sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
 
 
-func _parse_prefix(prefix: String) -> Dictionary:
-	var player_separator := prefix.rfind("_p")
-	if player_separator <= 8:
-		return {}
-	var graphic_text := prefix.substr(8, player_separator - 8)
-	var player_text := prefix.substr(player_separator + 2)
-	if not graphic_text.is_valid_int() or not player_text.is_valid_int():
-		return {}
-	return {"graphic_id": int(graphic_text), "player": int(player_text)}
+func _ensure_loaded(graphic_id: int, player: int) -> String:
+	var requested_key := _graphic_key(graphic_id, player)
+	if resolved_graphic_keys.has(requested_key):
+		return String(resolved_graphic_keys[requested_key])
+	var asset_name := "graphic_%d_p%d" % [graphic_id, player]
+	var frame_records: Array = frame_records_by_name.get(asset_name, [])
+	if frame_records.is_empty() and player != 1:
+		var fallback_key := _ensure_loaded(graphic_id, 1)
+		resolved_graphic_keys[requested_key] = fallback_key
+		return fallback_key
+	if frame_records.is_empty():
+		resolved_graphic_keys[requested_key] = ""
+		return ""
+	var frames: Array = []
+	var hotspots: Array[Vector2] = []
+	for metadata_value in frame_records:
+		var metadata: Dictionary = metadata_value
+		var texture: Texture2D = load("res://assets/generated/%s" % String(metadata.get("file", "")))
+		if texture == null:
+			continue
+		frames.append(texture)
+		var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
+		if metadata.has("hotspot"):
+			hotspot = Vector2(float(metadata["hotspot"][0]), float(metadata["hotspot"][1]))
+		hotspots.append(hotspot)
+	if frames.is_empty():
+		resolved_graphic_keys[requested_key] = ""
+		return ""
+	var spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
+	var sequence_type := int(spec.get("sequence_type", 0))
+	var descriptor := GraphicDescriptor.new(asset_name, spec, frames.size(), sequence_type != 0 and (sequence_type & 0x08) == 0)
+	descriptor.set_hotspots(hotspots)
+	textures_by_key[requested_key] = frames
+	descriptors_by_key[requested_key] = descriptor
+	resolved_graphic_keys[requested_key] = requested_key
+	return requested_key
+
+
+func _frame_records(graphic_id: int, player: int) -> Array:
+	return frame_records_by_name.get("graphic_%d_p%d" % [graphic_id, player], [])
 
 
 func _source_record(building: Dictionary) -> Dictionary:
 	var source_unit_id := int(building.get("source_unit_id", -1))
 	var civilization_id := int(building.get("components", {}).get("ownership", {}).get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
+	var cache_key := "%d:%d" % [civilization_id, source_unit_id]
+	if source_records_by_key.has(cache_key):
+		return source_records_by_key[cache_key]
 	var direct: Dictionary = object_catalog.get("objects", {}).get("%d:%d" % [civilization_id, source_unit_id], {})
 	if not direct.is_empty():
+		source_records_by_key[cache_key] = direct
 		return direct
 	var fallback: Dictionary = object_catalog.get("objects", {}).get("0:%d" % source_unit_id, {})
 	if not fallback.is_empty():
+		source_records_by_key[cache_key] = fallback
 		return fallback
 	var alias := String(building.get("kind", ""))
 	var archetype: Dictionary = runtime_catalog.get("archetypes", {}).get(alias, {})
 	var records: Dictionary = archetype.get("records", {})
 	var normalized: Dictionary = records.get(String.num_int64(civilization_id), records.get(String.num_int64(int(archetype.get("default_civilization_id", 13))), {}))
 	var source_key := String(normalized.get("source_key", ""))
-	return object_catalog.get("objects", {}).get(source_key, {})
+	var resolved: Dictionary = object_catalog.get("objects", {}).get(source_key, {})
+	source_records_by_key[cache_key] = resolved
+	return resolved
 
 
 func _presentation_facing(building: Dictionary, graphic_id: int) -> int:
 	if building.has("presentation_facing"):
 		return maxi(0, int(building["presentation_facing"]))
+	var civilization_id := int(building.get("components", {}).get("ownership", {}).get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
+	var cache_key := "%d:%d" % [civilization_id, graphic_id]
+	if presentation_facing_by_key.has(cache_key):
+		return int(presentation_facing_by_key[cache_key])
 	var graphic: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
 	var angle_count := maxi(1, int(graphic.get("angle_count", 1)))
 	if angle_count <= 1:
+		presentation_facing_by_key[cache_key] = 0
 		return 0
-	var civilization_id := int(building.get("components", {}).get("ownership", {}).get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
-	var icon_set := 0
-	for civilization_value in object_catalog.get("civilizations", []):
-		var civilization: Dictionary = civilization_value
-		if int(civilization.get("civilization_id", -1)) == civilization_id:
-			icon_set = int(civilization.get("icon_set", 0))
-			break
 	# RoR stores the expansion's Roman architecture as the final static
 	# direction in otherwise non-rotating building graphics.
-	return angle_count - 1 if icon_set == 4 else 0
+	var facing := angle_count - 1 if int(civilization_icon_sets.get(civilization_id, 0)) == 4 else 0
+	presentation_facing_by_key[cache_key] = facing
+	return facing
 
 
 func _frame_at(graphic_id: int, player: int, requested_frame: int) -> Dictionary:
-	var key := _graphic_key(graphic_id, player)
+	var key := _ensure_loaded(graphic_id, player)
 	var frames: Array = textures_by_key.get(key, [])
-	if frames.is_empty() and player != 1:
-		key = _graphic_key(graphic_id, 1)
-		frames = textures_by_key.get(key, [])
 	if frames.is_empty():
 		return {"texture": null, "asset_name": "", "frame_index": 0, "hotspot": Vector2.ZERO, "mirrored": false, "graphic_layer": _graphic_layer(graphic_id)}
 	var frame_index := clampi(requested_frame, 0, frames.size() - 1)
@@ -192,11 +213,8 @@ func _frame_at(graphic_id: int, player: int, requested_frame: int) -> Dictionary
 
 
 func _resolved_frame(graphic_id: int, player: int, logical_facing: int, animation_time: float) -> Dictionary:
-	var key := _graphic_key(graphic_id, player)
+	var key := _ensure_loaded(graphic_id, player)
 	var frames: Array = textures_by_key.get(key, [])
-	if frames.is_empty() and player != 1:
-		key = _graphic_key(graphic_id, 1)
-		frames = textures_by_key.get(key, [])
 	if frames.is_empty():
 		return _frame_at(graphic_id, player, 0)
 	var descriptor = descriptors_by_key[key]

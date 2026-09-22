@@ -162,10 +162,12 @@ func test_environment_field_culls_and_renders_non_selectable_items() -> void:
 	field.configure([
 		{"id": -200000, "kind": "presentation_scenery", "position": Vector2(2.5, 3.5), "presentation_layer": "scenery"},
 		{"id": -200001, "kind": "terrain_feature", "position": Vector2(9.5, 9.5), "presentation_layer": "decal"},
+		{"id": -200002, "kind": "ambient_actor", "position": Vector2(12.5, 12.5), "presentation_layer": "ambient_actor", "animated": true},
 	])
 	var visible: Array = field.query(Rect2i(1, 2, 4, 4))
-	assert_equal(field.item_count, 2, "environment field indexes every source item once")
+	assert_equal(field.item_count, 3, "environment field indexes every source item once")
 	assert_equal(visible.size(), 1, "environment field returns only the visible cell range")
+	assert_equal(field.mobile_items().size(), 1, "mobile ambient actors remain outside the static cell cache")
 	var snapshot := {"buildings": [], "resources": [], "objectives": [], "projectiles": [], "effects": [], "units": [], "markers": [], "environment": visible}
 	var renderer = RenderWorld.new()
 	var items: Array = renderer.create_world_drawables(snapshot, func(position: Vector2) -> Vector2: return position * 10.0, 1.0, Callable(self, "fake_frame_info"))
@@ -175,14 +177,24 @@ func test_environment_field_culls_and_renders_non_selectable_items() -> void:
 
 
 func test_ambient_wildlife_flies_without_simulation_paths() -> void:
-	var eagle := {"id": -200001, "kind": "ambient_actor", "position": Vector2(8.0, 9.0), "presentation_layer": "ambient_actor"}
+	var eagle := {"id": -200001, "kind": "ambient_actor", "position": Vector2(12.0, 12.0), "presentation_layer": "ambient_actor", "animated": true, "map_size": Vector2(32.0, 32.0)}
 	var origin := Vector2(eagle["position"])
 	assert_equal(RenderWorld.ambient_actor_position(eagle, 0.0), origin, "ambient wildlife starts at its source position")
-	var moving := RenderWorld.ambient_actor_position(eagle, 30.0)
-	assert_true(moving.distance_to(origin) > 0.01, "ambient wildlife flies continuously instead of resting")
+	var moving := RenderWorld.ambient_actor_position(eagle, RenderWorld.AMBIENT_TRAVEL_TICKS * 0.5)
+	var waypoint := RenderWorld.ambient_actor_position(eagle, RenderWorld.AMBIENT_TRAVEL_TICKS)
+	assert_true(moving.distance_to(origin) > 2.0, "ambient wildlife crosses a visible distance instead of circling in place")
 	assert_true(moving.distance_to(origin) <= RenderWorld.AMBIENT_WANDER_RADIUS + 0.01, "ambient wildlife remains inside its cheap presentation radius")
-	assert_true(RenderWorld.ambient_actor_position(eagle, 60.0).distance_to(moving) > 0.01, "ambient wildlife continues toward the next waypoint")
-	assert_equal(RenderWorld.ambient_actor_position(eagle, 30.0), moving, "ambient wildlife motion is deterministic")
+	assert_true(waypoint.distance_to(moving) > 2.0, "ambient wildlife continues toward a substantial waypoint")
+	assert_true(moving.distance_to(origin.lerp(waypoint, 0.5)) < 0.01, "ambient wildlife follows one coherent flight segment")
+	assert_equal(RenderWorld.ambient_actor_position(eagle, RenderWorld.AMBIENT_TRAVEL_TICKS * 0.5), moving, "ambient wildlife motion is deterministic")
+	assert_true(RenderWorld.ambient_actor_direction(eagle, 40.0).length_squared() > 0.99, "ambient wildlife exposes a stable flight direction")
+
+	var snapshot := {"tick": 40, "buildings": [], "resources": [], "objectives": [], "projectiles": [], "effects": [], "units": [], "markers": [], "environment": [eagle]}
+	var renderer = RenderWorld.new()
+	var items: Array = renderer.create_world_drawables(snapshot, func(position: Vector2) -> Vector2: return position * 10.0, 0.0, Callable(self, "fake_frame_info"))
+	var original_anchor: Vector2 = items[0]["world_anchor"]
+	renderer.refresh_world_drawables(items, func(position: Vector2) -> Vector2: return position * 10.0, 0.5, false)
+	assert_true(Vector2(items[0]["world_anchor"]).distance_to(original_anchor) > 0.001, "retained draw queue advances ambient actors between simulation ticks")
 	var scenery := {"id": -200002, "position": origin, "presentation_layer": "scenery"}
 	assert_equal(RenderWorld.ambient_actor_position(scenery, 30.0), origin, "static scenery is not moved by ambient wildlife animation")
 

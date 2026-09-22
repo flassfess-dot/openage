@@ -13,26 +13,29 @@ var frames_by_source: Dictionary = {}
 var descriptors_by_source: Dictionary = {}
 
 
-func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, asset_records: Array) -> void:
+func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, asset_records: Array, indexed_frame_records: Dictionary = {}) -> void:
 	runtime_catalog = runtime_data
 	object_catalog = object_data
 	graphics_catalog = graphics_data
 	definitions.clear()
-	records_by_name.clear()
 	frames_by_source.clear()
 	descriptors_by_source.clear()
-	for record_value in asset_records:
-		var record: Dictionary = record_value
-		if String(record.get("archive", "")) != "graphics" or not record.has("frame"):
-			continue
-		var name := String(record.get("name", ""))
-		if name.is_empty():
-			continue
-		if not records_by_name.has(name):
-			records_by_name[name] = []
-		records_by_name[name].append(record)
-	for name in records_by_name:
-		records_by_name[name].sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
+	if not indexed_frame_records.is_empty():
+		records_by_name = indexed_frame_records.duplicate()
+	else:
+		records_by_name.clear()
+		for record_value in asset_records:
+			var record: Dictionary = record_value
+			if String(record.get("archive", "")) != "graphics" or not record.has("frame"):
+				continue
+			var name := String(record.get("name", ""))
+			if name.is_empty():
+				continue
+			if not records_by_name.has(name):
+				records_by_name[name] = []
+			records_by_name[name].append(record)
+		for name in records_by_name:
+			records_by_name[name].sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
 	for archetype_value in runtime_catalog.get("archetypes", {}).values():
 		var archetype: Dictionary = archetype_value
 		if String(archetype.get("category", "")) != "projectile":

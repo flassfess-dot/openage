@@ -90,6 +90,8 @@ func _gazelle_flee_command(world, gazelle: Dictionary, tick: int):
 		var candidate: Dictionary = candidate_value
 		if int(candidate.get("id", -1)) == gazelle_id or float(candidate.get("hp", 0.0)) <= 0.0:
 			continue
+		if position.distance_squared_to(Vector2(candidate.get("pos", Vector2.ZERO))) > GAZELLE_FLEE_RANGE * GAZELLE_FLEE_RANGE:
+			continue
 		if int(candidate.get("team", 0)) <= 0 and String(candidate.get("kind", "")) != "lion":
 			continue
 		threats.append(candidate)
@@ -106,7 +108,7 @@ func _gazelle_flee_command(world, gazelle: Dictionary, tick: int):
 	if away.length_squared() <= 0.0001:
 		var direction_index := _deterministic_roll(gazelle_id, tick, 67, DIRECTION_COUNT)
 		away = Vector2.RIGHT.rotated(TAU * float(direction_index) / float(DIRECTION_COUNT))
-	var target := _flee_target(world, gazelle, away.normalized())
+	var target: Variant = _flee_target(world, gazelle, away.normalized())
 	if target == null:
 		return null
 	return Commands.MoveCommand.new(tick, [gazelle_id], target)
@@ -145,6 +147,8 @@ func _predator_command(world, predator: Dictionary, tick: int):
 		var candidate: Dictionary = candidate_value
 		if int(candidate.get("id", -1)) == predator_id or float(candidate.get("hp", 0.0)) <= 0.0:
 			continue
+		if predator_position.distance_squared_to(Vector2(candidate.get("pos", Vector2.ZERO))) > aggression_range * aggression_range:
+			continue
 		var player_creature := int(candidate.get("team", 0)) > 0
 		var wildlife_prey := hunts_gazelles and String(candidate.get("kind", "")) == "gazelle"
 		if coastal_predator:
@@ -164,7 +168,7 @@ func _predator_command(world, predator: Dictionary, tick: int):
 	var target: Variant = null
 	for candidate_value in candidates:
 		var candidate: Dictionary = candidate_value
-		var reachable := _can_reach_along_coast(world, predator, Vector2(candidate.get("pos", Vector2.ZERO))) if coastal_predator else world.can_unit_reach_entity(predator, candidate)
+		var reachable: bool = bool(_can_reach_along_coast(world, predator, Vector2(candidate.get("pos", Vector2.ZERO))) if coastal_predator else world.can_unit_reach_entity(predator, candidate))
 		if reachable:
 			target = candidate
 			break

@@ -18,12 +18,16 @@ var request_sequence: int = 0
 var last_played_by_category: Dictionary = {}
 
 
-func configure(runtime_data: Dictionary, sound_data: Dictionary, asset_records: Variant, graphics_data: Dictionary = {}, object_data: Dictionary = {}) -> void:
+func configure(runtime_data: Dictionary, sound_data: Dictionary, asset_records: Variant, graphics_data: Dictionary = {}, object_data: Dictionary = {}, indexed_audio_assets: Dictionary = {}) -> void:
 	runtime_catalog = runtime_data
 	object_catalog = object_data
 	sound_catalog = sound_data
 	graphics_catalog = graphics_data
 	assets_by_resource_id.clear()
+	if not indexed_audio_assets.is_empty():
+		assets_by_resource_id = indexed_audio_assets.duplicate()
+		reset()
+		return
 	var records: Array = asset_records.values() if asset_records is Dictionary else asset_records if asset_records is Array else []
 	for metadata_value in records:
 		var metadata: Dictionary = metadata_value
@@ -172,12 +176,10 @@ func _entity_graphic_id(entity: Dictionary, animation_state: String, civilizatio
 	var archetype: Dictionary = runtime_catalog.get("archetypes", {}).get(kind, {})
 	if archetype.is_empty():
 		return -1
-	var state_specs: Dictionary = archetype.get("runtime", {}).get("presentation_states", {}).duplicate(true)
+	var state_specs: Dictionary = archetype.get("runtime", {}).get("presentation_states", {})
 	var source_unit_id := int(entity.get("source_unit_id", archetype.get("identifiers", {}).get("source_unit_id", -1)))
 	var variant: Dictionary = archetype.get("runtime", {}).get("presentation_variants", {}).get(String.num_int64(source_unit_id), {})
-	for state_value in variant:
-		state_specs[state_value] = variant[state_value]
-	var state_spec: Dictionary = state_specs.get(animation_state, {})
+	var state_spec: Dictionary = variant.get(animation_state, state_specs.get(animation_state, {}))
 	var audio_graphic_field := String(state_spec.get("audio_graphic_field", ""))
 	if not audio_graphic_field.is_empty():
 		var audio_source_id := int(entity.get("source_unit_id", archetype.get("identifiers", {}).get("source_unit_id", -1)))

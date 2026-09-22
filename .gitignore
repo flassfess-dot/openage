@@ -83,6 +83,7 @@ perf.data*
 /prototype/.godot/
 /prototype/assets/audio/
 /prototype/assets/generated/
+/prototype/assets/ui/**/*.import
 /prototype/qa/
 /tools/ror_import/scenario_converter/target/
 

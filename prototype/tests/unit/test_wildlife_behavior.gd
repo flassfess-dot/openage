@@ -2,13 +2,19 @@ extends SceneTree
 
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
-const WildlifeBehaviorSystem := preload("res://scripts/wildlife_behavior_system.gd")
+const WILDLIFE_SCRIPT_PATH := "res://scripts/wildlife_behavior_system.gd"
 
 var failures: Array[String] = []
 var catalog
+var WildlifeBehaviorSystem: Script
 
 
 func _initialize() -> void:
+	WildlifeBehaviorSystem = load(WILDLIFE_SCRIPT_PATH) as Script
+	if WildlifeBehaviorSystem == null or not WildlifeBehaviorSystem.can_instantiate():
+		push_error("wildlife behavior script does not compile")
+		quit(1)
+		return
 	catalog = ResourceCatalog.new()
 	catalog.load_generated_data()
 	test_original_wildlife_contract()
@@ -114,7 +120,7 @@ func test_alligator_hunts_only_beside_the_coast() -> void:
 	alligator["task"] = "attack"
 	alligator["target_id"] = inland_villager["id"]
 	var return_tick := decision_tick(int(alligator["id"]), WildlifeBehaviorSystem.COAST_RETURN_INTERVAL_TICKS, 41, 2)
-	var disengage := wildlife.collect_commands(world, return_tick).filter(func(command): return command.unit_ids.has(int(alligator["id"])) and command.command_type() in ["move", "stop"])
+	var disengage: Array = wildlife.collect_commands(world, return_tick).filter(func(command): return command.unit_ids.has(int(alligator["id"])) and command.command_type() in ["move", "stop"])
 	assert_equal(disengage.size(), 1, "alligator abandons a target that leaves the coast")
 
 	alligator["pos"] = Vector2(9.5, 10.5)

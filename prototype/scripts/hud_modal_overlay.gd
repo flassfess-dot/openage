@@ -45,7 +45,7 @@ func configure(skin, definition: Dictionary, requested_style_index: int = 0, loc
 	interface_skin = skin
 	localization = localization_catalog
 	match_definition = definition.duplicate(true)
-	style_index = clampi(requested_style_index, 0, 3)
+	style_index = clampi(requested_style_index, 0, 4)
 	for button in [resume_button, save_button, load_button, resign_button, launcher_button, diplomacy_close_button]:
 		_apply_source_button_style(button)
 
@@ -332,6 +332,10 @@ func _row_label(text: String, color: Color) -> Label:
 func _apply_source_button_style(button: Button) -> void:
 	if interface_skin == null:
 		return
+	var text_color: Color = interface_skin.text_color(style_index)
+	button.add_theme_color_override("font_color", text_color)
+	button.add_theme_color_override("font_hover_color", text_color.lightened(0.12))
+	button.add_theme_color_override("font_pressed_color", text_color.darkened(0.08))
 	var source: Dictionary = interface_skin.menu_button(style_index, true)
 	if source.is_empty():
 		return

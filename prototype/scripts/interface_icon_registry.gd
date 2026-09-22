@@ -17,10 +17,21 @@ var records_by_sheet: Dictionary = {}
 var texture_cache: Dictionary = {}
 
 
-func configure(asset_records: Variant) -> void:
+func configure(asset_records: Variant, indexed_frame_records: Dictionary = {}) -> void:
 	records_by_sheet.clear()
 	texture_cache.clear()
-	var records: Array = asset_records.values() if asset_records is Dictionary else asset_records if asset_records is Array else []
+	var records: Array = []
+	if not indexed_frame_records.is_empty():
+		var indexed_sheets: Dictionary = {}
+		for sheet_name_value in ASSET_NAMES.values():
+			var sheet_name := String(sheet_name_value)
+			if indexed_sheets.has(sheet_name):
+				continue
+			indexed_sheets[sheet_name] = true
+			for record_value in indexed_frame_records.get(sheet_name, []):
+				records.append(record_value)
+	else:
+		records = asset_records.values() if asset_records is Dictionary else asset_records if asset_records is Array else []
 	for record_value in records:
 		var record: Dictionary = record_value
 		if String(record.get("archive", "")) != "interfac" or not record.has("frame"):

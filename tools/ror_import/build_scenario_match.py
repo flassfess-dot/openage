@@ -1019,6 +1019,7 @@ def runtime_entities(
         ):
             position = source["position"]
             graphic_id = int(source_record.get("graphics", {}).get("idle", -1))
+            movement_graphic_id = int(source_record.get("graphics", {}).get("move", -1))
             owner_system, _strategy = GAIA_OWNER_CONTRACTS[owner_category]
             source["runtime_status"] = "presentation_environment"
             source["runtime_alias"] = owner_category
@@ -1038,6 +1039,9 @@ def runtime_entities(
                     "source_frame": int(source.get("frame", -1)),
                     "graphic_id": graphic_id,
                     "asset_name": f"graphic_{graphic_id}",
+                    "movement_graphic_id": movement_graphic_id,
+                    "movement_asset_name": f"graphic_{movement_graphic_id}",
+                    "map_size": [width, height],
                     "presentation_layer": (
                         "decal"
                         if owner_category == "terrain_feature"

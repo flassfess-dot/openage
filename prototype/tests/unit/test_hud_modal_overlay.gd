@@ -21,7 +21,7 @@ func _initialize() -> void:
 			{"team": 2, "controller": "ai", "civilization_id": 1},
 			{"team": 3, "controller": "ai", "civilization_id": 4},
 		],
-	}, 0, catalog.localization)
+	}, 4, catalog.localization)
 	overlay.set_viewport_size(Vector2(800, 600))
 	overlay.set_snapshot({"player_state": {
 		"team": 1,
@@ -37,6 +37,7 @@ func _initialize() -> void:
 	overlay.show_menu()
 	assert_true(overlay.is_blocking(), "menu blocks world input")
 	assert_true(overlay.menu_panel.visible and not overlay.diplomacy_panel.visible, "menu owns the visible modal panel")
+	assert_equal(overlay.resume_button.get_theme_color("font_color"), Color("f4e6c7"), "Roman menu actions remain readable on the dark source buttons")
 	assert_equal(overlay.resume_button.custom_minimum_size, Vector2(108, 20), "modal action keeps native wide source-button dimensions")
 	overlay.set_save_available(false)
 	assert_true(overlay.load_button.disabled, "load action reports an absent quick save")

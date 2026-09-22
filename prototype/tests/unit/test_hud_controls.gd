@@ -21,6 +21,12 @@ func _initialize() -> void:
 func test_buttons_and_signals() -> void:
 	var hud = HUDControls.new()
 	assert_equal(hud.formation_buttons.size(), 5, "formation button count")
+	for formation_name in ["LINE", "RECTANGLE", "COLUMN", "WEDGE", "STAGGERED"]:
+		var icon: Texture2D = hud.formation_buttons[formation_name].icon
+		assert_true(icon != null, "%s formation has a dedicated icon" % formation_name)
+		if icon != null:
+			assert_equal(Vector2i(icon.get_width(), icon.get_height()), Vector2i(50, 50), "%s formation icon uses the source command size" % formation_name)
+		assert_equal(hud.formation_buttons[formation_name].text, "", "%s formation uses icon-only presentation" % formation_name)
 	assert_equal(hud.train_button.tooltip_text.is_empty(), false, "train tooltip")
 	hud.set_state("WEDGE", false)
 	assert_equal(hud.formation_buttons["WEDGE"].button_pressed, true, "pressed formation state")
@@ -32,6 +38,15 @@ func test_buttons_and_signals() -> void:
 	for formation_name in ["LINE", "RECTANGLE", "COLUMN", "WEDGE", "STAGGERED"]:
 		hud.formation_buttons[formation_name].emit_signal("pressed")
 		assert_equal(requested[0], formation_name, "%s button emits immediate reform action" % formation_name)
+	hud.set_view_model({"commands": [
+		{"type": "formation", "id": "LINE", "label": "Линия", "hotkey": "F5", "enabled": true, "active": false, "reason": ""},
+		{"type": "formation", "id": "RECTANGLE", "label": "Каре", "hotkey": "F6", "enabled": true, "active": false, "reason": ""},
+		{"type": "formation", "id": "COLUMN", "label": "Колонна", "hotkey": "F7", "enabled": true, "active": false, "reason": ""},
+		{"type": "formation", "id": "WEDGE", "label": "Клин", "hotkey": "F8", "enabled": true, "active": true, "reason": ""},
+		{"type": "formation", "id": "STAGGERED", "label": "Шахматный", "hotkey": "F9", "enabled": true, "active": false, "reason": ""},
+	]})
+	assert_true(hud.formation_buttons["LINE"].tooltip_text.contains("Линия") and hud.formation_buttons["LINE"].tooltip_text.contains("F5"), "formation tooltip preserves its localized name and hotkey")
+	assert_true(hud.formation_buttons["WEDGE"].button_pressed, "formation icon preserves active state")
 
 	var train_request := ["", -1]
 	hud.train_requested.connect(func(kind: String, building_id: int):

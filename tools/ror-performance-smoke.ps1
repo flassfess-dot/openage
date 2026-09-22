@@ -154,6 +154,7 @@ function Get-NestedValue {
 
 $functionalTests = @(
     @{ Id = "performance-observability"; Script = "res://tests/unit/test_performance_observability.gd" },
+    @{ Id = "resource-loading-policy"; Script = "res://tests/unit/test_resource_loading_policy.gd" },
     @{ Id = "entity-lookup-index"; Script = "res://tests/unit/test_entity_lookup_index.gd" },
     @{ Id = "spatial-hash"; Script = "res://tests/unit/test_spatial_hash_queries.gd" },
     @{ Id = "navigation-grid"; Script = "res://tests/unit/test_navigation_grid.gd" },

@@ -101,6 +101,7 @@ var terrain_border_textures := {}
 var tree_texture: Texture2D
 var berry_texture: Texture2D
 var interface_panel_texture: Texture2D
+var interface_style_index := 0
 var health_status_frames: Array[Texture2D] = []
 var unit_textures := {}
 var gamespec_data: Dictionary = {}
@@ -180,7 +181,8 @@ func _ready() -> void:
 	terrain_border_textures = resource_catalog.terrain_border_textures
 	tree_texture = resource_catalog.tree_texture
 	berry_texture = resource_catalog.berry_texture
-	interface_panel_texture = resource_catalog.interface_panel_texture
+	interface_style_index = resource_catalog.interface_skin.style_index_for_match(match_definition, resource_catalog.object_catalog_data)
+	interface_panel_texture = resource_catalog.interface_skin.panel_texture(interface_style_index)
 	var status_candidate: Dictionary = resource_catalog.interface_skin.status_candidate()
 	if resource_catalog.interface_skin.is_unit_health(status_candidate):
 		for texture_value in status_candidate.get("frames", []):
@@ -198,7 +200,7 @@ func _ready() -> void:
 	hud_controls = HUDControls.new()
 	add_child(hud_controls)
 	hud_controls.configure_icons(resource_catalog.interface_icons)
-	hud_controls.configure_interface_skin(resource_catalog.interface_skin, 0)
+	hud_controls.configure_interface_skin(resource_catalog.interface_skin, interface_style_index)
 	hud_controls.position = Vector2.ZERO
 	hud_controls.size = get_viewport_rect().size
 	hud_controls.formation_requested.connect(set_formation)
@@ -210,13 +212,13 @@ func _ready() -> void:
 	hud_controls.unit_action_requested.connect(issue_unit_action)
 	top_bar_controls = TopBarControls.new()
 	add_child(top_bar_controls)
-	top_bar_controls.configure(resource_catalog.interface_skin, 0)
+	top_bar_controls.configure(resource_catalog.interface_skin, interface_style_index)
 	top_bar_controls.set_viewport_size(get_viewport_rect().size)
 	top_bar_controls.diplomacy_requested.connect(_show_diplomacy_summary)
 	top_bar_controls.menu_requested.connect(_toggle_game_menu)
 	hud_modal_overlay = HUDModalOverlay.new()
 	add_child(hud_modal_overlay)
-	hud_modal_overlay.configure(resource_catalog.interface_skin, match_definition, 0, resource_catalog.localization)
+	hud_modal_overlay.configure(resource_catalog.interface_skin, match_definition, interface_style_index, resource_catalog.localization)
 	hud_modal_overlay.set_viewport_size(get_viewport_rect().size)
 	hud_modal_overlay.close_requested.connect(_close_hud_modal)
 	hud_modal_overlay.save_requested.connect(_save_quick_game)
@@ -268,7 +270,7 @@ func setup_sfx() -> void:
 		add_child(player)
 		sfx_players.append(player)
 	sfx_player = sfx_players[0]
-	presentation_audio_router.configure(resource_catalog.runtime_catalog_data, resource_catalog.sound_catalog_data, resource_catalog.asset_records, resource_catalog.graphics_catalog_data, resource_catalog.object_catalog_data)
+	presentation_audio_router.configure(resource_catalog.runtime_catalog_data, resource_catalog.sound_catalog_data, resource_catalog.asset_records, resource_catalog.graphics_catalog_data, resource_catalog.object_catalog_data, resource_catalog.audio_asset_files_by_resource_id)
 	presentation_audio_event_router.configure(presentation_audio_router)
 	presentation_effect_timeline.configure(resource_catalog.effect_presentations)
 
@@ -1421,6 +1423,8 @@ func sync_world_state(force: bool = true) -> void:
 	if cached_environment_items.is_empty() or cached_environment_bounds != environment_bounds:
 		cached_environment_bounds = environment_bounds
 		cached_environment_items = environment_presentation_field.query(environment_bounds)
+		cached_environment_items.append_array(environment_presentation_field.mobile_items())
+		cached_environment_items.sort_custom(func(left, right): return int(left.get("id", 0)) < int(right.get("id", 0)))
 	presentation_snapshot["environment"] = cached_environment_items
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.environment", Time.get_ticks_usec() - stage_started)
@@ -2027,11 +2031,12 @@ func draw_hud() -> void:
 	var layout := InterfaceLayout.for_viewport(viewport_size)
 	var resources: Dictionary = hud_model.get("resources", {})
 	draw_source_hud_shell(layout)
+	var hud_text_color: Color = resource_catalog.interface_skin.text_color(interface_style_index)
 	var resource_x := [32.0, 104.0, 172.0, 240.0]
 	var resource_keys := ["wood", "food", "gold", "stone"]
 	for index in range(resource_x.size()):
-		draw_string(font, Vector2(resource_x[index], 15), String.num_int64(int(resources.get(resource_keys[index], 0))), HORIZONTAL_ALIGNMENT_LEFT, 44.0, 11, Color("20180f"))
-	draw_string(font, Vector2(width * 0.5 - 90.0, 15), String(hud_model.get("age", {}).get("label", "")), HORIZONTAL_ALIGNMENT_CENTER, 180.0, 11, Color("20180f"))
+		draw_string(font, Vector2(resource_x[index], 15), String.num_int64(int(resources.get(resource_keys[index], 0))), HORIZONTAL_ALIGNMENT_LEFT, 44.0, 11, hud_text_color)
+	draw_string(font, Vector2(width * 0.5 - 90.0, 15), String(hud_model.get("age", {}).get("label", "")), HORIZONTAL_ALIGNMENT_CENTER, 180.0, 11, hud_text_color)
 
 	var command_rect: Rect2 = layout["command"]
 	var info_rect: Rect2 = layout["selection"]
@@ -2092,7 +2097,7 @@ func draw_source_hud_shell(layout: Dictionary) -> void:
 		while x < viewport_size.x:
 			draw_texture(interface_panel_texture, Vector2(x, bottom_rect.position.y))
 			x += float(interface_panel_texture.get_width())
-	var shell: Dictionary = resource_catalog.interface_skin.hud_shell(int(layout["source_width"]), 0)
+	var shell: Dictionary = resource_catalog.interface_skin.hud_shell(int(layout["source_width"]), interface_style_index)
 	var top_texture: Texture2D = shell.get("top")
 	var bottom_texture: Texture2D = shell.get("bottom")
 	if top_texture == null or bottom_texture == null:

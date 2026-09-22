@@ -18,6 +18,7 @@ func _initialize() -> void:
 
 
 func test_source_resolution_layouts() -> void:
+	assert_equal(InterfaceLayout.shell_asset_name(1024, 4), "hud_shell_1024_4", "Rise of Rome style remains distinct from the four base styles")
 	for size in [Vector2(640, 480), Vector2(800, 600), Vector2(1024, 768)]:
 		var layout := InterfaceLayout.for_viewport(size)
 		assert_equal(int(layout["source_width"]), int(size.x), "source width %d" % int(size.x))

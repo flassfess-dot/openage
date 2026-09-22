@@ -17,7 +17,7 @@ var records_by_name: Dictionary = {}
 var effect_presentations
 
 
-func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, records: Array, effect_registry = null) -> void:
+func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, records: Array, effect_registry = null, indexed_frame_records: Dictionary = {}) -> void:
 	runtime_catalog = runtime_data
 	object_catalog = object_data
 	graphics_catalog = graphics_data
@@ -27,7 +27,7 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 	graphic_ids.clear()
 	composite_parts.clear()
 	definitions.clear()
-	records_by_name = _records_by_name()
+	records_by_name = indexed_frame_records.duplicate() if not indexed_frame_records.is_empty() else _records_by_name()
 	effect_presentations = effect_registry
 	var archetypes: Dictionary = runtime_catalog.get("archetypes", {})
 	var aliases: Array = archetypes.keys()
@@ -50,9 +50,9 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 			# Variants are sparse overlays. Shared task states and lifecycle clips stay
 			# inherited when a source upgrade changes only one graphic (for example
 			# the Iron Age Villager attack).
-			var variant_states: Dictionary = state_specs.duplicate(true)
+			var variant_states: Dictionary = state_specs.duplicate()
 			for state_value in variants[source_id_value]:
-				variant_states[state_value] = variants[source_id_value][state_value].duplicate(true)
+				variant_states[state_value] = variants[source_id_value][state_value]
 			_register_team(alias, "%s#%d" % [alias, source_id], 1, archetype, variant_states, source_id)
 			_register_team(alias, "enemy_%s#%d" % [alias, source_id], 2, archetype, variant_states, source_id)
 

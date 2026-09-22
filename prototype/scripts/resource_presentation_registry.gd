@@ -7,16 +7,22 @@ var graphics_catalog: Dictionary = {}
 var frames_by_asset: Dictionary = {}
 var metadata_by_asset_frame: Dictionary = {}
 var records_by_asset: Dictionary = {}
+var valid_records_by_asset: Dictionary = {}
+var declared_assets: Dictionary = {}
 
 
-func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, asset_records: Array) -> void:
+func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, asset_records: Array, indexed_frame_records: Dictionary = {}) -> void:
 	runtime_catalog = runtime_data
 	object_catalog = object_data
 	graphics_catalog = graphics_data
 	frames_by_asset.clear()
 	metadata_by_asset_frame.clear()
+	valid_records_by_asset.clear()
+	declared_assets = _required_asset_names()
+	if not indexed_frame_records.is_empty():
+		records_by_asset = indexed_frame_records.duplicate()
+		return
 	records_by_asset.clear()
-	var required_assets := _required_asset_names()
 	for record_value in asset_records:
 		var record: Dictionary = record_value
 		if String(record.get("archive", "")) != "graphics" or not record.has("frame"):
@@ -27,8 +33,9 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 		if not records_by_asset.has(name):
 			records_by_asset[name] = []
 		records_by_asset[name].append(record)
-	for asset_name_value in required_assets:
-		_load_asset(String(asset_name_value))
+	for records_value in records_by_asset.values():
+		var records: Array = records_value
+		records.sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
 
 
 func _load_asset(asset_name: String) -> void:
@@ -54,9 +61,11 @@ func has_frame_records(asset_name: String) -> bool:
 
 
 func valid_frame_records(asset_name: String) -> Array:
-	var records: Array = records_by_asset.get(asset_name, []).duplicate()
-	records.sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
-	return records.filter(func(record): return not _is_invalid_resource_frame(record))
+	if valid_records_by_asset.has(asset_name):
+		return valid_records_by_asset[asset_name]
+	var records: Array = records_by_asset.get(asset_name, []).filter(func(record): return not _is_invalid_resource_frame(record))
+	valid_records_by_asset[asset_name] = records
+	return records
 
 
 func _is_invalid_resource_frame(record: Dictionary) -> bool:
@@ -120,7 +129,7 @@ func _animated_frame(resource: Dictionary, entity_id: int, animation_time: float
 
 func has_presentation(kind: String) -> bool:
 	var metadata: Dictionary = runtime_catalog.get("archetypes", {}).get(kind, {}).get("runtime", {})
-	return frames_by_asset.has(String(metadata.get("asset_name", "")))
+	return records_by_asset.has(String(metadata.get("asset_name", "")))
 
 
 func _required_asset_names() -> Dictionary:
@@ -144,9 +153,12 @@ func _required_asset_names() -> Dictionary:
 
 
 func _resource_metadata(resource: Dictionary) -> Dictionary:
-	var metadata: Dictionary = runtime_catalog.get("archetypes", {}).get(String(resource.get("kind", "")), {}).get("runtime", {}).duplicate(true)
+	var base_metadata: Dictionary = runtime_catalog.get("archetypes", {}).get(String(resource.get("kind", "")), {}).get("runtime", {})
 	var source_unit_id := String.num_int64(int(resource.get("source_unit_id", -1)))
-	var variant: Dictionary = metadata.get("presentation_variants", {}).get(source_unit_id, {})
+	var variant: Dictionary = base_metadata.get("presentation_variants", {}).get(source_unit_id, {})
+	if variant.is_empty():
+		return base_metadata
+	var metadata := base_metadata.duplicate()
 	for key in variant:
 		metadata[key] = variant[key]
 	return metadata

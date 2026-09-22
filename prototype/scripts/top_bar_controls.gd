@@ -23,7 +23,8 @@ func _init() -> void:
 
 func configure(skin, requested_style_index: int = 0) -> void:
 	interface_skin = skin
-	style_index = clampi(requested_style_index, 0, 3)
+	style_index = clampi(requested_style_index, 0, 4)
+	apply_text_colors()
 	apply_source_style(diplomacy_button, true)
 	apply_source_style(menu_button, false)
 	layout_controls()
@@ -59,6 +60,18 @@ func create_button(label: String) -> Button:
 	button.add_theme_color_override("font_hover_color", Color("20180f"))
 	button.add_theme_color_override("font_pressed_color", Color("20180f"))
 	return button
+
+
+func apply_text_colors() -> void:
+	if interface_skin == null:
+		return
+	var text_color: Color = interface_skin.text_color(style_index)
+	var hover_color := text_color.lightened(0.12)
+	var pressed_color := text_color.darkened(0.08)
+	for button in [diplomacy_button, menu_button]:
+		button.add_theme_color_override("font_color", text_color)
+		button.add_theme_color_override("font_hover_color", hover_color)
+		button.add_theme_color_override("font_pressed_color", pressed_color)
 
 
 func apply_source_style(button: Button, medium: bool) -> void:

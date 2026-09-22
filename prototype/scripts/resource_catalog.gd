@@ -2,6 +2,7 @@ class_name RoRResourceCatalog
 
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
 const CompositeGraphic := preload("res://scripts/composite_graphic.gd")
+const FacingConvention := preload("res://scripts/facing_convention.gd")
 const BuildingPresentationRegistry := preload("res://scripts/building_presentation_registry.gd")
 const ResourcePresentationRegistry := preload("res://scripts/resource_presentation_registry.gd")
 const UnitPresentationRegistry := preload("res://scripts/unit_presentation_registry.gd")
@@ -37,12 +38,15 @@ var interface_source_inventory_data: Dictionary = {}
 var localization := LocalizationCatalog.new()
 var asset_metadata: Dictionary = {}
 var asset_records: Array = []
+var asset_frame_records_by_archive: Dictionary = {}
+var audio_asset_files_by_resource_id: Dictionary = {}
 var graphic_descriptors: Dictionary = {}
 var composite_textures: Dictionary = {}
 var composite_descriptors: Dictionary = {}
 var scenario_marker_textures: Dictionary = {}
 var source_resource_textures: Dictionary = {}
 var source_resource_frame_metadata: Dictionary = {}
+var environment_graphic_descriptors: Dictionary = {}
 var building_presentations := BuildingPresentationRegistry.new()
 var resource_presentations := ResourcePresentationRegistry.new()
 var unit_presentations := UnitPresentationRegistry.new()
@@ -53,9 +57,12 @@ var interface_skin := InterfaceSkin.new()
 
 func load() -> void:
 	load_generated_data()
+	var graphics_frame_records: Dictionary = asset_frame_records_by_archive.get("graphics", {})
+	var interface_frame_records: Dictionary = asset_frame_records_by_archive.get("interfac", {})
 	scenario_marker_textures.clear()
 	source_resource_textures.clear()
 	source_resource_frame_metadata.clear()
+	environment_graphic_descriptors.clear()
 	terrain_textures = {
 		"grass": load_frames("terrain_grass", 9),
 		"sand": load_frames("terrain_sand", 9),
@@ -78,19 +85,19 @@ func load() -> void:
 	tree_texture = load("res://assets/generated/tree.png")
 	tree_stump_textures = load_frames("tree_stump", 4)
 	berry_texture = load("res://assets/generated/berry_bush.png")
-	interface_skin.configure(asset_records, interface_source_inventory_data)
-	interface_panel_texture = interface_skin.texture("interface_panel")
+	interface_skin.configure(asset_records, interface_source_inventory_data, interface_frame_records)
+	interface_panel_texture = interface_skin.panel_texture(0)
 	if interface_panel_texture == null:
 		interface_panel_texture = load("res://assets/generated/interface_panel.png")
-	effect_presentations.configure(graphics_catalog_data, asset_records)
-	unit_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records, effect_presentations)
+	effect_presentations.configure(graphics_catalog_data, asset_records, graphics_frame_records)
+	unit_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records, effect_presentations, graphics_frame_records)
 	unit_textures = unit_presentations.textures
 	build_graphic_descriptors()
 	load_composite_graphics()
-	building_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_metadata)
-	resource_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records)
-	projectile_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records)
-	interface_icons.configure(asset_records)
+	building_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_metadata, graphics_frame_records)
+	resource_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records, graphics_frame_records)
+	projectile_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records, graphics_frame_records)
+	interface_icons.configure(asset_records, interface_frame_records)
 
 func read_json(path: String):
 	var file := FileAccess.open(path, FileAccess.READ)
@@ -102,15 +109,38 @@ func read_json(path: String):
 func load_generated_data() -> void:
 	asset_metadata.clear()
 	asset_records.clear()
+	asset_frame_records_by_archive.clear()
+	audio_asset_files_by_resource_id.clear()
 	var parsed_gamespec = read_json("res://assets/generated/gamespec-prototype.json")
 	if parsed_gamespec is Dictionary:
 		gamespec_data = parsed_gamespec
 	var parsed_assets = read_json("res://assets/generated/assets.json")
 	if parsed_assets is Array:
-		for item in parsed_assets:
-			asset_records.append(item.duplicate(true))
+		for item_value in parsed_assets:
+			if not item_value is Dictionary:
+				continue
+			var item: Dictionary = item_value
+			# Parsed generated catalogs are immutable runtime data. Retaining their
+			# dictionaries avoids a second deep copy of the 12+ MB asset manifest.
+			asset_records.append(item)
 			if item.has("frame"):
 				asset_metadata[asset_key(item["name"], int(item["frame"]))] = item
+				var archive := String(item.get("archive", ""))
+				var name := String(item.get("name", ""))
+				if not archive.is_empty() and not name.is_empty():
+					if not asset_frame_records_by_archive.has(archive):
+						asset_frame_records_by_archive[archive] = {}
+					var archive_records: Dictionary = asset_frame_records_by_archive[archive]
+					if not archive_records.has(name):
+						archive_records[name] = []
+					archive_records[name].append(item)
+			if String(item.get("extension", "")).to_lower() == "wav" and item.has("id"):
+				audio_asset_files_by_resource_id[int(item["id"])] = String(item.get("file", ""))
+		for grouped_records_value in asset_frame_records_by_archive.values():
+			var grouped_records: Dictionary = grouped_records_value
+			for records_value in grouped_records.values():
+				var records: Array = records_value
+				records.sort_custom(func(left, right): return int(left.get("frame", 0)) < int(right.get("frame", 0)))
 	var parsed_graphics = read_json("res://assets/generated/graphics-catalog.json")
 	if parsed_graphics is Dictionary:
 		graphics_catalog_data = parsed_graphics
@@ -287,6 +317,14 @@ func effect_frame_info(effect: Dictionary) -> Dictionary:
 func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Dictionary:
 	var graphic_id := int(item.get("graphic_id", -1))
 	var asset_name := String(item.get("asset_name", ""))
+	var ambient_actor := String(item.get("presentation_layer", "scenery")) == "ambient_actor"
+	if ambient_actor:
+		var source_unit_id := int(item.get("source_unit_id", -1))
+		var source_record: Dictionary = object_catalog_data.get("objects", {}).get("0:%d" % source_unit_id, {})
+		var movement_graphic_id := int(item.get("movement_graphic_id", source_record.get("graphics", {}).get("move", -1)))
+		if movement_graphic_id >= 0:
+			graphic_id = movement_graphic_id
+			asset_name = String(item.get("movement_asset_name", "graphic_%d" % movement_graphic_id))
 	var spec: Dictionary = graphics_catalog_data.get("graphics", {}).get(String.num_int64(graphic_id), {})
 	if graphic_id < 0 or asset_name.is_empty() or spec.is_empty():
 		return {}
@@ -297,10 +335,23 @@ func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Di
 		return {}
 	var source_frame := int(item.get("source_frame", -1))
 	var frame_index := posmod(source_frame, frames.size()) if source_frame >= 0 else posmod(int(item.get("scenario_object_id", item.get("id", 0))), frames.size())
-	var frame_rate := float(spec.get("frame_rate", 0.0))
-	if bool(item.get("animated", false)) and frame_rate > 0.0:
-		var phase := posmod(int(item.get("scenario_object_id", item.get("id", 0))) * 1618, 1000) / 1000.0
-		frame_index = posmod(floori(animation_time / frame_rate + phase * frames.size()), frames.size())
+	var mirrored := false
+	if ambient_actor:
+		if not environment_graphic_descriptors.has(asset_name):
+			environment_graphic_descriptors[asset_name] = GraphicDescriptor.new(asset_name, spec, frames.size(), true)
+		var descriptor = environment_graphic_descriptors[asset_name]
+		var movement_direction := Vector2(item.get("movement_direction", Vector2.RIGHT))
+		var logical_facing := FacingConvention.logical_for_world(movement_direction, descriptor.logical_angle_count)
+		var cycle_duration: float = float(descriptor.frames_per_angle) * float(descriptor.frame_duration)
+		var phase: float = float(posmod(int(item.get("scenario_object_id", item.get("id", 0))) * 1618, 1000)) / 1000.0 * cycle_duration
+		var resolved: Dictionary = descriptor.resolve(logical_facing, animation_time + phase, frames.size())
+		frame_index = int(resolved.get("frame_index", 0))
+		mirrored = bool(resolved.get("mirrored", false))
+	else:
+		var frame_rate := float(spec.get("frame_rate", 0.0))
+		if bool(item.get("animated", false)) and frame_rate > 0.0:
+			var phase := posmod(int(item.get("scenario_object_id", item.get("id", 0))) * 1618, 1000) / 1000.0
+			frame_index = posmod(floori(animation_time / frame_rate + phase * frames.size()), frames.size())
 	var texture: Texture2D = frames[frame_index]
 	if texture == null:
 		return {}
@@ -315,7 +366,7 @@ func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Di
 		"graphic_id": graphic_id,
 		"frame_index": frame_index,
 		"hotspot": hotspot,
-		"mirrored": false,
+		"mirrored": mirrored,
 		"graphic_layer": int(spec.get("layer", 0)),
 	}
 

@@ -9,11 +9,14 @@ var frames_by_key: Dictionary = {}
 var descriptors_by_key: Dictionary = {}
 
 
-func configure(graphics_data: Dictionary, asset_records: Array) -> void:
+func configure(graphics_data: Dictionary, asset_records: Array, indexed_frame_records: Dictionary = {}) -> void:
 	graphics_catalog = graphics_data
-	records_by_name.clear()
 	frames_by_key.clear()
 	descriptors_by_key.clear()
+	if not indexed_frame_records.is_empty():
+		records_by_name = indexed_frame_records.duplicate()
+		return
+	records_by_name.clear()
 	for record_value in asset_records:
 		var record: Dictionary = record_value
 		if String(record.get("archive", "")) != "graphics" or not record.has("frame"):
