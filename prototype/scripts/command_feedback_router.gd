@@ -26,12 +26,24 @@ func consume(events: Array, player_issuer_id: int) -> Array[Dictionary]:
 		var event: Dictionary = event_value
 		event_cursor = maxi(event_cursor, int(event.get("sequence_id", 0)))
 		var event_type := String(event.get("type", ""))
-		if event_type not in ["command_accepted", "command_rejected"]:
+		if event_type not in ["command_accepted", "command_rejected", "queued_order_rejected"]:
 			continue
 		var payload: Dictionary = event.get("payload", {})
 		if int(payload.get("issuer_id", 0)) != player_issuer_id:
 			continue
 		var command_sequence := int(payload.get("sequence_id", -1))
+		if event_type == "queued_order_rejected":
+			feedback_events.append({
+				"type": "command_feedback",
+				"accepted": false,
+				"sequence_id": command_sequence,
+				"command_type": String(payload.get("command_type", "")),
+				"reason": String(payload.get("reason", "command_rejected")),
+				"message": rejected_message(String(payload.get("reason", "command_rejected"))),
+				"sound_name": "",
+				"marker": null,
+			})
+			continue
 		# Derived AI/stance reactions use the same command stream but were never
 		# registered by a pointer/UI gesture and must not impersonate player input.
 		if not pending.has(command_sequence):
@@ -55,10 +67,12 @@ func consume(events: Array, player_issuer_id: int) -> Array[Dictionary]:
 static func accepted_message(command_type: String) -> String:
 	return String({
 		"attack": "Атаковать цель",
+		"attack_ground": "Атаковать указанную точку",
 		"attack_move": "Атаковать с продвижением",
 		"convert": "Обратить цель",
 		"heal": "Исцелить союзника",
 		"martyrdom": "Жертвоприношение совершено",
+		"delete_entity": "Выбранные объекты удалены",
 		"gather": "Собирать ресурс",
 		"return_resources": "Сдать ресурсы",
 		"board": "Погрузиться в транспорт",
@@ -66,7 +80,8 @@ static func accepted_message(command_type: String) -> String:
 		"set_trade_resource": "Торговый ресурс выбран",
 		"trade": "Торговый маршрут назначен",
 		"build": "Продолжить строительство",
-		"repair": "Ремонтировать здание",
+		"repair": "Ремонтировать цель",
+		"tribute": "Дань отправлена",
 		"formation_move": "Приказ движения принят",
 		"move": "Приказ движения принят",
 		"stop": "Юниты остановлены",
@@ -82,6 +97,10 @@ static func accepted_message(command_type: String) -> String:
 static func rejected_message(reason: String) -> String:
 	return String({
 		"no_eligible_units": "Нет подходящих юнитов",
+		"attack_ground_unavailable": "Для атаки по земле нужны осадные орудия",
+		"invalid_ground_target": "Точка обстрела вне карты",
+		"order_queue_full": "Очередь приказов заполнена",
+		"queue_unsupported": "Этот приказ нельзя добавить в очередь",
 		"no_eligible_workers": "В группе нет работников",
 		"no_eligible_healers": "В группе нет жрецов, способных лечить",
 		"no_eligible_martyr": "Нет жреца, способного совершить жертвоприношение",
@@ -103,7 +122,7 @@ static func rejected_message(reason: String) -> String:
 		"invalid_transport": "Транспорт недоступен",
 		"no_eligible_passengers": "Нет подходящих пассажиров",
 		"invalid_passenger": "Пассажир недоступен",
-		"passenger_not_owned": "Можно погружать только свои войска",
+		"passenger_not_owned": "Можно погружать только свои и союзные войска",
 		"passenger_domain_forbidden": "Этот тип юнита нельзя погрузить",
 		"passenger_not_in_range": "Пассажир должен подойти к транспорту",
 		"transport_full": "В транспорте нет свободных мест",
@@ -127,7 +146,11 @@ static func rejected_message(reason: String) -> String:
 		"build_rejected": "Здесь нельзя строить",
 		"building_unavailable": "Это здание ещё не открыто",
 		"reseed_unavailable": "Эту ферму сейчас нельзя пересеять",
-		"repair_rejected": "Здание нельзя ремонтировать",
+		"repair_rejected": "Цель нельзя ремонтировать",
+		"invalid_tribute_recipient": "Выберите другого игрока для дани",
+		"tribute_requires_ally": "Дань можно отправить только союзнику",
+		"invalid_tribute_resource": "Недопустимый ресурс для дани",
+		"invalid_tribute_amount": "Сумма дани должна быть положительной",
 		"invalid_production_building": "Выбранное здание не может производить юнитов",
 		"wrong_production_location": "Этот юнит производится в другом здании",
 		"unit_unavailable": "Этот юнит ещё не открыт",

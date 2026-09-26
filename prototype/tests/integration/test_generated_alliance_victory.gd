@@ -11,6 +11,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	var settings := SkirmishSettings.default_settings()
 	settings["map_size_id"] = "standard"
+	settings["allied_victory_enabled"] = true
 	for index in range(8):
 		settings["players"][index]["enabled"] = index < 4
 		settings["players"][index]["controller"] = "human" if index == 0 else "ai"

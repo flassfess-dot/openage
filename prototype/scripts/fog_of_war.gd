@@ -6,11 +6,14 @@ const VISIBLE := 2
 
 var map_size: Vector2i
 var states_by_player: Dictionary = {}
+var personally_explored_by_player: Dictionary = {}
 var visible_counts_by_player: Dictionary = {}
 var revisions_by_player: Dictionary = {}
 var exploration_revisions_by_player: Dictionary = {}
 var newly_explored_cells_by_player: Dictionary = {}
+var navigation_newly_explored_by_player: Dictionary = {}
 var allies_by_player: Dictionary = {}
+var shared_vision_by_player: Dictionary = {}
 var vision_sources: Dictionary = {}
 var visibility_topology_dirty := true
 var revision: int = 0
@@ -34,11 +37,14 @@ func _init(world_size: Vector2i = Vector2i.ONE) -> void:
 
 func reset() -> void:
 	states_by_player.clear()
+	personally_explored_by_player.clear()
 	visible_counts_by_player.clear()
 	revisions_by_player.clear()
 	exploration_revisions_by_player.clear()
 	newly_explored_cells_by_player.clear()
+	navigation_newly_explored_by_player.clear()
 	allies_by_player.clear()
+	shared_vision_by_player.clear()
 	vision_sources.clear()
 	source_scan_generation = 0
 	source_seen_generations.resize(0)
@@ -66,6 +72,7 @@ func ensure_player(player_id: int) -> void:
 		states.resize(map_size.x * map_size.y)
 		states.fill(UNKNOWN)
 		states_by_player[player_id] = states
+		personally_explored_by_player[player_id] = {}
 		var visible_counts := PackedInt32Array()
 		visible_counts.resize(map_size.x * map_size.y)
 		visible_counts.fill(0)
@@ -76,6 +83,8 @@ func ensure_player(player_id: int) -> void:
 		visibility_topology_dirty = true
 	if not allies_by_player.has(player_id):
 		allies_by_player[player_id] = {player_id: true}
+	if not shared_vision_by_player.has(player_id):
+		shared_vision_by_player[player_id] = {player_id: true}
 
 
 func set_alliance(first_player: int, second_player: int, allied: bool = true) -> void:
@@ -84,6 +93,8 @@ func set_alliance(first_player: int, second_player: int, allied: bool = true) ->
 
 
 func set_relation(observer_player: int, source_player: int, allied: bool = true) -> void:
+	if observer_player <= 0 or source_player <= 0:
+		return
 	ensure_player(observer_player)
 	ensure_player(source_player)
 	var was_allied := bool(allies_by_player[observer_player].get(source_player, false))
@@ -97,7 +108,70 @@ func set_relation(observer_player: int, source_player: int, allied: bool = true)
 		allies_by_player[observer_player][source_player] = true
 	else:
 		allies_by_player[observer_player].erase(source_player)
+	if not allied:
+		set_shared_vision(observer_player, source_player, false)
+
+
+func set_shared_vision(observer_player: int, source_player: int, enabled: bool) -> void:
+	if observer_player <= 0 or source_player <= 0:
+		return
+	ensure_player(observer_player)
+	ensure_player(source_player)
+	if observer_player == source_player:
+		return
+	enabled = enabled and are_allied(observer_player, source_player)
+	var was_enabled := bool(shared_vision_by_player[observer_player].get(source_player, false))
+	if was_enabled == enabled:
+		return
+	if enabled:
+		shared_vision_by_player[observer_player][source_player] = true
+		merge_exploration(observer_player, source_player)
+	else:
+		shared_vision_by_player[observer_player].erase(source_player)
 	visibility_topology_dirty = true
+
+
+func merge_exploration(observer_player: int, source_player: int) -> void:
+	if observer_player <= 0 or source_player <= 0:
+		return
+	ensure_player(observer_player)
+	ensure_player(source_player)
+	var observer: PackedByteArray = states_by_player[observer_player]
+	var source: Dictionary = personally_explored_by_player[source_player]
+	var newly_explored: Array = newly_explored_cells_by_player[observer_player]
+	var navigation_newly: Variant = navigation_newly_explored_by_player.get(observer_player)
+	var changed := false
+	for index_value in source:
+		var index := int(index_value)
+		if observer[index] == UNKNOWN:
+			observer[index] = EXPLORED
+			newly_explored.append(index)
+			if navigation_newly is Array:
+				navigation_newly.append(index)
+			changed = true
+	if changed:
+		states_by_player[observer_player] = observer
+		exploration_revisions_by_player[observer_player] = int(exploration_revisions_by_player.get(observer_player, 0)) + 1
+		revisions_by_player[observer_player] = int(revisions_by_player.get(observer_player, 0)) + 1
+		revision += 1
+
+
+func reveal_explored_cell(player_id: int, cell: Vector2i) -> void:
+	ensure_player(player_id)
+	if cell.x < 0 or cell.y < 0 or cell.x >= map_size.x or cell.y >= map_size.y:
+		return
+	var index := _index(cell)
+	var states: PackedByteArray = states_by_player[player_id]
+	if states[index] != UNKNOWN:
+		return
+	states[index] = EXPLORED
+	states_by_player[player_id] = states
+	newly_explored_cells_by_player[player_id].append(index)
+	if navigation_newly_explored_by_player.has(player_id):
+		navigation_newly_explored_by_player[player_id].append(index)
+	exploration_revisions_by_player[player_id] = int(exploration_revisions_by_player.get(player_id, 0)) + 1
+	revisions_by_player[player_id] = int(revisions_by_player.get(player_id, 0)) + 1
+	revision += 1
 
 
 func revision_for_player(player_id: int) -> int:
@@ -122,6 +196,17 @@ func consume_newly_explored_cells(player_id: int) -> Array:
 	var result := cells.duplicate()
 	cells.clear()
 	return result
+
+
+func track_navigation_exploration(player_id: int) -> void:
+	ensure_player(player_id)
+	navigation_newly_explored_by_player[player_id] = []
+
+
+func consume_navigation_exploration(player_id: int) -> Array:
+	var pending: Array = navigation_newly_explored_by_player.get(player_id, [])
+	navigation_newly_explored_by_player[player_id] = []
+	return pending
 
 
 func are_allied(observer_player: int, owner_player: int) -> bool:
@@ -255,6 +340,7 @@ func _collect_sources(entities: Array, category_id: int, result: Dictionary, mov
 			continue
 		var vision_started := Time.get_ticks_usec() if performance_probe != null else 0
 		var cells := _vision_cells(center, sight_radius)
+		_mark_personally_explored(source_player, cells)
 		if performance_probe != null:
 			vision_cells_microseconds += Time.get_ticks_usec() - vision_started
 			regenerated_sources += 1
@@ -312,6 +398,7 @@ func _collect_source_deltas(
 			continue
 		var vision_started := Time.get_ticks_usec() if performance_probe != null else 0
 		var cells := _vision_cells(center, sight_radius)
+		_mark_personally_explored(source_player, cells)
 		if performance_probe != null:
 			vision_cells_microseconds += Time.get_ticks_usec() - vision_started
 			regenerated_sources += 1
@@ -347,6 +434,12 @@ func _vision_cells(center: Vector2, radius: float) -> PackedInt32Array:
 	return result
 
 
+func _mark_personally_explored(player_id: int, cells: PackedInt32Array) -> void:
+	var explored: Dictionary = personally_explored_by_player[player_id]
+	for index in cells:
+		explored[index] = true
+
+
 func _rebuild_visibility(current_sources: Dictionary) -> Dictionary:
 	var changed_players: Dictionary = {}
 	for observer_value in states_by_player.keys():
@@ -358,14 +451,15 @@ func _rebuild_visibility(current_sources: Dictionary) -> Dictionary:
 		var observer_changed := false
 		var exploration_changed := false
 		var newly_explored: Array = newly_explored_cells_by_player[observer]
+		var navigation_newly: Variant = navigation_newly_explored_by_player.get(observer)
 		for index in range(states.size()):
 			if states[index] == VISIBLE:
 				states[index] = EXPLORED
 				observer_changed = true
-		var allies: Dictionary = allies_by_player.get(observer, {})
+		var allies: Dictionary = shared_vision_by_player.get(observer, {})
 		for source in current_sources.values():
 			if bool(allies.get(int(source["team"]), false)):
-				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored)
+				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		states_by_player[observer] = states
@@ -389,18 +483,19 @@ func _apply_source_deltas(
 	var changed_players: Dictionary = {}
 	for observer_value in states_by_player.keys():
 		var observer := int(observer_value)
-		var allies: Dictionary = allies_by_player.get(observer, {})
+		var allies: Dictionary = shared_vision_by_player.get(observer, {})
 		var states: PackedByteArray = states_by_player[observer]
 		var counts: PackedInt32Array = visible_counts_by_player[observer]
 		var observer_changed := false
 		var exploration_changed := false
 		var newly_explored: Array = newly_explored_cells_by_player[observer]
+		var navigation_newly: Variant = navigation_newly_explored_by_player.get(observer)
 		for source in removed_sources:
 			if bool(allies.get(int(source["team"]), false)):
 				observer_changed = _apply_remove_visible_cells(states, counts, source["cells"]) or observer_changed
 		for source in added_sources:
 			if bool(allies.get(int(source["team"]), false)):
-				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored)
+				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		for replacement_index in range(previous_replacements.size()):
@@ -410,14 +505,14 @@ func _apply_source_deltas(
 			var current_team := int(current["team"])
 			if previous_team == current_team:
 				if bool(allies.get(current_team, false)):
-					var flags := _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"], newly_explored)
+					var flags := _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"], newly_explored, navigation_newly)
 					observer_changed = (flags & 1) != 0 or observer_changed
 					exploration_changed = (flags & 2) != 0 or exploration_changed
 				continue
 			if bool(allies.get(previous_team, false)):
 				observer_changed = _apply_remove_visible_cells(states, counts, previous["cells"]) or observer_changed
 			if bool(allies.get(current_team, false)):
-				var flags := _apply_add_visible_cells(states, counts, current["cells"], newly_explored)
+				var flags := _apply_add_visible_cells(states, counts, current["cells"], newly_explored, navigation_newly)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		states_by_player[observer] = states
@@ -433,7 +528,7 @@ func _add_source(source: Dictionary) -> bool:
 	var changed := false
 	for observer_value in states_by_player.keys():
 		var observer := int(observer_value)
-		if bool(allies_by_player.get(observer, {}).get(int(source["team"]), false)):
+		if bool(shared_vision_by_player.get(observer, {}).get(int(source["team"]), false)):
 			changed = _add_visible_cells(observer, source["cells"]) or changed
 	return changed
 
@@ -442,14 +537,14 @@ func _add_visible_cells(observer: int, cells: PackedInt32Array) -> bool:
 	var states: PackedByteArray = states_by_player[observer]
 	var counts: PackedInt32Array = visible_counts_by_player[observer]
 	var newly_explored: Array = newly_explored_cells_by_player[observer]
-	var flags := _apply_add_visible_cells(states, counts, cells, newly_explored)
+	var flags := _apply_add_visible_cells(states, counts, cells, newly_explored, navigation_newly_explored_by_player.get(observer))
 	states_by_player[observer] = states
 	visible_counts_by_player[observer] = counts
 	if (flags & 2) != 0:
 		exploration_revisions_by_player[observer] = int(exploration_revisions_by_player.get(observer, 0)) + 1
 	return (flags & 1) != 0
 
-func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array, newly_explored: Variant = null) -> int:
+func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null) -> int:
 	var flags := 0
 	for index in cells:
 		if counts[index] == 0 and states[index] != VISIBLE:
@@ -457,6 +552,8 @@ func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array,
 				flags |= 2
 				if newly_explored is Array:
 					newly_explored.append(index)
+				if navigation_newly is Array:
+					navigation_newly.append(index)
 			states[index] = VISIBLE
 			flags |= 1
 		counts[index] += 1
@@ -473,7 +570,7 @@ func _apply_remove_visible_cells(states: PackedByteArray, counts: PackedInt32Arr
 	return changed
 
 
-func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Array, previous_cells: PackedInt32Array, current_cells: PackedInt32Array, newly_explored: Variant = null) -> int:
+func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Array, previous_cells: PackedInt32Array, current_cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null) -> int:
 	var previous_index := 0
 	var current_index := 0
 	var flags := 0
@@ -495,6 +592,8 @@ func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Ar
 					flags |= 2
 					if newly_explored is Array:
 						newly_explored.append(current_cell)
+					if navigation_newly is Array:
+						navigation_newly.append(current_cell)
 				states[current_cell] = VISIBLE
 				flags |= 1
 			counts[current_cell] += 1

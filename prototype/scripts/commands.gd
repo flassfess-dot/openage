@@ -96,6 +96,17 @@ class AttackCommand extends Command:
 		return "attack"
 
 
+class AttackGroundCommand extends Command:
+	var target: Vector2
+
+	func _init(command_tick: int, command_unit_ids: Array[int], world_target: Vector2) -> void:
+		super(command_tick, command_unit_ids, {"target": world_target})
+		target = world_target
+
+	func command_type() -> String:
+		return "attack_ground"
+
+
 class ConvertCommand extends Command:
 	var target_entity_id: int
 
@@ -124,6 +135,14 @@ class MartyrdomCommand extends Command:
 
 	func command_type() -> String:
 		return "martyrdom"
+
+
+class DeleteEntityCommand extends Command:
+	func _init(command_tick: int, entity_ids: Array[int]) -> void:
+		super(command_tick, entity_ids, {})
+
+	func command_type() -> String:
+		return "delete_entity"
 
 
 class AttackMoveCommand extends MoveCommand:
@@ -274,6 +293,21 @@ class RepairCommand extends Command:
 		return "repair"
 
 
+class TributeCommand extends Command:
+	var target_team: int
+	var resource_type_id: int
+	var amount: int
+
+	func _init(command_tick: int, recipient_team: int, resource_id: int, tribute_amount: int) -> void:
+		super(command_tick, [], {"target_team": recipient_team, "resource_type_id": resource_id, "amount": tribute_amount})
+		target_team = recipient_team
+		resource_type_id = resource_id
+		amount = tribute_amount
+
+	func command_type() -> String:
+		return "tribute"
+
+
 class HoldCommand extends Command:
 	func _init(command_tick: int, command_unit_ids: Array[int]) -> void:
 		super(command_tick, command_unit_ids, {})
@@ -309,4 +343,15 @@ class ResignCommand extends Command:
 
 	func command_type() -> String:
 		return "resign"
+
+
+class PopulationLimitCommand extends Command:
+	var limit: int
+
+	func _init(command_tick: int, requested_limit: int) -> void:
+		super(command_tick, [], {"limit": requested_limit})
+		limit = requested_limit
+
+	func command_type() -> String:
+		return "population_limit"
 

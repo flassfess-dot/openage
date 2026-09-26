@@ -14,7 +14,7 @@ static func choose_goal(snapshot: Dictionary, team: int, decision_index: int) ->
 			var entity: Dictionary = entity_value
 			var owner := int(entity.get("team", 0))
 			var relation := String(relations.get(owner, "ally" if allies.has(owner) else "enemy"))
-			if owner > 0 and owner != team and relation == "enemy" and float(entity.get("hp", 0.0)) > 0.0:
+			if owner > 0 and owner != team and relation == "enemy" and float(entity.get("hp", 0.0)) > 0.0 and not bool(entity.get("last_known", false)):
 				targets.append(entity)
 	if not targets.is_empty():
 		targets.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
@@ -23,7 +23,24 @@ static func choose_goal(snapshot: Dictionary, team: int, decision_index: int) ->
 		if target_domains.is_empty():
 			var fallback_domain := String(target.get("movement_domain", "land"))
 			target_domains = [fallback_domain if fallback_domain in ["land", "water"] else "land"]
-		return {"type": "attack", "target_id": int(target["id"]), "position": Vector2(target.get("pos", Vector2.ZERO)), "target_domain": String(target_domains[0]), "target_domains": target_domains.duplicate()}
+		return {
+			"type": "attack",
+			"target_id": int(target["id"]),
+			"position": Vector2(target.get("pos", Vector2.ZERO)),
+			"target_domain": String(target_domains[0]),
+			"target_domains": target_domains.duplicate(),
+			"positions_by_domain": _exploration_positions(snapshot, team, decision_index, target_domains, false),
+		}
+	var positions_by_domain := _exploration_positions(snapshot, team, decision_index)
+	if positions_by_domain.is_empty():
+		return {"type": "wait", "reason": "no_reachable_exploration_surface"}
+	var primary_position: Vector2 = positions_by_domain.get("land", positions_by_domain.values()[0])
+	return {"type": "explore", "position": primary_position, "positions_by_domain": positions_by_domain}
+
+
+static func _exploration_positions(snapshot: Dictionary, team: int, decision_index: int, excluded_domains: Array = [], allow_land_fallback: bool = true) -> Dictionary:
+	if "land" in excluded_domains and "water" in excluded_domains:
+		return {}
 	var size: Vector2i = snapshot.get("map_size", Vector2i(24, 24))
 	var inset := Vector2(2.5, 2.5)
 	var points := [
@@ -51,6 +68,8 @@ static func choose_goal(snapshot: Dictionary, team: int, decision_index: int) ->
 			home_center += position
 		home_center /= float(owned_positions.size())
 	for domain in ["land", "water"]:
+		if domain in excluded_domains:
+			continue
 		var navigation: Dictionary = snapshot.get("navigation", {})
 		var has_reachability := navigation.has("reachable")
 		var frontier_source: Dictionary = navigation.get("reachable_frontier", {}) if has_reachability else navigation.get("frontier", {})
@@ -73,10 +92,7 @@ static func choose_goal(snapshot: Dictionary, team: int, decision_index: int) ->
 		var known: Array = known_source.get(domain, [])
 		if not known.is_empty():
 			positions_by_domain[domain] = known[posmod(decision_index + team, known.size())]
-	if not positions_by_domain.has("land"):
+	if allow_land_fallback and "land" not in excluded_domains and not positions_by_domain.has("land"):
 		if not snapshot.get("navigation", {}).has("reachable"):
 			positions_by_domain["land"] = points[posmod(decision_index + team, points.size())]
-		elif positions_by_domain.is_empty():
-			return {"type": "wait", "reason": "no_reachable_exploration_surface"}
-	var primary_position: Vector2 = positions_by_domain.get("land", positions_by_domain.values()[0])
-	return {"type": "explore", "position": primary_position, "positions_by_domain": positions_by_domain}
+	return positions_by_domain

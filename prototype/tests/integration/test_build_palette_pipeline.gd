@@ -64,6 +64,16 @@ func _initialize() -> void:
 				assert_true(not foundation.is_empty(), "normal click route enqueues and places the House foundation")
 				if not foundation.is_empty():
 					assert_equal(String(foundation.get("state", "")), "foundation", "new building begins with the authoritative construction lifecycle")
+				var next_target := valid_build_position(game, "house")
+				if next_target.x >= 0.0:
+					game.begin_build_placement("house")
+					var queued_before: int = game.game_controller.command_queue.size()
+					var next_screen: Vector2 = game.world_to_screen(next_target)
+					game.handle_input_action({"type": "selection_committed", "from": next_screen, "to": next_screen, "queue_order": true})
+					assert_equal(game.pending_build_kind, "house", "Shift-click retains repeated House placement mode")
+					assert_equal(game.game_controller.command_queue.size(), queued_before + 1, "Shift-click still queues its building command")
+					game.handle_input_action({"type": "context_committed", "position": next_screen})
+					assert_equal(game.pending_build_kind, "", "right-click exits repeated placement mode")
 	game.free()
 
 	if failures.is_empty():

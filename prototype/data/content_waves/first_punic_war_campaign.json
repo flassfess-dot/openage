@@ -6,7 +6,7 @@
   "campaign_name": "First Punic War",
   "campaign_sha256": "8d65cd16248320988090fbf16bd31cb2dfde46dd80a1bbf93191cace82f0fad2",
   "manifest_sha256": "c017aa2db6fa6fed6f3d4a62bac3279bd133d274d318943aa8c4d9c486fc5ad6",
-  "runtime_catalog_cache_key": "fc8ded7860c462e446ade5a7ad14f1bd074eabbbe5c142518c3e1bb8379c0afd",
+  "runtime_catalog_cache_key": "840326a4b5e1881c4ccea3353832fba835b751f486a7c6dd29393ac75f2df5b8",
   "gate_contract": {
     "launcher_required_zero_gaps": [
       "objects",

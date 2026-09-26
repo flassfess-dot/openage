@@ -34,6 +34,14 @@ func _initialize() -> void:
 	assert_equal(game.simulation_world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "town_center").size(), 2, "both generated starting towns bootstrap")
 	var archive := GameSaveArchive.create(game.match_path, game.match_definition, 0, "0".repeat(64), game.game_controller.replay_recorder.to_dictionary(), [], {}, {})
 	assert_equal(String(archive.get("match_fingerprint", "")), GameSaveArchive.fingerprint(game.match_definition), "generated match participates in ordinary save fingerprinting")
+	for index in range(16500):
+		game.game_controller.event_stream.emit(index, "presentation_retention_probe")
+	game.process_presentation_events()
+	assert_true(game.game_controller.event_stream.retained_count() <= 16384, "live presentation prunes only consumed old events")
+	var next_sequence: int = game.game_controller.event_stream.latest_sequence() + 1
+	game.game_controller.event_stream.emit(16500, "presentation_retention_probe")
+	game.process_presentation_events()
+	assert_equal(game.command_feedback_router.event_cursor, next_sequence, "event cursor continues after live journal pruning")
 	game.free()
 	_finish("E5-002 generated skirmish main scene tests passed")
 

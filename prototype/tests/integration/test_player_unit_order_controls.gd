@@ -60,6 +60,20 @@ func _initialize() -> void:
 		var soldier: Dictionary = game.simulation_world.find_unit(soldier_id)
 		assert_equal(String(soldier.get("task", "")), "idle", "stop cancels member %d movement" % soldier_id)
 		assert_equal(String(soldier.get("stance", "")), "passive", "stop preserves member %d stance" % soldier_id)
+	var barracks: Dictionary = game.simulation_world.get_buildings().filter(func(building): return int(building.get("team", 0)) == 1 and String(building.get("kind", "")) == "barracks")[0]
+	for _order in range(3):
+		assert_true(game.simulation_world.enqueue_unit_production(int(barracks["id"]), 1, "clubman") != null, "selected producer fixture queues three same-line units")
+	var food_before_stop: int = game.simulation_world.get_resource_amount(1, 0)
+	var barracks_ids: Array[int] = [int(barracks["id"])]
+	game.player_control_state.replace_or_add(barracks_ids, false)
+	game.sync_world_state()
+	assert_true(game.hud_model.get("commands", []).any(func(action): return String(action.get("type", "")) == "unit_action" and String(action.get("id", "")) == "stop"), "selected producer exposes a Stop action")
+	game.hud_controls.unit_action_requested.emit("stop")
+	var building_stop_record: Dictionary = game.game_controller.replay_recorder.command_records[-1]
+	assert_equal(String(building_stop_record.get("type", "")), "stop", "building HUD action records a replayable Stop command")
+	advance_tick(game)
+	assert_equal(barracks.get("production_queue", []).size(), 1, "building Stop preserves active production and clears waiting orders")
+	assert_equal(game.simulation_world.get_resource_amount(1, 0), food_before_stop + 100, "building Stop refunds two waiting Clubmen")
 
 	game.free()
 	if failures.is_empty():

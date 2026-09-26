@@ -49,30 +49,24 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 	if int(unit.get("projectile_id", -1)) >= 0:
 		spawn_projectile(unit, enemy)
 	else:
-		damage = CombatRules.entity_damage(unit, enemy)
-		enemy["hp"] -= damage
-		enemy["retaliation_target_id"] = int(unit.get("id", -1))
-		world.record_attack_distress(unit, enemy)
-		if world.capture_domain_events:
-			world.emit_domain_event("hit", {
-				"source_id": int(unit["id"]),
-				"target_id": int(enemy["id"]),
-				"projectile_id": -1,
-			})
-			world.emit_domain_event("damage", {
-				"source_id": int(unit["id"]),
-				"target_id": int(enemy["id"]),
-				"amount": damage,
-				"remaining_hp": maxf(0.0, float(enemy["hp"])),
-			})
-		EntityComponents.sync_dynamic(enemy)
+		var combat: Dictionary = unit.get("components", {}).get("combat", {})
+		var blast_range := maxf(0.0, float(combat.get("blast_range", unit.get("blast_range", 0.0))))
+		var candidates: Array = world.query_combat_entities_near(Vector2(enemy["pos"]), blast_range) if blast_range > 0.0 else [enemy]
+		var source_context: Dictionary = world.combat_source_context(unit)
+		var friendly_fire := bool(combat.get("friendly_fire", false))
+		for candidate_value in candidates:
+			var candidate: Dictionary = candidate_value
+			if float(candidate.get("hp", 0.0)) <= 0.0:
+				continue
+			if not friendly_fire and world.are_teams_allied(int(unit.get("team", 0)), int(candidate.get("team", 0))):
+				continue
+			var impact_damage := CombatRules.entity_damage(unit, candidate)
+			_apply_impact_damage(candidate, impact_damage, source_context, -1, player_team)
+			if int(candidate.get("id", -1)) == int(enemy.get("id", -2)):
+				damage = impact_damage
 	unit["cooldown"] = maxf(0.1, unit["attack_period"])
 	OrderPipeline.transition(unit, OrderPipeline.RECOVER)
 	unit["last_damage"] = damage
-	if damage > 0.0 and enemy["hp"] <= 0.0:
-		world.begin_entity_death(enemy, world.combat_source_context(unit))
-		if unit["team"] == player_team:
-			world.kills += 1
 
 
 func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
@@ -85,7 +79,9 @@ func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
 	var accuracy := int(combat.get("accuracy", 100))
 	var weapon_offset: Array = combat.get("weapon_offset", [0.0, 0.0, 0.0])
 	var spawn := ProjectileMotion.spawn_position(attacker, target["pos"], weapon_offset)
-	var aim: Dictionary = ProjectileMotion.aim_position(attacker, target, speed, bool(projectile_spec.get("smart_mode", false)), accuracy, projectile_entity_id)
+	var ground_attack := bool(target.get("attack_ground", false))
+	var predictive_aim := bool(projectile_spec.get("smart_mode", false)) or bool(combat.get("ballistics", false))
+	var aim: Dictionary = {"position": Vector2(target["pos"]), "roll": 0, "accurate": true} if ground_attack else ProjectileMotion.aim_position(attacker, target, speed, predictive_aim, accuracy, projectile_entity_id)
 	var destination: Vector2 = aim["position"]
 	var launch_height := float(weapon_offset[2]) if weapon_offset.size() > 2 else 0.0
 	var projectile_radius := 0.1
@@ -100,6 +96,7 @@ func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
 		"source_id": int(attacker.get("id", -1)),
 		"source_is_worker": world.entity_is_worker(attacker),
 		"target_id": int(target.get("id", -1)),
+		"attack_ground": ground_attack,
 		"pos": spawn,
 		"previous_pos": spawn,
 		"origin": spawn,
@@ -112,8 +109,9 @@ func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
 		"launch_height": launch_height,
 		"speed": speed,
 		"arc": float(projectile_spec.get("arc", 0.0)),
-		"smart_mode": bool(projectile_spec.get("smart_mode", false)),
-		"guidance": "predictive" if bool(projectile_spec.get("smart_mode", false)) else "ballistic",
+		"smart_mode": predictive_aim,
+		"source_smart_mode": bool(projectile_spec.get("smart_mode", false)),
+		"guidance": "predictive" if predictive_aim else "ballistic",
 		"accuracy": accuracy,
 		"accuracy_roll": int(aim["roll"]),
 		"accurate": bool(aim["accurate"]),
@@ -158,38 +156,15 @@ func update_projectiles(delta: float, player_team: int) -> void:
 			if not _can_damage(projectile, candidate):
 				continue
 			var impact_damage := _damage_at_impact(projectile, candidate)
-			candidate["hp"] -= impact_damage
-			candidate["retaliation_target_id"] = int(projectile.get("source_id", -1))
-			world.record_attack_distress({
-				"id": int(projectile.get("source_id", -1)),
-				"team": int(projectile.get("team", 0)),
-			}, candidate)
 			projectile["hit"] = true
 			projectile["direct_hit"] = bool(projectile.get("direct_hit", false)) or int(candidate.get("id", -1)) == int(projectile.get("target_id", -2))
 			projectile["hit_target_ids"].append(int(candidate.get("id", -1)))
 			projectile["damage"] = float(projectile.get("damage", 0.0)) + impact_damage
-			if world.capture_domain_events:
-				world.emit_domain_event("hit", {
-					"source_id": int(projectile.get("source_id", -1)),
-					"target_id": int(candidate["id"]),
-					"projectile_id": int(projectile["id"]),
-				})
-				world.emit_domain_event("damage", {
-					"source_id": int(projectile.get("source_id", -1)),
-					"target_id": int(candidate["id"]),
-					"projectile_id": int(projectile["id"]),
-					"amount": impact_damage,
-					"remaining_hp": maxf(0.0, float(candidate["hp"])),
-				})
-			if candidate["hp"] <= 0.0:
-				world.begin_entity_death(candidate, {
-					"entity_id": int(projectile.get("source_id", -1)),
-					"team": int(projectile.get("team", 0)),
-					"is_worker": bool(projectile.get("source_is_worker", false)),
-				})
-				if int(projectile.get("team", 0)) == player_team and not world.are_teams_allied(int(projectile.get("team", 0)), int(candidate.get("team", 0))):
-					world.kills += 1
-			EntityComponents.sync_dynamic(candidate)
+			_apply_impact_damage(candidate, impact_damage, {
+				"entity_id": int(projectile.get("source_id", -1)),
+				"team": int(projectile.get("team", 0)),
+				"is_worker": bool(projectile.get("source_is_worker", false)),
+			}, int(projectile["id"]), player_team)
 		projectile["impact_position"] = Vector2(projectile["pos"])
 		if world.capture_domain_events:
 			world.emit_domain_event("projectile_impact", {
@@ -216,6 +191,34 @@ func _impact_candidates(projectile: Dictionary, target: Variant) -> Array:
 		return []
 	var collision_radius := float(projectile.get("radius", 0.1)) + float(target.get("footprint_radius", 0.3)) + 0.08
 	return [target] if Vector2(projectile["pos"]).distance_to(Vector2(target["pos"])) <= collision_radius else []
+
+
+func _apply_impact_damage(target: Dictionary, damage: float, source_context: Dictionary, projectile_id: int, player_team: int) -> void:
+	var source_id := int(source_context.get("entity_id", -1))
+	var source_team := int(source_context.get("team", 0))
+	target["hp"] -= damage
+	target["retaliation_target_id"] = source_id
+	world.record_attack_distress({"id": source_id, "team": source_team}, target)
+	if world.capture_domain_events:
+		world.emit_domain_event("hit", {
+			"source_id": source_id,
+			"target_id": int(target["id"]),
+			"projectile_id": projectile_id,
+		})
+		var damage_payload := {
+			"source_id": source_id,
+			"target_id": int(target["id"]),
+			"amount": damage,
+			"remaining_hp": maxf(0.0, float(target["hp"])),
+		}
+		if projectile_id >= 0:
+			damage_payload["projectile_id"] = projectile_id
+		world.emit_domain_event("damage", damage_payload)
+	if damage > 0.0 and float(target["hp"]) <= 0.0:
+		world.begin_entity_death(target, source_context)
+		if source_team == player_team and not world.are_teams_allied(source_team, int(target.get("team", 0))):
+			world.kills += 1
+	EntityComponents.sync_dynamic(target)
 
 
 func _can_damage(projectile: Dictionary, candidate: Dictionary) -> bool:

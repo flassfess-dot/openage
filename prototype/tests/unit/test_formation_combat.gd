@@ -88,6 +88,12 @@ func test_building_contact_slots_clear_occupied_cells() -> void:
 		attacker["pos"] = destination
 		assert_true(navigation.is_position_walkable_for(destination, float(attacker["footprint_radius"]), "land"), "building contact remains outside occupied navigation cells")
 		assert_true(CombatRules.is_in_range(attacker, target), "building contact remains inside melee attack range")
+	for corner_position in [Vector2(26.32748, 6.62), Vector2(20.0, 4.0), Vector2(29.0, 13.0), Vector2(20.0, 13.0)]:
+		var corner_attacker := combat_unit(5, Vector2(corner_position), 0.0)
+		var corner_destination: Vector2 = FormationCombat.destination(corner_attacker, target)
+		corner_attacker["pos"] = corner_destination
+		assert_true(navigation.is_position_walkable_for(corner_destination, float(corner_attacker["footprint_radius"]), "land"), "diagonal building contact remains navigable")
+		assert_true(CombatRules.is_in_range(corner_attacker, target), "diagonal building contact reaches melee range")
 
 
 func test_group_returns_home_after_combat() -> void:

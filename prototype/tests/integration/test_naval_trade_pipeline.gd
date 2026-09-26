@@ -16,6 +16,7 @@ func _initialize() -> void:
 	catalog.load()
 	verify_source_driven_trade_cycle(catalog)
 	verify_shared_pool_waiting(catalog)
+	verify_palmyran_profit_after_distance(catalog)
 	verify_profit_policy_boundary()
 	if failures.is_empty():
 		print("I12-019D naval trade pipeline tests passed")
@@ -112,6 +113,22 @@ func trade_fixture(catalog, target_y: float) -> Dictionary:
 	world.rebuild_spatial_index()
 	world.update_fog_of_war()
 	return {"world": world, "far_home": far_home, "close_home": close_home, "target": target, "trader": trader}
+
+
+func verify_palmyran_profit_after_distance(catalog) -> void:
+	var fixture := trade_fixture(catalog, 22.5)
+	var world = fixture["world"]
+	world.set_team_civilization(1, 15)
+	var trader: Dictionary = fixture["trader"]
+	var trade: Dictionary = trader["components"]["trade"]
+	var home: Dictionary = fixture["close_home"]
+	var target: Dictionary = fixture["target"]
+	trade["home_dock_id"] = int(home["id"])
+	world.set_resource_amount(1, 1, 100)
+	world.trade_system.set_trade_goods(2, 100.0)
+	var base_gold := TradeProfitPolicy.profit_between(home["pos"], target["pos"], world.map_size)
+	assert_true(world.trade_system._try_load_trade_goods(trader, target), "Palmyran trade can load a normal Dock-to-Dock transaction")
+	assert_equal(int(trade.get("cargo_gold", -1)), base_gold * 2, "Palmyran bonus doubles the already-calculated distance profit")
 
 
 func configured_world(catalog):

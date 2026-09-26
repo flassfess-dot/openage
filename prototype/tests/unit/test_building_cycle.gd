@@ -36,7 +36,7 @@ func test_original_building_contract(catalog) -> void:
 func test_placement_reservation_and_cancel(catalog) -> void:
 	var world = original_world(catalog)
 	world.wood = 500
-	var worker: Dictionary = world.add_unit(1, "villager", Vector2(5.0, 7.0), false)
+	var worker: Dictionary = world.add_unit(1, "villager", Vector2(3.5, 7.0), false)
 	var foundation: Variant = world.place_foundation(1, "town_center", Vector2(7.0, 7.0), [worker])
 	assert_true(foundation != null, "explored flat free terrain accepts foundation (%s)" % world.last_build_failure)
 	if foundation == null:
@@ -75,8 +75,8 @@ func test_mixed_selection_assigns_every_worker(catalog) -> void:
 func test_multiple_builders_and_repair(catalog) -> void:
 	var world = original_world(catalog)
 	world.wood = 500
-	var first: Dictionary = world.add_unit(1, "villager", Vector2(5.0, 6.5), false)
-	var second: Dictionary = world.add_unit(1, "villager", Vector2(5.0, 7.5), false)
+	var first: Dictionary = world.add_unit(1, "villager", Vector2(3.5, 6.5), false)
+	var second: Dictionary = world.add_unit(1, "villager", Vector2(3.5, 7.5), false)
 	var foundation: Variant = world.place_foundation(1, "town_center", Vector2(7.0, 7.0), [first, second])
 	assert_true(foundation != null, "foundation created for multiple builders (%s)" % world.last_build_failure)
 	if foundation == null:
@@ -107,8 +107,10 @@ func test_multiple_builders_and_repair(catalog) -> void:
 
 	foundation["hp"] = float(foundation["max_hp"]) - 20.0
 	world.assign_command_repair([first, second], int(foundation["id"]))
-	first["pos"] = first["building_approach_slot"]
-	second["pos"] = second["building_approach_slot"]
+	if first["building_approach_slot"] is Vector2:
+		first["pos"] = first["building_approach_slot"]
+	if second["building_approach_slot"] is Vector2:
+		second["pos"] = second["building_approach_slot"]
 	var wood_before_repair: int = world.get_wood()
 	world.update_units(0.1, 1, 2)
 	assert_float(float(foundation["hp"]), float(foundation["max_hp"]) - 18.0, "two repairers contribute their work in the same tick")

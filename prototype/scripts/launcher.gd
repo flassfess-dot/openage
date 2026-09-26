@@ -3,6 +3,7 @@ extends Control
 
 const MatchRegistry := preload("res://scripts/match_registry.gd")
 const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
+const MultiplayerLobby := preload("res://scripts/multiplayer_lobby.gd")
 const GAME_SCENE := preload("res://main.tscn")
 
 var match_selector: OptionButton
@@ -140,7 +141,26 @@ func _launch_selected() -> void:
 
 
 func _launch_custom_skirmish() -> void:
-	last_generated_match = SkirmishSettings.build(_settings_from_controls())
+	var network_mode: OptionButton = setting_controls["network_mode"]
+	var role := String(network_mode.get_item_metadata(network_mode.selected))
+	var local_team := 1
+	if role == "offline":
+		last_generated_match = SkirmishSettings.build(_settings_from_controls())
+	else:
+		var invite: LineEdit = setting_controls["network_invite"]
+		var lobby = MultiplayerLobby.new()
+		if role == "host" and invite.text.strip_edges().is_empty():
+			_prepare_network_invite()
+			return
+		var invite_error: String = lobby.load_invite(invite.text.strip_edges())
+		if not invite_error.is_empty():
+			status_label.text = "Код лобби не принят: %s" % invite_error
+			return
+		local_team = 1 if role == "host" else roundi(float(setting_controls["network_team"].value))
+		if local_team not in lobby.participant_teams():
+			status_label.text = "Выберите свободное место игрока из кода лобби"
+			return
+		last_generated_match = lobby.build_match()
 	if not bool(last_generated_match.get("valid", false)):
 		status_label.text = "Настройки не приняты: %s" % ", ".join(last_generated_match.get("errors", []))
 		return
@@ -151,6 +171,11 @@ func _launch_custom_skirmish() -> void:
 	game.match_path = String(last_generated_match["identity"])
 	game.match_definition_override = last_generated_match["definition"].duplicate(true)
 	game.map_definition_override = last_generated_match["map_data"].duplicate(true)
+	if role != "offline":
+		game.network_role = role
+		game.local_player_team = local_team
+		game.network_port = roundi(float(setting_controls["network_port"].value))
+		game.network_address = String(setting_controls["network_address"].text).strip_edges()
 	get_tree().root.add_child(game)
 	get_tree().current_scene = game
 	queue_free()
@@ -201,6 +226,19 @@ func _build_skirmish_settings_panel() -> Control:
 	setting_controls["starting_age_id"] = _add_catalog_option(general, "Начальная эпоха", skirmish_catalog.get("starting_ages", []), "stone")
 	setting_controls["ai_difficulty_id"] = _add_catalog_option(general, "Сложность AI", skirmish_catalog.get("ai_difficulties", []), "standard")
 	setting_controls["victory_mode_id"] = _add_catalog_option(general, "Победа", skirmish_catalog.get("victory_modes", []), "conquest")
+	var allied_victory_label := Label.new()
+	allied_victory_label.text = "Победа союзников"
+	general.add_child(allied_victory_label)
+	var allied_victory_checkbox := CheckBox.new()
+	allied_victory_checkbox.button_pressed = false
+	general.add_child(allied_victory_checkbox)
+	setting_controls["allied_victory_enabled"] = allied_victory_checkbox
+	var full_tech_label := Label.new()
+	full_tech_label.text = "Полное дерево технологий"
+	general.add_child(full_tech_label)
+	var full_tech_checkbox := CheckBox.new()
+	general.add_child(full_tech_checkbox)
+	setting_controls["full_tech_tree"] = full_tech_checkbox
 	setting_controls["population_limit"] = _add_value_option(general, "Лимит населения", skirmish_catalog.get("population_limits", []), 50)
 	var seed_label := Label.new()
 	seed_label.text = "Seed"
@@ -222,6 +260,52 @@ func _build_skirmish_settings_panel() -> Control:
 	count_control.value_changed.connect(_on_player_count_changed)
 	general.add_child(count_control)
 	setting_controls["player_count"] = count_control
+	var network_heading := Label.new()
+	network_heading.text = "Сетевая игра (LAN)"
+	network_heading.add_theme_color_override("font_color", Color("f1d890"))
+	content.add_child(network_heading)
+	var network_row := HBoxContainer.new()
+	network_row.add_theme_constant_override("separation", 8)
+	content.add_child(network_row)
+	var network_mode := OptionButton.new()
+	_add_option_item(network_mode, "Одиночная", "offline")
+	_add_option_item(network_mode, "Создать", "host")
+	_add_option_item(network_mode, "Подключиться", "join")
+	network_mode.custom_minimum_size.x = 145
+	network_row.add_child(network_mode)
+	setting_controls["network_mode"] = network_mode
+	var address := LineEdit.new()
+	address.text = "127.0.0.1"
+	address.placeholder_text = "Адрес сервера"
+	address.custom_minimum_size.x = 170
+	network_row.add_child(address)
+	setting_controls["network_address"] = address
+	var port := SpinBox.new()
+	port.min_value = 1024
+	port.max_value = 65535
+	port.value = 39741
+	port.custom_minimum_size.x = 105
+	network_row.add_child(port)
+	setting_controls["network_port"] = port
+	var team := SpinBox.new()
+	team.min_value = 2
+	team.max_value = 8
+	team.value = 2
+	team.custom_minimum_size.x = 85
+	network_row.add_child(team)
+	setting_controls["network_team"] = team
+	var invite_row := HBoxContainer.new()
+	invite_row.add_theme_constant_override("separation", 8)
+	content.add_child(invite_row)
+	var prepare_button := Button.new()
+	prepare_button.text = "Создать код"
+	prepare_button.pressed.connect(_prepare_network_invite)
+	invite_row.add_child(prepare_button)
+	var invite := LineEdit.new()
+	invite.placeholder_text = "Код лобби: скопируйте хосту или вставьте при подключении"
+	invite.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	invite_row.add_child(invite)
+	setting_controls["network_invite"] = invite
 
 	var heading := Label.new()
 	heading.text = "Слот     Управление        Цивилизация          Цвет      Союз"
@@ -264,6 +348,19 @@ func _build_skirmish_settings_panel() -> Control:
 		player_controls.append({"row": row, "controller": controller, "civilization_id": civilization, "color_index": color, "alliance_id": alliance})
 	_on_player_count_changed(2.0)
 	return scroll
+
+
+func _prepare_network_invite() -> void:
+	var lobby = MultiplayerLobby.new()
+	var error: String = lobby.configure_from_skirmish(_settings_from_controls())
+	if not error.is_empty():
+		status_label.text = "Настройки лобби не приняты: %s" % error
+		return
+	var invite: LineEdit = setting_controls["network_invite"]
+	invite.text = lobby.invite_code()
+	invite.select_all()
+	invite.grab_focus()
+	status_label.text = "Скопируйте код другим игрокам, затем нажмите НАЧАТЬ"
 
 
 func _add_catalog_option(parent: Control, title: String, entries: Array, default_id: String) -> OptionButton:
@@ -326,6 +423,8 @@ func _settings_from_controls() -> Dictionary:
 		var option: OptionButton = setting_controls[key]
 		result[key] = option.get_item_metadata(option.selected)
 	result["seed"] = roundi(float(setting_controls["seed"].value))
+	result["allied_victory_enabled"] = bool(setting_controls["allied_victory_enabled"].button_pressed)
+	result["full_tech_tree"] = bool(setting_controls["full_tech_tree"].button_pressed)
 	var active_count := roundi(float(setting_controls["player_count"].value))
 	var players: Array = []
 	for index in range(player_controls.size()):

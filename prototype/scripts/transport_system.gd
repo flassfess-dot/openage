@@ -55,6 +55,7 @@ func board(passengers: Array, transport: Dictionary) -> String:
 		passenger["selected"] = false
 		passenger["transported_by_id"] = int(transport.get("id", -1))
 		passenger["cargo_state"] = "embarked"
+		world.sync_unit_victory_objective(passenger)
 		var passenger_id := int(passenger.get("id", -1))
 		embarked_units[passenger_id] = passenger
 		passenger_ids.append(passenger_id)
@@ -89,7 +90,11 @@ func validate_board(passengers: Array, transport: Dictionary) -> String:
 		seen[passenger_id] = true
 		if float(passenger.get("hp", 0.0)) <= 0.0 or String(passenger.get("death_phase", "alive")) != "alive":
 			return "invalid_passenger"
-		if int(passenger.get("team", 0)) != int(transport.get("team", 0)):
+		var passenger_team := int(passenger.get("team", 0))
+		var transport_team := int(transport.get("team", 0))
+		var allied_passenger: bool = passenger_team > 0 and world.are_teams_allied(transport_team, passenger_team) and world.are_teams_allied(passenger_team, transport_team)
+		var artifact: bool = passenger_team == 0 and world.entity_has_behavior_tag(passenger, "capturable")
+		if passenger_team != transport_team and not (allied_passenger and bool(cargo.get("allow_allied", true))) and not (artifact and bool(cargo.get("allow_artifacts", true))):
 			return "passenger_not_owned"
 		var allowed_domains: Array = cargo.get("allowed_domains", ["land"])
 		if String(passenger.get("movement_domain", "land")) not in allowed_domains:
@@ -154,10 +159,12 @@ func destroy_cargo(transport: Dictionary) -> void:
 		if passenger == null:
 			continue
 		passenger["hp"] = 0.0
+		world.track_conquest_entity(passenger)
 		passenger["death_phase"] = "removed"
 		passenger["removed"] = true
+		world.sync_unit_victory_objective(passenger)
 		if not bool(passenger.get("population_released", false)):
-			world.economy_system.add_population(int(passenger.get("team", 0)), -int(passenger.get("population_cost", 0)))
+			world.economy_system.add_population_points(int(passenger.get("team", 0)), -int(passenger.get("population_points_cost", int(passenger.get("population_cost", 0)) * 2)))
 			passenger["population_released"] = true
 		embarked_units.erase(passenger_id)
 		world.emit_domain_event("cargo_destroyed", {
@@ -167,6 +174,26 @@ func destroy_cargo(transport: Dictionary) -> void:
 		})
 	cargo["passenger_ids"] = []
 	cargo["count"] = 0
+
+
+func reconcile_ownership(transport: Dictionary) -> void:
+	if not is_transport(transport):
+		return
+	var transport_team := int(transport.get("team", 0))
+	var ids: Array = transport.get("components", {}).get("cargo", {}).get("passenger_ids", []).duplicate()
+	ids.sort_custom(func(left, right): return int(left) < int(right))
+	for id_value in ids:
+		var passenger: Variant = embarked_units.get(int(id_value))
+		if passenger == null:
+			continue
+		var passenger_team := int(passenger.get("team", 0))
+		if passenger_team == 0 or passenger_team == transport_team or (world.are_teams_allied(transport_team, passenger_team) and world.are_teams_allied(passenger_team, transport_team)):
+			continue
+		# Eject on the nearest valid shore; a blocked shoreline keeps the unit
+		# safely embarked until a later explicit unload instead of destroying it.
+		var result := unload([transport], Vector2(transport.get("pos", Vector2.ZERO)), [int(id_value)])
+		if not result.is_empty():
+			world.emit_domain_event("cargo_ownership_conflict", {"transport_id": int(transport.get("id", -1)), "passenger_id": int(id_value), "reason": result})
 
 
 func canonical_state() -> Array:
@@ -242,6 +269,7 @@ func _restore_passenger(transport: Dictionary, passenger: Dictionary, position: 
 	passenger["selected"] = false
 	passenger["elevation"] = world.elevation_at(position)
 	world.restore_unit_from_transport(passenger)
+	world.sync_unit_victory_objective(passenger)
 	EntityComponents.sync_dynamic(passenger)
 	world.emit_domain_event("unit_unloaded", {
 		"passenger_id": passenger_id,

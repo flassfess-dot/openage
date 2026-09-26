@@ -44,6 +44,7 @@ const VictorySystem := preload("res://scripts/victory_system.gd")
 const ScenarioSystem := preload("res://scripts/scenario_system.gd")
 const PlayerRegistry := preload("res://scripts/player_registry.gd")
 const SimulationTickPipeline := preload("res://scripts/simulation_tick_pipeline.gd")
+const AiNavigationKnowledge := preload("res://scripts/ai_navigation_knowledge.gd")
 
 var map_size: Vector2i = Vector2i(24, 24)
 var map_terrain_ids: Dictionary = {}
@@ -64,9 +65,12 @@ var decaying_resource_nodes: Array = []
 var resource_roster_revision: int = 0
 var resource_minimap_revision: int = 0
 var known_resources_by_player: Dictionary = {}
+var ai_navigation_knowledge = AiNavigationKnowledge.new()
 var compact_ai_resource_by_id: Dictionary = {}
 var known_ai_resources_by_player: Dictionary = {}
+var last_known_buildings_by_player: Dictionary = {}
 var local_build_site_cache: Dictionary = {}
+const MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES := 64
 var build_option_catalog_cache: Dictionary = {}
 var render_entity_projection_cache := RenderEntityProjectionCache.new()
 var static_obstructions: Array = []
@@ -123,6 +127,7 @@ var graphics_catalog_data: Dictionary = {}
 var attack_animation_spec_cache: Dictionary = {}
 var capture_radius_by_kind: Dictionary = {}
 var civilization_by_team: Dictionary = {1: 13, 2: 13}
+var full_tech_tree_enabled := false
 var population_by_team: Dictionary = {}
 var population_reserved_by_team: Dictionary = {}
 var population_cap_by_team: Dictionary = {}
@@ -151,6 +156,9 @@ var next_production_order_id: int:
 		if production_system != null: production_system.next_order_id = value
 var resource_stockpiles_by_team: Dictionary = {}
 var victory_objectives: Array = []
+var capturable_victory_objectives: Array[Dictionary] = []
+var conquest_counts_by_team: Dictionary = {}
+var conquest_tracked_by_id: Dictionary = {}
 var score_by_team: Dictionary = {}
 
 var food: int:
@@ -245,6 +253,7 @@ func set_runtime_catalog(data: Dictionary) -> void:
 func set_team_civilization(team: int, civilization_id: int) -> void:
 	player_registry.set_civilization(team, civilization_id)
 	civilization_by_team[team] = civilization_id
+	technology_system.set_team_civilization(team, civilization_id)
 	attack_animation_spec_cache.clear()
 	trade_system.initialize_team(team, data_repository.runtime_metadata("trade_boat").get("trade", {}))
 	if not object_catalog_data.is_empty():
@@ -255,6 +264,15 @@ func set_team_civilization(team: int, civilization_id: int) -> void:
 func set_alliance(first_team: int, second_team: int, allied: bool = true) -> void:
 	player_registry.set_mutual_relation(first_team, second_team, "ally" if allied else "enemy")
 	visibility_system.set_alliance(first_team, second_team, allied)
+	_sync_shared_vision(first_team)
+	_sync_shared_vision(second_team)
+	if allied:
+		_reveal_allied_town_centers(first_team, second_team)
+		_reveal_allied_town_centers(second_team, first_team)
+	if not allied:
+		for transport in units:
+			if transport_system.is_transport(transport) and int(transport.get("team", 0)) in [first_team, second_team]:
+				transport_system.reconcile_ownership(transport)
 	if not is_bulk_loading():
 		update_fog_of_war()
 
@@ -268,10 +286,67 @@ func set_diplomacy_relation(source_team: int, target_team: int, relation: String
 		return false
 	player_registry.set_relation(source_team, target_team, relation)
 	visibility_system.set_relation(source_team, target_team, relation == PlayerRegistry.ALLY)
+	_sync_shared_vision(source_team)
+	if relation == PlayerRegistry.ALLY:
+		_reveal_allied_town_centers(source_team, target_team)
+	if relation != PlayerRegistry.ALLY:
+		for transport in units:
+			if transport_system.is_transport(transport) and int(transport.get("team", 0)) in [source_team, target_team]:
+				transport_system.reconcile_ownership(transport)
 	if not is_bulk_loading():
 		update_fog_of_war()
 		_emit_domain_event("diplomacy_changed", {"source_team": source_team, "target_team": target_team, "relation": relation})
 	return true
+
+
+func _sync_shared_vision(observer_team: int) -> void:
+	if observer_team <= 0:
+		return
+	for source_team_value in player_registry.all_teams():
+		var source_team := int(source_team_value)
+		if source_team > 0 and source_team != observer_team:
+			visibility_system.set_shared_vision(observer_team, source_team, are_teams_allied(observer_team, source_team) and technology_system.grants_shared_vision(observer_team))
+
+
+func _reveal_allied_town_centers(observer_team: int, ally_team: int) -> void:
+	if observer_team <= 0 or ally_team <= 0:
+		return
+	var memory: Dictionary = last_known_buildings_by_player.get(observer_team, {})
+	for building_value in buildings:
+		var building: Dictionary = building_value
+		if int(building.get("team", 0)) != ally_team or String(building.get("kind", "")) != "town_center" or float(building.get("hp", 0.0)) <= 0.0:
+			continue
+		var position := Vector2(building.get("pos", Vector2.ZERO))
+		fog_of_war.reveal_explored_cell(observer_team, Vector2i(floori(position.x), floori(position.y)))
+		if memory.has(int(building.get("id", -1))):
+			continue
+		memory[int(building.get("id", -1))] = {
+			"id": int(building.get("id", -1)),
+			"team": ally_team,
+			"kind": "town_center",
+			"entity_type": "building",
+			"pos": position,
+			"hp": 1.0,
+			"max_hp": 1.0,
+			"health_unknown": true,
+			"location_only": true,
+		}
+	last_known_buildings_by_player[observer_team] = memory
+
+
+func restore_last_known_buildings(encoded: Dictionary) -> void:
+	# Save archives stringify dictionary keys; runtime lookups use integer team and entity IDs.
+	last_known_buildings_by_player.clear()
+	for observer_key in encoded:
+		var observer_team := int(observer_key)
+		if observer_team <= 0 or not encoded[observer_key] is Dictionary:
+			continue
+		var restored: Dictionary = {}
+		var records: Dictionary = encoded[observer_key]
+		for entity_key in records:
+			if records[entity_key] is Dictionary:
+				restored[int(entity_key)] = records[entity_key].duplicate(true)
+		last_known_buildings_by_player[observer_team] = restored
 
 
 func configure_players(definitions: Array) -> void:
@@ -301,6 +376,8 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	resource_roster_revision += 1
 	resource_minimap_revision += 1
 	known_resources_by_player.clear()
+	ai_navigation_knowledge.clear()
+	last_known_buildings_by_player.clear()
 	compact_ai_resource_by_id.clear()
 	known_ai_resources_by_player.clear()
 	local_build_site_cache.clear()
@@ -331,6 +408,9 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	transport_system.reset()
 	trade_system.reset()
 	victory_objectives.clear()
+	capturable_victory_objectives.clear()
+	conquest_counts_by_team.clear()
+	conquest_tracked_by_id.clear()
 	score_by_team.clear()
 	victory_system.reset()
 	player_registry.reset_match()
@@ -557,6 +637,9 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		"anim_state": AnimationController.IDLE,
 		"animation_events_fired": {},
 		"population_cost": int(production.get("population_cost", 0)),
+		"population_base_cost": int(production.get("population_cost", 0)),
+		"population_points_cost": int(production.get("population_cost", 0)) * SimulationEconomySystem.POPULATION_POINT_SCALE,
+		"population_accounted": false,
 		"population_released": false,
 		"victory_objective_id": -1,
 		"source_unit_id": int(source.get("unit_id", stats.get("unit_id", -1))),
@@ -581,9 +664,11 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	EntityComponents.sync_dynamic(unit)
 	units.append(unit)
 	units_by_id[entity_id] = unit
+	track_conquest_entity(unit)
 	register_unit_victory_objective(unit)
 	apply_technology_state_to_entity(unit, team)
-	economy_system.add_population(team, int(unit["population_cost"]))
+	economy_system.add_population_points(team, int(unit["population_points_cost"]))
+	unit["population_accounted"] = true
 	spatial_index.insert(unit, position, unit["footprint_radius"], "unit")
 	if not is_bulk_loading():
 		update_fog_of_war()
@@ -623,6 +708,8 @@ func _add_resource(kind: String, position: Vector2, amount: int, resolve_placeme
 		"kind": kind,
 		"pos": position,
 		"elevation": elevation_at(position),
+		"hp": float(source.get("health", 1.0)),
+		"max_hp": float(source.get("health", 1.0)),
 		"amount": safe_amount,
 		"max_amount": safe_amount,
 		"resource_type_id": resource_type_id,
@@ -797,10 +884,18 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 	configure_harvestable_building(building, completed)
 	building["components"]["production"]["queue"] = production_queue
 	apply_technology_state_to_entity(building, team)
+	_sync_town_center_age_presentation(building)
 	configure_entity_combat_awareness(building)
 	EntityComponents.sync_dynamic(building)
 	buildings.append(building)
 	buildings_by_id[id] = building
+	track_conquest_entity(building)
+	if kind == "town_center" and completed:
+		for observer_team_value in player_registry.allied_teams(team):
+			var observer_team := int(observer_team_value)
+			if observer_team != team:
+				_reveal_allied_town_centers(observer_team, team)
+	production_system.register_building(id)
 	var spatial_half_size: Vector2 = footprint.get("half_size", Vector2.ONE * float(building["footprint_radius"]))
 	spatial_index.insert(building, position, spatial_half_size.length(), "obstacle")
 	register_building_victory_objective(building)
@@ -969,6 +1064,35 @@ func register_unit_victory_objective(unit: Dictionary) -> void:
 	unit["victory_objective_id"] = int(objective["id"])
 
 
+func track_conquest_entity(entity: Dictionary) -> void:
+	var entity_id := int(entity.get("id", -1))
+	if entity_id < 0:
+		return
+	var old_team := int(conquest_tracked_by_id.get(entity_id, 0))
+	var team := int(entity.get("team", 0))
+	var is_building := buildings_by_id.has(entity_id)
+	var qualifies := bool(entity.get("counts_for_conquest", true)) if is_building else not entity_has_behavior_tag(entity, "capturable") and not entity_has_behavior_tag(entity, "noncombat_target")
+	var new_team := team if team > 0 and float(entity.get("hp", 0.0)) > 0.0 and qualifies else 0
+	if old_team == new_team:
+		return
+	if old_team > 0:
+		conquest_counts_by_team[old_team] = maxi(0, int(conquest_counts_by_team.get(old_team, 0)) - 1)
+	if new_team > 0:
+		conquest_counts_by_team[new_team] = int(conquest_counts_by_team.get(new_team, 0)) + 1
+		conquest_tracked_by_id[entity_id] = new_team
+	else:
+		conquest_tracked_by_id.erase(entity_id)
+
+
+func rebuild_conquest_presence() -> void:
+	conquest_counts_by_team.clear()
+	conquest_tracked_by_id.clear()
+	for unit in get_all_units_including_embarked():
+		track_conquest_entity(unit)
+	for building in buildings:
+		track_conquest_entity(building)
+
+
 func sync_unit_victory_objective(unit: Dictionary) -> void:
 	var objective_id := int(unit.get("victory_objective_id", -1))
 	if objective_id < 0:
@@ -977,8 +1101,9 @@ func sync_unit_victory_objective(unit: Dictionary) -> void:
 		if int(objective.get("id", -1)) == objective_id:
 			objective["team"] = int(unit.get("team", 0))
 			objective["completed"] = float(unit.get("hp", 0.0)) > 0.0
-			objective["active"] = float(unit.get("hp", 0.0)) > 0.0 and not bool(unit.get("removed", false))
+			objective["active"] = float(unit.get("hp", 0.0)) > 0.0 and not bool(unit.get("removed", false)) and String(unit.get("cargo_state", "deployed")) != "embarked"
 			objective["pos"] = Vector2(unit.get("pos", Vector2.ZERO))
+			victory_system.track_objective(objective)
 			return
 
 
@@ -1020,6 +1145,26 @@ func update_capturable_objectives() -> void:
 			if new_team != old_team and (old_team <= 0 or not are_teams_allied(old_team, new_team)):
 				transfer_entity_ownership(objective_unit, new_team, -1, "proximity_capture", true)
 		sync_unit_victory_objective(objective_unit)
+	for objective in capturable_victory_objectives:
+		if not bool(objective.get("active", true)):
+			continue
+		var position := Vector2(objective.get("pos", Vector2.ZERO))
+		var best_team := -1
+		var best_distance := INF
+		var best_id := 9223372036854775807
+		for candidate_value in query_units_near(position, 2.5):
+			var candidate: Dictionary = candidate_value
+			var candidate_id := int(candidate.get("id", -1))
+			if int(candidate.get("team", 0)) <= 0 or float(candidate.get("hp", 0.0)) <= 0.0 or entity_has_behavior_tag(candidate, "capturable"):
+				continue
+			var distance := position.distance_to(Vector2(candidate.get("pos", Vector2.ZERO)))
+			if distance > 1.0 + 0.0001 or distance > best_distance or (is_equal_approx(distance, best_distance) and candidate_id >= best_id):
+				continue
+			best_team = int(candidate.get("team", 0))
+			best_distance = distance
+			best_id = candidate_id
+		if best_team > 0 and best_team != int(objective.get("team", 0)) and (int(objective.get("team", 0)) <= 0 or not are_teams_allied(int(objective.get("team", 0)), best_team)):
+			set_victory_object_owner(int(objective.get("id", -1)), best_team)
 
 
 func capture_radius_for_kind(kind: String) -> float:
@@ -1038,6 +1183,7 @@ func sync_building_victory_objective(building: Dictionary) -> void:
 			objective["completed"] = String(building.get("state", "complete")) == "complete" and float(building.get("hp", 0.0)) > 0.0
 			objective["active"] = float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "complete")) != "destroyed"
 			objective["pos"] = Vector2(building.get("pos", Vector2.ZERO))
+			victory_system.track_objective(objective)
 			return
 
 
@@ -1077,10 +1223,16 @@ func civilization_record(team: int) -> Dictionary:
 
 func initialize_team_rules(team: int) -> void:
 	var civilization := civilization_record(team)
+	technology_system.set_team_civilization(team, int(civilization_by_team.get(team, 13)))
 	technology_system.initialize_rule_resources(team, civilization.get("resources", []))
 	apply_technology_commands(team, technology_system.initialize_team(team), false)
-	apply_technology_commands(team, technology_system.apply_effect_bundle(team, int(civilization.get("tech_tree_id", -1))), false)
+	apply_technology_commands(team, technology_system.apply_effect_bundle(team, int(civilization.get("tech_tree_id", -1)), not full_tech_tree_enabled), false)
 	resolve_automatic_technologies(team)
+	if full_tech_tree_enabled:
+		# RoR's Full Tech Tree retains civilization bonuses but lifts civilization
+		# technology disables. Fire Galley is the explicit global exception.
+		technology_system.disable_scenario_object(team, 360)
+	_sync_shared_vision(team)
 
 
 func apply_civilization_starting_resources(team: int) -> void:
@@ -1408,6 +1560,32 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 				var trade_update := trade_system.advance_unit(unit, delta)
 				moving = bool(trade_update.get("moving", false))
 				animation_state = String(trade_update.get("animation_state", AnimationController.IDLE))
+			"attack_ground":
+				var ground_position: Vector2 = OrderPipeline.current(unit).get("target_position", unit.get("pos", Vector2.ZERO))
+				var ground_target := _attack_ground_target(ground_position)
+				if not can_attack_ground(unit):
+					halt_unit(unit, "attack_ground_unavailable")
+				elif not CombatRules.is_in_range(unit, ground_target):
+					if String(unit.get("stance", "passive")) == "stand_ground":
+						halt_unit(unit, "stand_ground_range")
+					else:
+						var ground_destination := FormationCombat.destination(unit, ground_target)
+						unit["combat_destination"] = ground_destination
+						ensure_navigation_destination(unit, ground_destination)
+						if unit.get("path", []).is_empty():
+							halt_unit(unit, "no_path")
+						else:
+							moving = move_unit(unit, delta)
+				else:
+					face_unit_toward(unit, ground_position)
+					if float(unit.get("cooldown", 0.0)) <= 0.0:
+						OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+						OrderPipeline.transition(unit, OrderPipeline.PERFORM_ACTION)
+						animation_state = AnimationController.ATTACK_WINDUP
+						attack_target = ground_target
+					else:
+						OrderPipeline.transition(unit, OrderPipeline.RECOVER)
+						animation_state = AnimationController.ATTACK_RECOVER
 			"attack":
 				var enemy = find_combat_target(unit["target_id"])
 				if enemy == null or enemy["hp"] <= 0.0:
@@ -1700,6 +1878,8 @@ func begin_death(unit: Dictionary) -> void:
 		"team": int(unit.get("team", 0)),
 	})
 	unit["hp"] = minf(0.0, float(unit.get("hp", 0.0)))
+	track_conquest_entity(unit)
+	sync_unit_victory_objective(unit)
 	unit["selected"] = false
 	unit["task"] = "die"
 	unit["target_id"] = -1
@@ -1711,6 +1891,7 @@ func begin_death(unit: Dictionary) -> void:
 	unit["death_elapsed"] = 0.0
 	unit["death_complete"] = false
 	release_unit_destination(unit)
+	OrderPipeline.clear_queued(unit)
 	OrderPipeline.complete(unit, "unit_died")
 	unit["formation_group_id"] = -1
 	unit["formation_slot_id"] = -1
@@ -1723,7 +1904,7 @@ func begin_death(unit: Dictionary) -> void:
 	unit["combat_destination"] = null
 	if not bool(unit.get("population_released", false)):
 		var team := int(unit.get("team", 0))
-		economy_system.add_population(team, -int(unit.get("population_cost", 0)))
+		economy_system.add_population_points(team, -int(unit.get("population_points_cost", int(unit.get("population_cost", 0)) * SimulationEconomySystem.POPULATION_POINT_SCALE)))
 		unit["population_released"] = true
 	AnimationController.update(unit, AnimationController.DIE, 0.0)
 	EntityComponents.sync_dynamic(unit)
@@ -1750,8 +1931,7 @@ func begin_building_destruction(building: Dictionary) -> void:
 		"kind": String(building.get("kind", "")),
 		"team": int(building.get("team", 0)),
 	})
-	while not building.get("production_queue", []).is_empty():
-		production_system.cancel(int(building.get("id", -1)), 0)
+	production_system.abort_for_building_loss(int(building.get("id", -1)))
 	deactivate_population_support(building)
 	deactivate_building_victory_objective(building)
 	if bool(building.get("harvestable", false)):
@@ -1762,6 +1942,7 @@ func begin_building_destruction(building: Dictionary) -> void:
 				finish_gather_order(unit, "resource_destroyed")
 		building["resource_state"] = "destroyed"
 	building["hp"] = 0.0
+	track_conquest_entity(building)
 	building["state"] = "destroyed"
 	building["builders"] = {}
 	building["production_progress"] = 0.0
@@ -1838,10 +2019,13 @@ func advance_death_only(delta: float) -> void:
 		advance_death(unit, delta)
 	for building in dying_buildings:
 		building["death_elapsed"] = float(building.get("death_elapsed", 0.0)) + maxf(0.0, delta)
-		if float(building["death_elapsed"]) + 0.000001 >= float(building.get("death_duration", 0.05)):
+		var death_duration := float(building.get("death_duration", 0.05))
+		if float(building["death_elapsed"]) + 0.000001 >= death_duration + 8.0:
 			building["death_phase"] = "removed"
 			building["removed"] = true
 			building_removal_pending = true
+		elif float(building["death_elapsed"]) + 0.000001 >= death_duration:
+			building["death_phase"] = "ruin"
 		EntityComponents.sync_dynamic(building)
 
 
@@ -1860,6 +2044,7 @@ func purge_removed_units() -> void:
 	if building_removal_pending:
 		for index in range(buildings.size() - 1, -1, -1):
 			if bool(buildings[index].get("removed", false)):
+				production_system.unregister_building(int(buildings[index].get("id", -1)))
 				buildings_by_id.erase(int(buildings[index].get("id", -1)))
 				buildings.remove_at(index)
 		for index in range(dying_buildings.size() - 1, -1, -1):
@@ -2038,25 +2223,21 @@ func check_battle_state(player_team: int, enemy_team: int, delta: float = 0.0) -
 	if teams.is_empty():
 		teams = [player_team, enemy_team]
 	var has_conquest_rule := victory_system.rules.any(func(rule): return String(rule.get("type", "conquest")) == "conquest")
-	var conquest_presence: Variant = null
-	if has_conquest_rule and teams.size() >= 3:
-		conquest_presence = {}
-		for unit_value in get_all_units_including_embarked():
-			var unit: Dictionary = unit_value
-			if float(unit.get("hp", 0.0)) > 0.0:
-				conquest_presence[int(unit.get("team", 0))] = true
-		for building_value in buildings:
-			var building: Dictionary = building_value
-			if float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)):
-				conquest_presence[int(building.get("team", 0))] = true
+	var conquest_presence: Dictionary = {}
+	if has_conquest_rule:
+		# Explicit checks in fixtures may change HP directly. Fixed-tick gameplay
+		# uses the entity lifecycle index and never rescans the full roster here.
+		if delta <= 0.0:
+			rebuild_conquest_presence()
+		for team_value in teams:
+			var team := int(team_value)
+			conquest_presence[team] = int(conquest_counts_by_team.get(team, 0)) > 0
 	if has_conquest_rule:
 		for team_value in teams:
 			var team := int(team_value)
 			if player_registry.status(team) != PlayerRegistry.ACTIVE:
 				continue
-			var has_units := bool(conquest_presence.get(team, false)) if conquest_presence != null else get_all_units_including_embarked().any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0)
-			var has_buildings := false if conquest_presence != null else buildings.any(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)))
-			if not has_units and not has_buildings and player_registry.defeat(team):
+			if not bool(conquest_presence.get(team, false)) and player_registry.defeat(team):
 				_emit_domain_event("player_defeated", {"team": team})
 	var resources: Dictionary = {}
 	var technologies: Dictionary = {}
@@ -2071,17 +2252,19 @@ func check_battle_state(player_team: int, enemy_team: int, delta: float = 0.0) -
 		"teams": teams,
 		"participant_count": teams.size(),
 		"player_states": _player_states_by_team(),
-		"units": get_all_units_including_embarked(),
-		"buildings": buildings,
-		"resource_nodes": get_resources(),
 		"objectives": victory_objectives,
+		"objective_summary": victory_system.objective_summary,
 		"scores": score_by_team,
 		"resources": resources,
 		"technologies": technologies,
 		"relations": _team_relations(),
 	}
-	if conquest_presence != null:
+	if has_conquest_rule:
 		victory_context["conquest_presence"] = conquest_presence
+	if needs_scenario_rule_state or not scenario_system.definition.is_empty():
+		victory_context["units"] = get_all_units_including_embarked()
+		victory_context["buildings"] = buildings
+		victory_context["resource_nodes"] = get_resources()
 	var scenario_update: Dictionary = scenario_system.update(victory_context)
 	for event_value in scenario_update.get("events", []):
 		var event: Dictionary = event_value
@@ -2240,6 +2423,8 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 		if float(worker["carried_amount"]) > 0.0:
 			begin_resource_return(worker)
 			return GATHER_UPDATE_CARRY_IDLE
+		if resource != null and prepare_group_gather_approach(worker, resource):
+			return GATHER_UPDATE_IDLE
 		finish_gather_order(worker, "resource_unavailable")
 		return GATHER_UPDATE_IDLE
 
@@ -2248,12 +2433,21 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 		begin_resource_return(worker)
 		return GATHER_UPDATE_CARRY_IDLE
 
-	if not worker["resource_approach_slot"] is Vector2:
-		if not prepare_resource_approach(worker, resource):
+	# A lone worker can begin as soon as the deposit is in reach. Shared work
+	# uses the reserved positions so workers do not harvest inside one another.
+	var in_work_range: bool = _worker_in_resource_range(worker, resource)
+	if not in_work_range and not worker["resource_approach_slot"] is Vector2:
+		if not prepare_group_gather_approach(worker, resource):
 			finish_gather_order(worker, "no_approach_slot")
 			return GATHER_UPDATE_IDLE
-	var approach: Vector2 = worker["resource_approach_slot"]
-	if worker["pos"].distance_squared_to(approach) > 0.0144:
+		resource = find_resource(int(worker["resource_id"]))
+	var slot: Variant = worker["resource_approach_slot"]
+	if slot is Vector2:
+		var at_slot: bool = Vector2(worker["pos"]).distance_squared_to(slot) <= 0.0144
+		var reservations: Dictionary = resource_approach_slots.get(int(worker["resource_id"]), {})
+		in_work_range = at_slot if reservations.size() > 1 else in_work_range or at_slot
+	if not in_work_range:
+		var approach: Vector2 = worker["resource_approach_slot"]
 		worker["gather_stage"] = "approaching"
 		ensure_navigation_destination(worker, approach)
 		return GATHER_UPDATE_MOVE if move_unit(worker, delta) else GATHER_UPDATE_MOVE_IDLE
@@ -2277,10 +2471,25 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	return GATHER_UPDATE_ACTION
 
 
+func _worker_in_resource_range(worker: Dictionary, resource: Dictionary) -> bool:
+	# A unit can be hand-placed inside a resource's blocked navigation cell in
+	# scenarios and imported maps. Harvesting there immediately traps its first
+	# loaded return trip; it must step onto a free neighbouring cell first. A
+	# position a few floating-point units across a cell boundary is not enough
+	# clearance for the loaded unit to route back to its drop-off either.
+	var position: Vector2 = worker["pos"]
+	var cell := Vector2i(position)
+	var cell_offset := position - Vector2(cell)
+	if cell == Vector2i(Vector2(resource["pos"])) or cell_offset.x < 0.12 or cell_offset.x > 0.88 or cell_offset.y < 0.12 or cell_offset.y > 0.88:
+		return false
+	var reach := maxf(0.5, float(resource.get("footprint_radius", 0.2))) + float(worker.get("footprint_radius", 0.3)) + 0.32
+	return Vector2(worker["pos"]).distance_squared_to(Vector2(resource["pos"])) <= reach * reach
+
+
 func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 	if float(worker["carried_amount"]) <= 0.0:
 		var empty_resource: Variant = find_resource(int(worker["resource_id"]))
-		if empty_resource != null and int(empty_resource["amount"]) > 0 and prepare_resource_approach(worker, empty_resource):
+		if empty_resource != null and prepare_group_gather_approach(worker, empty_resource):
 			OrderPipeline.restart(worker)
 			return GATHER_UPDATE_IDLE
 		finish_gather_order(worker, "cycle_complete")
@@ -2307,10 +2516,9 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 	worker["deposit_cycles"] = int(worker["deposit_cycles"]) + 1
 	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
 	var resource: Variant = find_resource(int(worker["resource_id"]))
-	if resource != null and int(resource["amount"]) > 0:
+	if resource != null and prepare_group_gather_approach(worker, resource):
 		OrderPipeline.restart(worker)
-		if prepare_resource_approach(worker, resource):
-			return GATHER_UPDATE_IDLE
+		return GATHER_UPDATE_IDLE
 	finish_gather_order(worker, "resource_depleted")
 	return GATHER_UPDATE_IDLE
 
@@ -2389,13 +2597,44 @@ func prepare_resource_approach(worker: Dictionary, resource: Dictionary) -> bool
 	var maximum_gatherers := maxi(0, int(runtime_metadata.get("max_gatherers", 0)))
 	if maximum_gatherers > 0 and reservations.size() >= maximum_gatherers:
 		return false
-	var slot: Variant = _assign_reachable_approach_slot(worker, resource_approach_candidates(worker, resource, runtime_metadata), reservations)
+	var slot: Variant = _assign_reachable_approach_slot(worker, resource_approach_candidates(worker, resource, runtime_metadata), reservations, true)
 	if not slot is Vector2:
 		return false
 	reservations[int(worker["id"])] = slot
 	resource_approach_slots[resource_id] = reservations
 	worker["resource_approach_slot"] = slot
 	return true
+
+
+func prepare_group_gather_approach(worker: Dictionary, requested_resource: Dictionary) -> bool:
+	if int(requested_resource.get("amount", 0)) > 0 and prepare_resource_approach(worker, requested_resource):
+		return true
+	var neighbors: Array = []
+	var requested_position := Vector2(requested_resource["pos"])
+	for candidate_value in get_resources():
+		var candidate: Dictionary = candidate_value
+		if int(candidate.get("id", -1)) == int(requested_resource["id"]) or String(candidate.get("kind", "")) != String(requested_resource.get("kind", "")):
+			continue
+		if int(candidate.get("amount", 0)) <= 0 or requested_position.distance_squared_to(Vector2(candidate["pos"])) > 36.0:
+			continue
+		if not resource_accessible_to_team(candidate, int(worker.get("team", 0))) or not resource_allows_worker(candidate, worker):
+			continue
+		neighbors.append(candidate)
+	neighbors.sort_custom(func(left: Dictionary, right: Dictionary):
+		var left_distance := Vector2(worker["pos"]).distance_squared_to(Vector2(left["pos"]))
+		var right_distance := Vector2(worker["pos"]).distance_squared_to(Vector2(right["pos"]))
+		if not is_equal_approx(left_distance, right_distance):
+			return left_distance < right_distance
+		return int(left["id"]) < int(right["id"])
+	)
+	for candidate in neighbors:
+		if not prepare_resource_approach(worker, candidate):
+			continue
+		worker["resource_id"] = int(candidate["id"])
+		worker_role_system.apply(worker, worker_role_system.profile_for_resource(worker, candidate), false)
+		OrderPipeline.begin(worker, "gather", int(candidate["id"]), candidate["pos"], true)
+		return true
+	return false
 
 
 func resource_approach_candidates(worker: Dictionary, resource: Dictionary, runtime_metadata: Dictionary = {}) -> Array[Vector2]:
@@ -2407,7 +2646,11 @@ func resource_approach_candidates(worker: Dictionary, resource: Dictionary, runt
 		for offset in [Vector2.ZERO, Vector2(-0.65, -0.65), Vector2(0.65, -0.65), Vector2(0.65, 0.65), Vector2(-0.65, 0.65), Vector2(0.0, -0.75), Vector2(0.75, 0.0), Vector2(0.0, 0.75), Vector2(-0.75, 0.0)]:
 			result.append(Coordinates.clamp_world(Vector2(resource["pos"]) + offset * extent, map_size))
 		return result
-	var distance := float(resource.get("footprint_radius", 0.2)) + float(worker.get("footprint_radius", 0.3)) + 0.12
+	# Navigation blocks the whole resource cell. A slot based only on the
+	# physical sprite radii can still overlap that blocked cell, even though
+	# the unit appears to stand beside the resource.
+	var worker_radius := float(worker.get("footprint_radius", 0.3))
+	var distance := maxf(float(resource.get("footprint_radius", 0.2)) + worker_radius + 0.12, 0.5 + worker_radius + 0.1)
 	for slot_index in range(16):
 		var angle := PI + TAU * float(slot_index) / 16.0
 		result.append(Coordinates.clamp_world(Vector2(resource["pos"]) + Vector2(cos(angle), sin(angle)) * distance, map_size))
@@ -2785,6 +3028,7 @@ func get_cached_local_build_sites(team: int, kinds: Array, tick: int, maximum_ag
 		# every campaign AI even when that authoritative map had not changed.
 		return cached.get("sites", {})
 	var sites := get_local_build_sites(team, kinds, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
+	_prune_local_build_site_cache(tick, maximum_age_ticks)
 	local_build_site_cache[cache_key] = {
 		"tick": tick,
 		"navigation_revision": navigation_revision,
@@ -2792,6 +3036,23 @@ func get_cached_local_build_sites(team: int, kinds: Array, tick: int, maximum_ag
 		"sites": sites.duplicate(true),
 	}
 	return sites
+
+
+func _prune_local_build_site_cache(tick: int, maximum_age_ticks: int) -> void:
+	for key in local_build_site_cache.keys():
+		var cached: Dictionary = local_build_site_cache[key]
+		var cached_tick := int(cached.get("tick", -1))
+		if cached_tick > tick or tick - cached_tick > maxi(0, maximum_age_ticks):
+			local_build_site_cache.erase(key)
+	while local_build_site_cache.size() >= MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES:
+		var oldest_key = local_build_site_cache.keys()[0]
+		var oldest_tick := int(local_build_site_cache[oldest_key].get("tick", -1))
+		for key in local_build_site_cache:
+			var cached_tick := int(local_build_site_cache[key].get("tick", -1))
+			if cached_tick < oldest_tick:
+				oldest_key = key
+				oldest_tick = cached_tick
+		local_build_site_cache.erase(oldest_key)
 
 
 func _build_site_worker_component_signature(team: int) -> int:
@@ -3037,6 +3298,7 @@ func cancel_foundation(building_id: int) -> bool:
 		deactivate_building_victory_objective(building)
 		for index in range(buildings.size() - 1, -1, -1):
 			if int(buildings[index].get("id", -1)) == building_id:
+				production_system.unregister_building(building_id)
 				buildings_by_id.erase(building_id)
 				buildings.remove_at(index)
 				break
@@ -3114,16 +3376,35 @@ func reseed_harvestable_building(building: Dictionary, workers: Array = []) -> V
 
 
 func assign_command_repair(selected: Array, building_id: int) -> bool:
-	var building: Variant = find_building(building_id)
-	if building == null or float(building.get("hp", 0.0)) <= 0.0:
+	var target: Variant = find_building(building_id)
+	if target == null:
+		target = find_unit(building_id)
+	if target == null or selected.is_empty():
 		return false
-	assign_workers_to_building(selected, building, "repair")
-	return true
+	for worker_value in selected:
+		if not can_worker_repair(worker_value, target):
+			return false
+	assign_workers_to_building(selected, target, "repair")
+	return selected.any(func(worker): return String(worker.get("task", "")) == "repair" and int(worker.get("target_building_id", -1)) == building_id)
+
+
+func can_worker_repair(worker: Dictionary, target: Dictionary) -> bool:
+	if not entity_is_worker(worker) or float(worker.get("hp", 0.0)) <= 0.0:
+		return false
+	if float(target.get("hp", 0.0)) <= 0.0 or float(target.get("hp", 0.0)) >= float(target.get("max_hp", 0.0)) - 0.0001:
+		return false
+	var target_team := int(target.get("team", 0))
+	var worker_team := int(worker.get("team", 0))
+	if target_team <= 0 or worker_team <= 0 or not are_teams_allied(worker_team, target_team):
+		return false
+	if find_building(int(target.get("id", -1))) != null:
+		return String(target.get("state", "complete")) == "complete"
+	return find_unit(int(target.get("id", -1))) != null and String(target.get("movement_domain", "land")) == "water"
 
 
 func assign_workers_to_building(selected: Array, building: Dictionary, order_type: String) -> void:
 	for worker in selected:
-		if not entity_is_worker(worker) or int(worker.get("team", 0)) != int(building.get("team", 0)):
+		if not entity_is_worker(worker) or (order_type == "build" and int(worker.get("team", 0)) != int(building.get("team", 0))) or (order_type == "repair" and not can_worker_repair(worker, building)):
 			continue
 		worker_role_system.apply(worker, worker_role_system.profile_for_task(worker, order_type), false)
 		worker["pending_hunt_target_id"] = -1
@@ -3135,12 +3416,14 @@ func assign_workers_to_building(selected: Array, building: Dictionary, order_typ
 		worker["task"] = order_type
 		worker["target_building_id"] = int(building["id"])
 		OrderPipeline.begin(worker, order_type, int(building["id"]), building["pos"], true)
-		if not prepare_building_approach(worker, building):
+		if not _worker_in_building_range(worker, building) and not prepare_building_approach(worker, building):
 			finish_building_order(worker, "no_approach_slot")
 
 
 func update_building_order(worker: Dictionary, delta: float) -> Dictionary:
 	var building: Variant = find_building(int(worker.get("target_building_id", -1)))
+	if building == null and String(worker.get("task", "")) == "repair":
+		building = find_unit(int(worker.get("target_building_id", -1)))
 	if building == null or float(building.get("hp", 0.0)) <= 0.0:
 		finish_building_order(worker, "building_unavailable")
 		return {"moving": false, "animation_state": AnimationController.IDLE}
@@ -3150,12 +3433,17 @@ func update_building_order(worker: Dictionary, delta: float) -> Dictionary:
 	if worker["task"] == "repair" and float(building["hp"]) >= float(building["max_hp"]) - 0.0001:
 		finish_building_order(worker, "repair_complete")
 		return {"moving": false, "animation_state": AnimationController.IDLE}
-	if not worker.get("building_approach_slot") is Vector2:
+	if worker["task"] == "repair" and not can_worker_repair(worker, building):
+		finish_building_order(worker, "repair_no_longer_allowed")
+		return {"moving": false, "animation_state": AnimationController.IDLE}
+	var in_work_range := _worker_in_building_range(worker, building)
+	if not in_work_range and not worker.get("building_approach_slot") is Vector2:
 		if not prepare_building_approach(worker, building):
 			finish_building_order(worker, "no_approach_slot")
 			return {"moving": false, "animation_state": AnimationController.IDLE}
-	var destination: Vector2 = worker["building_approach_slot"]
-	if worker["pos"].distance_squared_to(destination) > 0.0144:
+		in_work_range = _worker_in_building_range(worker, building)
+	if not in_work_range:
+		var destination: Vector2 = worker["building_approach_slot"]
 		ensure_navigation_destination(worker, destination)
 		return {"moving": move_unit(worker, delta), "animation_state": AnimationController.MOVE}
 
@@ -3174,23 +3462,71 @@ func update_building_order(worker: Dictionary, delta: float) -> Dictionary:
 		if float(building["construction_progress"]) >= 1.0 - 0.000001:
 			complete_foundation(building)
 	else:
-		var repair_amount := minf(float(building["max_hp"]) - float(building["hp"]), delta * worker_rate * 10.0)
-		var repair_cost := repair_amount * 0.1
-		var repair_team := int(worker.get("team", building.get("team", 0)))
-		var available_fraction := float(economy_system.get_resource_amount(repair_team, 1)) + float(building.get("repair_cost_fraction", 0.0))
-		if repair_amount > 0.0 and available_fraction > 0.0:
-			building["hp"] += repair_amount
-			building["repair_cost_fraction"] = float(building.get("repair_cost_fraction", 0.0)) + repair_cost
-			var whole_cost := floori(float(building["repair_cost_fraction"]))
-			if whole_cost > 0:
-				economy_system.change_resource_amount(repair_team, 1, -whole_cost)
-				building["repair_cost_fraction"] = float(building["repair_cost_fraction"]) - whole_cost
-			EntityComponents.sync_dynamic(building)
+		var repair_rate := maxf(0.0, float(data_repository.runtime_metadata(String(building.get("kind", ""))).get("repair_hp_per_work", 10.0)))
+		advance_repair(worker, building, delta * worker_rate * repair_rate)
 		if float(building["hp"]) >= float(building["max_hp"]) - 0.0001:
 			building["hp"] = building["max_hp"]
 			finish_building_order(worker, "repair_complete")
 	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
 	return {"moving": false, "animation_state": AnimationController.BUILD if was_building else AnimationController.REPAIR}
+
+
+func _worker_in_building_range(worker: Dictionary, building: Dictionary) -> bool:
+	var half_size := Vector2(building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5)))
+	var offset := Vector2(worker["pos"]) - Vector2(building["pos"])
+	# Navigation's blocked footprint and mobile collision can stop a worker up
+	# to roughly one cell short of an exact perimeter slot. This is still
+	# adjacent construction range, not permission to build from across a gap.
+	var reach := float(worker.get("footprint_radius", 0.3)) + 1.0
+	var outside := Vector2(maxf(0.0, absf(offset.x) - half_size.x), maxf(0.0, absf(offset.y) - half_size.y))
+	return outside.length_squared() <= reach * reach
+
+
+func advance_repair(worker: Dictionary, target: Dictionary, requested_hp: float) -> float:
+	if not can_worker_repair(worker, target):
+		return 0.0
+	var repair_policy: Dictionary = data_repository.runtime_metadata(String(target.get("kind", "")))
+	var payer := int(target.get("team", 0)) if String(repair_policy.get("repair_payer", "worker")) == "owner" else int(worker.get("team", 0))
+	var source_cost := building_cost(String(target.get("kind", "")), int(target.get("team", 0))) if find_building(int(target.get("id", -1))) != null else unit_resource_cost(String(target.get("kind", "")), int(target.get("team", 0)))
+	if source_cost.is_empty():
+		source_cost = {1: 10}
+	var cost_per_hp: Dictionary = {}
+	var max_hp := maxf(1.0, float(target.get("max_hp", 1.0)))
+	var cost_ratio := maxf(0.0, float(repair_policy.get("repair_cost_ratio", 0.5)))
+	for resource_id_value in source_cost:
+		var resource_id := int(resource_id_value)
+		if resource_id in [0, 1, 2, 3] and int(source_cost[resource_id_value]) > 0:
+			cost_per_hp[resource_id] = float(source_cost[resource_id_value]) * cost_ratio / max_hp
+	var fractions_by_payer: Dictionary = target.get("repair_cost_fractions", {})
+	var fractions: Dictionary = fractions_by_payer.get(payer, {})
+	var restored_hp := minf(maxf(0.0, requested_hp), maxf(0.0, max_hp - float(target.get("hp", 0.0))))
+	for resource_id_value in cost_per_hp:
+		var resource_id := int(resource_id_value)
+		var rate := float(cost_per_hp[resource_id])
+		var stock := economy_system.get_resource_amount(payer, resource_id)
+		var pending := float(fractions.get(resource_id, 0.0))
+		if rate > 0.0:
+			if stock <= 0:
+				return 0.0
+			restored_hp = minf(restored_hp, maxf(0.0, (float(stock) - pending) / rate))
+	if restored_hp <= 0.000001:
+		return 0.0
+	var completes_target := float(target.get("hp", 0.0)) + restored_hp >= max_hp - 0.000001
+	var spent: Dictionary = {}
+	for resource_id_value in cost_per_hp:
+		var resource_id := int(resource_id_value)
+		var total := float(fractions.get(resource_id, 0.0)) + restored_hp * float(cost_per_hp[resource_id])
+		var whole := ceili(total - 0.000001) if completes_target else floori(total + 0.000001)
+		fractions[resource_id] = 0.0 if completes_target else maxf(0.0, total - float(whole))
+		if whole > 0:
+			economy_system.change_resource_amount(payer, resource_id, -whole)
+			spent[resource_id] = whole
+	fractions_by_payer[payer] = fractions
+	target["repair_cost_fractions"] = fractions_by_payer
+	target["hp"] = minf(max_hp, float(target.get("hp", 0.0)) + restored_hp)
+	EntityComponents.sync_dynamic(target)
+	_emit_domain_event("entity_repaired", {"entity_id": int(target.get("id", -1)), "payer_team": payer, "restored_hp": restored_hp, "resource_spent": spent})
+	return restored_hp
 
 
 func complete_foundation(building: Dictionary) -> void:
@@ -3218,7 +3554,7 @@ func complete_foundation(building: Dictionary) -> void:
 		var gatherers: Array = []
 		for builder_id in completing_builder_ids:
 			var builder: Variant = find_unit(int(builder_id))
-			if builder != null and float(builder.get("hp", 0.0)) > 0.0 and entity_is_worker(builder):
+			if builder != null and float(builder.get("hp", 0.0)) > 0.0 and entity_is_worker(builder) and OrderPipeline.queued(builder).is_empty():
 				gatherers.append(builder)
 		if not gatherers.is_empty():
 			assign_command_gather(gatherers, building_id)
@@ -3238,6 +3574,8 @@ func activate_building_completion(building: Dictionary) -> void:
 		return
 	var team := int(building.get("team", 0))
 	activate_population_support(building)
+	if team <= 0:
+		return
 	var civilization_id := int(civilization_by_team.get(team, 13))
 	var technology_id: int = data_repository.completion_technology_id(kind, civilization_id)
 	if technology_id < 0 or technology_system.technology(technology_id).is_empty() or technology_system.is_researched(team, technology_id):
@@ -3360,14 +3698,14 @@ func prepare_building_approach(worker: Dictionary, building: Dictionary) -> bool
 	return true
 
 
-func _assign_reachable_approach_slot(worker: Dictionary, candidates: Array[Vector2], reservations: Dictionary) -> Variant:
-	for candidate in _available_approach_slots(worker, candidates, reservations):
+func _assign_reachable_approach_slot(worker: Dictionary, candidates: Array[Vector2], reservations: Dictionary, respect_footprints: bool = false) -> Variant:
+	for candidate in _available_approach_slots(worker, candidates, reservations, respect_footprints):
 		if _resume_approach(worker, candidate):
 			return candidate
 	return null
 
 
-func _available_approach_slots(worker: Dictionary, candidates: Array[Vector2], reservations: Dictionary) -> Array[Vector2]:
+func _available_approach_slots(worker: Dictionary, candidates: Array[Vector2], reservations: Dictionary, respect_footprints: bool = false) -> Array[Vector2]:
 	var result: Array[Vector2] = []
 	var radius := float(worker.get("footprint_radius", 0.3))
 	var domain := String(worker.get("movement_domain", "land"))
@@ -3375,7 +3713,18 @@ func _available_approach_slots(worker: Dictionary, candidates: Array[Vector2], r
 	for candidate in candidates:
 		if not navigation_grid.is_position_walkable_for(candidate, radius, domain, restriction):
 			continue
-		if reservations.values().any(func(existing): return Vector2(existing).distance_squared_to(candidate) < 0.09):
+		var too_close := false
+		for other_id in reservations:
+			var separation := 0.3
+			if respect_footprints:
+				var other: Variant = find_unit(int(other_id))
+				separation = Footprint.separation_distance(worker, other) if other != null else radius * 2.0 + Footprint.DEFAULT_CLEARANCE
+			if Vector2(reservations[other_id]).distance_squared_to(candidate) < separation * separation:
+				too_close = true
+				break
+		if not too_close and respect_footprints:
+			too_close = _resource_approach_slot_occupied(worker, candidate)
+		if too_close:
 			continue
 		result.append(candidate)
 	var origin := Vector2(worker.get("pos", Vector2.ZERO))
@@ -3389,6 +3738,26 @@ func _available_approach_slots(worker: Dictionary, candidates: Array[Vector2], r
 		return left.x < right.x
 	)
 	return result
+
+
+func _resource_approach_slot_occupied(worker: Dictionary, candidate: Vector2) -> bool:
+	# Berry bushes and tree clusters have separate reservation tables. Search the
+	# nearby resource cells as well, so slots belonging to adjacent nodes cannot
+	# put two working units at nearly the same world position.
+	var cell := Vector2i(candidate)
+	for y in range(maxi(0, cell.y - 3), mini(map_size.y - 1, cell.y + 3) + 1):
+		for x in range(maxi(0, cell.x - 3), mini(map_size.x - 1, cell.x + 3) + 1):
+			for resource_value in resource_nodes_by_cell.get(y * map_size.x + x, []):
+				var resource: Dictionary = resource_value
+				var slots: Dictionary = resource_approach_slots.get(int(resource["id"]), {})
+				for other_id in slots:
+					if int(other_id) == int(worker["id"]):
+						continue
+					var other: Variant = find_unit(int(other_id))
+					var separation := Footprint.separation_distance(worker, other) if other != null else float(worker.get("footprint_radius", 0.3)) * 2.0 + Footprint.DEFAULT_CLEARANCE
+					if Vector2(slots[other_id]).distance_squared_to(candidate) < separation * separation:
+						return true
+	return false
 
 
 func _resume_approach(worker: Dictionary, slot: Vector2) -> bool:
@@ -3454,8 +3823,10 @@ func update_resource_state(resource: Dictionary) -> void:
 
 
 func advance_resource_lifecycle(delta: float) -> void:
+	var expired_count := 0
 	for resource in decaying_resource_nodes:
 		if int(resource.get("amount", 0)) <= 0:
+			expired_count += 1
 			continue
 		var decay_rate := maxf(0.0, float(resource.get("decay_rate", 0.0)))
 		if decay_rate <= 0.0:
@@ -3478,6 +3849,40 @@ func advance_resource_lifecycle(delta: float) -> void:
 				"amount": lost,
 				"remaining": int(resource.get("amount", 0)),
 			})
+		if int(resource.get("amount", 0)) <= 0:
+			expired_count += 1
+	if expired_count > 0:
+		var active: Array = []
+		var retired_ids: Dictionary = {}
+		for resource in decaying_resource_nodes:
+			if int(resource.get("amount", 0)) > 0:
+				active.append(resource)
+			elif not bool(resource.get("visible_when_depleted", false)):
+				retired_ids[int(resource.get("id", -1))] = resource
+		decaying_resource_nodes = active
+		if not retired_ids.is_empty():
+			# Carcasses are invisible after depletion. Keeping every old corpse in
+			# the authoritative roster makes every AI/resource snapshot grow for
+			# the whole match, long after it stopped being harvestable.
+			var retained_resources: Array = []
+			for resource in resource_nodes:
+				if not retired_ids.has(int(resource.get("id", -1))):
+					retained_resources.append(resource)
+			resource_nodes = retained_resources
+			for resource_id_value in retired_ids.keys():
+				var resource_id := int(resource_id_value)
+				var retired: Dictionary = retired_ids[resource_id]
+				resource_nodes_by_id.erase(resource_id)
+				compact_ai_resource_by_id.erase(resource_id)
+				var position: Vector2 = retired.get("pos", Vector2.ZERO)
+				var cell_index := floori(position.y) * map_size.x + floori(position.x)
+				var cell_resources: Array = resource_nodes_by_cell.get(cell_index, [])
+				cell_resources.erase(retired)
+				if cell_resources.is_empty():
+					resource_nodes_by_cell.erase(cell_index)
+			resource_roster_revision += 1
+			known_resources_by_player.clear()
+			known_ai_resources_by_player.clear()
 
 
 func _update_huntable_reaction(unit: Dictionary) -> void:
@@ -3688,6 +4093,53 @@ func ensure_navigation_destination(unit: Dictionary, destination: Vector2) -> vo
 	if previous_destination.distance_squared_to(destination) > 0.25 or unit.get("path", []).is_empty():
 		assign_unit_destination(unit, destination, false)
 
+
+func can_attack_ground(unit: Dictionary) -> bool:
+	var combat: Dictionary = unit.get("components", {}).get("combat", {})
+	return bool(unit.get("combat_enabled", false)) and int(combat.get("projectile_id", unit.get("projectile_id", -1))) >= 0 and float(combat.get("blast_range", unit.get("blast_range", 0.0))) > 0.0
+
+
+func _attack_ground_target(position: Vector2) -> Dictionary:
+	return {
+		"id": -1,
+		"pos": position,
+		"hp": 1.0,
+		"footprint_radius": 0.0,
+		"elevation": elevation_at(position),
+		"attack_ground": true,
+	}
+
+
+func assign_command_attack_ground(selected: Array, target: Vector2) -> bool:
+	var ground_target := _attack_ground_target(target)
+	var resolved_count := 0
+	for unit in selected:
+		if not can_attack_ground(unit):
+			continue
+		conversion_system.cancel(unit, "new_order")
+		healing_system.cancel(unit, "new_order")
+		release_resource_approach_slot(unit)
+		release_building_approach_slot(unit)
+		unit["gather_stage"] = "none"
+		unit["resource_id"] = -1
+		unit["target_building_id"] = -1
+		unit["task"] = "attack_ground"
+		unit["target_id"] = -1
+		_clear_combat_intent(unit)
+		unit["combat_destination"] = FormationCombat.destination(unit, ground_target)
+		unit["retaliation_target_id"] = -1
+		OrderPipeline.begin(unit, "attack_ground", -1, target, true)
+		if CombatRules.is_in_range(unit, ground_target):
+			release_unit_destination(unit)
+			OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
+			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
+			resolved_count += 1
+		elif assign_unit_destination(unit, Vector2(unit["combat_destination"])):
+			resolved_count += 1
+		else:
+			halt_unit(unit, "no_path")
+	return resolved_count > 0
+
 func assign_command_attack(selected: Array, target_id: int, policy: Dictionary = {}) -> bool:
 	var target: Variant = find_combat_target(target_id)
 	if target == null or target["hp"] <= 0.0:
@@ -3888,6 +4340,10 @@ func _finish_healing(healer: Dictionary, reason: String, completed: bool = false
 	healer["diagnostic_reason"] = "healing_complete:%s" % reason
 	OrderPipeline.complete(healer, reason)
 	restore_formation_facing(healer)
+	if completed and float(healer.get("hp", 0.0)) > 0.0 and OrderPipeline.queued(healer).is_empty():
+		var next_target: Variant = healing_system.next_chain_target(healer)
+		if next_target != null:
+			assign_command_heal([healer], int(next_target.get("id", -1)))
 
 
 func apply_martyrdom(selected: Array) -> String:
@@ -3916,6 +4372,38 @@ func set_trade_resource(traders: Array, resource_type_id: int) -> String:
 	return trade_system.set_resource(traders, resource_type_id)
 
 
+func pay_tribute(sender_team: int, recipient_team: int, resource_type_id: int, amount: int) -> String:
+	if sender_team <= 0 or not player_registry.players.has(sender_team):
+		return "invalid_issuer"
+	if recipient_team <= 0 or recipient_team == sender_team or not player_registry.players.has(recipient_team):
+		return "invalid_tribute_recipient"
+	if player_registry.status(sender_team) != PlayerRegistry.ACTIVE or player_registry.status(recipient_team) != PlayerRegistry.ACTIVE:
+		return "player_not_active"
+	if not are_teams_allied(sender_team, recipient_team):
+		return "tribute_requires_ally"
+	if resource_type_id not in [0, 1, 2, 3]:
+		return "invalid_tribute_resource"
+	if amount <= 0:
+		return "invalid_tribute_amount"
+	if economy_system.get_resource_amount(sender_team, resource_type_id) < amount:
+		return "insufficient_resources"
+	var tax := technology_system.tribute_tax(sender_team)
+	var received := clampi(floori(float(amount) * (1.0 - tax) + 0.000001), 0, amount)
+	# Validate everything before either balance is changed; the two mutations
+	# and one fog-neutral event form one deterministic simulation transaction.
+	economy_system.change_resource_amount(sender_team, resource_type_id, -amount)
+	economy_system.change_resource_amount(recipient_team, resource_type_id, received)
+	_emit_domain_event("tribute_paid", {
+		"sender_team": sender_team,
+		"recipient_team": recipient_team,
+		"resource_type_id": resource_type_id,
+		"amount_sent": amount,
+		"amount_received": received,
+		"tax_lost": amount - received,
+	})
+	return ""
+
+
 func assign_command_trade(traders: Array, target_dock: Dictionary) -> String:
 	return trade_system.start_route(traders, target_dock)
 
@@ -3938,18 +4426,21 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 			for worker in units:
 				if int(worker.get("resource_id", -1)) == entity_id:
 					finish_gather_order(worker, "resource_owner_changed")
-		while not entity.get("production_queue", []).is_empty():
-			production_system.cancel(entity_id, 0)
+		production_system.abort_for_building_loss(entity_id)
 		deactivate_population_support(entity)
 	else:
 		halt_unit(entity, "converted" if ownership_reason == "conversion" else ownership_reason)
 		if old_team > 0 and not bool(entity.get("population_released", false)):
-			var population_cost := int(entity.get("population_cost", 0))
-			economy_system.add_population(old_team, -population_cost)
+			var population_points_cost := int(entity.get("population_points_cost", int(entity.get("population_cost", 0)) * SimulationEconomySystem.POPULATION_POINT_SCALE))
+			economy_system.add_population_points(old_team, -population_points_cost)
 		if not bool(entity.get("population_released", false)):
-			economy_system.add_population(new_team, int(entity.get("population_cost", 0)))
+			entity["population_points_cost"] = expected_population_points_cost(entity, new_team)
+			economy_system.add_population_points(new_team, int(entity["population_points_cost"]))
 	player_registry.ensure(new_team, int(civilization_by_team.get(new_team, 13)))
 	entity["team"] = new_team
+	track_conquest_entity(entity)
+	if not is_building and transport_system.is_transport(entity):
+		transport_system.reconcile_ownership(entity)
 	entity["selected"] = false
 	var owner_history: Array = entity.get("owner_history", [old_team]).duplicate()
 	owner_history.append(new_team)
@@ -4011,7 +4502,7 @@ func assign_command_gather(selected: Array, target_id: int) -> void:
 			if float(unit.get("carried_amount", 0.0)) > 0.0 and carried_type != target_type:
 				if not begin_resource_return(unit):
 					finish_gather_order(unit, "no_dropoff")
-			elif not prepare_resource_approach(unit, resource):
+			elif not prepare_group_gather_approach(unit, resource):
 				finish_gather_order(unit, "no_approach_slot")
 		else:
 			finish_gather_order(unit, "incompatible_gatherer" if resource != null and not resource_allows_worker(resource, unit) else "resource_unavailable")
@@ -4068,6 +4559,8 @@ func _finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> 
 
 
 func halt_unit(unit: Dictionary, reason: String = "stopped") -> void:
+	if reason in ["stop", "hold", "converted", "unit_died"]:
+		OrderPipeline.clear_queued(unit)
 	conversion_system.cancel(unit, reason)
 	healing_system.cancel(unit, reason)
 	trade_system.cancel(unit, reason)
@@ -4153,6 +4646,47 @@ func unit_population_cost(kind: String, team: int) -> int:
 	return 0
 
 
+func unit_population_points_cost(kind: String, team: int) -> int:
+	var source := object_record_for(kind, team)
+	var source_id := int(source.get("unit_id", unit_stats(kind).get("unit_id", -1)))
+	var probe := {
+		"source_unit_id": technology_system.resolved_unit_id(team, source_id),
+		"population_base_cost": unit_population_cost(kind, team),
+	}
+	return expected_population_points_cost(probe, team)
+
+
+func expected_population_points_cost(entity: Dictionary, team: int) -> int:
+	var points := maxi(0, int(entity.get("population_base_cost", entity.get("population_cost", 0)))) * SimulationEconomySystem.POPULATION_POINT_SCALE
+	var matching_entity := entity
+	if int(entity.get("team", 0)) != team:
+		matching_entity = entity.duplicate()
+		matching_entity["team"] = team
+	for effect_value in technology_system.persistent_entity_effects(team):
+		var effect: Dictionary = effect_value
+		if int(effect.get("attr_c", -1)) != 101 or not technology_effect_matches_entity(matching_entity, effect):
+			continue
+		var raw_type := int(effect.get("type_id", -1))
+		var effect_type := raw_type % 10 if raw_type >= 10 and raw_type < 30 else raw_type
+		var value := float(effect.get("attr_d", 0.0))
+		match effect_type:
+			0:
+				points = roundi(absf(value) * float(SimulationEconomySystem.POPULATION_POINT_SCALE))
+			4:
+				points += roundi(value * float(SimulationEconomySystem.POPULATION_POINT_SCALE))
+			5, 6:
+				points = roundi(float(points) * value)
+	return maxi(0, points)
+
+
+func reconcile_unit_population_points(entity: Dictionary) -> void:
+	var old_points := int(entity.get("population_points_cost", int(entity.get("population_cost", 0)) * SimulationEconomySystem.POPULATION_POINT_SCALE))
+	var new_points := expected_population_points_cost(entity, int(entity.get("team", 0)))
+	entity["population_points_cost"] = new_points
+	if bool(entity.get("population_accounted", false)) and not bool(entity.get("population_released", false)):
+		economy_system.add_population_points(int(entity.get("team", 0)), new_points - old_points)
+
+
 func production_building_for(team: int, kind: String = "") -> Variant:
 	return production_system.production_building_for(team, kind)
 
@@ -4187,6 +4721,10 @@ func update_production(delta: float) -> void:
 
 func cancel_production(building_id: int, queue_index: int = 0) -> bool:
 	return production_system.cancel(building_id, queue_index)
+
+
+func stop_waiting_production(building_id: int) -> bool:
+	return production_system.stop_waiting(building_id)
 
 
 func set_rally_point(building_id: int, target: Vector2) -> bool:
@@ -4225,8 +4763,11 @@ func apply_technology_commands(team: int, commands: Array, resolve_automatic: bo
 	attack_animation_spec_cache.clear()
 	var upgraded_entities: Array[Dictionary] = []
 	var upgraded_entity_ids: Dictionary = {}
+	var changes_population_cost := false
 	for command_value in commands:
 		var command: Dictionary = command_value
+		if int(command.get("attr_c", -1)) == 101:
+			changes_population_cost = true
 		var raw_type := int(command.get("type_id", -1))
 		var effect_type := raw_type
 		if effect_type in [10, 11, 12, 13, 14, 15, 16]:
@@ -4258,10 +4799,15 @@ func apply_technology_commands(team: int, commands: Array, resolve_automatic: bo
 		for persistent_value in technology_system.persistent_entity_effects(team):
 			apply_attribute_effect(entity, persistent_value)
 		configure_entity_combat_awareness(entity)
+	if changes_population_cost:
+		for entity in get_all_units_including_embarked():
+			if int(entity.get("team", 0)) == team:
+				reconcile_unit_population_points(entity)
 	var researched := technology_system.researched_ids(team)
 	for entity in get_all_units_including_embarked() + buildings:
 		if int(entity.get("team", 0)) == team and not bool(entity.get("technology_locked", false)):
 			entity.get("components", {}).get("technology", {})["researched_ids"] = researched.duplicate()
+			_sync_town_center_age_presentation(entity)
 	if not is_bulk_loading():
 		# Age upgrades can change building footprints (Town Center variants);
 		# each upgraded building reconciles only its own cells.
@@ -4270,6 +4816,7 @@ func apply_technology_commands(team: int, commands: Array, resolve_automatic: bo
 				_sync_building_navigation_occupancy(entity)
 	if resolve_automatic:
 		resolve_automatic_technologies(team)
+	_sync_shared_vision(team)
 
 
 func resolve_automatic_technologies(team: int, emit_events: bool = true) -> Array[int]:
@@ -4330,6 +4877,24 @@ func apply_technology_state_to_entity(entity: Dictionary, team: int) -> void:
 	for command_value in technology_system.persistent_entity_effects(team):
 		apply_attribute_effect(entity, command_value)
 	entity.get("components", {}).get("technology", {})["researched_ids"] = technology_system.researched_ids(team)
+	_sync_town_center_age_presentation(entity)
+
+
+func _sync_town_center_age_presentation(entity: Dictionary) -> void:
+	if String(entity.get("kind", "")) != "town_center":
+		return
+	if int(entity.get("source_unit_id", -1)) != 109:
+		entity.erase("presentation_facing")
+		return
+	var civilization_id := int(entity.get("components", {}).get("ownership", {}).get("civilization_id", 13))
+	var icon_set := 0
+	for civilization_value in object_catalog_data.get("civilizations", []):
+		var civilization: Dictionary = civilization_value
+		if int(civilization.get("civilization_id", -1)) == civilization_id:
+			icon_set = int(civilization.get("icon_set", 0))
+			break
+	if icon_set == 4:
+		entity["presentation_facing"] = 2 if technology_system.current_age(int(entity.get("team", 0))) >= 101 else 0
 
 
 func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapply_persistent_effects: bool = true) -> void:
@@ -4347,6 +4912,12 @@ func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapp
 	var resources: Dictionary = source.get("resources", {})
 	var production: Dictionary = source.get("production", {})
 	entity["source_unit_id"] = target_unit_id
+	if entity.has("population_released"):
+		for cost_value in source.get("resources", {}).get("cost", []):
+			var cost: Dictionary = cost_value
+			if int(cost.get("type_id", -1)) == 4:
+				entity["population_base_cost"] = maxi(0, int(cost.get("amount", 0)))
+				break
 	if not entity.get("unit_lineage", []).has(target_unit_id):
 		entity["unit_lineage"].append(target_unit_id)
 	entity["display_graphic_id"] = int(source.get("graphics", {}).get("idle", entity.get("display_graphic_id", -1)))
@@ -4394,6 +4965,8 @@ func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapp
 	if reapply_persistent_effects:
 		for persistent_value in technology_system.persistent_entity_effects(team):
 			apply_attribute_effect(entity, persistent_value)
+	if entity.has("population_released"):
+		reconcile_unit_population_points(entity)
 	configure_entity_combat_awareness(entity)
 
 
@@ -4463,7 +5036,7 @@ func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 		100:
 			components.get("production", {})["resource_cost_modifier"] = {"operator": effect_type, "value": value}
 		101:
-			entity["population_cost"] = maxi(0, roundi(apply_effect_operator(float(entity.get("population_cost", 0)), effect_type, value)))
+			reconcile_unit_population_points(entity)
 
 
 func technology_effect_matches_entity(entity: Dictionary, command: Dictionary) -> bool:
@@ -4616,7 +5189,7 @@ func get_known_resources(observer_team: int) -> Array:
 		return resource_nodes
 	var fog = get_fog_of_war()
 	fog.ensure_player(observer_team)
-	var ally_ids: Array = fog.allies_by_player.get(observer_team, {}).keys()
+	var ally_ids: Array = fog.shared_vision_by_player.get(observer_team, {}).keys()
 	ally_ids.sort()
 	var alliance_signature := hash(ally_ids)
 	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
@@ -4639,7 +5212,7 @@ func get_known_resources(observer_team: int) -> Array:
 			cached["revision"] = int(cached.get("revision", 0)) + 1
 		return known
 	var states: PackedByteArray = fog.states_by_player[observer_team]
-	var allies: Dictionary = fog.allies_by_player.get(observer_team, {})
+	var allies: Dictionary = fog.shared_vision_by_player.get(observer_team, {})
 	var known: Array = []
 	var known_ids: Dictionary = {}
 	for resource_value in resource_nodes:
@@ -4789,6 +5362,10 @@ func get_population(team: int) -> int:
 	return economy_system.get_population(team)
 
 
+func get_population_points(team: int) -> int:
+	return economy_system.get_population_points(team)
+
+
 func get_reserved_population(team: int) -> int:
 	return economy_system.get_reserved_population(team)
 
@@ -4877,8 +5454,10 @@ func is_unit_in_attack_range(unit: Dictionary, target: Dictionary) -> bool:
 	return CombatRules.is_in_range(unit, target)
 
 
-func configure_victory_rules(rules: Array) -> void:
-	victory_system.configure(rules)
+func configure_victory_rules(rules: Array, allied_victory_enabled: bool = true) -> void:
+	victory_system.configure(rules, allied_victory_enabled)
+	for objective in victory_objectives:
+		victory_system.track_objective(objective)
 	player_registry.reset_statuses()
 	battle_over = false
 	battle_message = ""
@@ -4898,13 +5477,20 @@ func add_victory_object(category: String, position: Vector2, team: int = 0, comp
 		"active": true,
 	}
 	victory_objectives.append(objective)
+	victory_system.track_objective(objective)
+	if category == "ruin":
+		capturable_victory_objectives.append(objective)
 	return objective
 
 
 func set_victory_object_owner(object_id: int, team: int) -> bool:
 	for objective in victory_objectives:
 		if int(objective.get("id", -1)) == object_id:
+			if int(objective.get("team", 0)) == team:
+				return true
 			objective["team"] = team
+			victory_system.track_objective(objective)
+			_emit_domain_event("victory_object_captured", {"object_id": object_id, "category": String(objective.get("category", "")), "team": team})
 			return true
 	return false
 
@@ -4913,6 +5499,7 @@ func set_victory_object_completed(object_id: int, completed: bool) -> bool:
 	for objective in victory_objectives:
 		if int(objective.get("id", -1)) == object_id:
 			objective["completed"] = completed
+			victory_system.track_objective(objective)
 			return true
 	return false
 
@@ -4921,6 +5508,7 @@ func remove_victory_object(object_id: int) -> bool:
 	for objective in victory_objectives:
 		if int(objective.get("id", -1)) == object_id:
 			objective["active"] = false
+			victory_system.track_objective(objective)
 			return true
 	return false
 

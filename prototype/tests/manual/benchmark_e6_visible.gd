@@ -86,6 +86,16 @@ func _run_case(options: Dictionary) -> Dictionary:
 
 	for _frame in range(int(options["warmup_frames"])):
 		await _render_frame(game)
+	if not String(options["capture_png"]).is_empty():
+		game.pending_build_kind = "house"
+		game.input_adapter.pointer_position = Vector2(requested_size.x * 0.62, requested_size.y * 0.48)
+		await _render_frame(game)
+		var capture_path := ProjectSettings.globalize_path(String(options["capture_png"]))
+		DirAccess.make_dir_recursive_absolute(capture_path.get_base_dir())
+		var capture_error := viewport.get_texture().get_image().save_png(capture_path)
+		if capture_error != OK:
+			push_error("E6 visible capture could not save %s: %d" % [capture_path, capture_error])
+		game.pending_build_kind = ""
 	var frame_times: Array[int] = []
 	var draw_calls: Array[int] = []
 	var objects_in_frame: Array[int] = []
@@ -407,6 +417,7 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 		"sample_frames": 120,
 		"preparation_samples": 12,
 		"output": DEFAULT_OUTPUT,
+		"capture_png": "",
 	}
 	for argument in arguments:
 		if argument.begins_with("--case="):
@@ -425,6 +436,8 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 			result["preparation_samples"] = maxi(1, int(argument.trim_prefix("--preparation-samples=")))
 		elif argument.begins_with("--output="):
 			result["output"] = argument.trim_prefix("--output=")
+		elif argument.begins_with("--capture-png="):
+			result["capture_png"] = argument.trim_prefix("--capture-png=")
 	return result
 
 

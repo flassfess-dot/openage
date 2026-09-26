@@ -55,7 +55,7 @@ func verify_case(case_value: Dictionary, catalog) -> void:
 	var zones: Array = map_data.get("naval_start_zones", [])
 	assert_equal(zones.size(), player_count, "%s retains every Dock/staging zone" % context)
 	var deep_fish: Array = map_data.get("resources", []).filter(func(resource): return String(resource.get("kind", "")) == "deep_fish")
-	assert_equal(deep_fish.size(), player_count * 3, "%s retains three generated Deep Fish per start" % context)
+	assert_true(deep_fish.size() >= player_count * 3, "%s retains three guaranteed Deep Fish per start plus neutral schools" % context)
 
 	var world = SimulationWorld.new(map_data["size"])
 	world.set_gamespec(catalog.gamespec_data)
@@ -79,7 +79,7 @@ func verify_case(case_value: Dictionary, catalog) -> void:
 		var water_component: int = world.navigation_grid.surface_component_id(Vector2i(Vector2(zone["water_staging"])), "water")
 		land_components[land_component] = true
 		water_components[water_component] = true
-		assert_true(land_component >= 0, "%s team %d starts on legal land" % [context, team])
+		assert_true(land_component >= 0, "%s team %d starts on legal land (cell=%s terrain=%d kind=%s)" % [context, team, Vector2i(start), world.navigation_grid.terrain_id(Vector2i(start)), world.navigation_grid.terrain(Vector2i(start))])
 		assert_true(water_component >= 0, "%s team %d has legal water staging" % [context, team])
 		assert_true(deep_fish.filter(func(resource): return Vector2(resource.get("position", Vector2.ZERO)).distance_to(Vector2(zone["water_staging"])) <= 12.0).size() >= 2, "%s team %d has nearby reachable water food" % [context, team])
 		assert_equal(world.get_team_relations(team).values().filter(func(relation): return String(relation) == "enemy").size(), player_count - 1, "%s team %d sees every other participant as an enemy" % [context, team])

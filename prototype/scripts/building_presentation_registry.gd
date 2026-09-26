@@ -36,9 +36,9 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary:
 	var player := _player_asset_id(int(building.get("team", 1)))
 	var source := _source_record(building)
-	if String(building.get("death_phase", "alive")) == "dying" or String(building.get("state", "complete")) == "destroyed":
+	if String(building.get("death_phase", "alive")) in ["dying", "ruin"] or String(building.get("state", "complete")) == "destroyed":
 		var death_graphic := int(source.get("graphics", {}).get("death", -1))
-		var death_time := float(building.get("death_elapsed", animation_time))
+		var death_time := minf(float(building.get("death_elapsed", animation_time)), maxf(0.0, float(building.get("death_duration", 0.05)) - 0.001)) if String(building.get("death_phase", "alive")) == "ruin" else float(building.get("death_elapsed", animation_time))
 		var death_info := _resolved_frame(death_graphic, player, 0, death_time)
 		death_info["graphic_id"] = death_graphic
 		death_info["composite_parts"] = _composite_parts(death_graphic, player, 0, death_time)

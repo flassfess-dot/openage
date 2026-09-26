@@ -71,7 +71,7 @@ func _initialize() -> void:
 	var accepted_fishing_train := 0
 	var accepted_fishing_gather := 0
 	var gather_failure: Dictionary = {}
-	var initial_fish_amount := int(fish.get("amount", 0))
+	var initial_total_fish_amount: int = world.get_resources().filter(func(resource): return String(resource.get("kind", "")) in ["deep_fish", "shore_fish"]).reduce(func(total, resource): return int(total) + int(resource.get("amount", 0)), 0)
 	var food_before := world.get_resource_amount(AI_TEAM, 0)
 
 	while int(controller.tick_index) < MAX_TICKS:
@@ -112,8 +112,10 @@ func _initialize() -> void:
 	assert_true(accepted_fishing_gather > 0, "AI assigns generated fish through the public gather command")
 	assert_true(not boats.is_empty(), "Dock completes the AI-requested Fishing Boat")
 	if not boats.is_empty():
-		assert_equal(world.get_population(AI_TEAM), population_before_fishing_boat + int(boats[0].get("population_cost", 0)), "Fishing Boat consumes the same authoritative population and housing pool as land units")
-	assert_true(int(fish.get("amount", 0)) < initial_fish_amount, "Fishing Boat harvests the generated deep-fish pool")
+		var boat_population: int = int(boats.reduce(func(total, boat): return int(total) + int(boat.get("population_cost", 0)), 0))
+		assert_equal(world.get_population(AI_TEAM), population_before_fishing_boat + boat_population, "all trained Fishing Boats consume the same authoritative population and housing pool as land units")
+	var remaining_total_fish_amount: int = world.get_resources().filter(func(resource): return String(resource.get("kind", "")) in ["deep_fish", "shore_fish"]).reduce(func(total, resource): return int(total) + int(resource.get("amount", 0)), 0)
+	assert_true(remaining_total_fish_amount < initial_total_fish_amount, "Fishing Boat harvests a generated fish pool")
 	assert_true(deposit_cycles > 0, "Fishing Boat completes a delivery to its generated-map Dock")
 	assert_true(world.get_resource_amount(AI_TEAM, 0) > food_before, "Dock delivery credits gathered fish to the authoritative stockpile")
 	assert_equal(String(dock.get("state", "")), "complete", "generated-map Dock remains the authoritative drop site")

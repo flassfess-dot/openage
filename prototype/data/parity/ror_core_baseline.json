@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "baseline_id": "aoe1_ror_core_p00",
+  "plan_id": "P00",
+  "status": "captured",
+  "simulation_source_commit": "5b7509cc7424e1b34cc246d1c718c7d0e451e548",
+  "simulation_worktree_modified": true,
+  "captured_at": "2026-09-22T23:01:15+03:00",
+  "capture_attempts": [
+    {
+      "captured_at": "2026-09-22T20:41:00+03:00",
+      "status": "failed_before_completion",
+      "passed_tests_before_failure": 74,
+      "failure": "res://tests/scenarios/test_generated_naval_ai_acceptance.gd: naval formation corridor used the land movement domain and produced an out-of-bounds waypoint lookup",
+      "observed_controls": {
+        "save_state_matrix": {
+          "terminal_tick": 25,
+          "round_trips": 8,
+          "canonical_sha256": "8daf9b78ce781da7638aaa8183394df3c8ad18620eaba18fc7ca64f59e89e48f",
+          "provisional": true,
+          "reason": "The control passed, but the suite did not finish and simulation code was corrected afterwards."
+        }
+      }
+    },
+    {
+      "captured_at": "2026-09-22T21:48:20+03:00",
+      "status": "targeted_validation_passed",
+      "passed_tests": 4,
+      "scenario": "res://tests/scenarios/test_generated_naval_ai_acceptance.gd",
+      "scenario_terminal_tick": 6970,
+      "scenario_outcome": "dock=1 scouts=2 fish_discovered=true water_orders=13",
+      "reason": "Targeted validation passed; the full suite and performance smoke still need a user run."
+    },
+    {
+      "captured_at": "2026-09-22T22:09:57+03:00",
+      "status": "failed_before_completion",
+      "passed_tests_before_failure": 76,
+      "failure": "res://tests/scenarios/test_generated_skirmish_deterministic_outcome.gd: conquest did not complete by tick 13005",
+      "observed_controls": {
+        "generated_inland_conquest": {
+          "terminal_tick": 13005,
+          "battle_over": false,
+          "observed_sha256": "e4947d67105652da8ddd028ffb52594ce6ef14e832fac5f999a5b049052b0141",
+          "provisional": true,
+          "reason": "The match did not reach a terminal outcome and cannot set the canonical hash."
+        }
+      }
+    },
+    {
+      "captured_at": "2026-09-22T22:15:12+03:00",
+      "status": "targeted_validation_failed",
+      "scenario": "res://tests/scenarios/test_generated_skirmish_deterministic_outcome.gd",
+      "terminal_tick": 13005,
+      "battle_over": false,
+      "observed_sha256": "da90c8b217ec983e0ac01e25e637932bb86eb5983fab81973dc2d9bf77b5c827",
+      "reason": "Corner-contact fix enabled one Clubman to reduce the enemy Town Center from 600 to 418.8 HP, but three idle Clubmen were below the hard AI's four-unit new-wave threshold while another Clubman was already attacking. The match remained nonterminal."
+    },
+    {
+      "captured_at": "2026-09-22T22:29:06+03:00",
+      "status": "targeted_validation_failed",
+      "scenario": "res://tests/scenarios/test_generated_skirmish_deterministic_outcome.gd",
+      "terminal_tick": 13005,
+      "battle_over": false,
+      "observed_sha256": "b58c79b974decb317c33b7bdb7086dc8e310c20bbfb241843debc8cbf0555f80",
+      "reason": "Reinforcement policy passed targeted unit validation and brought four Clubmen into the attack. The enemy Town Center had 72 HP remaining at the old 13000-tick scenario deadline; the last attack order was tick 11866, and no idle fighter remained. The long-outcome capture budget was extended to 16000 ticks, retaining a damage-progress checkpoint at tick 13000."
+    },
+    {
+      "captured_at": "2026-09-22T22:55:19+03:00",
+      "status": "resumed_segment_passed",
+      "start_script": "res://tests/scenarios/test_generated_skirmish_deterministic_outcome.gd",
+      "passed_tests": 143,
+      "failed_tests": 0,
+      "log": "prototype/qa/dev-scripts/test-run-20260922-224527.log",
+      "observed_controls": {
+        "generated_inland_conquest": {
+          "terminal_tick": 14565,
+          "winner_team": 2,
+          "reason": "conquest",
+          "canonical_sha256": "e9f600bbdc3ecb935bfbae841722ad53e3ec8929cf642ee3ed2140d699296c79"
+        },
+        "deterministic_replay_unit": {
+          "terminal_tick": 7,
+          "seed": 24681357,
+          "canonical_sha256": "c03b2a4b74a5dba330450e82c90f11c699bebd0e16a06cfdf06e0707d6136908"
+        }
+      },
+      "reason": "The user resumed at the failed scenario and completed all remaining tests. Earlier tests were not rerun against the final stabilization worktree."
+    },
+    {
+      "captured_at": "2026-09-22T23:01:15+03:00",
+      "status": "canonical_and_performance_capture_passed",
+      "save_state_matrix_log": "prototype/qa/dev-scripts/p00-targeted-test_game_save_state_matrix-20260922-225900.log",
+      "save_state_matrix_tick": 25,
+      "save_state_matrix_round_trips": 8,
+      "save_state_matrix_sha256": "8daf9b78ce781da7638aaa8183394df3c8ad18620eaba18fc7ca64f59e89e48f",
+      "performance_report": "prototype/qa/dev-scripts/performance-smoke-20260922-225912.json",
+      "performance_status": "passed",
+      "functional_tests_passed": 22,
+      "benchmark_cases_passed": 3,
+      "reason": "All three canonical controls and the local performance baseline were captured from user-run checks. The full test suite was completed in separate segments across stabilization changes, not as one clean run of the final worktree."
+    }
+  ],
+  "capture_policy": {
+    "canonical_rule": "Only successful terminal control matches may become expected hashes.",
+    "performance_rule": "Capture the local performance-smoke baseline and retain the machine identity and raw report paths.",
+    "update_rule": "A behavior-changing package must explain every canonical hash change; a hot-path package must compare against this baseline before acceptance."
+  },
+  "canonical_matches": [
+    {
+      "id": "deterministic_replay_unit",
+      "status": "passed",
+      "script": "res://tests/unit/test_deterministic_replay.gd",
+      "seed": 24681357,
+      "terminal_tick": 7,
+      "outcome": "replay_hash_equal",
+      "canonical_sha256": "c03b2a4b74a5dba330450e82c90f11c699bebd0e16a06cfdf06e0707d6136908"
+    },
+    {
+      "id": "generated_inland_conquest",
+      "status": "passed",
+      "script": "res://tests/scenarios/test_generated_skirmish_deterministic_outcome.gd",
+      "seed": 41721,
+      "terminal_tick": 14565,
+      "outcome": {"winner_team": 2, "reason": "conquest"},
+      "canonical_sha256": "e9f600bbdc3ecb935bfbae841722ad53e3ec8929cf642ee3ed2140d699296c79"
+    },
+    {
+      "id": "save_state_matrix",
+      "status": "passed",
+      "script": "res://tests/integration/test_game_save_state_matrix.gd",
+      "seed": null,
+      "terminal_tick": 25,
+      "outcome": {"round_trips": 8},
+      "canonical_sha256": "8daf9b78ce781da7638aaa8183394df3c8ad18620eaba18fc7ca64f59e89e48f"
+    }
+  ],
+  "performance_smoke": {
+    "status": "passed",
+    "runner": "tools/ror-performance-smoke.ps1",
+    "local_baseline": "prototype/qa/performance-smoke/baseline.json",
+    "local_report": "prototype/qa/dev-scripts/performance-smoke-20260922-225912.json",
+    "local_report_glob": "prototype/qa/dev-scripts/performance-smoke-*.json",
+    "required_cases": {
+      "movement": ["fixed_tick_p95_us", "unit_orders_p95_us", "command_wall_us", "memory_static_bytes"],
+      "mixed": ["fixed_tick_p95_us", "world_advance_p95_us", "command_wall_us", "memory_static_bytes"],
+      "visible": ["snapshot_p95_us", "drawable_build_p95_us", "render_frame_p95_us", "pan_frame_p95_us", "active_frame_p95_us", "memory_static_bytes"]
+    },
+    "machine": {
+      "processor": "Intel64 Family 6 Model 158 Stepping 9, GenuineIntel",
+      "graphics": "NVIDIA GeForce RTX 3080 Ti",
+      "graphics_api": "OpenGL 3.3 Compatibility"
+    },
+    "captured_at": "2026-09-22T23:01:14+03:00",
+    "functional_tests_passed": 22,
+    "cases": {
+      "movement": {"fixed_tick_p95_us": 7083, "unit_orders_p95_us": 4840, "command_wall_us": 39454, "memory_static_bytes": 54126861},
+      "mixed": {"fixed_tick_p95_us": 7328, "world_advance_p95_us": 6538, "command_wall_us": 69840, "memory_static_bytes": 243990681},
+      "visible": {"snapshot_p95_us": 3373, "drawable_build_p95_us": 912, "render_frame_p95_us": 16712, "pan_frame_p95_us": 16674, "active_frame_p95_us": 51263, "memory_static_bytes": 540732875}
+    }
+  },
+  "completion_requirements": [
+    "Every canonical match has status passed and a 64-character SHA-256 hash.",
+    "The generated match reaches its configured terminal outcome before its tick limit.",
+    "The performance smoke passes all functional cases and records movement, mixed and visible metrics.",
+    "The baseline file is updated with the user-run observations before P00 becomes INTEGRATED."
+  ]
+}

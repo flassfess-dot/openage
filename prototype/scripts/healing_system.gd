@@ -56,6 +56,29 @@ func rate_for(healer: Dictionary) -> float:
 	return rate * maxf(0.0, float(healing.get("rate_multiplier", 1.0)))
 
 
+func next_chain_target(healer: Dictionary) -> Variant:
+	var healing := component(healer)
+	if not bool(healing.get("auto_chain_enabled", true)):
+		return null
+	var radius := maxf(0.0, float(healing.get("auto_chain_radius", range_for(healer))))
+	if radius <= 0.0:
+		return null
+	var eligible: Array = []
+	for candidate_value in world.query_units_near(Vector2(healer.get("pos", Vector2.ZERO)), radius):
+		var candidate: Dictionary = candidate_value
+		if not validate_target(healer, candidate).is_empty():
+			continue
+		if not world.is_entity_visible_to(int(healer.get("team", 0)), candidate):
+			continue
+		eligible.append(candidate)
+	eligible.sort_custom(func(left, right):
+		var left_distance: float = Vector2(healer["pos"]).distance_squared_to(Vector2(left["pos"]))
+		var right_distance: float = Vector2(healer["pos"]).distance_squared_to(Vector2(right["pos"]))
+		return left_distance < right_distance if not is_equal_approx(left_distance, right_distance) else int(left["id"]) < int(right["id"])
+	)
+	return eligible[0] if not eligible.is_empty() else null
+
+
 func begin(healer: Dictionary, target: Dictionary) -> String:
 	var rejection := validate_target(healer, target)
 	if not rejection.is_empty():

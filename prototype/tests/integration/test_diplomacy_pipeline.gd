@@ -48,7 +48,7 @@ func _initialize() -> void:
 	controller.enqueue_command(ally, true, 1)
 	controller.advance_frame(controller.FIXED_STEP_SECONDS, 1, 2)
 	assert_true(bool(controller.get_command_result(ally.sequence_id).get("accepted", false)), "ally relation is accepted")
-	assert_true(world.visibility_system.fog.are_allied(1, 2), "directed ally relation shares target-team sight with the issuer")
+	assert_true(world.visibility_system.fog.are_allied(1, 2), "directed ally relation is recorded for the issuer")
 	assert_true(not world.visibility_system.fog.are_allied(2, 1), "sight sharing remains directed")
 	var friendly_attack = Commands.AttackCommand.new(4, [int(attacker["id"])], int(neutral_worker["id"]))
 	controller.enqueue_command(friendly_attack, true, 1)

@@ -7,7 +7,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	test_resources_costs_and_snapshot()
-	test_population_reservation_lifecycle()
+	test_population_accounting()
 	if failures.is_empty():
 		print("I1-005b simulation economy system tests passed")
 		quit(0)
@@ -34,18 +34,15 @@ func test_resources_costs_and_snapshot() -> void:
 	assert_equal(economy.get_resource_amount(1, 0), 180, "snapshot cannot mutate economy")
 
 
-func test_population_reservation_lifecycle() -> void:
+func test_population_accounting() -> void:
 	var economy = SimulationEconomySystem.new()
 	economy.reset()
 	economy.set_population_cap(1, 2)
 	economy.add_population(1, 1)
-	assert_true(economy.can_reserve_population(1, 1), "free cap can be reserved")
-	economy.reserve_population(1, 1)
-	assert_true(not economy.can_reserve_population(1, 1), "living plus reserved population enforces cap")
-	economy.release_reserved_population(1, 1)
-	economy.add_population(1, -1)
+	assert_equal(economy.get_population(1), 1, "living population is tracked")
+	assert_equal(economy.get_population_cap(1), 2, "population cap is tracked independently")
+	economy.add_population(1, -2)
 	assert_equal(economy.get_population(1), 0, "population release cannot go negative")
-	assert_equal(economy.get_reserved_population(1), 0, "reservation release cannot go negative")
 
 
 func assert_true(value: bool, context: String) -> void:

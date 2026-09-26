@@ -55,9 +55,14 @@ func _initialize() -> void:
 	assert_true(launcher.settings_panel.visible, "custom skirmish exposes declarative settings")
 	assert_equal(launcher.player_controls.size(), 8, "all eight player slots are configurable")
 	assert_true(launcher.setting_controls.has("ai_difficulty_id"), "custom skirmish exposes the policy-owned AI difficulty selector")
+	var size_selector: OptionButton = launcher.setting_controls["map_size_id"]
+	assert_true(range(size_selector.item_count).any(func(index): return String(size_selector.get_item_metadata(index)) == "supergiant" and size_selector.get_item_text(index) == "Сверхгигантская"), "new 400x400 size appears in the launcher")
 	var generated = SkirmishSettings.build(launcher._settings_from_controls())
 	assert_true(bool(generated.get("valid", false)), "launcher defaults produce a valid generated match")
 	assert_equal(String(generated.get("definition", {}).get("players", [])[1].get("ai", {}).get("difficulty_id", "")), "standard", "launcher difficulty reaches the generated AI player")
+	assert_true(launcher.setting_controls.has("network_mode") and launcher.setting_controls.has("network_invite"), "launcher exposes LAN host and join controls")
+	launcher._prepare_network_invite()
+	assert_true(String(launcher.setting_controls["network_invite"].text).begins_with("ROR1-"), "host can copy a complete lobby invitation")
 	launcher.free()
 	_finish("E5-002 launcher scene tests passed")
 

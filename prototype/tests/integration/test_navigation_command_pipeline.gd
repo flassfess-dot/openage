@@ -12,6 +12,8 @@ func _initialize() -> void:
 	test_reachable_command_resolves_and_arrives()
 	test_open_group_move_registers_shared_validation()
 	test_blocked_group_move_falls_back_to_individual_paths()
+	test_water_formation_move_uses_naval_paths()
+	test_unreachable_formation_move_is_rejected_without_engine_errors()
 	test_unreachable_command_is_explicitly_rejected()
 
 	if failures.is_empty():
@@ -82,6 +84,36 @@ func test_blocked_group_move_falls_back_to_individual_paths() -> void:
 	assert_true(bool(controller.get_command_result(command.sequence_id).get("accepted", false)), "blocked group move remains routable around the obstacle")
 	assert_equal(int(report.get("counters", {}).get("navigation.prevalidated_group_segments", 0)), 0, "blocked envelope is not marked prevalidated")
 	assert_equal(int(report.get("metrics_microseconds", {}).get("navigation.path_query", {}).get("count", 0)), ids.size(), "blocked envelope runs one individual path query per member")
+
+
+func test_water_formation_move_uses_naval_paths() -> void:
+	var world = SimulationWorld.new(Vector2i(20, 20))
+	world.navigation_grid.configure_terrain(func(_cell): return "water")
+	world.set_gamespec({"units": {"scout_ship": {"terrain_restriction": 3, "hit_points": 120.0, "speed": 1.75, "selection_radius": [1.0, 1.0, 2.0]}}})
+	var first: Dictionary = world.add_unit(1, "scout_ship", Vector2(2.5, 8.5), false)
+	var second: Dictionary = world.add_unit(1, "scout_ship", Vector2(3.5, 8.5), false)
+	var controller = GameController.new(world)
+	var command = Commands.FormationMoveCommand.new(1, [int(first["id"]), int(second["id"])], Vector2(14.5, 8.5), "LINE", Vector2(1.0, 0.0))
+	controller.enqueue_command(command, true, 1)
+	controller.advance_frame(0.05, 1, 2)
+	assert_true(bool(controller.get_command_result(command.sequence_id).get("accepted", false)), "naval formation move is accepted")
+	assert_true(not first.get("path", []).is_empty() and not second.get("path", []).is_empty(), "every naval formation member receives a water path")
+
+
+func test_unreachable_formation_move_is_rejected_without_engine_errors() -> void:
+	var world = SimulationWorld.new(Vector2i(10, 10))
+	world.navigation_grid.configure_terrain(func(_cell): return "water")
+	var first: Dictionary = world.add_unit(1, "clubman", Vector2(2.5, 2.5), false)
+	var second: Dictionary = world.add_unit(1, "clubman", Vector2(3.5, 2.5), false)
+	var controller = GameController.new(world)
+	var command = Commands.FormationMoveCommand.new(1, [int(first["id"]), int(second["id"])], Vector2(7.5, 7.5), "LINE", Vector2(1.0, 0.0))
+	controller.enqueue_command(command, true, 1)
+	controller.advance_frame(0.05, 1, 2)
+	var result := controller.get_command_result(command.sequence_id)
+	assert_equal(result["accepted"], false, "unreachable formation move is not acknowledged as success")
+	assert_equal(result["reason"], "no_path", "unreachable formation move exposes stable rejection")
+	assert_equal(first["task"], "idle", "unreachable formation leaves the first member stable")
+	assert_equal(second["task"], "idle", "unreachable formation leaves the second member stable")
 
 
 func test_unreachable_command_is_explicitly_rejected() -> void:

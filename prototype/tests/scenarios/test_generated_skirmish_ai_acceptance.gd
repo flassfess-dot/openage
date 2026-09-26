@@ -71,7 +71,8 @@ func _initialize() -> void:
 			rejection_reasons[reason] = int(rejection_reasons.get(reason, 0)) + 1
 	var resources := [world.get_resource_amount(2, 0), world.get_resource_amount(2, 1), world.get_resource_amount(2, 2), world.get_resource_amount(2, 3)]
 	var queues: Array = team_two_buildings.map(func(building): return {"id": int(building.get("id", -1)), "kind": String(building.get("kind", "")), "pos": building.get("pos", Vector2.ZERO), "state": String(building.get("state", "")), "progress": snappedf(float(building.get("construction_progress", 0.0)), 0.01), "builders": building.get("builders", {}).size(), "queue": building.get("production_queue", []).size()})
-	print("E5-006 diagnostics tick=%d issued=%d accepted=%d types=%s rejected=%d reasons=%s workers=%d combatants=%d pop=%d/%d age=%d resources=%s buildings=%s battle_over=%s" % [controller.tick_index, issued, accepted, accepted_types, rejected, rejection_reasons, workers.size(), combatants.size(), world.get_population(2), world.get_population_cap(2), world.get_current_age(2), resources, queues, world.is_battle_over()])
+	var path_requests := maxi(0, int(world.navigation_service.next_request_id) - 1)
+	print("E5-006 diagnostics tick=%d issued=%d accepted=%d path_requests=%d types=%s rejected=%d reasons=%s workers=%d combatants=%d pop=%d/%d age=%d resources=%s buildings=%s battle_over=%s" % [controller.tick_index, issued, accepted, path_requests, accepted_types, rejected, rejection_reasons, workers.size(), combatants.size(), world.get_population(2), world.get_population_cap(2), world.get_current_age(2), resources, queues, world.is_battle_over()])
 
 	assert_true(issued > 0 and accepted > 0, "generated AI acts only through accepted public commands")
 	assert_true(workers.size() >= 6, "generated AI grows a viable workforce")
@@ -81,6 +82,8 @@ func _initialize() -> void:
 	assert_true(int(accepted_types.get("research", 0)) > 0 or world.get_current_age(2) >= 101, "generated AI starts its first age advance")
 	assert_true(int(accepted_types.get("formation_move", 0)) > 0 or int(accepted_types.get("attack_move", 0)) > 0 or int(accepted_types.get("attack", 0)) > 0, "generated military leaves the base through the ordinary combat command pipeline")
 	assert_true(rejected <= maxi(2, accepted / 10), "generated AI does not rely on rejected command spam (%d/%d)" % [rejected, accepted])
+	assert_true(issued <= 250, "AI decision cadence bounds public command growth over the long match (%d)" % issued)
+	assert_true(path_requests <= maxi(512, issued * 128), "navigation requests stay bounded relative to public commands (%d/%d)" % [path_requests, issued])
 	_finish()
 
 

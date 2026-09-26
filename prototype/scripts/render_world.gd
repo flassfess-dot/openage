@@ -1,6 +1,7 @@
 class_name RoRRenderWorld
 
 const RenderItem := preload("res://scripts/render_item.gd")
+const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
 const AMBIENT_TRAVEL_TICKS := 160
 const AMBIENT_WANDER_RADIUS := 8.0
 const AMBIENT_MIN_WAYPOINT_RADIUS := 5.0
@@ -39,12 +40,26 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	var source_buildings: Array = world_source.get("buildings", []) if from_snapshot else world_source.get_buildings()
 	var source_resources: Array = world_source.get("resources", []) if from_snapshot else world_source.get_resources()
 	var source_objectives: Array = world_source.get("objectives", []) if from_snapshot else world_source.victory_objectives
+	if not from_snapshot and observer_team > 0:
+		# Compatibility renderer calls must obey the same last-known boundary as
+		# the main snapshot renderer instead of reading live explored buildings.
+		var legal_static: Dictionary = SimulationSnapshot.presentation(world_source, 0, observer_team, {
+			"include_navigation": false,
+			"include_build_sites": false,
+			"include_fog_cells": false,
+			"include_projectiles": false,
+			"include_scenario": false,
+			"include_worker_command_options": false,
+			"compact_render_entities": true,
+		})
+		source_buildings = legal_static.get("buildings", [])
+		source_objectives = legal_static.get("objectives", [])
 	var source_projectiles: Array = world_source.get("projectiles", []) if from_snapshot else world_source.get_projectiles()
 	var source_effects: Array = world_source.get("effects", []) if from_snapshot else []
 	var source_markers: Array = world_source.get("markers", []) if from_snapshot else []
 	var source_environment: Array = world_source.get("environment", []) if from_snapshot else []
 	var source_units: Array = world_source.get("units", []) if from_snapshot else world_source.get_units()
-	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids) if from_snapshot else []
+	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids + selected_ids) if from_snapshot else []
 	_observe_stage("resources", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	var environment_projection := _snapshot_environment_drawables(source_environment, world_to_screen, frame_info_provider) if from_snapshot else {"static": [], "animated": source_environment}
@@ -53,7 +68,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	_observe_stage("environment_cache", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	for building in source_buildings:
-		if building["hp"] <= 0.0 and String(building.get("death_phase", "removed")) != "dying":
+		if building["hp"] <= 0.0 and String(building.get("death_phase", "removed")) not in ["dying", "ruin"]:
 			continue
 		if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, building, true):
 			continue
@@ -247,6 +262,11 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 			var resource_id := int(drawable.get("stable_id", -1))
 			if current_by_id.has(resource_id):
 				drawable["data"] = current_by_id[resource_id]
+				if String(current_by_id[resource_id].get("kind", "")) in ["deep_fish", "shore_fish"]:
+					var frame_info := _frame_info(frame_info_provider, "resource", current_by_id[resource_id])
+					drawable["frame_info"] = frame_info
+					drawable["frame"] = int(frame_info.get("frame_index", 0))
+					drawable["hotspot"] = frame_info.get("hotspot", Vector2.ZERO)
 		return cached_resource_drawables
 	cached_resource_signature = signature
 	cached_resource_drawables = []

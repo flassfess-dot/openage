@@ -41,6 +41,9 @@ func test_worker_to_first_military_unit(catalog) -> void:
 		if int(tree["amount"]) == 0 and String(worker["task"]) == "idle":
 			break
 	assert_true(bool(controller.get_command_result(gather.sequence_id).get("accepted", false)), "gather command is accepted")
+	if world.get_wood() != starting_wood + 12:
+		var nearest: Variant = world.nearest_dropoff(worker)
+		print("I8-001 gather diagnostic worker=%s tree=%s nearest_dropoff_id=%d" % [{"pos": worker.get("pos"), "task": worker.get("task"), "reason": worker.get("diagnostic_reason"), "carried": worker.get("carried_amount"), "stage": worker.get("gather_stage"), "dropoff": worker.get("dropoff_id"), "path_status": worker.get("path_status")}, {"amount": tree.get("amount"), "pos": tree.get("pos")}, int(nearest.get("id", -1)) if nearest != null else -1])
 	assert_equal(world.get_wood(), starting_wood + 12, "physical gather/carry/deposit credits the exact resource")
 
 	var build_position := Vector2(7.0, 13.0)
@@ -71,7 +74,7 @@ func test_worker_to_first_military_unit(catalog) -> void:
 	var trained: Array = world.get_units().filter(func(unit): return int(unit.get("team", 0)) == 1 and String(unit.get("kind", "")) == "clubman")
 	assert_equal(trained.size(), 1, "production queue creates the first military unit")
 	assert_equal(world.get_food(), 130, "original Clubman food cost is charged once")
-	assert_equal(world.get_reserved_population(1), 0, "population reservation is released on completion")
+	assert_equal(world.get_population(1), 2, "completed Clubman joins the living population")
 
 	var events := controller.events_after()
 	assert_true(events.any(func(event): return String(event["type"]) == "resource_gathered"), "gather progress is observable")
@@ -79,7 +82,7 @@ func test_worker_to_first_military_unit(catalog) -> void:
 	assert_true(events.any(func(event): return String(event["type"]) == "foundation_placed"), "foundation reservation is observable")
 	assert_true(events.any(func(event): return String(event["type"]) == "build_complete"), "building completion is observable")
 	assert_true(events.any(func(event): return String(event["type"]) == "building_technology_unlocked"), "building unlock is observable")
-	assert_true(events.any(func(event): return String(event["type"]) == "production_queued"), "production reservation is observable")
+	assert_true(events.any(func(event): return String(event["type"]) == "production_queued"), "production request is observable")
 	assert_true(events.any(func(event): return String(event["type"]) == "unit_produced"), "production completion is observable")
 
 

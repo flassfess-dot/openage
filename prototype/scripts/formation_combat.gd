@@ -67,7 +67,19 @@ static func _polygon_destination(unit: Dictionary, target: Dictionary, direction
 	var navigation_minimum: Vector2 = occupied_bounds[0] - Vector2.ONE * navigation_padding
 	var navigation_maximum: Vector2 = occupied_bounds[1] + Vector2.ONE * navigation_padding
 	var navigation_exit := _ray_exit_distance(center, direction, navigation_minimum, navigation_maximum)
-	return center + direction * maxf(combat_exit, navigation_exit)
+	var destination := center + direction * maxf(combat_exit, navigation_exit)
+	# At a corner, the axis-aligned padding is farther from the building than
+	# the same radial padding along its edge. Keep the contact outside the
+	# occupied cells while allowing a melee unit to actually reach attack range.
+	var closest := Vector2(
+		clampf(destination.x, occupied_bounds[0].x, occupied_bounds[1].x),
+		clampf(destination.y, occupied_bounds[0].y, occupied_bounds[1].y)
+	)
+	var outside := destination - closest
+	var contact_radius := maxf(combat_padding, navigation_padding)
+	if outside.length_squared() > contact_radius * contact_radius:
+		return closest + outside.normalized() * contact_radius
+	return destination
 
 
 static func _occupied_world_bounds(cells: Array, fallback_minimum: Vector2, fallback_maximum: Vector2) -> Array[Vector2]:

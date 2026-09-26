@@ -5,6 +5,7 @@ const GameController := preload("res://scripts/game_controller.gd")
 const ReplaySystem := preload("res://scripts/replay_system.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
+const PerformanceProbe := preload("res://scripts/performance_probe.gd")
 
 var failures: Array[String] = []
 
@@ -13,6 +14,9 @@ func _initialize() -> void:
 	test_hash_covers_authoritative_subsystems()
 	test_presentation_snapshot_is_filtered_and_detached()
 	test_known_resource_cache_tracks_incremental_exploration()
+	test_navigation_cache_tracks_local_changes()
+	test_navigation_cache_reachable_domain_switch()
+	test_builder_presentation_projection()
 	if failures.is_empty():
 		print("I1-003 canonical snapshot tests passed")
 		quit(0)
@@ -52,6 +56,91 @@ func test_hash_covers_authoritative_subsystems() -> void:
 	var attacker: Dictionary = world.get_units()[2]
 	world.record_attack_distress(attacker, first)
 	assert_not_equal(replay.world_state_hash(world, controller.tick_index, controller), baseline, "active AI distress signals affect canonical replay state")
+
+
+func test_builder_presentation_projection() -> void:
+	var world = SimulationWorld.new(Vector2i(12, 12))
+	var worker: Dictionary = world.add_unit(1, "villager", Vector2(4.0, 4.0), false)
+	worker["anim_state"] = "Build"
+	worker["presentation_state_overrides"] = {"Build": "builder_work"}
+	var selected: Dictionary = SimulationSnapshot._compact_control_entity(worker, 1, Callable(world, "compact_render_projection"))
+	assert_equal(selected.get("presentation_state_overrides", {}).get("Build", ""), "builder_work", "selected builders retain the work clip override")
+	worker["presentation_state_overrides"] = {"Gather": "forager_work"}
+	var updated: Dictionary = world.compact_render_projection(worker)
+	assert_true(not updated.get("presentation_state_overrides", {}).has("Build"), "render cache updates a worker's changed task profile")
+
+
+func test_navigation_cache_tracks_local_changes() -> void:
+	var world = SimulationWorld.new(Vector2i(20, 20))
+	world.navigation_grid.configure_terrain(func(_cell): return "grass")
+	world.add_unit(1, "clubman", Vector2(3.5, 3.5), false)
+	var fog = world.get_fog_of_war()
+	for y in range(2, 5):
+		for x in range(2, 5):
+			fog.reveal_explored_cell(1, Vector2i(x, y))
+	var probe = PerformanceProbe.new()
+	var options := {"include_build_sites": false, "include_fog_cells": false, "performance_probe": probe}
+	var first: Dictionary = SimulationSnapshot.presentation(world, 1, 1, options)["navigation"]
+	assert_true(Vector2(4.5, 3.5) in first["frontier"]["land"], "initial navigation marks the explored boundary")
+	SimulationSnapshot.presentation(world, 2, 1, options)
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "unchanged AI decision reuses its navigation cache")
+	fog.reveal_explored_cell(1, Vector2i(5, 3))
+	world.get_known_resources(1)
+	var expanded: Dictionary = SimulationSnapshot.presentation(world, 3, 1, options)["navigation"]
+	assert_true(Vector2(5.5, 3.5) in expanded["land"], "navigation receives discoveries after resource knowledge consumes its own queue")
+	assert_true(Vector2(5.5, 3.5) in expanded["frontier"]["land"], "exploration refreshes the new fog boundary")
+	assert_true(navigation_row_major(expanded["land"]) and navigation_row_major(expanded["frontier"]["land"]), "incremental navigation keeps the original deterministic row-major order")
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "exploration updates only dirty navigation cells")
+	world.navigation_grid.occupy([Vector2i(5, 3)], "static_obstruction", 900)
+	var blocked: Dictionary = SimulationSnapshot.presentation(world, 4, 1, options)["navigation"]
+	assert_true(Vector2(5.5, 3.5) not in blocked["land"], "local obstruction removes its navigation point")
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "local obstruction does not rebuild the complete map")
+	world.navigation_grid.release_occupant([Vector2i(5, 3)], "static_obstruction", 900)
+	var reopened: Dictionary = SimulationSnapshot.presentation(world, 5, 1, options)["navigation"]
+	assert_true(Vector2(5.5, 3.5) in reopened["land"], "released obstruction restores only its cell")
+	world.navigation_grid.set_terrain_id(Vector2i(4, 4), 10)
+	var forest_floor: Dictionary = SimulationSnapshot.presentation(world, 6, 1, options)["navigation"]
+	assert_true(Vector2(4.5, 4.5) in forest_floor["land"], "forest floor remains locally walkable")
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "forest terrain detail does not invalidate whole-map connectivity")
+	var before_distant_edit := int(world.navigation_grid.revision)
+	world.navigation_grid.occupy([Vector2i(2, 2), Vector2i(18, 18)], "static_obstruction", 901)
+	assert_equal(world.navigation_grid.changed_cells_since(before_distant_edit).size(), 2, "distant edits retain exact changed cells instead of one map-wide rectangle")
+	var distant_edit: Dictionary = SimulationSnapshot.presentation(world, 7, 1, options)["navigation"]
+	assert_true(Vector2(2.5, 2.5) not in distant_edit["land"], "exact delta updates the known obstruction")
+	assert_true(navigation_row_major(distant_edit["land"]), "removing a distant cell preserves navigation order")
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "distant local edits do not trigger a full rebuild")
+	assert_true(int(probe.counters.get("ai.navigation.dirty_cells", 0)) <= 10, "local changes touch only the revealed cell, boundary, and obstruction")
+	world.reset_game(false)
+	assert_true(world.ai_navigation_knowledge.entries.is_empty(), "match reset discards derived navigation knowledge")
+
+
+func test_navigation_cache_reachable_domain_switch() -> void:
+	var world = SimulationWorld.new(Vector2i(12, 8))
+	world.navigation_grid.configure_terrain(func(cell): return "water" if cell.x in [1, 2, 8, 9] else "grass")
+	var ship: Dictionary = world.add_unit(1, "clubman", Vector2(1.5, 3.5), false)
+	ship["movement_domain"] = "water"
+	var fog = world.get_fog_of_war()
+	for x in [1, 2, 8, 9]:
+		fog.reveal_explored_cell(1, Vector2i(x, 3))
+	var probe = PerformanceProbe.new()
+	var options := {"include_build_sites": false, "include_fog_cells": false, "performance_probe": probe}
+	var first: Dictionary = SimulationSnapshot.presentation(world, 1, 1, options)["navigation"]
+	assert_true(Vector2(1.5, 3.5) in first["reachable"]["water"], "ship reaches its own water component")
+	assert_true(Vector2(8.5, 3.5) not in first["reachable"]["water"], "distant island is not falsely reachable")
+	ship["pos"] = Vector2(8.5, 3.5)
+	var moved: Dictionary = SimulationSnapshot.presentation(world, 2, 1, options)["navigation"]
+	assert_true(Vector2(8.5, 3.5) in moved["reachable"]["water"], "moving between disconnected domains updates reachability")
+	assert_true(Vector2(1.5, 3.5) not in moved["reachable"]["water"], "old water component loses reachability")
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "component switch updates explored cells without a full map scan")
+
+
+func navigation_row_major(points: Array) -> bool:
+	for index in range(1, points.size()):
+		var previous: Vector2 = points[index - 1]
+		var current: Vector2 = points[index]
+		if current.y < previous.y or (current.y == previous.y and current.x <= previous.x):
+			return false
+	return true
 
 
 func test_presentation_snapshot_is_filtered_and_detached() -> void:

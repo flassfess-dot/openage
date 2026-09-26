@@ -248,6 +248,12 @@ func test_population_support_planning() -> void:
 	assert_equal(commands[0].command_type(), "build", "source economy expands housing through the public build command")
 	assert_equal(commands[0].building_type, "house", "source economy requests the RoR House archetype")
 	assert_equal(commands[0].target, Vector2(10.5, 10.5), "source economy uses an authoritative local placement candidate")
+	snapshot["player_state"]["population_points"] = 13
+	assert_equal(Planner.plan_economy(snapshot, 4, 2, {"build_order": []}).size(), 0, "source economy uses exact half-population pressure")
+	snapshot["buildings"] = [{"id": 40, "team": 2, "kind": "barracks", "hp": 350.0, "state": "complete", "production_queue": [{"status": "blocked_population"}]}]
+	var blocked_commands := Planner.plan_economy(snapshot, 5, 2, {"build_order": []})
+	assert_equal(blocked_commands.size(), 1, "blocked producer restores source housing priority")
+	assert_equal(blocked_commands[0].command_type(), "build", "blocked production does not enqueue a duplicate training order")
 
 
 func source_contract() -> Dictionary:

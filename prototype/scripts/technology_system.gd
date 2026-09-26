@@ -2,6 +2,8 @@ class_name RoRTechnologySystem
 extends RefCounted
 
 const AGE_TECHNOLOGY_IDS: Array[int] = [100, 101, 102, 103]
+const TRIBUTE_TAX_RESOURCE_ID := 46
+const WRITING_TECHNOLOGY_ID := 114
 
 var catalog: Dictionary = {}
 var team_states: Dictionary = {}
@@ -43,6 +45,26 @@ func rule_resource_value(team: int, resource_id: int, fallback: float = 0.0) -> 
 	return float(_state(team)["rule_resources"].get(resource_id, fallback))
 
 
+func tribute_tax(team: int) -> float:
+	return clampf(rule_resource_value(team, TRIBUTE_TAX_RESOURCE_ID, 0.25), 0.0, 1.0)
+
+
+func trade_profit_multiplier(team: int) -> float:
+	# RoR's Palmyran trade bonus is a civilization rule, not a distance rule.
+	# Keep the identity here so TradeSystem never needs civilization IDs.
+	var civilization_id := int(_state(team).get("civilization_id", -1))
+	return 2.0 if civilization_id == 15 else 1.0
+
+
+func set_team_civilization(team: int, civilization_id: int) -> void:
+	_state(team)["civilization_id"] = civilization_id
+	_touch_team(team)
+
+
+func grants_shared_vision(team: int) -> bool:
+	return is_researched(team, WRITING_TECHNOLOGY_ID)
+
+
 func apply_rule_resource_effect(team: int, resource_id: int, operator: int, value: float) -> float:
 	var state := _state(team)
 	var current := float(state["rule_resources"].get(resource_id, 0.0))
@@ -64,13 +86,17 @@ func effect_commands(technology_id: int) -> Array:
 	return catalog.get("effect_bundles", {}).get(String.num_int64(bundle_id), {}).get("commands", []).duplicate(true)
 
 
-func apply_effect_bundle(team: int, effect_bundle_id: int) -> Array:
+func apply_effect_bundle(team: int, effect_bundle_id: int, allow_technology_disables: bool = true) -> Array:
 	if effect_bundle_id < 0:
 		return []
 	var commands: Array = catalog.get("effect_bundles", {}).get(String.num_int64(effect_bundle_id), {}).get("commands", []).duplicate(true)
+	var applied: Array = []
 	for command_value in commands:
+		if not allow_technology_disables and int(command_value.get("type_id", -1)) == 102:
+			continue
 		_register_persistent_effect(team, command_value)
-	return commands
+		applied.append(command_value)
+	return applied
 
 
 func is_researched(team: int, technology_id: int) -> bool:

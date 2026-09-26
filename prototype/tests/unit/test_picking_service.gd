@@ -8,6 +8,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_stack_uses_render_order_and_deduplicates_composites()
 	test_transparent_sprite_falls_back_to_footprint()
+	test_zero_health_berry_is_pickable()
 	test_box_prioritizes_mobile_units()
 
 	if failures.is_empty():
@@ -52,6 +53,18 @@ func test_transparent_sprite_falls_back_to_footprint() -> void:
 	)
 	assert_equal(hits.size(), 1, "selection footprint keeps transparent frame clickable")
 	assert_equal(hits[0].get("hit_method"), "footprint", "fallback method is observable")
+
+
+func test_zero_health_berry_is_pickable() -> void:
+	var service := PickingService.new()
+	var berry := entity(8, 0, "berries", Vector2(20, 20))
+	berry["hp"] = 0.0 # The RoR source object (unit 59) declares zero HP.
+	berry["amount"] = 150
+	var hits := service.hit_stack(Vector2(20, 20), [drawable("resource", berry, solid_texture(Color.WHITE), 1)], Callable(self, "identity_projection"), 1.0)
+	assert_equal(hits.size(), 1, "zero-HP berry bush remains available for mouse commands")
+	berry["amount"] = 0
+	hits = service.hit_stack(Vector2(20, 20), [drawable("resource", berry, solid_texture(Color.WHITE), 1)], Callable(self, "identity_projection"), 1.0)
+	assert_equal(hits.size(), 1, "a resource intentionally still rendered after depletion remains inspectable")
 
 
 func test_box_prioritizes_mobile_units() -> void:

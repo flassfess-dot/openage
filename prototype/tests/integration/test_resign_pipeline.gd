@@ -2,6 +2,7 @@ extends SceneTree
 
 const Commands := preload("res://scripts/commands.gd")
 const GameController := preload("res://scripts/game_controller.gd")
+const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
 var failures: Array[String] = []
@@ -25,6 +26,10 @@ func _initialize() -> void:
 	assert_equal(world.player_registry.status(1), "resigned", "issuer keeps explicit resigned state")
 	assert_equal(world.player_registry.status(2), "victorious", "remaining player wins conquest")
 	assert_equal(world.get_victory_result().get("winner_team"), 2, "victory system resolves remaining active player")
+	assert_equal(world.get_victory_result().get("reason"), "conquest", "resign reaches the common conquest outcome")
+	var presentation: Dictionary = SimulationSnapshot.presentation(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
+	assert_equal(presentation.get("player_state", {}).get("status"), "resigned", "local observer retains the resigned spectator status")
+	assert_equal(presentation.get("match_result", {}).get("winner_team"), 2, "read-only presentation receives the same authoritative result")
 	assert_true(controller.events_after().any(func(event): return String(event.get("type", "")) == "player_resigned" and int(event.get("payload", {}).get("team", 0)) == 1), "resign emits typed domain event")
 
 	var illegal_move = Commands.MoveCommand.new(2, [int(human["id"])], Vector2(6, 6))

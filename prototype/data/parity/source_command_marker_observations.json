@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "gate_id": "I3-I10-command-marker",
-  "status": "geometry_measured_timing_pending",
+  "status": "source_asset_identified_timing_pending",
   "reference_build": {
     "product": "Age of Empires, the Rise of Rome",
     "product_version": "1.1",
@@ -26,6 +26,8 @@
     }
   ],
   "verified_contract": {
+    "source_asset": "data/Interfac.drs SLP 50405, visible frames 1-6",
+    "cursor_asset": "data/Interfac.drs SLP 51000, seven cursor frames",
     "composition": "four cardinal arrows converge on the accepted world target",
     "layer": "above world and fog, below the operating-system cursor",
     "colour": "fixed bright red with dark lower-right shadow",
@@ -33,8 +35,7 @@
     "event_rule": "shown only after authoritative command acceptance"
   },
   "pending_measurements": [
-    "exact source asset identity",
-    "frame count and frame duration from a high-frame-rate capture",
+    "frame duration from a high-frame-rate capture",
     "whether the final phase disappears directly or blinks once"
   ]
 }

@@ -34,6 +34,8 @@ func _initialize() -> void:
 	assert_equal(builder.build(definition, state, 1, "ru").get("outcome"), "victory", "local winning team maps to victory presentation")
 	state["result"] = {"over": true, "winner_team": 2, "reason": "scenario"}
 	assert_equal(builder.build(definition, state, 1, "ru").get("outcome"), "defeat", "opponent winning team maps to defeat presentation")
+	state["result"] = {"over": true, "winner_team": 1, "winner_teams": [1, 2], "reason": "conquest"}
+	assert_equal(builder.build(definition, state, 2, "ru").get("outcome"), "victory", "allied winner maps to victory presentation")
 	_finish("I12-020D scenario presentation model tests passed")
 
 

@@ -54,6 +54,22 @@ func _initialize() -> void:
 	recovery_economy_snapshot["resources"] = [{"id": 81, "kind": "berries", "pos": Vector2(3.5, 3), "amount": 100}]
 	var recovery_economy_commands := EconomicPlanner.plan(recovery_economy_snapshot, 2, 2)
 	assert_equal(recovery_economy_commands[0].unit_ids, [46], "a failed nearest route cannot starve another healthy idle worker")
+	var shortage_snapshot := snapshot_base()
+	var gold_worker := worker(47, 2, Vector2(3, 3))
+	gold_worker["task"] = "gather"
+	gold_worker["resource_id"] = 82
+	shortage_snapshot["units"] = [gold_worker]
+	shortage_snapshot["resources"] = [
+		{"id": 82, "kind": "gold_mine", "pos": Vector2(4, 3), "amount": 100, "resource_type_id": 3},
+		{"id": 83, "kind": "berries", "pos": Vector2(7, 3), "amount": 100, "resource_type_id": 0},
+	]
+	shortage_snapshot["player_state"]["food"] = 50
+	shortage_snapshot["player_state"]["gold"] = 1000
+	var shortage_commands := EconomicPlanner.plan(shortage_snapshot, 3, 2)
+	assert_equal(shortage_commands.size(), 1, "food shortage reassigns a worker from surplus gold")
+	assert_equal(shortage_commands[0].resource_id, 83, "food shortage targets visible food rather than nearby gold")
+	gold_worker["resource_id"] = 83
+	assert_equal(EconomicPlanner.plan(shortage_snapshot, 4, 2).size(), 0, "a worker already gathering the critical resource is not repeatedly retasked")
 
 	var resume_snapshot := snapshot_base()
 	resume_snapshot["units"] = [worker(41, 2, Vector2(3, 3))]
@@ -179,6 +195,23 @@ func _initialize() -> void:
 	frontier_snapshot["navigation"]["reachable_frontier"] = {"land": [Vector2(3.5, 3.5)], "water": []}
 	var island_goal := StrategicPlanner.choose_goal(frontier_snapshot, 2, 0)
 	assert_equal(island_goal.get("position"), Vector2(3.5, 3.5), "land exploration never targets a visible but disconnected island")
+	var mixed_frontier := snapshot_base()
+	mixed_frontier["units"] = [fighter(76, 2, Vector2(4, 4), "land"), fighter(77, 2, Vector2(3, 8), "water"), fighter(10, 1, Vector2(7, 4), "land")]
+	mixed_frontier["navigation"] = {
+		"reachable": {"land": [Vector2(4.5, 4.5)], "water": [Vector2(3.5, 8.5), Vector2(6.5, 8.5)]},
+		"reachable_frontier": {"land": [], "water": [Vector2(6.5, 8.5)]},
+	}
+	var mixed_goal := StrategicPlanner.choose_goal(mixed_frontier, 2, 0)
+	assert_equal(mixed_goal.get("type"), "attack", "visible land enemy remains the attack goal")
+	assert_equal(mixed_goal.get("positions_by_domain", {}).get("water"), Vector2(6.5, 8.5), "incompatible naval group retains a reachable water frontier")
+	var mixed_commands := TacticalPlanner.plan(mixed_frontier, 1, 2, mixed_goal, "LINE", 3)
+	assert_equal(mixed_commands.size(), 1, "undersized naval group still explores while land attack waits for reinforcements")
+	assert_equal(mixed_commands[0].command_type(), "attack_move", "naval exploration uses the public command despite a land target")
+	assert_equal(mixed_commands[0].target, Vector2(6.5, 8.5), "naval exploration uses the reachable water frontier")
+	var delayed_mixed_ai = AiPlayer.new({"team": 2, "ai": {"profile": "skirmish_policy_v1", "initial_attack_delay_ticks": 120, "minimum_attack_group_size": 3}})
+	var delayed_commands := delayed_mixed_ai.collect_commands(mixed_frontier, 1)
+	assert_equal(delayed_commands.size(), 1, "attack delay does not suspend naval exploration")
+	assert_equal(delayed_commands[0].command_type(), "attack_move", "delayed land attack keeps the water scout moving")
 
 	var dock_build_snapshot := snapshot_base()
 	var dock_worker := worker(75, 2, Vector2(4, 10))
@@ -236,6 +269,15 @@ func test_fleet_production_and_trade_routes() -> void:
 	var second_boat := worker(192, 2, Vector2(2.5, 11.5), "water")
 	first_boat["task"] = "gather"
 	second_boat["task"] = "gather"
+	var scout_frontier := fleet_snapshot.duplicate(true)
+	scout_frontier["units"] = [first_boat]
+	scout_frontier["navigation"] = {"reachable_frontier": {"water": [Vector2(6.5, 12.5)]}}
+	scout_frontier["buildings"][0]["command_options"]["train"] = [train_option("fishing_boat", ["worker", "naval"])]
+	scout_frontier["buildings"].append({"id": 195, "team": 2, "kind": "archery_range", "pos": Vector2(5.5, 8.5), "hp": 350.0, "state": "complete", "production_queue": [], "command_options": {"train": [train_option("archer", ["combatant"], {1: 20})], "research": []}})
+	assert_equal(first_command_of_type(EconomicPlanner.plan(scout_frontier, 2, 2), "train"), null, "Dock saves wood for a scout after the first fishing boat when water remains unexplored")
+	scout_frontier["buildings"][0]["command_options"]["train"].append(train_option("scout_ship", ["combatant", "naval"]))
+	var scout_train: Variant = first_command_of_type(EconomicPlanner.plan(scout_frontier, 3, 2), "train")
+	assert_true(scout_train != null and String(scout_train.unit_type) == "scout_ship", "Dock trains its first naval scout before surplus fishing boats")
 	fleet_snapshot["units"] = [first_boat, second_boat]
 	var fishing_only := fleet_snapshot.duplicate(true)
 	fishing_only["buildings"][0]["command_options"]["train"] = [train_option("fishing_boat", ["worker", "naval"])]
@@ -315,6 +357,16 @@ func test_skirmish_policy_attack_control() -> void:
 	immediate_policy["initial_attack_delay_ticks"] = 0
 	var understrength_player = AiPlayer.new({"team": 2, "ai": immediate_policy})
 	assert_equal(understrength_player.collect_commands(understrength, 1).size(), 0, "undersized groups wait instead of trickling into combat")
+	var reinforcing := distant.duplicate(true)
+	var committed := fighter(23, 2, Vector2(18, 20))
+	committed["task"] = "attack"
+	committed["target_id"] = 10
+	reinforcing["units"].insert(3, committed)
+	var reinforcement_commands := TacticalPlanner.plan(reinforcing, 12, 2, StrategicPlanner.choose_goal(reinforcing, 2, 0), "LINE", 4)
+	assert_equal(reinforcement_commands.size(), 1, "an ongoing attack accepts reinforcements below the new-wave minimum")
+	assert_equal(reinforcement_commands[0].unit_ids, [20, 21, 22], "reinforcement order excludes the fighter already attacking")
+	committed["target_id"] = 11
+	assert_equal(TacticalPlanner.plan(reinforcing, 13, 2, StrategicPlanner.choose_goal(reinforcing, 2, 0), "LINE", 4).size(), 0, "a fighter attacking another target does not bypass the new-wave minimum")
 
 	var capped := distant.duplicate(true)
 	capped["units"].insert(3, fighter(23, 2, Vector2(5, 5)))

@@ -2,6 +2,7 @@ class_name RoRPathfinder
 
 const CARDINAL_COST: float = 1.0
 const DIAGONAL_COST: float = 1.41421356237
+const MAX_ROUTE_CACHE_ENTRIES: int = 2048
 const DIRECTIONS := [
 	Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1),
 	Vector2i(-1, 0),                         Vector2i(1, 0),
@@ -192,6 +193,11 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		var cached_path: Array[Vector2] = []
 		cached_path.assign(cache[key])
 		return _finish_path_observation(started, cached_path, true)
+	# Keys include exact world-space endpoints. In a long, otherwise static
+	# match most routes are unique; topology revision alone cannot bound them.
+	# Keep the last full cache until after its final possible hit.
+	if cache.size() >= MAX_ROUTE_CACHE_ENTRIES:
+		cache.clear()
 	var smoothed: Array[Vector2i]
 	var direct_path := false
 	if uses_native_kernel():

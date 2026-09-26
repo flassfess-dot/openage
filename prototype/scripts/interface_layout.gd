@@ -52,6 +52,7 @@ static func for_viewport(viewport_size: Vector2) -> Dictionary:
 		"expanded": expanded,
 		"top": Rect2(0.0, 0.0, viewport_size.x, TOP_HEIGHT),
 		"world": Rect2(0.0, TOP_HEIGHT, viewport_size.x, maxf(1.0, viewport_size.y - TOP_HEIGHT - BOTTOM_HEIGHT)),
+		"status_overlay": Rect2(maxf(0.0, viewport_size.x - 148.0), TOP_HEIGHT + 6.0, 140.0, 37.0),
 		"bottom": Rect2(0.0, panel_top, viewport_size.x, BOTTOM_HEIGHT),
 		"command": Rect2(command.position + bottom_origin, command.size),
 		"selection": Rect2(selection.position + bottom_origin, selection.size),

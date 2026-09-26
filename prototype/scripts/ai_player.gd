@@ -9,6 +9,8 @@ const SourceCampaignPlanner := preload("res://scripts/source_campaign_ai_planner
 const StrategicPlanner := preload("res://scripts/ai_strategic_planner.gd")
 const TacticalPlanner := preload("res://scripts/ai_tactical_planner.gd")
 const TransportPlanner := preload("res://scripts/ai_transport_planner.gd")
+const SupportPlanner := preload("res://scripts/ai_support_planner.gd")
+const Commands := preload("res://scripts/commands.gd")
 
 var team: int
 var enabled: bool
@@ -28,12 +30,14 @@ var last_economic_tick: int = -1
 var last_military_tick: int = -1
 var last_attack_tick: int = -1
 var last_response_tick: int = -1
+var last_tribute_tick: int = -1
 var decision_index: int = 0
 var source_attack_groups: Dictionary = {}
 var next_source_attack_group_id: int = 1
 var source_assignment_groups: Dictionary = {}
 var next_source_assignment_group_id: int = 1
 var source_city_plan
+var failed_gather_targets: Dictionary = {}
 
 
 func _init(player_definition: Dictionary) -> void:
@@ -62,6 +66,11 @@ func _init(player_definition: Dictionary) -> void:
 		"age_saving_production_exceptions": settings.get("age_saving_production_exceptions", []).duplicate(),
 		"structure_gap_fallback_kinds": settings.get("structure_gap_fallback_kinds", []).duplicate(),
 		"minimum_structure_gap": maxf(0.0, float(settings.get("minimum_structure_gap", 0.0))),
+		"tribute_target_team": int(settings.get("tribute_target_team", -1)),
+		"tribute_resource_type_id": int(settings.get("tribute_resource_type_id", 0)),
+		"tribute_amount": maxi(0, int(settings.get("tribute_amount", 0))),
+		"tribute_reserve": maxi(0, int(settings.get("tribute_reserve", 0))),
+		"tribute_cooldown_ticks": maxi(1, int(settings.get("tribute_cooldown_ticks", 600))),
 	}
 	source_contract = player_definition.get("source_ai", {}).duplicate(true)
 	source_city_plan = SourceCityPlan.new(team)
@@ -74,6 +83,8 @@ func needs_decision(next_tick: int) -> bool:
 
 func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 	if not enabled:
+		return []
+	if bool(snapshot.get("match_result", {}).get("over", false)):
 		return []
 	if int(snapshot.get("observer_team", -1)) != team:
 		return []
@@ -136,8 +147,26 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 			_prune_completed_assignment_groups()
 			last_military_tick = next_tick
 		return result
+	var skirmish_reserved_ids: Dictionary = {}
 	if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
-		result.append_array(EconomicPlanner.plan(snapshot, next_tick, team, economic_policy))
+		_remember_failed_gather_targets(snapshot)
+		var support_commands: Array = SupportPlanner.plan(snapshot, next_tick, team)
+		result.append_array(support_commands)
+		for command in support_commands:
+			for unit_id in command.unit_ids:
+				skirmish_reserved_ids[int(unit_id)] = true
+		var current_economic_policy := economic_policy.duplicate()
+		current_economic_policy["failed_gather_targets"] = failed_gather_targets
+		if last_attack_tick >= 0:
+			current_economic_policy["wartime_combatant_target"] = maxi(6, minimum_attack_group_size)
+		var economic_commands: Array = EconomicPlanner.plan(snapshot, next_tick, team, current_economic_policy, skirmish_reserved_ids)
+		result.append_array(economic_commands)
+		for command in economic_commands:
+			for unit_id in command.unit_ids:
+				skirmish_reserved_ids[int(unit_id)] = true
+		var tribute_command: Variant = _plan_tribute(snapshot, next_tick)
+		if tribute_command != null:
+			result.append(tribute_command)
 		last_economic_tick = next_tick
 	if last_military_tick < 0 or next_tick - last_military_tick >= military_interval:
 		var goal := StrategicPlanner.choose_goal(snapshot, team, decision_index)
@@ -148,13 +177,78 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 			attack_allowed = responding or (next_tick >= initial_attack_delay and (last_attack_tick < 0 or next_tick - last_attack_tick >= attack_separation))
 		var tactical_commands: Array = []
 		if attack_allowed:
-			tactical_commands = TacticalPlanner.plan(snapshot, next_tick, team, goal, formation_name, minimum_attack_group_size, maximum_attack_group_size, use_workers_in_attack_groups)
+			var transport_commands: Array = TransportPlanner.plan(snapshot, next_tick, team, goal, formation_name, skirmish_reserved_ids)
+			result.append_array(transport_commands)
+			for command in transport_commands:
+				for unit_id in command.unit_ids:
+					skirmish_reserved_ids[int(unit_id)] = true
+			var refresh_stalled_attack := last_attack_tick >= 0 and next_tick - last_attack_tick >= maxi(400, attack_separation)
+			tactical_commands = TacticalPlanner.plan(snapshot, next_tick, team, goal, formation_name, minimum_attack_group_size, maximum_attack_group_size, use_workers_in_attack_groups, skirmish_reserved_ids, refresh_stalled_attack)
 			result.append_array(tactical_commands)
-			result.append_array(TransportPlanner.plan(snapshot, next_tick, team, goal, formation_name))
-		if String(goal.get("type", "")) == "attack" and not tactical_commands.is_empty():
+		elif String(goal.get("type", "")) == "attack" and not goal.get("positions_by_domain", {}).is_empty():
+			tactical_commands = TacticalPlanner.plan(snapshot, next_tick, team, {"type": "explore", "positions_by_domain": goal["positions_by_domain"]}, formation_name, minimum_attack_group_size, maximum_attack_group_size, use_workers_in_attack_groups, skirmish_reserved_ids)
+			result.append_array(tactical_commands)
+		if String(goal.get("type", "")) == "attack" and tactical_commands.any(func(command): return String(command.command_type()) == "attack"):
 			last_attack_tick = next_tick
 		last_military_tick = next_tick
 	return result
+
+
+func _remember_failed_gather_targets(snapshot: Dictionary) -> void:
+	if not failed_gather_targets.is_empty():
+		var live_workers: Dictionary = {}
+		for unit_value in snapshot.get("units", []):
+			var unit: Dictionary = unit_value
+			if int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0:
+				live_workers[int(unit.get("id", -1))] = true
+		var available_resources: Dictionary = {}
+		for resource_value in snapshot.get("resources", []):
+			if int(resource_value.get("amount", 0)) > 0:
+				available_resources[int(resource_value.get("id", -1))] = true
+		for worker_id_value in failed_gather_targets.keys():
+			if not live_workers.has(int(worker_id_value)):
+				failed_gather_targets.erase(worker_id_value)
+				continue
+			var failures: Dictionary = failed_gather_targets[worker_id_value]
+			for resource_id_value in failures.keys():
+				if not available_resources.has(int(resource_id_value)):
+					failures.erase(resource_id_value)
+			if failures.is_empty():
+				failed_gather_targets.erase(worker_id_value)
+	for unit_value in snapshot.get("units", []):
+		var unit: Dictionary = unit_value
+		if int(unit.get("team", 0)) != team:
+			continue
+		var order: Dictionary = unit.get("components", {}).get("order", {})
+		if String(order.get("type", "")) != "gather" or not bool(order.get("completed", false)) or String(order.get("completion_reason", "")) not in ["no_approach_slot", "no_path", "local_blocked"]:
+			continue
+		var target_id := int(order.get("target_entity_id", -1))
+		if target_id < 0:
+			continue
+		var worker_id := int(unit.get("id", -1))
+		var failures: Dictionary = failed_gather_targets.get(worker_id, {})
+		failures[target_id] = true
+		failed_gather_targets[worker_id] = failures
+
+
+func _plan_tribute(snapshot: Dictionary, tick: int) -> Variant:
+	var recipient := int(economic_policy.get("tribute_target_team", -1))
+	var requested := int(economic_policy.get("tribute_amount", 0))
+	var resource_type_id := int(economic_policy.get("tribute_resource_type_id", 0))
+	if recipient <= 0 or recipient == team or requested <= 0 or resource_type_id not in [0, 1, 2, 3]:
+		return null
+	var player_state: Dictionary = snapshot.get("player_state", {})
+	if recipient not in player_state.get("allies", []):
+		return null
+	if last_tribute_tick >= 0 and tick - last_tribute_tick < int(economic_policy.get("tribute_cooldown_ticks", 600)):
+		return null
+	var resource_name: String = ["food", "wood", "stone", "gold"][resource_type_id]
+	var available := int(player_state.get(resource_name, 0)) - int(economic_policy.get("tribute_reserve", 0))
+	var amount := mini(requested, available)
+	if amount <= 0:
+		return null
+	last_tribute_tick = tick
+	return Commands.TributeCommand.new(tick, recipient, resource_type_id, amount)
 
 
 func _target_threatens_owned_position(snapshot: Dictionary, target_position: Vector2) -> bool:
@@ -220,7 +314,7 @@ func presentation_options() -> Dictionary:
 			"preferred_build_sites": preferred_build_sites,
 			"strict_preferred_build_site_kinds": strict_preferred_build_site_kinds,
 		}
-	if profile == "skirmish_policy_v1":
+	if profile in ["skirmish_policy_v1", "skirmish"]:
 		return {
 			"compact_entities": true,
 			"include_navigation": true,
@@ -249,6 +343,13 @@ func canonical_state() -> Dictionary:
 	var assignment_groups: Array = []
 	for group_id in assignment_group_ids:
 		assignment_groups.append(source_assignment_groups[group_id].canonical_state())
+	var failed_gathers: Array = []
+	var worker_ids: Array = failed_gather_targets.keys()
+	worker_ids.sort()
+	for worker_id in worker_ids:
+		var resource_ids: Array = failed_gather_targets[worker_id].keys()
+		resource_ids.sort()
+		failed_gathers.append({"worker_id": int(worker_id), "resource_ids": resource_ids})
 	return {
 		"team": team,
 		"enabled": enabled,
@@ -257,11 +358,13 @@ func canonical_state() -> Dictionary:
 		"last_military_tick": last_military_tick,
 		"last_attack_tick": last_attack_tick,
 		"last_response_tick": last_response_tick,
+		"last_tribute_tick": last_tribute_tick,
 		"decision_index": decision_index,
 		"next_source_attack_group_id": next_source_attack_group_id,
 		"source_attack_groups": groups,
 		"next_source_assignment_group_id": next_source_assignment_group_id,
 		"source_assignment_groups": assignment_groups,
+		"failed_gather_targets": failed_gathers,
 		"source_city_plan": source_city_plan.canonical_state() if source_city_plan != null else {},
 	}
 
@@ -273,6 +376,7 @@ func restore_state(data: Dictionary) -> bool:
 	last_military_tick = int(data.get("last_military_tick", -1))
 	last_attack_tick = int(data.get("last_attack_tick", -1))
 	last_response_tick = int(data.get("last_response_tick", -1))
+	last_tribute_tick = int(data.get("last_tribute_tick", -1))
 	decision_index = int(data.get("decision_index", 0))
 	next_source_attack_group_id = maxi(1, int(data.get("next_source_attack_group_id", 1)))
 	next_source_assignment_group_id = maxi(1, int(data.get("next_source_assignment_group_id", 1)))
@@ -293,6 +397,16 @@ func restore_state(data: Dictionary) -> bool:
 			continue
 		source_assignment_groups[int(group.group_id)] = group
 		next_source_assignment_group_id = maxi(next_source_assignment_group_id, int(group.group_id) + 1)
+	failed_gather_targets.clear()
+	for entry_value in data.get("failed_gather_targets", []):
+		var entry: Dictionary = entry_value
+		var worker_id := int(entry.get("worker_id", -1))
+		if worker_id < 0:
+			continue
+		var failed: Dictionary = {}
+		for resource_id in entry.get("resource_ids", []):
+			failed[int(resource_id)] = true
+		failed_gather_targets[worker_id] = failed
 	return true
 
 

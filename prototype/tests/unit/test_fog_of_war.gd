@@ -68,6 +68,9 @@ func test_unknown_explored_visible_and_allies() -> void:
 	var ally := vision_entity(3, Vector2(10.5, 8.5), 1.0)
 	fog.set_alliance(1, 3, true)
 	fog.update([scout, enemy_scout, ally], [])
+	assert_equal(fog.state_at_world(1, ally["pos"]), FogOfWar.UNKNOWN, "alliance alone does not share current sight")
+	fog.set_shared_vision(1, 3, true)
+	fog.update([scout, enemy_scout, ally], [])
 	assert_equal(fog.state_name(fog.state_at_world(1, ally["pos"])), "visible", "allied vision is shared")
 	ally["hp"] = 0.0
 	fog.update([scout, enemy_scout, ally], [])
@@ -137,6 +140,9 @@ func test_simulation_and_render_visibility() -> void:
 
 	var ally: Dictionary = world.add_unit(3, "scout", Vector2(12.5, 13.5), false)
 	world.set_alliance(1, 3, true)
+	assert_true(not world.is_entity_visible_to(1, enemy), "alliance alone leaves the distant enemy hidden")
+	world.visibility_system.set_shared_vision(1, 3, true)
+	world.update_fog_of_war()
 	assert_true(world.is_entity_visible_to(1, enemy), "allied unit reveals distant enemy")
 	ally["hp"] = 0.0
 	world.update_fog_of_war()

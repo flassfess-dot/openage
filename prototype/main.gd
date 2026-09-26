@@ -10,9 +10,11 @@ const RenderWorld := preload("res://scripts/render_world.gd")
 const RenderItem := preload("res://scripts/render_item.gd")
 const Diagnostics := preload("res://scripts/diagnostics.gd")
 const InputAdapter := preload("res://scripts/input_adapter.gd")
+const PointerController := preload("res://scripts/pointer_controller.gd")
 const PickingService := preload("res://scripts/picking_service.gd")
 const CommandFeedbackRouter := preload("res://scripts/command_feedback_router.gd")
 const CommandMarkerPresentation := preload("res://scripts/command_marker_presentation.gd")
+const SourceCursorPresentation := preload("res://scripts/source_cursor_presentation.gd")
 const InteractionCursor := preload("res://scripts/interaction_cursor.gd")
 const PlayerControlState := preload("res://scripts/player_control_state.gd")
 const ControlGroups := preload("res://scripts/control_groups.gd")
@@ -23,19 +25,26 @@ const HUDModalOverlay := preload("res://scripts/hud_modal_overlay.gd")
 const HudViewModel := preload("res://scripts/hud_view_model.gd")
 const PresentationAudioRouter := preload("res://scripts/presentation_audio_router.gd")
 const PresentationAudioEventRouter := preload("res://scripts/presentation_audio_event_router.gd")
+const SoundCueHistory := preload("res://scripts/sound_cue_history.gd")
 const PresentationEffectTimeline := preload("res://scripts/presentation_effect_timeline.gd")
 const MinimapProjection := preload("res://scripts/minimap_projection.gd")
+const MinimapTerrainRaster := preload("res://scripts/minimap_terrain_raster.gd")
 const MatchDefinition := preload("res://scripts/match_definition.gd")
 const MatchBootstrap := preload("res://scripts/match_bootstrap.gd")
 const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
 const ReplaySystem := preload("res://scripts/replay_system.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
+const LockstepSession := preload("res://scripts/lockstep_session.gd")
+const LockstepTcpRelay := preload("res://scripts/lockstep_tcp_relay.gd")
 const AiPlayer := preload("res://scripts/ai_player.gd")
 const SpriteGeometry := preload("res://scripts/sprite_geometry.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const FacingConvention := preload("res://scripts/facing_convention.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
+const Footprint := preload("res://scripts/footprint.gd")
+const WallPlacement := preload("res://scripts/wall_placement.gd")
+const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 const ScenarioOverlay := preload("res://scripts/scenario_overlay.gd")
 const ViewportCulling := preload("res://scripts/viewport_culling.gd")
@@ -60,6 +69,8 @@ const HUD_BOTTOM := InterfaceLayout.BOTTOM_HEIGHT
 # intermediate fog revisions, so the cadence actually bounds rebuild spikes.
 const OVERVIEW_REFRESH_TICKS := 10
 const WORLD_FOG_CHUNK_SIZE := 32
+const MAX_PRESENTATION_EVENT_HISTORY := 16384
+const PRESENTATION_EVENT_HISTORY_TAIL := 4096
 
 @export_file("*.json") var match_path: String = MatchDefinition.DEFAULT_PATH
 var match_definition_override: Dictionary = {}
@@ -79,8 +90,24 @@ var command_feedback_router := CommandFeedbackRouter.new()
 var command_marker_presentation := CommandMarkerPresentation.new()
 var interaction_highlight_id: int = -1
 var interaction_cursor_semantic := "default"
+var source_cursor_frame_applied := -1
+var source_cursor_frames: Array[Texture2D] = []
+var source_command_marker_frames: Dictionary = {}
 var control_groups := ControlGroups.new()
 var player_control_state := PlayerControlState.new(PLAYER_TEAM)
+var local_player_team: int = PLAYER_TEAM
+var network_role := ""
+var network_address := "127.0.0.1"
+var network_port: int = 39741
+var network_session
+var network_relay
+var network_accumulator := 0.0
+var network_hello_cooldown := 0.0
+var network_frame_submitted_tick := 0
+var pending_network_commands: Array = []
+var network_sent_commands: Dictionary = {}
+var network_feedback_by_command: Dictionary = {}
+var network_chat_input: LineEdit
 
 var units: Array = []
 var resource_nodes: Array = []
@@ -90,10 +117,16 @@ var overview_buildings: Array = []
 var presentation_snapshot: Dictionary = {}
 var formation := "RECTANGLE"
 var pending_build_kind := ""
+var pending_build_started := false
+var resource_feedback_id := -1
+var resource_feedback_time := 0.0
+var placement_preview_key := ""
+var placement_preview_valid := false
 var pending_target_command := ""
 var game_message := "Выберите отряд и отдайте приказ правой кнопкой"
 var message_time := 5.0
 var battle_over := false
+var local_spectator := false
 var diagnostics_enabled := false
 
 var terrain_textures := {}
@@ -111,6 +144,8 @@ var sfx_players: Array[AudioStreamPlayer] = []
 var sfx_round_robin: int = 0
 var presentation_audio_router := PresentationAudioRouter.new()
 var presentation_audio_event_router := PresentationAudioEventRouter.new()
+var sound_cue_history := SoundCueHistory.new()
+var compact_status_visible := false
 var presentation_effect_timeline := PresentationEffectTimeline.new()
 var environment_presentation_field := EnvironmentPresentationField.new()
 var font: Font
@@ -139,8 +174,13 @@ var cached_map_edge_chains: Array[PackedVector2Array] = []
 var cached_map_edge_zoom := -1.0
 var cached_map_edge_terrain_revision := -1
 var cached_minimap_mesh: ArrayMesh
+var cached_minimap_terrain_texture: ImageTexture
+var cached_minimap_terrain_revision: int = -1
+var cached_minimap_terrain_rectangle := Rect2()
+var cached_minimap_fog_texture: ImageTexture
+var cached_minimap_exploration_revision: int = -1
+var cached_minimap_fog_rectangle := Rect2()
 var cached_minimap_mesh_tick: int = -1
-var cached_minimap_mesh_fog_revision: int = -1
 var cached_minimap_mesh_rectangle := Rect2()
 var cached_minimap_resource_signature: int = 0
 var cached_minimap_resource_rectangle := Rect2()
@@ -163,16 +203,26 @@ func _ready() -> void:
 	font = ThemeDB.fallback_font
 	resource_catalog = ResourceCatalog.new()
 	resource_catalog.load()
+	for frame_index in range(7):
+		source_cursor_frames.append(load("res://assets/generated/ror_cursor_%02d.png" % frame_index))
+	for frame_index in range(1, 7):
+		source_command_marker_frames[frame_index] = load("res://assets/generated/ror_command_marker_%02d.png" % frame_index)
+	_install_source_control_cursors()
+	_apply_source_cursor("default")
 	match_definition = match_definition_override.duplicate(true) if not match_definition_override.is_empty() else MatchDefinition.load_json(match_path)
 	if not match_definition_override.is_empty():
 		match_definition["source_path"] = match_path
 	if not bool(match_definition.get("valid", false)):
 		push_error("Invalid match definition: %s" % [str(match_definition.get("errors", []))])
 		return
+	if network_role.is_empty():
+		local_player_team = int(match_definition.get("local_team", PLAYER_TEAM))
+	player_control_state.player_id = local_player_team
 	var environment_items: Array = match_definition.get("presentation_environment", []).duplicate(true)
 	environment_items.append_array(match_definition.get("static_obstructions", []))
-	environment_presentation_field.configure(environment_items)
 	map_definition = map_definition_override.duplicate(true) if not map_definition_override.is_empty() else RandomMapGenerator.generate(match_definition)
+	environment_items.append_array(map_definition.get("scenery", []))
+	environment_presentation_field.configure(environment_items)
 	map_size = map_definition.get("size", MAP_SIZE)
 	map_seed = int(map_definition.get("seed", MAP_SEED))
 
@@ -223,9 +273,12 @@ func _ready() -> void:
 	hud_modal_overlay.close_requested.connect(_close_hud_modal)
 	hud_modal_overlay.save_requested.connect(_save_quick_game)
 	hud_modal_overlay.load_requested.connect(_load_quick_game)
+	hud_modal_overlay.named_save_requested.connect(_save_named_game)
+	hud_modal_overlay.named_load_requested.connect(_load_named_game)
 	hud_modal_overlay.resign_requested.connect(_resign_from_hud_modal)
 	hud_modal_overlay.launcher_requested.connect(_return_to_launcher)
 	hud_modal_overlay.diplomacy_relation_requested.connect(_change_diplomacy_from_hud)
+	hud_modal_overlay.tribute_requested.connect(_pay_tribute_from_hud)
 	scenario_overlay = ScenarioOverlay.new()
 	add_child(scenario_overlay)
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
@@ -233,6 +286,10 @@ func _ready() -> void:
 	scenario_overlay.menu_requested.connect(_return_to_launcher)
 
 	reset_game()
+	if not network_role.is_empty():
+		_start_network_match()
+		if network_session != null:
+			_create_network_chat_input()
 	setup_audio()
 	setup_sfx()
 	get_viewport().size_changed.connect(center_initial_view)
@@ -309,8 +366,10 @@ func center_initial_view() -> void:
 	if scenario_overlay != null:
 		scenario_overlay.position = Vector2.ZERO
 		scenario_overlay.size = size
+	if network_chat_input != null:
+		network_chat_input.position = Vector2(16, size.y - HUD_BOTTOM - 40)
 	var initial_world := Vector2(map_size.x / 2.0, map_size.y / 2.0)
-	var local_team := int(match_definition.get("local_team", PLAYER_TEAM))
+	var local_team := local_player_team
 	for player_value in match_definition.get("players", []):
 		var player: Dictionary = player_value
 		if int(player.get("team", 0)) == local_team:
@@ -327,10 +386,14 @@ func reset_game() -> void:
 	var bootstrap: Dictionary = MatchBootstrap.apply(simulation_world, match_definition, map_definition)
 	game_controller.reset_timing()
 	game_controller.start_recording(map_seed, false)
+	game_controller.set_command_result_limit(1024)
 	configure_ai_players()
 	game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
 	control_groups.clear()
 	player_control_state.clear()
+	sound_cue_history.reset()
+	compact_status_visible = false
+	local_spectator = false
 	input_adapter.reset()
 	command_feedback_router.reset()
 	presentation_effect_timeline.reset()
@@ -345,8 +408,13 @@ func reset_game() -> void:
 	cached_map_edge_zoom = -1.0
 	cached_map_edge_terrain_revision = -1
 	cached_minimap_mesh = null
+	cached_minimap_terrain_texture = null
+	cached_minimap_terrain_revision = -1
+	cached_minimap_terrain_rectangle = Rect2()
+	cached_minimap_fog_texture = null
+	cached_minimap_exploration_revision = -1
+	cached_minimap_fog_rectangle = Rect2()
 	cached_minimap_mesh_tick = -1
-	cached_minimap_mesh_fog_revision = -1
 	cached_minimap_mesh_rectangle = Rect2()
 	cached_minimap_resource_signature = 0
 	cached_minimap_resource_rectangle = Rect2()
@@ -357,7 +425,7 @@ func reset_game() -> void:
 		render_world.clear_caches()
 	command_marker_presentation.reset()
 	interaction_highlight_id = -1
-	interaction_cursor_semantic = "default"
+	_apply_source_cursor("default")
 	units.clear()
 	resource_nodes.clear()
 	overview_units.clear()
@@ -383,7 +451,7 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	if simulation_world == null:
 		return {"id": -1}
 	var unit: Dictionary = simulation_world.add_unit(team, kind, position, false)
-	if selected and team == PLAYER_TEAM:
+	if selected and team == local_player_team:
 		player_control_state.replace_or_add([int(unit["id"])], true)
 	return unit
 
@@ -398,6 +466,8 @@ func _process(delta: float) -> void:
 	presentation_audio_router.advance(delta)
 	presentation_effect_timeline.advance(delta)
 	_sync_effect_snapshot()
+	if network_session != null:
+		_network_update(delta)
 	if probe != null:
 		probe.observe_microseconds("presentation.process.audio_effects", Time.get_ticks_usec() - stage_started)
 	if scenario_overlay != null and scenario_overlay.is_blocking():
@@ -410,13 +480,15 @@ func _process(delta: float) -> void:
 	if probe != null:
 		probe.observe_microseconds("presentation.process.camera_terrain", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
-	update_units(delta)
+	if network_session == null:
+		update_units(delta)
 	if probe != null:
 		probe.observe_microseconds("presentation.process.update_units", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
 	if message_time > 0.0:
 		message_time -= delta
 	command_marker_presentation.advance(delta)
+	resource_feedback_time = maxf(0.0, resource_feedback_time - delta)
 	queue_redraw()
 	if probe != null:
 		probe.observe_microseconds("presentation.process.feedback", Time.get_ticks_usec() - stage_started)
@@ -428,6 +500,8 @@ func update_camera(delta: float) -> void:
 	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): direction.x -= 1.0
 	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): direction.y += 1.0
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): direction.y -= 1.0
+	if get_window().has_focus():
+		direction += PointerController.edge_scroll_direction(get_viewport().get_mouse_position(), get_viewport_rect().size, PointerController.EDGE_SCROLL_MARGIN, HUD_TOP, HUD_BOTTOM)
 	if direction != Vector2.ZERO:
 		view_offset += direction.normalized() * 430.0 * delta
 
@@ -436,7 +510,7 @@ func update_units(delta: float) -> void:
 		return
 	var probe: Variant = game_controller.performance_probe
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
-	var battle_text := game_controller.advance_frame(delta, PLAYER_TEAM, ENEMY_TEAM)
+	var battle_text := game_controller.advance_frame(delta, local_player_team, ENEMY_TEAM)
 	if probe != null:
 		probe.observe_microseconds("presentation.update.controller", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -450,6 +524,182 @@ func update_units(delta: float) -> void:
 	if battle_text != "":
 		game_message = battle_text
 		message_time = 2.0
+
+
+func _start_network_match() -> void:
+	var participants: Array[int] = []
+	for player_value in match_definition.get("players", []):
+		var player: Dictionary = player_value
+		if String(player.get("controller", "")) in ["human", "remote"]:
+			participants.append(int(player.get("team", 0)))
+		elif String(player.get("controller", "")) == "ai":
+			game_message = "AI-места в сетевом матче пока не поддерживаются"
+			return
+	participants.sort()
+	network_session = LockstepSession.new()
+	var error: String = network_session.configure(game_controller, match_definition, map_seed, participants, local_player_team)
+	if not error.is_empty():
+		network_session = null
+		game_message = "Сетевой матч не создан: %s" % error
+		game_controller.set_paused(true)
+		return
+	game_controller.set_before_fixed_tick(Callable())
+	network_relay = LockstepTcpRelay.new()
+	if network_role == "host":
+		error = network_relay.start_server(network_port, participants, participants[0], "0.0.0.0")
+	elif network_role == "join":
+		error = network_relay.connect_client(network_address, network_port)
+	else:
+		error = "network_role_invalid"
+	if not error.is_empty():
+		network_session = null
+		network_relay = null
+		game_message = "Сетевое соединение не создано: %s" % error
+		game_controller.set_paused(true)
+		return
+	game_message = "Ожидание сетевых игроков…"
+	message_time = 30.0
+
+
+func _queue_local_command(command) -> void:
+	if network_session == null:
+		game_controller.enqueue_command(command, true, local_player_team)
+		return
+	command.tick = maxi(int(command.tick), network_frame_submitted_tick + 1)
+	pending_network_commands.append(command)
+
+
+func _register_local_feedback(command, accepted_message: String, sound_name: String, marker: Variant) -> void:
+	if network_session == null:
+		command_feedback_router.register(command, accepted_message, sound_name, marker)
+	else:
+		network_feedback_by_command[command.get_instance_id()] = {"accepted_message": accepted_message, "sound_name": sound_name, "marker": marker}
+
+
+func _network_update(delta: float) -> void:
+	if network_relay == null or network_session.phase == "aborted":
+		return
+	for event in network_relay.poll_events():
+		match String(event.get("kind", "")):
+			"packet":
+				var packet: Dictionary = event["packet"]
+				var error: String = network_session.receive_packet(packet)
+				if not error.is_empty():
+					game_message = "Сетевой матч остановлен: %s" % error
+					message_time = 30.0
+				elif String(packet.get("kind", "")) == "chat" and not network_session.chat_messages.is_empty():
+					var latest: Dictionary = network_session.chat_messages.back()
+					if latest == packet:
+						game_message = "[%d] %s" % [int(packet.get("sender_team", 0)), String(packet.get("text", ""))]
+						message_time = 5.0
+			"disconnected":
+				game_message = "Сетевой матч остановлен: %s" % network_session.peer_disconnected(int(event.get("team", -1)))
+				message_time = 30.0
+			"transport_error":
+				game_message = "Сетевая ошибка: %s" % String(event.get("reason", ""))
+				message_time = 5.0
+	if network_session.phase == "aborted":
+		return
+	network_hello_cooldown -= delta
+	if network_hello_cooldown <= 0.0:
+		if network_relay.send_packet(network_session.hello_packet()).is_empty():
+			network_hello_cooldown = 0.5
+	if network_session.phase != "running":
+		return
+	var next_tick := int(game_controller.tick_index) + 1
+	if network_frame_submitted_tick < next_tick:
+		var commands: Array = []
+		for command in pending_network_commands:
+			if int(command.tick) == next_tick:
+				commands.append(command)
+		var frame: Dictionary = network_session.frame_packet(next_tick, commands)
+		if not frame.is_empty() and network_relay.send_packet(frame).is_empty():
+			network_frame_submitted_tick = next_tick
+			network_sent_commands[next_tick] = commands
+			pending_network_commands = pending_network_commands.filter(func(command): return int(command.tick) > next_tick)
+		else:
+			network_session.abort_packet("transport_send_failed")
+			game_message = "Сетевой матч остановлен: transport_send_failed"
+			message_time = 30.0
+			return
+	network_accumulator = minf(0.25, network_accumulator + delta)
+	if network_accumulator < game_controller.FIXED_STEP_SECONDS or not network_session.can_advance():
+		return
+	var step: Dictionary = network_session.advance_one()
+	if not bool(step.get("advanced", false)):
+		game_message = "Сетевой матч остановлен: %s" % String(step.get("reason", ""))
+		message_time = 30.0
+		return
+	var applied_tick := int(step.get("tick", -1))
+	var original_commands: Array = network_sent_commands.get(applied_tick, [])
+	var sequence_ids: Array = step.get("local_sequence_ids", [])
+	for index in range(mini(original_commands.size(), sequence_ids.size())):
+		var original = original_commands[index]
+		var identity: int = int(original.get_instance_id())
+		if network_feedback_by_command.has(identity):
+			original.assign_envelope(local_player_team, int(sequence_ids[index]))
+			var feedback: Dictionary = network_feedback_by_command[identity]
+			command_feedback_router.register(original, String(feedback["accepted_message"]), String(feedback["sound_name"]), feedback["marker"])
+			network_feedback_by_command.erase(identity)
+	network_sent_commands.erase(applied_tick)
+	network_accumulator -= game_controller.FIXED_STEP_SECONDS
+	if not step.get("hash_packet", {}).is_empty():
+		network_relay.send_packet(step["hash_packet"])
+	sync_world_state(false)
+	process_presentation_events()
+	var battle_text: String = simulation_world.get_last_battle_message()
+	if not battle_text.is_empty():
+		game_message = battle_text
+		message_time = 2.0
+
+
+func _create_network_chat_input() -> void:
+	network_chat_input = LineEdit.new()
+	network_chat_input.placeholder_text = "Enter: союзный чат  /all: всем  /pop N: лимит хоста"
+	network_chat_input.size = Vector2(470, 32)
+	network_chat_input.position = Vector2(16, get_viewport_rect().size.y - HUD_BOTTOM - 40)
+	network_chat_input.visible = false
+	network_chat_input.text_submitted.connect(_submit_network_chat)
+	network_chat_input.gui_input.connect(_network_chat_gui_input)
+	add_child(network_chat_input)
+
+
+func _network_chat_gui_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		network_chat_input.hide()
+		network_chat_input.release_focus()
+		get_viewport().set_input_as_handled()
+
+
+func _submit_network_chat(raw_text: String) -> void:
+	if network_chat_input != null:
+		network_chat_input.clear()
+		network_chat_input.hide()
+		network_chat_input.release_focus()
+	if network_session == null or network_session.phase != "running":
+		return
+	var message := raw_text.strip_edges()
+	if message.is_empty():
+		return
+	if message.begins_with("/pop "):
+		var requested := message.substr(5).strip_edges()
+		if local_player_team == 1 and requested.is_valid_int() and int(requested) >= 1 and int(requested) <= 500:
+			_queue_local_command(RoRCommands.PopulationLimitCommand.new(game_controller.tick_index + 1, int(requested)))
+			game_message = "Новый лимит населения: %s" % requested
+		else:
+			game_message = "Только хост может менять лимит от 1 до 500"
+		message_time = 4.0
+		return
+	var channel := "allies"
+	if message.begins_with("/all "):
+		channel = "all"
+		message = message.substr(5).strip_edges()
+	var packet: Dictionary = network_session.chat_packet(message, channel)
+	if packet.is_empty():
+		return
+	if network_relay.send_packet(packet).is_empty():
+		game_message = "[%d] %s" % [local_player_team, message]
+		message_time = 5.0
 
 
 func configure_ai_players() -> void:
@@ -522,13 +772,15 @@ func queue_ai_commands(next_tick: int = -1) -> bool:
 
 
 func enqueue_with_feedback(command: Variant, accepted_message: String, sound_name: String, marker: Variant = null) -> void:
-	game_controller.enqueue_command(command, true, PLAYER_TEAM)
-	command_feedback_router.register(command, accepted_message, sound_name, marker)
+	if local_spectator or battle_over:
+		return
+	_queue_local_command(command)
+	_register_local_feedback(command, accepted_message, sound_name, marker)
 
 
 func process_presentation_events() -> void:
 	var new_events := game_controller.events_after(command_feedback_router.event_cursor)
-	for feedback in command_feedback_router.consume(new_events, PLAYER_TEAM):
+	for feedback in command_feedback_router.consume(new_events, local_player_team):
 		game_message = String(feedback["message"])
 		if bool(feedback["accepted"]):
 			var sound_name := String(feedback["sound_name"])
@@ -536,10 +788,20 @@ func process_presentation_events() -> void:
 				play_sfx(sound_name)
 			if feedback["marker"] is Vector2:
 				command_marker_presentation.trigger(feedback["marker"])
+			elif feedback["marker"] is Dictionary:
+				resource_feedback_id = int(feedback["marker"].get("resource_id", -1))
+				resource_feedback_time = 0.7
 		message_time = 1.8
 	presentation_effect_timeline.consume(new_events, Callable(self, "presentation_effect_visible"))
 	_sync_effect_snapshot()
 	process_world_audio_events(new_events)
+	for cue in sound_cue_history.consume_distress(presentation_snapshot.get("ai_distress_signals", []), local_player_team, game_controller.tick_index):
+		play_audio_request(presentation_audio_router.request_sound_id(10, "combat", -1, int(cue["sequence"])))
+	# All presentation consumers have now observed these events. Keep a short
+	# diagnostic tail while bounding the journal retained by a long live match.
+	# Controllers used by replay/scenario tests do not opt into this pruning.
+	if game_controller.event_stream.retained_count() > MAX_PRESENTATION_EVENT_HISTORY:
+		game_controller.event_stream.prune_through(command_feedback_router.event_cursor - PRESENTATION_EVENT_HISTORY_TAIL)
 
 
 func process_world_audio_events(events: Array) -> void:
@@ -607,6 +869,11 @@ func screen_to_world(screen: Vector2) -> Vector2:
 	return Coordinates.screen_to_world(screen, view_zoom, view_offset)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if network_chat_input != null and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ENTER and not network_chat_input.visible:
+		network_chat_input.show()
+		network_chat_input.grab_focus()
+		get_viewport().set_input_as_handled()
+		return
 	if hud_modal_overlay != null and hud_modal_overlay.is_blocking():
 		return
 	if scenario_overlay != null and scenario_overlay.is_blocking():
@@ -638,6 +905,8 @@ func handle_minimap_input(event: InputEvent) -> bool:
 
 
 func handle_input_action(action: Dictionary) -> void:
+	if local_spectator and String(action.get("type", "")) not in ["consume_outside_world", "zoom", "pointer_moved", "toggle_audio", "toggle_pause", "change_speed", "toggle_diagnostics", "toggle_status_indicators", "next_sound_cue", "reset_game", "quit"]:
+		return
 	match String(action.get("type", "")):
 		"consume_outside_world":
 			selection_preview_ids.clear()
@@ -650,17 +919,19 @@ func handle_input_action(action: Dictionary) -> void:
 			if not pending_target_command.is_empty():
 				commit_pending_target(action["to"])
 			elif pending_build_kind.is_empty():
-				finish_selection(action["from"], action["to"])
+				finish_selection(action["from"], action["to"], String(action.get("mode", "select_click")))
 			else:
-				commit_build_placement(action["to"])
+				commit_build_placement(action["to"], bool(action.get("queue_order", false)), action["from"])
 			selection_preview_ids.clear()
 		"context_committed":
 			if not pending_target_command.is_empty():
 				commit_pending_target(action["position"])
 			elif pending_build_kind.is_empty():
-				issue_order(action["position"], action.get("direction_end"))
+				issue_order(action["position"], action.get("direction_end"), bool(action.get("queue_order", false)))
 			else:
 				pending_build_kind = ""
+				pending_build_started = false
+				update_interaction_cursor(input_adapter.pointer_position)
 				game_message = "Строительство отменено"
 				message_time = 1.5
 		"pointer_moved":
@@ -676,6 +947,8 @@ func handle_input_action(action: Dictionary) -> void:
 			set_formation(String(action["formation"]))
 		"attack_move_mode":
 			begin_attack_move()
+		"attack_ground_mode":
+			begin_attack_ground()
 		"stop":
 			issue_unit_action("stop")
 		"hold":
@@ -684,15 +957,31 @@ func handle_input_action(action: Dictionary) -> void:
 			issue_unit_action("stance")
 		"train":
 			request_primary_train_command()
+		"train_shortcut":
+			request_train_shortcut(String(action.get("archetype", "")))
+		"toggle_status_indicators":
+			compact_status_visible = not compact_status_visible
+			queue_redraw()
+		"next_sound_cue":
+			var cue := sound_cue_history.next_cue()
+			if not cue.is_empty():
+				center_view_on_world(cue["position"])
+				queue_redraw()
 		"toggle_audio":
 			audio_player.stream_paused = not audio_player.stream_paused
 			for player in sfx_players:
 				player.stream_paused = audio_player.stream_paused
 		"toggle_pause":
+			if network_session != null:
+				game_message = "Пауза в сетевом матче недоступна"
+				return
 			var is_paused := game_controller.toggle_paused()
 			game_message = "Пауза" if is_paused else "Игра продолжена"
 			message_time = 1.5
 		"change_speed":
+			if network_session != null:
+				game_message = "Скорость сетевого матча фиксирована"
+				return
 			var speed := game_controller.cycle_speed(int(action["direction"]))
 			game_message = "Скорость игры: %.1fx" % speed
 			message_time = 1.5
@@ -702,16 +991,19 @@ func handle_input_action(action: Dictionary) -> void:
 			message_time = 1.5
 		"open_calibration":
 			get_tree().change_scene_to_file("res://calibration.tscn")
-		"martyrdom":
-			issue_martyrdom()
+		"delete_context":
+			issue_delete_context()
 		"unload":
-			issue_unload_at_pointer()
+			issue_unload_at_pointer(bool(action.get("queue_order", false)))
 		"reset_game":
-			reset_game()
+			if network_session == null:
+				reset_game()
+			else:
+				game_message = "Перезапуск сетевого матча требует нового лобби"
 		"resign":
 			var command = RoRCommands.ResignCommand.new(game_controller.tick_index + 1)
-			game_controller.enqueue_command(command, true, PLAYER_TEAM)
-			command_feedback_router.register(command, "Вы сдались", "", null)
+			_queue_local_command(command)
+			_register_local_feedback(command, "Вы сдались", "", null)
 		"quit":
 			get_tree().quit()
 
@@ -721,11 +1013,19 @@ func _show_diplomacy_summary() -> void:
 
 
 func _change_diplomacy_from_hud(target_team: int, relation: String) -> void:
-	if game_controller == null or not RoRCommands.is_valid_diplomacy_relation(relation):
+	if game_controller == null or local_spectator or battle_over or not RoRCommands.is_valid_diplomacy_relation(relation):
 		return
 	var command = RoRCommands.DiplomacyCommand.new(game_controller.tick_index + 1, target_team, relation)
-	game_controller.enqueue_command(command, true, PLAYER_TEAM)
-	command_feedback_router.register(command, "Дипломатия изменена", "", null)
+	_queue_local_command(command)
+	_register_local_feedback(command, "Дипломатия изменена", "", null)
+
+
+func _pay_tribute_from_hud(target_team: int, resource_type_id: int, amount: int) -> void:
+	if game_controller == null or local_spectator or battle_over:
+		return
+	var command = RoRCommands.TributeCommand.new(game_controller.tick_index + 1, target_team, resource_type_id, amount)
+	_queue_local_command(command)
+	_register_local_feedback(command, "Дань отправлена", "", null)
 
 
 func _toggle_game_menu() -> void:
@@ -740,12 +1040,14 @@ func _open_hud_modal(mode: String) -> void:
 		return
 	if not hud_modal_overlay.is_blocking():
 		modal_restore_paused = game_controller.paused
-	game_controller.set_paused(true)
+	if network_session == null:
+		game_controller.set_paused(true)
 	hud_modal_overlay.set_snapshot(presentation_snapshot)
 	if mode == HUDModalOverlay.MODE_DIPLOMACY:
 		hud_modal_overlay.show_diplomacy()
 	else:
 		hud_modal_overlay.set_save_available(FileAccess.file_exists(GameSaveArchive.SAVE_PATH))
+		hud_modal_overlay.set_named_saves(GameSaveArchive.list_named_saves())
 		hud_modal_overlay.set_menu_status("")
 		hud_modal_overlay.show_menu()
 
@@ -754,7 +1056,7 @@ func _close_hud_modal() -> void:
 	if hud_modal_overlay == null or not hud_modal_overlay.is_blocking():
 		return
 	hud_modal_overlay.close()
-	if game_controller != null:
+	if game_controller != null and network_session == null:
 		game_controller.set_paused(modal_restore_paused)
 	game_message = "Пауза" if modal_restore_paused else "Игра продолжена"
 	message_time = 1.5
@@ -763,12 +1065,12 @@ func _close_hud_modal() -> void:
 func _resign_from_hud_modal() -> void:
 	if hud_modal_overlay != null:
 		hud_modal_overlay.close()
-	if game_controller == null:
+	if game_controller == null or local_spectator or battle_over:
 		return
 	game_controller.set_paused(false)
 	var command = RoRCommands.ResignCommand.new(game_controller.tick_index + 1)
-	game_controller.enqueue_command(command, true, PLAYER_TEAM)
-	command_feedback_router.register(command, "Вы сдались", "", null)
+	_queue_local_command(command)
+	_register_local_feedback(command, "Вы сдались", "", null)
 
 
 func _save_quick_game() -> void:
@@ -776,17 +1078,40 @@ func _save_quick_game() -> void:
 		hud_modal_overlay.set_save_available(true)
 		hud_modal_overlay.set_menu_status("Игра сохранена")
 	else:
-		hud_modal_overlay.set_menu_status("Не удалось сохранить игру", true)
+		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
 
 func _load_quick_game() -> void:
 	if not load_game_from_path(GameSaveArchive.SAVE_PATH):
 		if hud_modal_overlay != null:
-			hud_modal_overlay.set_menu_status("Сохранение несовместимо или повреждено", true)
+			hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
 
-func save_game_to_path(path: String) -> bool:
+func _save_named_game(name: String) -> void:
+	var path: String = GameSaveArchive.named_path(name)
+	if path.is_empty():
+		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message("slot_name_invalid"), true)
+		return
+	if save_game_to_path(path, GameSaveArchive.normalized_slot_name(name)):
+		hud_modal_overlay.set_named_saves(GameSaveArchive.list_named_saves())
+		hud_modal_overlay.set_menu_status("Именованное сохранение создано")
+	else:
+		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
+
+
+func _load_named_game(path: String) -> void:
+	if not load_game_from_path(path):
+		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
+
+
+func save_game_to_path(path: String, slot_name: String = "Быстрое сохранение") -> bool:
 	last_save_error = ""
+	if network_session != null:
+		last_save_error = "network_save_unsupported"
+		return false
+	if not GameSaveArchive.valid_slot_name(slot_name):
+		last_save_error = "slot_name_invalid"
+		return false
 	if game_controller == null or simulation_world == null or game_controller.replay_recorder == null:
 		last_save_error = "runtime_not_ready"
 		return false
@@ -799,7 +1124,10 @@ func save_game_to_path(path: String) -> bool:
 		"selection": player_control_state.selected_ids(),
 		"formation": formation,
 		"control_groups": control_groups.groups.duplicate(true),
+		"last_known_buildings": simulation_world.last_known_buildings_by_player.duplicate(true),
 		"last_recalled_group": control_groups.last_recalled_group,
+		"compact_status_visible": compact_status_visible,
+		"sound_cue_history": sound_cue_history.canonical_state(),
 	}
 	var controller_state := {
 		"speed": game_controller.get_speed_multiplier(),
@@ -814,7 +1142,8 @@ func save_game_to_path(path: String) -> bool:
 		game_controller.replay_recorder.to_dictionary(),
 		ai_states,
 		view_state,
-		controller_state
+		controller_state,
+		slot_name
 	)
 	var write_error := GameSaveArchive.write(path, archive)
 	if write_error != OK:
@@ -825,6 +1154,8 @@ func save_game_to_path(path: String) -> bool:
 
 func load_game_from_path(path: String) -> bool:
 	last_save_error = ""
+	if network_session != null:
+		return _load_failed("network_load_unsupported")
 	var loaded: Dictionary = GameSaveArchive.read(path)
 	if not bool(loaded.get("valid", false)):
 		return _load_failed(String(loaded.get("error", "archive_invalid")))
@@ -843,7 +1174,7 @@ func load_game_from_path(path: String) -> bool:
 	var replay_data: Dictionary = archive.get("replay", {})
 	if not restored_controller.load_replay(replay_data):
 		return _load_failed("replay_invalid")
-	if not restored_controller.replay_until_tick(int(archive.get("tick", 0)), PLAYER_TEAM, ENEMY_TEAM):
+	if not restored_controller.replay_until_tick(int(archive.get("tick", 0)), local_player_team, ENEMY_TEAM):
 		return _load_failed("replay_failed:%s" % restored_controller.last_replay_mismatch)
 	var verifier := ReplaySystem.new()
 	var restored_hash := verifier.world_state_hash(restored_world, restored_controller.tick_index, restored_controller)
@@ -864,6 +1195,10 @@ func load_game_from_path(path: String) -> bool:
 			return _load_failed("ai_state_missing:%d" % int(ai.team))
 		if not ai.restore_state(ai_state_by_team[int(ai.team)]):
 			return _load_failed("ai_state_invalid:%d" % int(ai.team))
+	var saved_view: Dictionary = archive.get("view_state", {})
+	var restored_sound_history := SoundCueHistory.new()
+	if not restored_sound_history.restore_state(saved_view.get("sound_cue_history", {}), int(archive.get("tick", 0))):
+		return _load_failed("sound_cue_history_invalid")
 
 	simulation_world = restored_world
 	game_controller = restored_controller
@@ -873,7 +1208,7 @@ func load_game_from_path(path: String) -> bool:
 	game_controller.set_speed_multiplier(float(saved_controller.get("speed", 1.5)))
 	game_controller.set_paused(bool(saved_controller.get("paused", false)))
 	modal_restore_paused = game_controller.paused
-	var saved_view: Dictionary = archive.get("view_state", {})
+	simulation_world.restore_last_known_buildings(saved_view.get("last_known_buildings", {}))
 	view_offset = saved_view.get("view_offset", view_offset)
 	view_zoom = float(saved_view.get("view_zoom", view_zoom))
 	formation = String(saved_view.get("formation", "RECTANGLE"))
@@ -889,14 +1224,20 @@ func load_game_from_path(path: String) -> bool:
 			group_ids.append(int(entity_id))
 		control_groups.assign(int(group_key), group_ids)
 	control_groups.last_recalled_group = int(saved_view.get("last_recalled_group", -1))
+	compact_status_visible = bool(saved_view.get("compact_status_visible", false))
+	sound_cue_history = restored_sound_history
 	input_adapter.reset()
 	command_feedback_router.reset()
 	presentation_effect_timeline.reset()
 	command_marker_presentation.reset()
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
+	cached_minimap_fog_texture = null
+	cached_minimap_exploration_revision = -1
+	cached_minimap_fog_rectangle = Rect2()
 	pending_build_kind = ""
 	pending_target_command = ""
+	local_spectator = false
 	terrain_canvas.configure(map_size, map_seed, resource_catalog, simulation_world, Callable(self, "terrain_id_at_cell"), Callable(self, "visible_tile_bounds"))
 	_sync_terrain_canvas()
 	sync_world_state()
@@ -931,7 +1272,7 @@ func assign_control_group(group_number: int) -> void:
 func recall_control_group(group_number: int, additive: bool) -> void:
 	var available_ids: Array[int] = []
 	for unit in overview_units:
-		if unit["team"] == PLAYER_TEAM and unit["hp"] > 0.0:
+		if unit["team"] == local_player_team and unit["hp"] > 0.0:
 			available_ids.append(int(unit["id"]))
 	var result: Dictionary = control_groups.recall(group_number, available_ids, _selection_ids(selected_units()), additive)
 	var recalled_ids: Array[int] = result["ids"]
@@ -972,23 +1313,29 @@ func zoom_at(mouse: Vector2, factor: float) -> void:
 	var after_screen := world_to_screen(before)
 	view_offset += mouse - after_screen
 
-func finish_selection(first: Vector2, mouse: Vector2) -> void:
+func finish_selection(first: Vector2, mouse: Vector2, mode: String = "select_click") -> void:
 	var rectangle := selection_rectangle(first, mouse)
 	var click := rectangle.size.length() < 9.0
 	var hits: Array = []
 	if click:
 		for hit_value in pick_stack_at(mouse):
 			var hit: Dictionary = hit_value
-			if int(hit.get("team", 0)) == PLAYER_TEAM and String(hit.get("entity_type", "")) in ["unit", "building", "foundation"]:
-				hits.append(hit["entity"])
+			if (int(hit.get("team", 0)) == local_player_team and String(hit.get("entity_type", "")) in ["unit", "building", "foundation"]) or String(hit.get("entity_type", "")) == "resource":
+				hits.append(picking_service.context_entity(hit))
 				break
 	else:
 		hits = selection_hits_in_rectangle(rectangle)
 
 	var eligible_ids := selectable_player_ids()
+	if click and not hits.is_empty() and String(hits[0].get("entity_type", "")) == "resource":
+		eligible_ids.append(int(hits[0]["id"]))
 	var hit_ids: Array[int] = []
-	for unit in hits:
-		hit_ids.append(int(unit["id"]))
+	if click and mode == "select_double_click" and not hits.is_empty():
+		var clicked: Dictionary = hits[0]
+		hit_ids = PlayerControlState.same_type_visible_ids(presentation_snapshot.get("units", []), clicked, local_player_team, InterfaceLayout.for_viewport(get_viewport_rect().size)["world"], Callable(self, "world_to_screen"))
+	if hit_ids.is_empty():
+		for unit in hits:
+			hit_ids.append(int(unit["id"]))
 	player_control_state.apply_selection(eligible_ids, hit_ids, Input.is_key_pressed(KEY_SHIFT))
 	refresh_hud_model()
 	var selected := selected_entities()
@@ -998,7 +1345,7 @@ func finish_selection(first: Vector2, mouse: Vector2) -> void:
 		play_sfx("selection:%s" % String(selected[0]["kind"]))
 
 func selection_hits_in_rectangle(rectangle: Rect2) -> Array:
-	return picking_service.box_hits(rectangle, current_world_drawables(), Callable(self, "world_to_screen"), PLAYER_TEAM)
+	return picking_service.box_hits(rectangle, current_world_drawables(), Callable(self, "world_to_screen"), local_player_team)
 
 
 func current_world_drawables() -> Array:
@@ -1008,6 +1355,8 @@ func current_world_drawables() -> Array:
 	var highlighted_ids: Array[int] = selection_preview_ids.duplicate()
 	if interaction_highlight_id >= 0 and not highlighted_ids.has(interaction_highlight_id):
 		highlighted_ids.append(interaction_highlight_id)
+	if resource_feedback_time > 0.0 and resource_feedback_id >= 0 and not highlighted_ids.has(resource_feedback_id):
+		highlighted_ids.append(resource_feedback_id)
 	highlighted_ids.sort()
 	var selected_ids := player_control_state.selected_ids()
 	var control_signature := hash([highlighted_ids, selected_ids])
@@ -1015,7 +1364,7 @@ func current_world_drawables() -> Array:
 		var retained_snapshot := presentation_snapshot.duplicate()
 		retained_snapshot["effects"] = []
 		render_world.performance_probe = game_controller.performance_probe if game_controller != null else null
-		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, PLAYER_TEAM, selected_ids)
+		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, local_player_team, selected_ids)
 		# Cached resource/environment statics keep the screen position of their
 		# last refresh; a publication frame may skip refresh entirely, so force
 		# one static re-projection pass or panned scenery lags one frame behind.
@@ -1054,10 +1403,43 @@ func update_interaction_cursor(screen_position: Vector2) -> void:
 	var hits := pick_stack_at(screen_position)
 	if not hits.is_empty():
 		hovered = picking_service.context_entity(hits[0])
-	var cursor := InteractionCursor.resolve(selected_units(), hovered, screen_to_world(screen_position), PLAYER_TEAM)
+	var cursor := InteractionCursor.resolve(selected_units(), hovered, screen_to_world(screen_position), local_player_team)
 	interaction_highlight_id = int(cursor.get("entity_id", -1))
-	interaction_cursor_semantic = String(cursor.get("semantic", "default"))
-	Input.set_default_cursor_shape(cursor_shape_for_semantic(interaction_cursor_semantic))
+	var semantic := String(cursor.get("semantic", "default"))
+	if not pending_build_kind.is_empty():
+		semantic = "build"
+	elif not pending_target_command.is_empty():
+		semantic = pending_target_command
+	_apply_source_cursor(semantic)
+
+
+func _apply_source_cursor(semantic: String) -> void:
+	var frame_index := SourceCursorPresentation.frame_for_semantic(semantic)
+	if semantic == interaction_cursor_semantic and frame_index == source_cursor_frame_applied:
+		return
+	interaction_cursor_semantic = semantic
+	source_cursor_frame_applied = frame_index
+	if frame_index < source_cursor_frames.size() and source_cursor_frames[frame_index] != null:
+		var metadata := resource_catalog.get_texture_metadata("ror_cursor", frame_index)
+		Input.set_custom_mouse_cursor(source_cursor_frames[frame_index], Input.CURSOR_ARROW, SourceCursorPresentation.hotspot_for_metadata(metadata))
+		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	else:
+		Input.set_default_cursor_shape(cursor_shape_for_semantic(semantic))
+
+
+func _install_source_control_cursors() -> void:
+	for mapping in [
+		[Input.CURSOR_POINTING_HAND, 3],
+		[Input.CURSOR_CAN_DROP, 3],
+		[Input.CURSOR_MOVE, 0],
+		[Input.CURSOR_CROSS, 4],
+		[Input.CURSOR_FORBIDDEN, 6],
+	]:
+		var frame_index := int(mapping[1])
+		if frame_index >= source_cursor_frames.size() or source_cursor_frames[frame_index] == null:
+			continue
+		var metadata := resource_catalog.get_texture_metadata("ror_cursor", frame_index)
+		Input.set_custom_mouse_cursor(source_cursor_frames[frame_index], int(mapping[0]), SourceCursorPresentation.hotspot_for_metadata(metadata))
 
 
 func cursor_shape_for_semantic(semantic: String) -> Input.CursorShape:
@@ -1074,9 +1456,16 @@ func unit_frame_info(unit: Dictionary) -> Dictionary:
 	if String(unit.get("death_phase", "alive")) == "corpse":
 		animation_state = "corpse"
 	animation_state = resource_catalog.unit_presentation_state(unit, animation_state)
+	if animation_state == "idle" and String(unit.get("death_phase", "alive")) == "alive":
+		var entity_id := int(unit.get("id", 0))
+		var period := 7.0 + float(posmod(entity_id * 17, 61)) * 0.1
+		var phase := fposmod(float(presentation_snapshot.get("tick", 0)) * GameController.FIXED_STEP_SECONDS + float(posmod(entity_id * 37, 100)) * 0.13, period)
+		var presentation_unit := unit.duplicate()
+		presentation_unit["anim"] = phase if phase < 0.8 else 0.0
+		return resource_catalog.unit_frame_info(presentation_unit, animation_state)
 	return resource_catalog.unit_frame_info(unit, animation_state)
 
-func issue_order(mouse: Vector2, direction_end: Variant = null) -> void:
+func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: bool = false) -> void:
 	var selected := selected_units()
 	if selected.is_empty():
 		game_message = "Для этого приказа выберите своих юнитов"
@@ -1092,7 +1481,7 @@ func issue_order(mouse: Vector2, direction_end: Variant = null) -> void:
 	if not hit_stack.is_empty():
 		clicked_entity = picking_service.context_entity(hit_stack[0])
 
-	var resolution := ContextResolver.resolve(selected, clicked_entity, mouse_world, PLAYER_TEAM)
+	var resolution := ContextResolver.resolve(selected, clicked_entity, mouse_world, local_player_team, simulation_world.get_allied_teams(local_player_team))
 	var selected_ids := _selection_ids(selected)
 	var command: Variant = null
 	var accepted_message := ""
@@ -1125,14 +1514,17 @@ func issue_order(mouse: Vector2, direction_end: Variant = null) -> void:
 			command = RoRCommands.RepairCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
 			accepted_message = "Ремонтировать здание"
 		"move":
-			command = RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target"], formation, formation_forward)
+			command = RoRCommands.MoveCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target"]) if queue_order else RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target"], formation, formation_forward)
 			accepted_message = "Движение: %s" % formation_name()
 		_:
 			game_message = String(resolution.get("message", "Команда для этой цели пока недоступна"))
 			message_time = 1.8
 			return
+	if queue_order and String(command.command_type()) in GameController.QUEUEABLE_ORDERS:
+		command.params["queue_order"] = true
 	var is_worker_group: bool = "worker" in selected[0].get("behavior_tags", []) or String(selected[0].get("kind", "")) == "villager"
-	enqueue_with_feedback(command, accepted_message, "command:%s" % String(selected[0].get("kind", "")), mouse_world)
+	var feedback_marker: Variant = {"resource_id": int(resolution["target_id"])} if String(resolution.get("type", "")) == "gather" else mouse_world
+	enqueue_with_feedback(command, accepted_message, "command:%s" % String(selected[0].get("kind", "")), feedback_marker)
 
 
 func issue_martyrdom() -> void:
@@ -1143,7 +1535,26 @@ func issue_martyrdom() -> void:
 	enqueue_with_feedback(command, "Жертвоприношение", "", null)
 
 
-func issue_unload_at_pointer() -> void:
+func issue_delete_context() -> void:
+	var selected := selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team and String(entity.get("entity_type", "")) != "resource")
+	var martyr_ids: Array[int] = []
+	var delete_ids: Array[int] = []
+	for entity in selected:
+		var entity_id := int(entity.get("id", -1))
+		var live_unit = simulation_world.find_unit(entity_id)
+		if live_unit != null and simulation_world.conversion_system.validate_martyrdom(live_unit).is_empty():
+			martyr_ids.append(entity_id)
+		else:
+			delete_ids.append(entity_id)
+	if not martyr_ids.is_empty():
+		var martyrdom = RoRCommands.MartyrdomCommand.new(game_controller.tick_index + 1, martyr_ids)
+		enqueue_with_feedback(martyrdom, "Жертвоприношение", "", null)
+	if not delete_ids.is_empty():
+		var deletion = RoRCommands.DeleteEntityCommand.new(game_controller.tick_index + 1, delete_ids)
+		enqueue_with_feedback(deletion, "Удалить выбранные объекты", "", null)
+
+
+func issue_unload_at_pointer(queue_order: bool = false) -> void:
 	var selected := selected_units()
 	var transports: Array = selected.filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)))
 	if transports.is_empty():
@@ -1152,6 +1563,8 @@ func issue_unload_at_pointer() -> void:
 		return
 	var target := screen_to_world(input_adapter.pointer_position)
 	var command = RoRCommands.UnloadCommand.new(game_controller.tick_index + 1, _selection_ids(transports), target)
+	if queue_order:
+		command.params["queue_order"] = true
 	enqueue_with_feedback(command, "Высадить пассажиров", "", target)
 
 
@@ -1159,11 +1572,14 @@ func issue_unit_action(action_name: String) -> void:
 	if action_name == "attack_move":
 		begin_attack_move()
 		return
+	if action_name == "attack_ground":
+		begin_attack_ground()
+		return
 	if battle_over:
 		return
-	var selected := selected_units()
+	var selected := selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team and String(entity.get("entity_type", "")) != "resource") if action_name == "stop" else selected_units()
 	if selected.is_empty():
-		game_message = "Для приказа выберите своих юнитов"
+		game_message = "Для приказа выберите свои объекты" if action_name == "stop" else "Для приказа выберите своих юнитов"
 		message_time = 1.5
 		return
 	var ids := _selection_ids(selected)
@@ -1192,20 +1608,48 @@ func begin_attack_move() -> void:
 		return
 	pending_build_kind = ""
 	pending_target_command = "attack_move"
+	update_interaction_cursor(input_adapter.pointer_position)
 	game_message = "Укажите точку движения с атакой"
 	message_time = 4.0
 
 
+func begin_attack_ground() -> void:
+	if battle_over or game_controller == null:
+		return
+	var attackers: Array = selected_units().filter(func(unit): return simulation_world.can_attack_ground(unit))
+	if attackers.is_empty():
+		game_message = "Для атаки по земле выберите осадные орудия"
+		message_time = 1.5
+		return
+	pending_build_kind = ""
+	pending_target_command = "attack_ground"
+	update_interaction_cursor(input_adapter.pointer_position)
+	game_message = "Укажите точку обстрела"
+	message_time = 4.0
+
+
 func commit_pending_target(screen_position: Vector2) -> void:
-	if pending_target_command != "attack_move":
+	var target_command := pending_target_command
+	if target_command not in ["attack_move", "attack_ground"]:
 		return
 	pending_target_command = ""
+	update_interaction_cursor(input_adapter.pointer_position)
 	var selected := selected_units()
 	if selected.is_empty() or battle_over:
 		return
 	var target := screen_to_world(screen_position)
-	var command = RoRCommands.AttackMoveCommand.new(game_controller.tick_index + 1, _selection_ids(selected), target)
-	enqueue_with_feedback(command, "Двигаться с атакой", "command:%s" % String(selected[0].get("kind", "")), target)
+	var command: Variant
+	var message: String
+	if target_command == "attack_ground":
+		selected = selected.filter(func(unit): return simulation_world.can_attack_ground(unit))
+		if selected.is_empty():
+			return
+		command = RoRCommands.AttackGroundCommand.new(game_controller.tick_index + 1, _selection_ids(selected), target)
+		message = "Атаковать точку"
+	else:
+		command = RoRCommands.AttackMoveCommand.new(game_controller.tick_index + 1, _selection_ids(selected), target)
+		message = "Двигаться с атакой"
+	enqueue_with_feedback(command, message, "command:%s" % String(selected[0].get("kind", "")), target)
 
 
 func stance_name(value: String) -> String:
@@ -1215,7 +1659,7 @@ func stance_name(value: String) -> String:
 func selected_units() -> Array:
 	var selected: Array = []
 	for unit in units:
-		if unit["team"] == PLAYER_TEAM and unit["hp"] > 0.0 and player_control_state.is_selected(int(unit["id"])):
+		if unit["team"] == local_player_team and unit["hp"] > 0.0 and player_control_state.is_selected(int(unit["id"])):
 			selected.append(unit)
 	selected.sort_custom(func(left, right): return left["id"] < right["id"])
 	return selected
@@ -1224,20 +1668,43 @@ func selected_units() -> Array:
 func selected_entities() -> Array:
 	var selected: Array = selected_units()
 	for building in presentation_snapshot.get("buildings", []):
-		if int(building.get("team", 0)) == PLAYER_TEAM and float(building.get("hp", 0.0)) > 0.0 and player_control_state.is_selected(int(building.get("id", -1))):
+		if int(building.get("team", 0)) == local_player_team and float(building.get("hp", 0.0)) > 0.0 and player_control_state.is_selected(int(building.get("id", -1))):
 			selected.append(building)
+	for resource in presentation_snapshot.get("resources", []):
+		if player_control_state.is_selected(int(resource.get("id", -1))):
+			selected.append(resource)
 	selected.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	return selected
 
 
 func selectable_player_ids() -> Array[int]:
 	var ids: Array[int] = []
+	var seen: Dictionary = {}
 	for unit in overview_units:
-		if int(unit.get("team", 0)) == PLAYER_TEAM and float(unit.get("hp", 0.0)) > 0.0:
-			ids.append(int(unit["id"]))
+		if int(unit.get("team", 0)) == local_player_team and float(unit.get("hp", 0.0)) > 0.0:
+			var entity_id := int(unit["id"])
+			ids.append(entity_id)
+			seen[entity_id] = true
 	for building in overview_buildings:
-		if int(building.get("team", 0)) == PLAYER_TEAM and float(building.get("hp", 0.0)) > 0.0:
-			ids.append(int(building["id"]))
+		if int(building.get("team", 0)) == local_player_team and float(building.get("hp", 0.0)) > 0.0:
+			var entity_id := int(building["id"])
+			if not seen.has(entity_id):
+				ids.append(entity_id)
+				seen[entity_id] = true
+	# Overview data refreshes less often than the local snapshot. A newly
+	# spawned selected object must not be pruned before its first overview pass.
+	for entity in units + presentation_snapshot.get("buildings", []):
+		if int(entity.get("team", 0)) != local_player_team or float(entity.get("hp", 0.0)) <= 0.0:
+			continue
+		var entity_id := int(entity.get("id", -1))
+		if entity_id >= 0 and not seen.has(entity_id):
+			ids.append(entity_id)
+			seen[entity_id] = true
+	for resource in presentation_snapshot.get("resources", []):
+		var resource_id := int(resource.get("id", -1))
+		if player_control_state.is_selected(resource_id) and not seen.has(resource_id):
+			ids.append(resource_id)
+			seen[resource_id] = true
 	ids.sort()
 	return ids
 
@@ -1272,7 +1739,7 @@ func set_formation(value: String) -> void:
 	center /= float(selected.size())
 	var existing_forward: Vector2 = selected[0].get("formation_forward", Vector2.ZERO)
 	var reform = RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, _selection_ids(selected), center, formation, existing_forward)
-	game_controller.enqueue_command(reform, true, PLAYER_TEAM)
+	_queue_local_command(reform)
 func formation_name() -> String:
 	return {"LINE": "линия", "RECTANGLE": "каре", "COLUMN": "колонна", "WEDGE": "клин", "STAGGERED": "шахматный"}.get(formation, formation)
 
@@ -1291,28 +1758,84 @@ func request_primary_train_command() -> void:
 	message_time = 2.0
 
 
+func request_train_shortcut(unit_kind: String) -> void:
+	for command_value in hud_model.get("commands", []):
+		var command: Dictionary = command_value
+		if String(command.get("type", "")) != "train" or String(command.get("id", "")) != unit_kind:
+			continue
+		if bool(command.get("enabled", false)):
+			train_unit_from_hud(unit_kind, int(command.get("building_id", -1)))
+		else:
+			game_message = HUDControls.reason_text(String(command.get("reason", "")))
+			message_time = 2.0
+		return
+	game_message = "Выберите здание для обучения: %s" % unit_kind
+	message_time = 2.0
+
+
 func begin_build_placement(building_kind: String) -> void:
 	if building_kind.is_empty() or selected_units().is_empty():
 		return
 	pending_build_kind = building_kind
+	pending_build_started = false
+	update_interaction_cursor(input_adapter.pointer_position)
 	game_message = "Укажите место строительства: %s (ПКМ — отмена)" % building_kind
 	message_time = 4.0
 
 
-func commit_build_placement(screen_position: Vector2) -> void:
+func commit_build_placement(screen_position: Vector2, queue_order: bool = false, start_screen_position: Vector2 = Vector2.INF) -> void:
 	if pending_build_kind.is_empty() or simulation_world == null or battle_over:
 		return
 	var workers: Array = selected_units().filter(func(unit): return simulation_world.entity_is_worker(unit))
 	if workers.is_empty():
 		pending_build_kind = ""
+		update_interaction_cursor(input_adapter.pointer_position)
 		game_message = "Для строительства нужен рабочий"
 		message_time = 2.0
 		return
 	var target := Coordinates.clamp_world(screen_to_world(screen_position).round(), map_size)
 	var kind := pending_build_kind
-	pending_build_kind = ""
+	if kind == "wall" and start_screen_position != Vector2.INF:
+		var start := Coordinates.clamp_world(screen_to_world(start_screen_position).round(), map_size)
+		var cells := WallPlacement.cells(Vector2i(start), Vector2i(target), OrderPipeline.MAX_QUEUED_ORDERS + 1)
+		if not queue_order:
+			pending_build_kind = ""
+			pending_build_started = false
+		else:
+			pending_build_started = true
+		update_interaction_cursor(input_adapter.pointer_position)
+		queue_wall_line(workers, cells)
+		return
+	var defer_order := queue_order and pending_build_started
+	if not queue_order:
+		pending_build_kind = ""
+		pending_build_started = false
+	else:
+		pending_build_started = true
+	update_interaction_cursor(input_adapter.pointer_position)
 	var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, _selection_ids(workers), kind, target)
+	if defer_order:
+		command.params["queue_order"] = true
 	enqueue_with_feedback(command, "Строительство: %s" % kind, "command:%s" % String(workers[0].get("kind", "villager")), target)
+
+
+func queue_wall_line(workers: Array, cells: Array[Vector2i]) -> void:
+	if cells.is_empty():
+		return
+	var worker_ids := _selection_ids(workers)
+	# Place foundations together, then let the builders finish the line from its
+	# clicked anchor. Deferred BuildCommands reattach to existing foundations.
+	for index in range(cells.size() - 1, -1, -1):
+		var target := Vector2(cells[index])
+		var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, worker_ids, "wall", target)
+		if index == 0:
+			enqueue_with_feedback(command, "Стена: %d секций" % cells.size(), "command:%s" % String(workers[0].get("kind", "villager")), target)
+		else:
+			_queue_local_command(command)
+	for index in range(1, cells.size()):
+		var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, worker_ids, "wall", Vector2(cells[index]))
+		command.params["queue_order"] = true
+		_queue_local_command(command)
 
 
 func train_unit_from_hud(unit_kind: String, building_id: int) -> void:
@@ -1323,8 +1846,8 @@ func train_unit_from_hud(unit_kind: String, building_id: int) -> void:
 		game_message = "Здание больше недоступно"
 		message_time = 2.0
 		return
-	var command = RoRCommands.TrainCommand.new(game_controller.tick_index + 1, [building_id], unit_kind, PLAYER_TEAM, Vector2.ZERO)
-	enqueue_with_feedback(command, "Добавлено в очередь: %s" % unit_kind, "", Vector2(building.get("pos", Vector2.ZERO)))
+	var command = RoRCommands.TrainCommand.new(game_controller.tick_index + 1, [building_id], unit_kind, local_player_team, Vector2.ZERO)
+	enqueue_with_feedback(command, "Добавлено в очередь: %s" % unit_kind, "", null)
 
 
 func research_from_hud(technology_id: int, building_id: int) -> void:
@@ -1403,7 +1926,7 @@ func sync_world_state(force: bool = true) -> void:
 	if probe != null:
 		snapshot_options["performance_probe"] = probe
 		snapshot_options["performance_prefix"] = "presentation.local.snapshot"
-	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, current_tick, PLAYER_TEAM, snapshot_options)
+	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, current_tick, local_player_team, snapshot_options)
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.snapshot", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -1443,6 +1966,15 @@ func sync_world_state(force: bool = true) -> void:
 	overview_buildings = overview.get("buildings", presentation_snapshot.get("buildings", []))
 	player_control_state.prune(selectable_player_ids())
 	battle_over = bool(presentation_snapshot.get("battle_over", false))
+	var now_spectator := String(presentation_snapshot.get("player_state", {}).get("status", "active")) in ["resigned", "defeated"]
+	if now_spectator and not local_spectator:
+		player_control_state.clear()
+		control_groups.clear()
+		pending_build_kind = ""
+		pending_target_command = ""
+		game_message = "Режим наблюдателя — управление войсками недоступно"
+		message_time = 4.0
+	local_spectator = now_spectator
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.control_projection", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -1457,11 +1989,24 @@ func sync_world_state(force: bool = true) -> void:
 
 
 func _restart_from_scenario_overlay() -> void:
-	reset_game()
+	if network_session == null:
+		reset_game()
+	else:
+		game_message = "Для новой сетевой игры вернитесь в лобби"
 
 
 func _return_to_launcher() -> void:
+	if network_relay != null:
+		network_relay.close()
 	get_tree().change_scene_to_file("res://launcher.tscn")
+
+
+func _exit_tree() -> void:
+	for shape in [Input.CURSOR_ARROW, Input.CURSOR_POINTING_HAND, Input.CURSOR_CAN_DROP, Input.CURSOR_MOVE, Input.CURSOR_CROSS, Input.CURSOR_FORBIDDEN]:
+		Input.set_custom_mouse_cursor(null, shape)
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	if network_relay != null:
+		network_relay.close()
 
 
 func presentation_fog_state_at(position: Vector2) -> int:
@@ -1502,6 +2047,7 @@ func _draw() -> void:
 		probe.observe_microseconds("presentation.draw.map_edge", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
 	draw_command_marker()
+	draw_build_placement_preview()
 	if probe != null:
 		probe.observe_microseconds("presentation.draw.command_marker", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -1620,19 +2166,43 @@ func draw_command_marker() -> void:
 	var marker := command_marker_presentation.snapshot()
 	if marker.is_empty():
 		return
+	var frame_index := int(marker["frame_index"])
+	var texture: Texture2D = source_command_marker_frames.get(frame_index)
+	if texture == null:
+		return
 	var center := PixelScaling.snap_screen(world_to_screen(marker["world_position"]))
-	var half_extent: Vector2 = marker["half_extent"]
-	var directions := [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]
-	for direction in directions:
-		var outer_extent := half_extent.x if not is_zero_approx(direction.x) else half_extent.y
-		var local_points := CommandMarkerPresentation.arrow_polygon(direction, outer_extent)
-		var shadow_points := PackedVector2Array()
-		var bright_points := PackedVector2Array()
-		for point in local_points:
-			shadow_points.append(PixelScaling.snap_screen(center + point + marker["shadow_offset"]))
-			bright_points.append(PixelScaling.snap_screen(center + point))
-		draw_colored_polygon(shadow_points, marker["shadow_color"])
-		draw_colored_polygon(bright_points, marker["bright_color"])
+	var metadata := resource_catalog.get_texture_metadata("ror_command_marker", frame_index)
+	var source_hotspot := SourceCursorPresentation.hotspot_for_metadata(metadata)
+	draw_anchored_texture(texture, "ror_command_marker", frame_index, center, 1.0, false, 1.0, source_hotspot)
+
+
+func draw_build_placement_preview() -> void:
+	if pending_build_kind.is_empty() or simulation_world == null or not is_world_interaction_area(input_adapter.pointer_position):
+		return
+	var center := Coordinates.clamp_world(screen_to_world(input_adapter.pointer_position).round(), map_size)
+	if pending_build_kind == "wall" and input_adapter.pointer.is_selecting():
+		var start := Coordinates.clamp_world(screen_to_world(input_adapter.pointer.anchor).round(), map_size)
+		for cell in WallPlacement.cells(Vector2i(start), Vector2i(center), OrderPipeline.MAX_QUEUED_ORDERS + 1):
+			draw_foundation_preview_at("wall", Vector2(cell))
+		return
+	draw_foundation_preview_at(pending_build_kind, center)
+
+
+func draw_foundation_preview_at(kind: String, center: Vector2) -> void:
+	var key := "%s:%d:%d:%d" % [kind, roundi(center.x), roundi(center.y), int(game_controller.tick_index / 10)]
+	if key != placement_preview_key:
+		placement_preview_key = key
+		placement_preview_valid = simulation_world.map_supports_foundation(kind, center)
+	var footprint := Footprint.building(simulation_world.unit_stats(kind), center)
+	var ghost := {"kind": kind, "team": local_player_team, "pos": center, "state": "foundation", "construction_stage": 0, "footprint": footprint}
+	var color := Color(0.45, 0.95, 0.5, 0.75) if placement_preview_valid else Color(1.0, 0.3, 0.25, 0.75)
+	var points := building_selection_outline(ghost)
+	draw_colored_polygon(points, Color(color.r, color.g, color.b, 0.16))
+	draw_polyline(points, color, maxf(1.0, view_zoom), true)
+	var frame_info := resource_catalog.building_frame_info(ghost, 0.0)
+	var texture: Texture2D = frame_info.get("texture")
+	if texture != null:
+		draw_anchored_texture(texture, String(frame_info.get("asset_name", "")), int(frame_info.get("frame_index", 0)), PixelScaling.snap_screen(world_to_screen(center)), view_zoom, bool(frame_info.get("mirrored", false)), 0.55, frame_info.get("hotspot"))
 
 
 func draw_fog_overlay() -> void:
@@ -1905,6 +2475,8 @@ func static_frame_info(texture: Texture2D, asset_name: String, frame_index: int 
 func draw_render_body(item: Dictionary) -> void:
 	var frame_info: Dictionary = item["frame_info"]
 	if frame_info.is_empty() or frame_info.get("texture") == null:
+		if String(item.get("kind", "")) == "objective":
+			draw_objective_fallback(item)
 		return
 	var screen := PixelScaling.snap_screen(item["screen_position"])
 	if item["kind"] == "projectile":
@@ -1913,9 +2485,34 @@ func draw_render_body(item: Dictionary) -> void:
 	screen += screen_offset * view_zoom
 	draw_anchored_texture(frame_info["texture"], frame_info["asset_name"], item["frame"], screen, view_zoom, bool(frame_info.get("mirrored", false)), float(item["opacity"]), item["hotspot"])
 
+
+func draw_objective_fallback(item: Dictionary) -> void:
+	var objective: Dictionary = item.get("data", {})
+	if String(objective.get("category", "")) != "ruin":
+		return
+	var screen := PixelScaling.snap_screen(item["screen_position"])
+	var extent := 13.0 * view_zoom
+	var owner := int(objective.get("team", 0))
+	var fill := Color("747f81") if owner <= 0 else RenderItem.color_for_team(owner)
+	var points := PackedVector2Array([
+		screen + Vector2(0, -extent),
+		screen + Vector2(extent * 0.8, -extent * 0.25),
+		screen + Vector2(extent * 0.65, extent * 0.55),
+		screen + Vector2(-extent * 0.65, extent * 0.55),
+		screen + Vector2(-extent * 0.8, -extent * 0.25),
+	])
+	draw_colored_polygon(points, fill)
+	points.append(points[0])
+	draw_polyline(points, Color("e4d4a7"), maxf(1.0, view_zoom))
+
 func draw_unit_selection(item: Dictionary) -> void:
 	var unit: Dictionary = item["data"]
+	if String(unit.get("entity_type", "")) == "resource" and resource_feedback_time > 0.0 and int(unit.get("id", -1)) == resource_feedback_id:
+		if int(resource_feedback_time * 10.0) % 2 == 0:
+			draw_selection_ellipse(PixelScaling.snap_screen(item["screen_position"]) + Vector2(0, 7) * view_zoom, Color("45e958"), Vector2(15.0, 6.5))
+		return
 	var screen := PixelScaling.snap_screen(item["screen_position"])
+	var is_building := String(unit.get("entity_type", "")) in ["building", "foundation"] or String(unit.get("footprint", {}).get("shape", "")) == "polygon"
 	var radius := Vector2(15.0, 6.5)
 	var half_size: Variant = unit.get("footprint", {}).get("half_size")
 	if half_size is Vector2:
@@ -1926,12 +2523,56 @@ func draw_unit_selection(item: Dictionary) -> void:
 	var selected := player_control_state.is_selected(int(unit["id"]))
 	if previewed:
 		var preview_color := Color("f39a55") if Input.is_key_pressed(KEY_SHIFT) and selected else Color("66e8ff")
-		draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, preview_color, radius)
+		if is_building:
+			draw_building_selection_rectangle(unit, preview_color)
+		else:
+			draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, preview_color, radius)
 	elif hovered:
 		var hover_color := Color("ef5d55") if interaction_cursor_semantic == "attack" else Color("d6bc63") if interaction_cursor_semantic == "gather" else Color("66e8ff")
-		draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, hover_color, radius)
+		if is_building:
+			draw_building_selection_rectangle(unit, hover_color)
+		else:
+			draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, hover_color, radius)
 	elif selected:
-		draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, Color("e8f45b"), radius)
+		if is_building:
+			draw_building_selection_rectangle(unit, Color("e8f45b"))
+		else:
+			draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, Color("e8f45b"), radius)
+
+
+func draw_building_selection_rectangle(building: Dictionary, color: Color) -> void:
+	draw_polyline(building_selection_outline(building), color, maxf(1.0, view_zoom), true)
+
+
+func building_selection_outline(building: Dictionary) -> PackedVector2Array:
+	var footprint: Dictionary = building.get("footprint", {})
+	var half_size := Vector2(footprint.get("half_size", Vector2(0.5, 0.5)))
+	var center := Vector2(building.get("pos", Vector2.ZERO))
+	var points := PackedVector2Array()
+	for offset in [Vector2(-half_size.x, -half_size.y), Vector2(half_size.x, -half_size.y), Vector2(half_size.x, half_size.y), Vector2(-half_size.x, half_size.y), Vector2(-half_size.x, -half_size.y)]:
+		points.append(PixelScaling.snap_screen(world_to_screen(center + offset)))
+	return points
+
+
+func building_selection_rectangle(building: Dictionary) -> Rect2:
+	var footprint: Dictionary = building.get("footprint", {})
+	var half_size := Vector2(footprint.get("half_size", Vector2(0.5, 0.5)))
+	var center := Vector2(building.get("pos", Vector2.ZERO))
+	var corners := [
+		center + Vector2(-half_size.x, -half_size.y),
+		center + Vector2(half_size.x, -half_size.y),
+		center + Vector2(half_size.x, half_size.y),
+		center + Vector2(-half_size.x, half_size.y),
+	]
+	var minimum := Vector2(INF, INF)
+	var maximum := Vector2(-INF, -INF)
+	for corner in corners:
+		var point := PixelScaling.snap_screen(world_to_screen(corner))
+		minimum = minimum.min(point)
+		maximum = maximum.max(point)
+	# A single unfilled rectangle follows the projected footprint bounds. Unlike
+	# the unit ring it has no offset copy or synthetic shadow.
+	return Rect2(minimum, maximum - minimum)
 
 
 func draw_unit_shadow(item: Dictionary) -> void:
@@ -1953,7 +2594,7 @@ func draw_unit_health(item: Dictionary) -> void:
 	var bar_height := maxf(3.0, 3.0 * view_zoom)
 	var bar_pos := PixelScaling.snap_screen(Vector2(screen.x - bar_width * 0.5, screen.y - hotspot.y * view_zoom - 5.0))
 	draw_rect(Rect2(bar_pos, Vector2(bar_width, bar_height)), Color(0.02, 0.04, 0.03, 0.95), true)
-	draw_rect(Rect2(bar_pos + Vector2(1, 1), Vector2(maxf(0.0, (bar_width - 2.0) * ratio), maxf(1.0, bar_height - 2.0))), Color("21dc4b") if unit["team"] == PLAYER_TEAM else Color("e44339"), true)
+	draw_rect(Rect2(bar_pos + Vector2(1, 1), Vector2(maxf(0.0, (bar_width - 2.0) * ratio), maxf(1.0, bar_height - 2.0))), Color("21dc4b") if unit["team"] == local_player_team else Color("e44339"), true)
 
 func draw_anchored_texture(texture: Texture2D, name: String, frame: int, anchor: Vector2, scale: float, mirrored: bool = false, opacity: float = 1.0, provided_hotspot: Variant = null) -> void:
 	var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
@@ -2037,6 +2678,16 @@ func draw_hud() -> void:
 	for index in range(resource_x.size()):
 		draw_string(font, Vector2(resource_x[index], 15), String.num_int64(int(resources.get(resource_keys[index], 0))), HORIZONTAL_ALIGNMENT_LEFT, 44.0, 11, hud_text_color)
 	draw_string(font, Vector2(width * 0.5 - 90.0, 15), String(hud_model.get("age", {}).get("label", "")), HORIZONTAL_ALIGNMENT_CENTER, 180.0, 11, hud_text_color)
+	if compact_status_visible:
+		var status_rect: Rect2 = layout["status_overlay"]
+		var indicators: Dictionary = hud_model.get("status_indicators", {})
+		draw_rect(status_rect, Color(0.05, 0.04, 0.03, 0.88), true)
+		draw_rect(status_rect, Color("ae8b55"), false, 1.0)
+		var population_color := Color("ff9b78") if bool(indicators.get("blocked", false)) else Color("eee0b8")
+		# Presentation blink remains live while simulation time is paused.
+		if not bool(indicators.get("blocked", false)) or int(Time.get_ticks_msec() / 500) % 2 == 0:
+			draw_string(font, status_rect.position + Vector2(5, 14), "НАС %s" % String(indicators.get("population_text", "0/0")), HORIZONTAL_ALIGNMENT_LEFT, status_rect.size.x - 10.0, 10, population_color)
+		draw_string(font, status_rect.position + Vector2(5, 29), "ВРЕМЯ %s" % String(indicators.get("clock_text", "00:00:00")), HORIZONTAL_ALIGNMENT_LEFT, status_rect.size.x - 10.0, 10, Color("eee0b8"))
 
 	var command_rect: Rect2 = layout["command"]
 	var info_rect: Rect2 = layout["selection"]
@@ -2055,30 +2706,39 @@ func draw_hud() -> void:
 		var selected_count := int(selection.get("count", 0))
 		if selected_count > 1:
 			draw_string(font, info_rect.position + Vector2(text_x, 48), "%d ×" % selected_count, HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
-		draw_string(font, info_rect.position + Vector2(text_x, 63), "АТК %d" % int(leader.get("attack", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
-		draw_string(font, info_rect.position + Vector2(text_x, 77), "БРН %d" % int(leader.get("armor", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
+		if String(selection.get("category", "")) == "resource":
+			draw_string(font, info_rect.position + Vector2(text_x, 63), "РЕС %d" % int(leader.get("resource_amount", 0)), HORIZONTAL_ALIGNMENT_LEFT, 65.0, 10, Color.WHITE)
+			draw_string(font, info_rect.position + Vector2(text_x, 77), "ИЗ %d" % int(leader.get("resource_maximum", 0)), HORIZONTAL_ALIGNMENT_LEFT, 65.0, 10, Color.WHITE)
+		elif bool(leader.get("show_combat_stats", true)):
+			draw_string(font, info_rect.position + Vector2(text_x, 63), "АТК %d" % int(leader.get("attack", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
+			draw_string(font, info_rect.position + Vector2(text_x, 77), "БРН %d" % int(leader.get("armor", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
 		if int(leader.get("carried_amount", 0)) > 0:
 			draw_string(font, info_rect.position + Vector2(text_x, 91), "%s %d" % [String(leader.get("carried_resource", "")).to_upper(), int(leader.get("carried_amount", 0))], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color("f0d16d"))
 		if bool(leader.get("conversion_enabled", false)):
 			draw_string(font, info_rect.position + Vector2(text_x, 91), "ВЕРА %d" % roundi(float(leader.get("faith", 0.0))), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color("d8c8ff"))
-		var hp := int(leader.get("hp", 0))
-		var max_hp := maxi(1, int(leader.get("max_hp", 1)))
-		var hp_ratio := clampf(float(hp) / float(max_hp), 0.0, 1.0)
-		var hp_rect := Rect2(info_rect.position + Vector2(5, 91), Vector2(50, 7))
-		if not health_status_frames.is_empty():
-			var hp_frame := resource_catalog.interface_skin.status_frame_index(hp_ratio, health_status_frames.size())
-			draw_texture(health_status_frames[hp_frame], hp_rect.position)
-		else:
-			draw_rect(hp_rect, Color("351714"), true)
-			var hp_color := Color("18d74a") if hp_ratio > 0.5 else Color("e2c62d") if hp_ratio > 0.25 else Color("dc352f")
-			draw_rect(Rect2(hp_rect.position + Vector2.ONE, Vector2((hp_rect.size.x - 2.0) * hp_ratio, hp_rect.size.y - 2.0)), hp_color, true)
-		draw_string(font, info_rect.position + Vector2(5, 108), "%d/%d" % [hp, max_hp], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color.WHITE)
+		if bool(leader.get("show_hp", true)):
+			var hp := int(leader.get("hp", 0))
+			var max_hp := maxi(1, int(leader.get("max_hp", 1)))
+			var hp_ratio := clampf(float(hp) / float(max_hp), 0.0, 1.0)
+			var hp_rect := Rect2(info_rect.position + Vector2(5, 91), Vector2(50, 7))
+			if not health_status_frames.is_empty():
+				var hp_frame := resource_catalog.interface_skin.status_frame_index(hp_ratio, health_status_frames.size())
+				draw_texture(health_status_frames[hp_frame], hp_rect.position)
+			else:
+				draw_rect(hp_rect, Color("351714"), true)
+				var hp_color := Color("18d74a") if hp_ratio > 0.5 else Color("e2c62d") if hp_ratio > 0.25 else Color("dc352f")
+				draw_rect(Rect2(hp_rect.position + Vector2.ONE, Vector2((hp_rect.size.x - 2.0) * hp_ratio, hp_rect.size.y - 2.0)), hp_color, true)
+			draw_string(font, info_rect.position + Vector2(5, 108), "%d/%d" % [hp, max_hp], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color.WHITE)
 	var queue: Array = hud_model.get("queue", [])
 	var queue_text := ""
+	var queue_blocked := false
 	if not queue.is_empty():
-		queue_text = "  Очередь: %s  %d%%" % [String(queue[0].get("label", "")), roundi(float(queue[0].get("progress", 0.0)) * 100.0)]
+		queue_blocked = String(queue[0].get("status", "")) == "blocked_population"
+		queue_text = "Очередь: %s ×%d  %d%%" % [String(queue[0].get("label", "")), queue.size(), roundi(float(queue[0].get("progress", 0.0)) * 100.0)]
+		if queue_blocked:
+			queue_text = "НЕТ МЕСТА · " + queue_text
 	if not queue_text.is_empty():
-		draw_string(font, command_rect.position + Vector2(4, 116), queue_text.strip_edges(), HORIZONTAL_ALIGNMENT_LEFT, command_rect.size.x - 8.0, 9, Color("e6d6ae"))
+		draw_string(font, command_rect.position + Vector2(4, 116), queue_text, HORIZONTAL_ALIGNMENT_LEFT, command_rect.size.x - 8.0, 9, Color("ffb7a2") if queue_blocked else Color("e6d6ae"))
 
 	draw_minimap(map_rect)
 	if message_time > 0.0:
@@ -2126,7 +2786,7 @@ func draw_split_hud_texture(texture: Texture2D, destination_y: float, destinatio
 		destination_x += piece_width
 
 func living_player_count() -> int:
-	return units.filter(func(unit): return unit["team"] == PLAYER_TEAM and unit["hp"] > 0.0).size()
+	return units.filter(func(unit): return unit["team"] == local_player_team and unit["hp"] > 0.0).size()
 
 func unit_display_name(unit: Dictionary) -> String:
 	return {"villager": "Villager", "clubman": "Clubman", "archer": "Bowman"}.get(unit["kind"], unit["kind"])
@@ -2143,17 +2803,33 @@ func draw_minimap(rectangle: Rect2) -> void:
 	])
 	draw_colored_polygon(aperture, Color.BLACK)
 	var map_points := MinimapProjection.map_polygon(map_size, center, scale)
-	draw_colored_polygon(map_points, Color("3e7a35"))
+	# Tree depletion changes terrain artwork but not land/water geography. Rebuild
+	# the small minimap raster only when navigable surface topology changes.
+	var terrain_revision := int(simulation_world.navigation_grid.surface_revision) if simulation_world != null else -1
+	if cached_minimap_terrain_texture == null or cached_minimap_terrain_revision != terrain_revision or cached_minimap_terrain_rectangle != rectangle:
+		var terrain_image := MinimapTerrainRaster.build(map_size, rectangle, center, scale, Callable(self, "terrain_id_at_cell"))
+		cached_minimap_terrain_texture = ImageTexture.create_from_image(terrain_image)
+		cached_minimap_terrain_revision = terrain_revision
+		cached_minimap_terrain_rectangle = rectangle
+	if cached_minimap_terrain_texture != null:
+		draw_texture(cached_minimap_terrain_texture, rectangle.position)
+	var exploration_revision := int(presentation_snapshot.get("fog_exploration_revision", presentation_snapshot.get("fog_revision", -1)))
+	if cached_minimap_fog_texture == null or cached_minimap_exploration_revision != exploration_revision or cached_minimap_fog_rectangle != rectangle:
+		var fog_image := MinimapTerrainRaster.build_fog(map_size, rectangle, center, scale, presentation_snapshot.get("fog", {}).get("cells", []))
+		if cached_minimap_fog_texture == null or cached_minimap_fog_rectangle != rectangle:
+			cached_minimap_fog_texture = ImageTexture.create_from_image(fog_image)
+		else:
+			cached_minimap_fog_texture.update(fog_image)
+		cached_minimap_exploration_revision = exploration_revision
+		cached_minimap_fog_rectangle = rectangle
+	if cached_minimap_fog_texture != null:
+		draw_texture(cached_minimap_fog_texture, rectangle.position)
 	var snapshot_tick := int(presentation_snapshot.get("overview_tick", presentation_snapshot.get("tick", -1)))
-	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
-	# The overview tick is the minimap's publication boundary. Rebuilding the
-	# complete mesh for every intermediate fog revision defeated that cadence and
-	# produced a visible frame spike while the camera explored the map.
+	# Keep resource and unit markers independent of changing visibility.
 	if cached_minimap_mesh == null or cached_minimap_mesh_tick != snapshot_tick or cached_minimap_mesh_rectangle != rectangle:
 		cached_minimap_mesh_rectangle = rectangle
 		cached_minimap_mesh = _build_minimap_mesh(center, scale)
 		cached_minimap_mesh_tick = snapshot_tick
-		cached_minimap_mesh_fog_revision = fog_revision
 	if cached_minimap_mesh != null:
 		draw_mesh(cached_minimap_mesh, null)
 	draw_polyline(PackedVector2Array([map_points[0], map_points[1], map_points[2], map_points[3], map_points[0]]), Color("d2bd7d"), 1.0)
@@ -2176,21 +2852,6 @@ func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	var vertices := PackedVector3Array()
 	var colors := PackedColorArray()
-	for run_value in fog_runs():
-		var run: Dictionary = run_value
-		var y := int(run["y"])
-		var x_from := int(run["x_from"])
-		var x_to := int(run["x_to"])
-		var points := PackedVector2Array([
-			minimap_position(Vector2(x_from, y), center, scale),
-			minimap_position(Vector2(x_to, y), center, scale),
-			minimap_position(Vector2(x_to, y + 1), center, scale),
-			minimap_position(Vector2(x_from, y + 1), center, scale),
-		])
-		_append_colored_quad(vertices, colors, points, FogPresentation.color_for_state(int(run["state"]), true))
-	if probe != null:
-		probe.observe_microseconds("presentation.minimap.fog", Time.get_ticks_usec() - stage_started)
-		stage_started = Time.get_ticks_usec()
 	# Imported campaigns may contain ten thousand individual trees. At minimap
 	# scale many of them land on the same two-pixel cell, so drawing a circle for
 	# every source entity only creates hundreds of thousands of overlapping
@@ -2207,10 +2868,10 @@ func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
 		stage_started = Time.get_ticks_usec()
 	for unit in overview_units:
 		if unit["hp"] > 0.0:
-			_append_colored_circle(vertices, colors, minimap_position(unit["pos"], center, scale), 2.0, Color("40b9ff") if unit["team"] == PLAYER_TEAM else Color("e33d31"))
+			_append_colored_circle(vertices, colors, minimap_position(unit["pos"], center, scale), 2.0, Color("40b9ff") if unit["team"] == local_player_team else Color("e33d31"))
 	for building in overview_buildings:
 		if building["hp"] > 0.0:
-			_append_colored_circle(vertices, colors, minimap_position(building["pos"], center, scale), 3.0, Color("f0d16d") if building["team"] == PLAYER_TEAM else Color("e33d31"))
+			_append_colored_circle(vertices, colors, minimap_position(building["pos"], center, scale), 3.0, Color("f0d16d") if building["team"] == local_player_team else Color("e33d31"))
 	if probe != null:
 		probe.observe_microseconds("presentation.minimap.entities", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -2241,7 +2902,10 @@ func _minimap_resource_pixels(center: Vector2, scale: float, rectangle: Rect2) -
 	for resource in overview_resource_nodes:
 		if int(resource.get("amount", 0)) <= 0:
 			continue
-		var point := minimap_position(Vector2(resource.get("pos", Vector2.ZERO)), center, scale)
+		var resource_position := Vector2(resource.get("pos", Vector2.ZERO))
+		if presentation_fog_state_at(resource_position) == FogOfWar.UNKNOWN:
+			continue
+		var point := minimap_position(resource_position, center, scale)
 		resource_pixels[Vector2i(floori(point.x * 0.5), floori(point.y * 0.5))] = true
 	var resource_pixel_keys: Array = resource_pixels.keys()
 	resource_pixel_keys.sort_custom(func(left, right):

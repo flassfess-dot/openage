@@ -6,11 +6,17 @@ const RESOURCE_IDS := {"food": 0, "wood": 1, "stone": 2, "gold": 3}
 
 static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictionary:
 	world.set_simulation_seed(int(map_data.get("seed", 1)))
+	world.full_tech_tree_enabled = bool(definition.get("full_tech_tree", false))
 	world.configure_players(definition.get("players", []))
 	world.begin_bulk_load()
 	world.reset_game(false, true)
 	world.configure_map_data(map_data)
-	world.configure_static_obstructions(definition.get("static_obstructions", []))
+	var obstructions: Array = definition.get("static_obstructions", []).duplicate(true)
+	var cliff_cells: Array = map_data.get("cliff_cells", [])
+	for index in range(cliff_cells.size()):
+		var cell: Vector2i = cliff_cells[index]
+		obstructions.append({"id": -100000 - index, "kind": "cliff", "position": Vector2(cell) + Vector2(0.5, 0.5), "occupied_cells": [cell]})
+	world.configure_static_obstructions(obstructions)
 
 	for player_value in definition.get("players", []):
 		var player: Dictionary = player_value
@@ -36,7 +42,7 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 			String(relation.get("relation", "enemy"))
 		)
 	world.configure_scenario_definition(definition.get("scenario_definition", {}))
-	world.configure_victory_rules(definition.get("victory_rules", [{"type": "conquest"}]))
+	world.configure_victory_rules(definition.get("victory_rules", [{"type": "conquest"}]), bool(definition.get("allied_victory_enabled", true)))
 
 	var selected_ids: Array[int] = []
 	var entities: Array = definition.get("entities", []).duplicate(true)

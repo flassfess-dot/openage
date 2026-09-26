@@ -2,19 +2,25 @@ class_name RoRVictorySystem
 extends RefCounted
 
 var rules: Array = [{"type": "conquest"}]
+var allied_victory_enabled: bool = true
 var elapsed_seconds: float = 0.0
 var hold_seconds: Dictionary = {}
+var objective_summary: Dictionary = {}
+var tracked_objectives: Dictionary = {}
 var result: Dictionary = {"over": false, "winner_team": -1, "winner_teams": [], "loser_teams": [], "reason": ""}
 
 
-func configure(new_rules: Array) -> void:
+func configure(new_rules: Array, allow_allied_victory: bool = true) -> void:
 	rules = new_rules.duplicate(true) if not new_rules.is_empty() else [{"type": "conquest"}]
+	allied_victory_enabled = allow_allied_victory
 	reset()
 
 
 func reset() -> void:
 	elapsed_seconds = 0.0
 	hold_seconds.clear()
+	objective_summary.clear()
+	tracked_objectives.clear()
 	result = {"over": false, "winner_team": -1, "winner_teams": [], "loser_teams": [], "reason": ""}
 
 
@@ -36,23 +42,23 @@ func update(delta: float, context: Dictionary) -> Dictionary:
 			"artifacts", "ruins":
 				var winner := held_object_winner(rule_type.trim_suffix("s"), rule, teams, context, delta)
 				if winner >= 0:
-					return finish(winner, all_teams, rule_type)
+					return finish(winner, all_teams, rule_type, context)
 			"wonder":
 				var winner := wonder_winner(rule, teams, context, delta)
 				if winner >= 0:
-					return finish(winner, all_teams, "wonder")
+					return finish(winner, all_teams, "wonder", context)
 			"score":
 				var winner := score_winner(rule, teams, context)
 				if winner >= 0:
-					return finish(winner, all_teams, "score")
+					return finish(winner, all_teams, "score", context)
 			"scenario":
 				var winner := scenario_winner(rule, teams, context)
 				if winner >= 0:
-					return finish(winner, all_teams, "scenario")
+					return finish_side([winner], all_teams, "scenario")
 			"scenario_definition":
 				var winner := int(context.get("scenario_result", {}).get("winner_team", -1))
 				if bool(context.get("scenario_result", {}).get("over", false)) and winner >= 0:
-					return finish(winner, all_teams, "scenario")
+					return finish_side([winner], all_teams, "scenario")
 	return result
 
 
@@ -66,7 +72,7 @@ func conquest_winners(teams: Array, context: Dictionary) -> Array[int]:
 	var conquest_presence: Variant = context.get("conquest_presence")
 	for team_value in teams:
 		var team := int(team_value)
-		var has_units: bool = bool(conquest_presence.get(team, false)) if conquest_presence != null else context.get("units", []).any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0)
+		var has_units: bool = bool(conquest_presence.get(team, false)) if conquest_presence != null else context.get("units", []).any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and "capturable" not in unit.get("behavior_tags", []) and "noncombat_target" not in unit.get("behavior_tags", []))
 		var has_buildings: bool = false if conquest_presence != null else context.get("buildings", []).any(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0 and bool(building.get("counts_for_conquest", true)))
 		if has_units or has_buildings:
 			active.append(team)
@@ -75,6 +81,8 @@ func conquest_winners(teams: Array, context: Dictionary) -> Array[int]:
 	active.sort()
 	if active.size() == 1:
 		return active
+	if not allied_victory_enabled:
+		return []
 	var relations: Dictionary = context.get("relations", {})
 	for first_index in range(active.size()):
 		for second_index in range(first_index + 1, active.size()):
@@ -86,13 +94,14 @@ func conquest_winners(teams: Array, context: Dictionary) -> Array[int]:
 
 
 func held_object_winner(category: String, rule: Dictionary, teams: Array, context: Dictionary, delta: float) -> int:
-	var objectives: Array = context.get("objectives", []).filter(func(item): return String(item.get("category", "")) == category and bool(item.get("active", true)))
-	var required_count := int(rule.get("required_count", objectives.size()))
+	var summary: Dictionary = context.get("objective_summary", {}).get(category, {})
+	var objectives: Array = [] if not summary.is_empty() else context.get("objectives", []).filter(func(item): return String(item.get("category", "")) == category and bool(item.get("active", true)))
+	var required_count := int(rule.get("required_count", summary.get("total", objectives.size())))
 	if required_count <= 0:
 		return -1
 	for team_value in teams:
 		var team := int(team_value)
-		var owned := objectives.filter(func(item): return int(item.get("team", 0)) == team).size()
+		var owned: int = int(summary.get("by_team", {}).get(team, 0)) if not summary.is_empty() else objectives.filter(func(item): return int(item.get("team", 0)) == team).size()
 		var key := "%s:%d" % [category, team]
 		hold_seconds[key] = float(hold_seconds.get(key, 0.0)) + delta if owned >= required_count else 0.0
 		if owned >= required_count and float(hold_seconds[key]) + 0.000001 >= float(rule.get("hold_seconds", 0.0)):
@@ -101,14 +110,49 @@ func held_object_winner(category: String, rule: Dictionary, teams: Array, contex
 
 
 func wonder_winner(rule: Dictionary, teams: Array, context: Dictionary, delta: float) -> int:
+	var summary: Dictionary = context.get("objective_summary", {}).get("wonder", {})
 	for team_value in teams:
 		var team := int(team_value)
-		var owns_wonder: bool = context.get("objectives", []).any(func(item): return String(item.get("category", "")) == "wonder" and int(item.get("team", 0)) == team and bool(item.get("active", true)) and bool(item.get("completed", false)))
+		var owns_wonder: bool = int(summary.get("completed_by_team", {}).get(team, 0)) > 0 if not summary.is_empty() else context.get("objectives", []).any(func(item): return String(item.get("category", "")) == "wonder" and int(item.get("team", 0)) == team and bool(item.get("active", true)) and bool(item.get("completed", false)))
 		var key := "wonder:%d" % team
 		hold_seconds[key] = float(hold_seconds.get(key, 0.0)) + delta if owns_wonder else 0.0
 		if owns_wonder and float(hold_seconds[key]) + 0.000001 >= float(rule.get("hold_seconds", 0.0)):
 			return team
 	return -1
+
+
+func track_objective(objective: Dictionary) -> void:
+	var objective_id := int(objective.get("id", -1))
+	if objective_id < 0:
+		return
+	var current := {
+		"category": String(objective.get("category", "")),
+		"team": int(objective.get("team", 0)),
+		"active": bool(objective.get("active", true)),
+		"completed": bool(objective.get("completed", false)),
+	}
+	var previous: Dictionary = tracked_objectives.get(objective_id, {})
+	if previous == current:
+		return
+	if not previous.is_empty():
+		_adjust_objective_summary(previous, -1)
+	_adjust_objective_summary(current, 1)
+	tracked_objectives[objective_id] = current
+
+
+func _adjust_objective_summary(record: Dictionary, delta: int) -> void:
+	var category := String(record.get("category", ""))
+	var summary: Dictionary = objective_summary.get(category, {"total": 0, "by_team": {}, "completed_by_team": {}})
+	if bool(record.get("active", false)):
+		summary["total"] = int(summary.get("total", 0)) + delta
+	if bool(record.get("active", false)) and int(record.get("team", 0)) > 0:
+		var team := int(record["team"])
+		var owners: Dictionary = summary.get("by_team", {})
+		owners[team] = int(owners.get(team, 0)) + delta
+		if bool(record.get("completed", false)):
+			var completed: Dictionary = summary.get("completed_by_team", {})
+			completed[team] = int(completed.get(team, 0)) + delta
+	objective_summary[category] = summary
 
 
 func score_winner(rule: Dictionary, teams: Array, context: Dictionary) -> int:
@@ -164,8 +208,24 @@ func scenario_condition_met(condition_value: Variant, default_team: int, context
 	return false
 
 
-func finish(winner_team: int, teams: Array, reason: String) -> Dictionary:
-	return finish_side([winner_team], teams, reason)
+func finish(winner_team: int, teams: Array, reason: String, context: Dictionary = {}) -> Dictionary:
+	var winners: Array[int] = [winner_team]
+	if allied_victory_enabled and not context.is_empty():
+		var relations: Dictionary = context.get("relations", {})
+		var states: Dictionary = context.get("player_states", {})
+		for team_value in teams:
+			var team := int(team_value)
+			if team == winner_team or String(states.get(team, {}).get("status", "active")) != "active":
+				continue
+			if String(relations.get(winner_team, {}).get(team, "enemy")) == "ally" and String(relations.get(team, {}).get(winner_team, "enemy")) == "ally":
+				winners.append(team)
+		for first_index in range(winners.size()):
+			for second_index in range(first_index + 1, winners.size()):
+				var first := winners[first_index]
+				var second := winners[second_index]
+				if String(relations.get(first, {}).get(second, "enemy")) != "ally" or String(relations.get(second, {}).get(first, "enemy")) != "ally":
+					return finish_side([winner_team], teams, reason)
+	return finish_side(winners, teams, reason)
 
 
 func finish_side(winner_teams_value: Array, teams: Array, reason: String) -> Dictionary:

@@ -87,7 +87,10 @@ func verify_fishing_boat_economy(catalog) -> void:
 	assert_true(world.navigation_grid.surface_accessible(Vector2i(floori(boat["pos"].x), floori(boat["pos"].y)), "water"), "Dock spawns Fishing Boat on navigable water")
 	assert_true(world.entity_is_worker(boat), "Fishing Boat participates in the common worker pipeline")
 	assert_equal(catalog.unit_frame_info(boat, "idle").get("asset_name"), "fishing_boat_idle", "Fishing Boat resolves original idle art")
-	assert_true(catalog.unit_frame_info(boat, "work").get("texture") != null, "Fishing Boat work art is loadable")
+	var fishing_work: Dictionary = catalog.unit_frame_info(boat, "work")
+	var fishing_parts: Array = fishing_work.get("composite_parts", [])
+	assert_equal(fishing_work.get("graphic_id"), 43, "Fishing Boat retains the source fishing-net layer")
+	assert_true(fishing_parts.any(func(part): return int(part.get("graphic_id", -1)) == 42 and String(part.get("asset_name", "")) == "fishing_boat_idle"), "Fishing Boat work art includes its hull and net")
 
 	var fish: Dictionary = world.add_resource("deep_fish", Vector2(11.5, 12.5), 3)
 	assert_equal(fish.get("placement_domain"), "water", "deep fish is placed in the water domain")
@@ -110,6 +113,10 @@ func verify_fishing_boat_economy(catalog) -> void:
 	assert_equal(boat.get("source_unit_id"), 14, "existing Fishing Boat upgrades to Fishing Ship source 14")
 	assert_equal(boat.get("max_hp"), 75.0, "Fishing Ship receives original 75 hit points")
 	assert_equal(catalog.unit_frame_info(boat, "idle").get("asset_name"), "fishing_ship_idle", "Fishing Ship resolves upgraded original art")
+	var upgraded_work: Dictionary = catalog.unit_frame_info(boat, "work")
+	var upgraded_parts: Array = upgraded_work.get("composite_parts", [])
+	assert_equal(upgraded_work.get("graphic_id"), 784, "Fishing Ship retains the upgraded source fishing-net layer")
+	assert_true(upgraded_parts.any(func(part): return int(part.get("graphic_id", -1)) == 44 and String(part.get("asset_name", "")) == "fishing_ship_idle"), "Fishing Ship work art includes its upgraded hull and net")
 	assert_true(world.dropoff_accepts_resource(dock, 0, {45: true}), "upgraded Dock lineage remains a valid fishing drop site")
 
 

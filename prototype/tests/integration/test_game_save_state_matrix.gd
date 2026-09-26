@@ -12,6 +12,8 @@ const SAVE_PATH := "res://qa/e3-save-state-matrix.json"
 
 var failures: Array[String] = []
 var round_trip_count := 0
+var baseline_hash := ""
+var baseline_tick := -1
 
 
 func _initialize() -> void:
@@ -35,6 +37,7 @@ func _initialize() -> void:
 	cleanup()
 	game.free()
 	if failures.is_empty():
+		print("P00 BASELINE save_state_matrix tick=%d round_trips=%d hash=%s" % [baseline_tick, round_trip_count, baseline_hash])
 		print("E3 save/load gameplay state matrix passed (%d round trips)" % round_trip_count)
 		quit(0)
 		return
@@ -139,14 +142,21 @@ func round_trip(game, context: String) -> void:
 	var saved_tick := int(game.game_controller.tick_index)
 	var expected_snapshot = verifier.encode_variant(verifier.world_snapshot(game.simulation_world, saved_tick, game.game_controller))
 	var expected_hash := verifier.world_state_hash(game.simulation_world, saved_tick, game.game_controller)
+	baseline_hash = expected_hash
+	baseline_tick = saved_tick
 	assert_true(game.save_game_to_path(SAVE_PATH), "%s writes save" % context)
 	advance_ticks(game, 2)
+	var continued_hash := verifier.world_state_hash(game.simulation_world, saved_tick + 2, game.game_controller)
 	var loaded: bool = bool(game.load_game_from_path(SAVE_PATH))
 	if not loaded:
 		print("E3 SAVE MATRIX FIRST DIFFERENCE [%s]: %s" % [context, replay_difference(game, expected_snapshot)])
 	assert_true(loaded, "%s loads save (%s)" % [context, game.last_save_error])
 	assert_equal(game.game_controller.tick_index, saved_tick, "%s restores fixed tick" % context)
 	assert_equal(verifier.world_state_hash(game.simulation_world, saved_tick, game.game_controller), expected_hash, "%s restores canonical state" % context)
+	if loaded:
+		advance_ticks(game, 2)
+		assert_equal(verifier.world_state_hash(game.simulation_world, saved_tick + 2, game.game_controller), continued_hash, "%s continues to the identical canonical hash after loading" % context)
+		assert_true(game.load_game_from_path(SAVE_PATH), "%s can restore the original checkpoint after continuation" % context)
 	round_trip_count += 1
 
 

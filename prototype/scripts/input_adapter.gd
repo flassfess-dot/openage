@@ -4,10 +4,12 @@ const PointerController := preload("res://scripts/pointer_controller.gd")
 
 var pointer := PointerController.new()
 var pointer_position := Vector2.ZERO
+var primary_double_click := false
 
 
 func reset() -> void:
 	pointer.reset()
+	primary_double_click = false
 
 
 func translate(event: InputEvent, in_world_area: bool = true) -> Array[Dictionary]:
@@ -27,21 +29,24 @@ func translate(event: InputEvent, in_world_area: bool = true) -> Array[Dictionar
 					actions.append({"type": "zoom", "position": event.position, "steps": -1})
 			MOUSE_BUTTON_LEFT:
 				if event.pressed:
+					primary_double_click = event.double_click
 					pointer.begin_primary(event.position)
 					actions.append({"type": "selection_started"})
 				else:
 					var selection := pointer.end_primary(event.position)
 					if not selection.is_empty():
-						actions.append({"type": "selection_committed", "from": selection["from"], "to": selection["to"], "mode": selection["type"]})
+						var mode := "select_double_click" if primary_double_click and String(selection["type"]) == "select_click" else String(selection["type"])
+						actions.append({"type": "selection_committed", "from": selection["from"], "to": selection["to"], "mode": mode, "queue_order": event.shift_pressed})
+					primary_double_click = false
 			MOUSE_BUTTON_RIGHT:
 				if event.pressed:
 					pointer.begin_secondary(event.position)
 				else:
 					var command := pointer.end_secondary(event.position)
 					if command.get("type", "") == "context_command":
-						actions.append({"type": "context_committed", "position": command["position"]})
+						actions.append({"type": "context_committed", "position": command["position"], "queue_order": event.shift_pressed})
 					elif command.get("type", "") == "formation_direction":
-						actions.append({"type": "context_committed", "position": command["position"], "direction_end": command["direction_end"]})
+						actions.append({"type": "context_committed", "position": command["position"], "direction_end": command["direction_end"], "queue_order": event.shift_pressed})
 			MOUSE_BUTTON_MIDDLE:
 				if event.pressed:
 					pointer.begin_pan(event.position)
@@ -57,6 +62,7 @@ func translate(event: InputEvent, in_world_area: bool = true) -> Array[Dictionar
 			return actions
 		match event.keycode:
 			KEY_Q: actions.append({"type": "attack_move_mode"})
+			KEY_G: actions.append({"type": "attack_ground_mode"})
 			KEY_X: actions.append({"type": "stop"})
 			KEY_H: actions.append({"type": "hold"})
 			KEY_V: actions.append({"type": "cycle_stance"})
@@ -65,15 +71,18 @@ func translate(event: InputEvent, in_world_area: bool = true) -> Array[Dictionar
 			KEY_F7: actions.append({"type": "set_formation", "formation": "COLUMN"})
 			KEY_F8: actions.append({"type": "set_formation", "formation": "WEDGE"})
 			KEY_F9: actions.append({"type": "set_formation", "formation": "STAGGERED"})
-			KEY_T: actions.append({"type": "train", "archetype": "clubman"})
+			KEY_Z: actions.append({"type": "train_shortcut", "archetype": "swordsman"})
+			KEY_T: actions.append({"type": "train_shortcut", "archetype": "scout"})
+			KEY_F11: actions.append({"type": "toggle_status_indicators"})
+			KEY_HOME: actions.append({"type": "next_sound_cue"})
 			KEY_M: actions.append({"type": "toggle_audio"})
 			KEY_SPACE: actions.append({"type": "toggle_pause"})
 			KEY_COMMA: actions.append({"type": "change_speed", "direction": -1})
 			KEY_PERIOD: actions.append({"type": "change_speed", "direction": 1})
 			KEY_F3: actions.append({"type": "toggle_diagnostics"})
 			KEY_F10: actions.append({"type": "open_calibration"})
-			KEY_DELETE: actions.append({"type": "martyrdom"})
-			KEY_U: actions.append({"type": "unload", "position": pointer_position})
+			KEY_DELETE: actions.append({"type": "delete_context"})
+			KEY_U: actions.append({"type": "unload", "position": pointer_position, "queue_order": event.shift_pressed})
 			KEY_R: actions.append({"type": "resign"} if event.shift_pressed else {"type": "reset_game"})
 			KEY_ESCAPE: actions.append({"type": "quit"})
 	return actions

@@ -7,6 +7,7 @@ const FACE_TARGET := "FaceTarget"
 const PERFORM_ACTION := "PerformAction"
 const RECOVER := "Recover"
 const REPEAT_OR_COMPLETE := "RepeatOrComplete"
+const MAX_QUEUED_ORDERS: int = 16
 
 const PHASES: Array[String] = [
 	ACQUIRE_TARGET,
@@ -30,12 +31,14 @@ static func empty_order() -> Dictionary:
 		"completion_reason": "idle",
 		"revision": 0,
 		"history": [],
+		"queued": [],
 	}
 
 
 static func begin(entity: Dictionary, order_type: String, target_entity_id: int = -1, target_position: Vector2 = Vector2.ZERO, repeat: bool = false) -> Dictionary:
 	var order := current(entity)
 	var revision := int(order.get("revision", 0)) + 1
+	var queued: Array = order.get("queued", [])
 	order = {
 		"type": order_type,
 		"phase": ACQUIRE_TARGET,
@@ -46,6 +49,7 @@ static func begin(entity: Dictionary, order_type: String, target_entity_id: int 
 		"completion_reason": "",
 		"revision": revision,
 		"history": [ACQUIRE_TARGET],
+		"queued": queued,
 	}
 	set_order(entity, order)
 	return order
@@ -108,3 +112,35 @@ static func set_order(entity: Dictionary, order: Dictionary) -> void:
 	var components: Dictionary = entity.get("components", {})
 	components["order"] = order
 	entity["components"] = components
+
+
+static func queued(entity: Dictionary) -> Array:
+	return current(entity).get("queued", [])
+
+
+static func append_queued(entity: Dictionary, entry: Dictionary) -> bool:
+	var order := current(entity)
+	var pending: Array = order.get("queued", [])
+	if pending.size() >= MAX_QUEUED_ORDERS:
+		return false
+	pending.append(entry.duplicate(true))
+	order["queued"] = pending
+	set_order(entity, order)
+	return true
+
+
+static func pop_queued(entity: Dictionary) -> Dictionary:
+	var order := current(entity)
+	var pending: Array = order.get("queued", [])
+	if pending.is_empty():
+		return {}
+	var entry: Dictionary = pending.pop_front()
+	order["queued"] = pending
+	set_order(entity, order)
+	return entry
+
+
+static func clear_queued(entity: Dictionary) -> void:
+	var order := current(entity)
+	order["queued"] = []
+	set_order(entity, order)

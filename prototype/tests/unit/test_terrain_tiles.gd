@@ -29,7 +29,7 @@ func _initialize() -> void:
 func test_original_frame_sets() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
-	for terrain_kind in ["grass", "sand", "water"]:
+	for terrain_kind in ["grass", "sand", "water", "water_dark"]:
 		var expected := TerrainRules.frame_count(terrain_kind)
 		var terrain_id := int(TerrainRules.TERRAIN_IDS[terrain_kind])
 		var source_record: Dictionary = catalog.terrain_catalog_data.get("terrains", {}).get(str(terrain_id), {})
@@ -44,7 +44,7 @@ func test_original_frame_sets() -> void:
 
 
 func test_seeded_variation() -> void:
-	for terrain_kind in ["grass", "sand", "water"]:
+	for terrain_kind in ["grass", "sand", "water", "water_dark"]:
 		var count := TerrainRules.frame_count(terrain_kind)
 		var first: Array[int] = []
 		var repeated: Array[int] = []
@@ -120,6 +120,7 @@ func test_water_corner_frames_follow_diagonal_terrain() -> void:
 func test_shallows_do_not_render_as_open_water() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
+	assert_equal(TerrainRules.base_texture_kind(22, catalog.terrain_catalog_data), "water_dark", "source deep water keeps its own RoR texture")
 	assert_equal(TerrainRules.base_texture_kind(4, catalog.terrain_catalog_data), "sand", "source Shallows does not use the flat open-water placeholder")
 	assert_true(4 in TerrainRules.WATER_TERRAIN_IDS, "source Shallows remains water-domain terrain for scenario placement")
 

@@ -56,6 +56,9 @@ func test_allied_conquest(catalog) -> void:
 	assert_equal(world.player_registry.status(1), "victorious", "first ally is finalized as victorious")
 	assert_equal(world.player_registry.status(2), "victorious", "second ally is finalized as victorious")
 	assert_true(world.get_last_battle_message().begins_with("ПОБЕДА"), "local member of the winning alliance receives victory presentation")
+	world.configure_victory_rules([{"type": "conquest"}], false)
+	world.check_battle_state(2, 3)
+	assert_true(not world.is_battle_over(), "mutual alliance without the explicit setting does not finish conquest")
 
 
 func test_artifacts_and_ruins(catalog) -> void:

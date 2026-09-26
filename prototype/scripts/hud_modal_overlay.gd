@@ -4,13 +4,17 @@ extends Control
 signal close_requested
 signal save_requested
 signal load_requested
+signal named_save_requested(name: String)
+signal named_load_requested(path: String)
 signal resign_requested
 signal launcher_requested
 signal diplomacy_relation_requested(target_team: int, relation: String)
+signal tribute_requested(target_team: int, resource_type_id: int, amount: int)
 
 const MODE_NONE := ""
 const MODE_MENU := "menu"
 const MODE_DIPLOMACY := "diplomacy"
+const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
 
 var interface_skin
 var localization
@@ -26,10 +30,17 @@ var diplomacy_rows: VBoxContainer
 var resume_button: Button
 var save_button: Button
 var load_button: Button
+var named_save_button: Button
+var named_load_button: Button
+var named_save_input: LineEdit
+var named_load_options: OptionButton
+var named_saves: Array[Dictionary] = []
 var resign_button: Button
 var launcher_button: Button
 var diplomacy_close_button: Button
 var menu_status: Label
+var instructions_label: Label
+var match_status_label: Label
 var diplomacy_relation_buttons: Dictionary = {}
 
 
@@ -45,9 +56,59 @@ func configure(skin, definition: Dictionary, requested_style_index: int = 0, loc
 	interface_skin = skin
 	localization = localization_catalog
 	match_definition = definition.duplicate(true)
+	instructions_label.text = instruction_summary(match_definition)
 	style_index = clampi(requested_style_index, 0, 4)
-	for button in [resume_button, save_button, load_button, resign_button, launcher_button, diplomacy_close_button]:
+	for button in [resume_button, save_button, load_button, named_save_button, named_load_button, resign_button, launcher_button, diplomacy_close_button]:
 		_apply_source_button_style(button)
+
+
+static func instruction_summary(definition: Dictionary) -> String:
+	var settings: Dictionary = definition.get("skirmish_settings", {})
+	var map: Dictionary = definition.get("map", {})
+	var size_value: Variant = map.get("size", Vector2i.ZERO)
+	var size := Vector2i.ZERO
+	if size_value is Vector2i:
+		size = size_value
+	elif size_value is Array and size_value.size() >= 2:
+		size = Vector2i(int(size_value[0]), int(size_value[1]))
+	var catalog: Dictionary = SkirmishSettings.catalog()
+	var map_type_id := String(settings.get("map_type_id", map.get("type_id", "")))
+	var map_fallback := String({"coastal_land": "Побережье", "fixed_source": "Заданная карта"}.get(String(map.get("generator", {}).get("type", "")), "Тип не указан"))
+	var map_type := _catalog_name(catalog.get("map_types", []), map_type_id, map_fallback)
+	var age_id := String(settings.get("starting_age_id", ""))
+	if age_id.is_empty():
+		for player_value in definition.get("players", []):
+			var player: Dictionary = player_value
+			if int(player.get("team", 0)) == int(definition.get("local_team", 1)):
+				age_id = String({100: "stone", 101: "tool", 102: "bronze", 103: "iron"}.get(int(player.get("starting_age_technology_id", 100)), "stone"))
+				break
+	if age_id.is_empty():
+		age_id = "stone"
+	var age := _catalog_name(catalog.get("starting_ages", []), age_id, "Не указан")
+	var population_limit := int(settings.get("population_limit", 0))
+	if population_limit <= 0:
+		for player_value in definition.get("players", []):
+			var player: Dictionary = player_value
+			if int(player.get("team", 0)) == int(definition.get("local_team", 1)):
+				population_limit = int(player.get("population_limit", 0))
+				break
+	if population_limit <= 0:
+		population_limit = 50
+	var victory_id := String(settings.get("victory_mode_id", ""))
+	if victory_id.is_empty():
+		var rules: Array = definition.get("victory_rules", [])
+		victory_id = String(rules[0].get("type", "")) if rules.size() == 1 else "standard" if rules.size() > 1 else ""
+	var victory := _catalog_name(catalog.get("victory_modes", []), victory_id, "Не указана")
+	var full_tech_tree := bool(settings.get("full_tech_tree", definition.get("full_tech_tree", false)))
+	return "Карта: %s · %d×%d · Seed: %d\nСтарт: %s · Лимит: %d\nПобеда: %s · Full Tech Tree: %s" % [map_type, size.x, size.y, int(map.get("seed", settings.get("seed", 0))), age, population_limit, victory, "Вкл." if full_tech_tree else "Выкл."]
+
+
+static func _catalog_name(entries: Array, entry_id: String, fallback: String) -> String:
+	for value in entries:
+		var entry: Dictionary = value
+		if String(entry.get("id", "")) == entry_id:
+			return String(entry.get("name", fallback))
+	return fallback
 
 
 func set_viewport_size(viewport_size: Vector2) -> void:
@@ -61,12 +122,16 @@ func set_snapshot(snapshot: Dictionary) -> void:
 	# of fog cells and every overview entity on every simulation tick while the
 	# menu is closed.
 	latest_snapshot = snapshot
+	resign_button.disabled = String(snapshot.get("player_state", {}).get("status", "active")) != "active" or bool(snapshot.get("battle_over", false))
+	if active_mode == MODE_MENU:
+		match_status_label.text = match_status_summary(snapshot)
 	if active_mode == MODE_DIPLOMACY:
 		_rebuild_diplomacy_rows()
 
 
 func show_menu() -> void:
 	active_mode = MODE_MENU
+	match_status_label.text = match_status_summary(latest_snapshot)
 	menu_panel.visible = true
 	diplomacy_panel.visible = false
 	visible = true
@@ -78,6 +143,30 @@ func show_menu() -> void:
 func set_save_available(available: bool) -> void:
 	load_button.disabled = not available
 	load_button.tooltip_text = "" if available else "Сохранённая игра не найдена"
+
+
+func set_named_saves(entries: Array[Dictionary]) -> void:
+	named_saves = entries.duplicate(true)
+	named_load_options.clear()
+	for entry in named_saves:
+		var label := "%s · такт %d" % [String(entry.get("slot_name", "")), int(entry.get("tick", 0))]
+		var saved_at := int(entry.get("saved_at_unix", 0))
+		if saved_at > 0:
+			label += " · %s" % Time.get_datetime_string_from_unix_time(saved_at, true)
+		named_load_options.add_item(label)
+	named_load_button.disabled = named_saves.is_empty()
+	named_load_options.disabled = named_saves.is_empty()
+	if not named_saves.is_empty():
+		named_load_options.select(0)
+
+
+static func match_status_summary(snapshot: Dictionary) -> String:
+	var result: Dictionary = snapshot.get("match_result", {})
+	if bool(snapshot.get("battle_over", false)) or bool(result.get("over", false)):
+		var winner := int(result.get("winner_team", -1))
+		return "Матч завершён · победила команда %d" % winner if winner > 0 else "Матч завершён · ничья"
+	var status := String(snapshot.get("player_state", {}).get("status", "active"))
+	return "Режим наблюдателя · управление недоступно" if status in ["resigned", "defeated"] else "Матч продолжается"
 
 
 func set_menu_status(text: String, failed: bool = false) -> void:
@@ -121,9 +210,20 @@ func _build_interface() -> void:
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(shade)
 
-	menu_panel = _center_panel(Vector2(360, 350))
+	menu_panel = _center_panel(Vector2(500, 570))
 	var menu_column := _panel_column(menu_panel)
 	menu_column.add_child(_heading("МЕНЮ"))
+	instructions_label = Label.new()
+	instructions_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	instructions_label.add_theme_font_size_override("font_size", 11)
+	instructions_label.add_theme_color_override("font_color", Color("d7c49b"))
+	instructions_label.custom_minimum_size = Vector2(420, 52)
+	menu_column.add_child(instructions_label)
+	match_status_label = Label.new()
+	match_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	match_status_label.add_theme_font_size_override("font_size", 12)
+	match_status_label.add_theme_color_override("font_color", Color("d7c49b"))
+	menu_column.add_child(match_status_label)
 	resume_button = _action_button("ПРОДОЛЖИТЬ")
 	resume_button.pressed.connect(func(): close_requested.emit())
 	menu_column.add_child(_centered(resume_button))
@@ -133,6 +233,27 @@ func _build_interface() -> void:
 	load_button = _action_button("ЗАГРУЗИТЬ")
 	load_button.pressed.connect(func(): load_requested.emit())
 	menu_column.add_child(_centered(load_button))
+	var named_heading := _row_label("Именованные сохранения", Color("d7c49b"))
+	named_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	menu_column.add_child(named_heading)
+	named_save_input = LineEdit.new()
+	named_save_input.placeholder_text = "Имя сохранения (до 64 символов)"
+	named_save_input.max_length = 64
+	menu_column.add_child(named_save_input)
+	named_save_button = _action_button("СОХРАНИТЬ КАК")
+	named_save_button.pressed.connect(func(): named_save_requested.emit(named_save_input.text))
+	menu_column.add_child(_centered(named_save_button))
+	named_load_options = OptionButton.new()
+	named_load_options.disabled = true
+	menu_column.add_child(named_load_options)
+	named_load_button = _action_button("ЗАГРУЗИТЬ ВЫБРАННОЕ")
+	named_load_button.disabled = true
+	named_load_button.pressed.connect(func():
+		var selected := named_load_options.get_selected_id()
+		if selected >= 0 and selected < named_saves.size():
+			named_load_requested.emit(String(named_saves[selected].get("path", "")))
+	)
+	menu_column.add_child(_centered(named_load_button))
 	resign_button = _action_button("СДАТЬСЯ")
 	resign_button.pressed.connect(func(): resign_requested.emit())
 	menu_column.add_child(_centered(resign_button))
@@ -158,7 +279,11 @@ func _build_interface() -> void:
 	diplomacy_rows = VBoxContainer.new()
 	diplomacy_rows.custom_minimum_size = Vector2(540, 220)
 	diplomacy_rows.add_theme_constant_override("separation", 4)
-	diplomacy_column.add_child(diplomacy_rows)
+	var diplomacy_scroll := ScrollContainer.new()
+	diplomacy_scroll.custom_minimum_size = Vector2(540, 250)
+	diplomacy_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	diplomacy_scroll.add_child(diplomacy_rows)
+	diplomacy_column.add_child(diplomacy_scroll)
 	diplomacy_close_button = _action_button("ЗАКРЫТЬ")
 	diplomacy_close_button.pressed.connect(func(): close_requested.emit())
 	diplomacy_column.add_child(_centered(diplomacy_close_button))
@@ -217,6 +342,27 @@ func _rebuild_diplomacy_rows() -> void:
 			diplomacy_relation_buttons[team] = team_buttons
 			row.add_child(controls)
 		diplomacy_rows.add_child(row)
+		if team != own_team and relation == "ally" and String(player.get("status", "active")) == "active":
+			var tribute_row := HBoxContainer.new()
+			tribute_row.add_theme_constant_override("separation", 6)
+			tribute_row.add_child(_row_label("Дань игроку %d" % team, Color("dfd0aa")))
+			var resource_choice := OptionButton.new()
+			var resource_names := ["Еда", "Дерево", "Камень", "Золото"]
+			for resource_id in range(4):
+				resource_choice.add_item(resource_names[resource_id], resource_id)
+			tribute_row.add_child(resource_choice)
+			var tribute_amount := SpinBox.new()
+			tribute_amount.min_value = 1
+			tribute_amount.max_value = 100000
+			tribute_amount.value = 100
+			tribute_amount.step = 1
+			tribute_amount.rounded = true
+			tribute_amount.custom_minimum_size.x = 90
+			tribute_row.add_child(tribute_amount)
+			var pay_button := _action_button("ОТПРАВИТЬ")
+			pay_button.pressed.connect(func(): tribute_requested.emit(team, resource_choice.get_selected_id(), int(tribute_amount.value)))
+			tribute_row.add_child(pay_button)
+			diplomacy_rows.add_child(tribute_row)
 
 
 func _relation_button(team: int, relation: String, selected: bool) -> Button:
@@ -224,7 +370,7 @@ func _relation_button(team: int, relation: String, selected: bool) -> Button:
 	button.custom_minimum_size = Vector2(55, 20)
 	button.toggle_mode = true
 	button.button_pressed = selected
-	button.tooltip_text = {"ally": "Не атаковать; получать союзный обзор", "neutral": "Автоматически атаковать войска и здания, но не рабочих", "enemy": "Атаковать все допустимые цели"}.get(relation, "")
+	button.tooltip_text = {"ally": "Не атаковать; обмен обзором после Writing", "neutral": "Автоматически атаковать войска и здания, но не рабочих", "enemy": "Атаковать все допустимые цели"}.get(relation, "")
 	_apply_source_button_style(button)
 	button.pressed.connect(func():
 		_set_pending_relation(team, relation)

@@ -7,12 +7,15 @@ const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
 var failures: Array[String] = []
+var baseline_hash := ""
+var baseline_tick := -1
 
 
 func _initialize() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load_generated_data()
 	test_round_trip_and_identical_state(catalog)
+	test_oblique_formation_vector_round_trip()
 	test_same_tick_command_order(catalog)
 	test_issue_tick_preserves_autonomous_sequence(catalog)
 	test_incremental_recording_preserves_both_orders()
@@ -24,6 +27,7 @@ func _initialize() -> void:
 	test_trade_commands_round_trip()
 	test_mismatch_detection(catalog)
 	if failures.is_empty():
+		print("P00 BASELINE deterministic_replay_unit tick=%d seed=24681357 hash=%s" % [baseline_tick, baseline_hash])
 		print("S-013 deterministic replay tests passed")
 		quit(0)
 		return
@@ -42,6 +46,8 @@ func test_round_trip_and_identical_state(catalog) -> void:
 	first_controller.enqueue_command(Commands.AttackCommand.new(7, [player_ids[0]], first["enemy_id"]))
 	first_controller.advance_frame(0.5, 1, 2)
 	var first_hash: String = recorder.world_state_hash(first_world, first_controller.tick_index)
+	baseline_hash = first_hash
+	baseline_tick = int(first_controller.tick_index)
 	var serialized: String = recorder.to_json()
 	var loaded := ReplaySystem.new()
 	assert_true(loaded.load_json(serialized), "replay JSON round-trip")
@@ -56,6 +62,19 @@ func test_round_trip_and_identical_state(catalog) -> void:
 	var second_hash: String = loaded.world_state_hash(second_world, second_controller.tick_index)
 	assert_equal(second_hash, first_hash, "same seed and commands produce identical state hash")
 	assert_equal(second_controller.last_replay_mismatch, "", "recorded per-tick hashes match playback")
+
+
+func test_oblique_formation_vector_round_trip() -> void:
+	var recorder := ReplaySystem.new()
+	recorder.begin(998)
+	var command = Commands.FormationMoveCommand.new(9, [3, 4], Vector2(12.25, 8.75), "RECTANGLE", Vector2(7.0, -11.0))
+	command.assign_envelope(2, 1)
+	recorder.record_command(command)
+	var loaded := ReplaySystem.new()
+	assert_true(loaded.load_json(recorder.to_json()), "oblique formation replay loads")
+	var restored = loaded.commands_through_tick(9)[0]
+	assert_equal(restored.forward, command.forward, "replay retains the exact normalized formation vector")
+	assert_equal(restored.params["forward"], command.params["forward"], "replay preserves the command's serialized orientation")
 
 
 func test_mismatch_detection(catalog) -> void:

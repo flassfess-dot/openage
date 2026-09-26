@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string]$StartAt = "")
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -44,7 +44,7 @@ function Get-TestScripts {
 try {
     Write-LogLine "Rise of Rome test run started"
     Write-LogLine "Repository: $repositoryRoot"
-    Write-LogLine "Category: all"
+    Write-LogLine ("Category: {0}" -f $(if ($StartAt) { "from $StartAt" } else { "all" }))
     Write-Status 0 "checking test runner"
 
     if (-not (Test-Path -LiteralPath $godotApplication)) {
@@ -58,7 +58,20 @@ try {
     if ($testScripts.Count -eq 0) {
         throw "No tests found"
     }
-    Write-Status 5 ("found {0} test scripts" -f $testScripts.Count)
+    $startScript = $StartAt.Trim().Replace('\', '/')
+    if ($startScript.StartsWith('res://')) {
+        $startScript = $startScript.Substring(6)
+    }
+    $testCount = $testScripts.Count
+    if ($startScript) {
+        $orderedScripts = @($testScripts | ForEach-Object { $_.FullName.Substring($projectRoot.Length + 1).Replace('\', '/') } | Sort-Object)
+        $startIndex = [Array]::IndexOf($orderedScripts, $startScript)
+        if ($startIndex -lt 0) {
+            throw "Cannot resume: test not found: $startScript"
+        }
+        $testCount = $orderedScripts.Count - $startIndex
+    }
+    Write-Status 5 ("found {0} test scripts to run" -f $testCount)
 
     if (Test-Path -LiteralPath $godotLog) {
         Remove-Item -LiteralPath $godotLog -Force
@@ -70,6 +83,9 @@ try {
         "--path", $projectRoot,
         "--script", "res://tests/test_suite.gd"
     )
+    if ($startScript) {
+        $arguments += @("--", "--start-at=$startScript")
+    }
     Write-LogLine ("COMMAND: {0} {1}" -f $godotApplication, ($arguments -join " "))
     $passed = 0
     $failed = 0
@@ -78,12 +94,12 @@ try {
         Write-LogLine ("test-suite: {0}" -f $text)
         if ($text -match '^PASSED ') {
             $passed += 1
-            $percent = 5 + [int](90 * (($passed + $failed) / [double]$testScripts.Count))
-            Write-Progress -Activity "Rise of Rome tests" -Status ("passed {0}/{1}" -f $passed, $testScripts.Count) -PercentComplete $percent
+            $percent = 5 + [int](90 * (($passed + $failed) / [double]$testCount))
+            Write-Progress -Activity "Rise of Rome tests" -Status ("passed {0}/{1}" -f $passed, $testCount) -PercentComplete $percent
         }
         elseif ($text -match '^FAILED ') {
             $failed += 1
-            $percent = 5 + [int](90 * (($passed + $failed) / [double]$testScripts.Count))
+            $percent = 5 + [int](90 * (($passed + $failed) / [double]$testCount))
             Write-Progress -Activity "Rise of Rome tests" -Status ("failed {0}, passed {1}" -f $failed, $passed) -PercentComplete $percent
         }
     }

@@ -22,6 +22,12 @@ var terrain_mesh: ArrayMesh
 var terrain_mesh_bounds := Rect2i()
 
 
+func _ready() -> void:
+	# Imported isometric tiles use transparent corners. Linear sampling across
+	# neighbouring atlas cells creates dark triangular fringes at shorelines.
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
+
 func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable, visible_bounds_provider: Callable) -> void:
 	map_size = size
 	map_seed = seed

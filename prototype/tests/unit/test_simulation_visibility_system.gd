@@ -35,6 +35,8 @@ func test_visibility_system_matches_fog_reference() -> void:
 
 	reference.set_alliance(1, 2, true)
 	system.set_alliance(1, 2, true)
+	reference.set_shared_vision(1, 2, true)
+	system.set_shared_vision(1, 2, true)
 	reference.update(units, buildings)
 	system.advance({"tick": 2})
 	assert_equal(system.get_fog().snapshot(1), reference.snapshot(1), "allied visibility matches reference")

@@ -16,7 +16,9 @@ func hit_stack(screen_position: Vector2, drawables: Array, world_to_screen: Call
 		if drawable_kind not in SELECTABLE_DRAWABLES:
 			continue
 		var entity: Dictionary = drawable.get("data", {})
-		if entity.is_empty() or float(entity.get("hp", 1.0)) <= 0.0:
+		# RoR berry bushes have zero source HP while still containing food. The
+		# resource renderer governs visibility/depletion; combat HP is irrelevant.
+		if entity.is_empty() or (drawable_kind != "resource" and float(entity.get("hp", 1.0)) <= 0.0):
 			continue
 		var entity_type := entity_type_for(drawable_kind, entity)
 		var stable_id := int(drawable.get("stable_id", entity.get("id", -1)))

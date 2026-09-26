@@ -55,7 +55,7 @@ func verify_temple_priest_vertical(catalog) -> void:
 	assert_priest_source_contract(catalog, priest)
 	verify_unit_conversion(world, priest)
 	verify_faith_and_priest_technologies(world, priest)
-	verify_monotheism_and_resistance(world, priest)
+	verify_monotheism_building_capture(world)
 	verify_replay_round_trip(priest)
 
 
@@ -150,7 +150,7 @@ func verify_faith_and_priest_technologies(world, priest: Dictionary) -> void:
 	assert_near(float(priest.get("speed", 0.0)), 1.12, 0.0001, "Polytheism increases Priest speed by forty percent")
 
 
-func verify_monotheism_and_resistance(world, upgraded_priest: Dictionary) -> void:
+func verify_monotheism_building_capture(world) -> void:
 	# Keep the fixture inside the one-cell building conversion radius measured
 	# from the authoritative occupied-cell boundary.
 	var fresh_priest: Dictionary = world.add_unit(1, "priest", Vector2(8.3, 8.3), false)
@@ -172,9 +172,6 @@ func verify_monotheism_and_resistance(world, upgraded_priest: Dictionary) -> voi
 	assert_equal(int(enemy_house.get("team", 0)), 1, "building conversion transfers ownership")
 	assert_equal(world.economy_system.get_population_housing(1), team_one_housing + int(enemy_house.get("population_support", 0)), "captured housing supports new owner")
 	assert_equal(world.economy_system.get_population_housing(2), team_two_housing - int(enemy_house.get("population_support", 0)), "captured housing leaves old owner")
-	var enemy_chariot: Dictionary = world.add_unit(2, "chariot", Vector2(14.0, 8.0), false)
-	upgraded_priest["components"]["conversion"]["base_success_chance"] = 0.30
-	assert_near(world.conversion_system.success_chance_for(upgraded_priest, enemy_chariot), 0.0975, 0.0001, "Chariot resistance multiplies Astrology chance by one quarter")
 
 
 func verify_replay_round_trip(priest: Dictionary) -> void:

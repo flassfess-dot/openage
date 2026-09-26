@@ -11,10 +11,27 @@ enum State {
 
 const SELECTION_DRAG_THRESHOLD: float = 9.0
 const DIRECTION_DRAG_THRESHOLD: float = 14.0
+const EDGE_SCROLL_MARGIN: float = 16.0
 
 var state: State = State.IDLE
 var anchor := Vector2.ZERO
 var current := Vector2.ZERO
+
+
+static func edge_scroll_direction(position: Vector2, viewport_size: Vector2, margin: float = EDGE_SCROLL_MARGIN, top_inset: float = 0.0, bottom_inset: float = 0.0) -> Vector2:
+	var playfield_bottom := viewport_size.y - bottom_inset
+	if position.x < 0.0 or position.y < top_inset or position.x >= viewport_size.x or position.y >= playfield_bottom:
+		return Vector2.ZERO
+	var direction := Vector2.ZERO
+	if position.x < margin:
+		direction.x += 1.0
+	elif position.x >= viewport_size.x - margin:
+		direction.x -= 1.0
+	if position.y < top_inset + margin:
+		direction.y += 1.0
+	elif position.y >= playfield_bottom - margin:
+		direction.y -= 1.0
+	return direction
 
 
 func begin_primary(position: Vector2) -> void:

@@ -147,6 +147,10 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				)
 				if snapshot_probe != null:
 					unit_render_projection_microseconds += Time.get_ticks_usec() - projection_started
+			if compact_entities and observer_team > 0 and int(unit.get("team", 0)) != observer_team and world.are_teams_allied(observer_team, int(unit.get("team", 0))):
+				var allied_cargo: Dictionary = presentation_unit.get("components", {}).get("cargo", {})
+				if bool(allied_cargo.get("enabled", false)):
+					allied_cargo["count"] = unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).size()
 			if observer_team > 0 and int(unit.get("team", 0)) == observer_team and world.entity_is_worker(unit) and (not restrict_command_options or command_option_entity_lookup.has(int(unit.get("id", -1)))):
 				var worker_options_started := Time.get_ticks_usec() if snapshot_probe != null else 0
 				if not requested_build_options.is_empty():
@@ -214,25 +218,51 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	for objective in world.victory_objectives:
 		if not bool(objective.get("active", true)):
 			continue
-		if _entity_visible_to_observer(objective, observer_team, observer_states, observer_allies, fog_map_size, true):
+		if _entity_visible_to_observer(objective, observer_team, observer_states, observer_allies, fog_map_size):
 			objectives.append(_presentation_entity(objective, observer_team, compact_entities))
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".objectives", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
 	var buildings: Array = []
 	var overview_buildings: Array = []
+	var remembered_buildings: Dictionary = world.last_known_buildings_by_player.get(observer_team, {}) if observer_team > 0 else {}
+	var live_building_ids: Dictionary = {}
+	var blocked_population_queues := 0
 	for building in world.get_buildings():
-		var building_in_detail_bounds := not has_entity_bounds or _entity_in_bounds(building, entity_bounds) or always_include_entity_lookup.has(int(building.get("id", -1)))
+		if observer_team > 0 and int(building.get("team", 0)) == observer_team:
+			var own_queue: Array = building.get("production_queue", [])
+			if not own_queue.is_empty() and String(own_queue[0].get("status", "")) == "blocked_population":
+				blocked_population_queues += 1
+		var building_id := int(building.get("id", -1))
+		live_building_ids[building_id] = true
+		var visible_now := _entity_visible_to_observer(building, observer_team, observer_states, observer_allies, fog_map_size)
+		var knowledge: Dictionary = building
+		if visible_now and observer_team > 0:
+			# Capture only legal, observed state. A later fogged snapshot never
+			# projects the live dictionary again.
+			remembered_buildings[building_id] = _compact_render_entity(building)
+		elif observer_team > 0:
+			knowledge = remembered_buildings.get(building_id, {})
+			if knowledge.is_empty():
+				continue
+			var remembered_cell := Vector2i(floori(Vector2(knowledge.get("pos", Vector2.ZERO)).x), floori(Vector2(knowledge.get("pos", Vector2.ZERO)).y))
+			if fog.state_at_cell(observer_team, remembered_cell) != 1:
+				if fog.state_at_cell(observer_team, remembered_cell) == 2:
+					remembered_buildings.erase(building_id)
+				continue
+		var building_in_detail_bounds := not has_entity_bounds or _entity_in_bounds(knowledge, entity_bounds) or always_include_entity_lookup.has(building_id)
 		if not include_overview and not building_in_detail_bounds:
 			continue
-		if _entity_visible_to_observer(building, observer_team, observer_states, observer_allies, fog_map_size, true):
+		if not knowledge.is_empty():
 			if include_overview:
-				overview_buildings.append(building if borrow_overview_entities else _overview_entity(building))
+				overview_buildings.append(knowledge if borrow_overview_entities and visible_now else _overview_entity(knowledge))
 			if not building_in_detail_bounds:
 				continue
-			var building_id := int(building.get("id", -1))
 			var presentation_building: Dictionary
-			if compact_render_entities and always_include_entity_lookup.has(building_id):
+			if not visible_now:
+				presentation_building = _compact_ai_entity(knowledge, observer_team) if compact_entities else _compact_render_entity(knowledge)
+				presentation_building["last_known"] = true
+			elif compact_render_entities and always_include_entity_lookup.has(building_id):
 				presentation_building = _compact_control_entity(building, observer_team, compact_render_projector)
 			else:
 				presentation_building = _presentation_entity(
@@ -242,9 +272,15 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 					compact_render_entities,
 					compact_render_projector
 				)
-			presentation_building["target_domains"] = world.combat_target_domains(building)
-			if world.trade_system.is_trade_dock(building):
+			if visible_now:
+				presentation_building["target_domains"] = world.combat_target_domains(building)
+			if visible_now and world.trade_system.is_trade_dock(building):
 				presentation_building["trade"] = world.trade_system.presentation_for_dock(building)
+			if compact_entities and observer_team > 0 and int(building.get("team", 0)) == observer_team:
+				for order_value in presentation_building.get("production_queue", []):
+					var projected_order: Dictionary = order_value
+					if String(projected_order.get("order_type", "unit")) == "unit":
+						projected_order["population_points_cost"] = world.unit_population_points_cost(String(projected_order.get("kind", "")), observer_team)
 			if observer_team > 0 and int(building.get("team", 0)) == observer_team and (not restrict_command_options or command_option_entity_lookup.has(int(building.get("id", -1)))):
 				presentation_building["builder_count"] = building.get("builders", {}).size()
 				if String(building.get("state", "complete")) == "foundation":
@@ -259,6 +295,28 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				if not planning_technology_ids.is_empty():
 					_append_planning_research_options(world, presentation_building, building, observer_team, planning_technology_ids)
 			buildings.append(presentation_building)
+	if observer_team > 0:
+		var missing_ids: Array = remembered_buildings.keys()
+		missing_ids.sort()
+		for missing_id_value in missing_ids:
+			var missing_id := int(missing_id_value)
+			if live_building_ids.has(missing_id):
+				continue
+			var memory: Dictionary = remembered_buildings[missing_id]
+			var memory_position := Vector2(memory.get("pos", Vector2.ZERO))
+			var memory_state: int = int(fog.state_at_world(observer_team, memory_position))
+			if memory_state == 2:
+				remembered_buildings.erase(missing_id)
+				continue
+			if memory_state != 1:
+				continue
+			if include_overview:
+				overview_buildings.append(_overview_entity(memory))
+			if not has_entity_bounds or _entity_in_bounds(memory, entity_bounds) or always_include_entity_lookup.has(missing_id):
+				var last_known: Dictionary = _compact_ai_entity(memory, observer_team) if compact_entities else _compact_render_entity(memory)
+				last_known["last_known"] = true
+				buildings.append(last_known)
+		world.last_known_buildings_by_player[observer_team] = remembered_buildings
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".buildings", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
@@ -299,9 +357,11 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".build_sites", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
-	var navigation: Dictionary = _presentation_navigation(world, fog, observer_team) if include_navigation else {}
+	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, fog, observer_team, snapshot_probe) if include_navigation and observer_team > 0 else {}
 	var presented_fog: Dictionary = _presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []}
 	var player_state: Dictionary = _presentation_player_state(world, observer_team)
+	if observer_team > 0:
+		player_state["blocked_population_queues"] = blocked_population_queues
 	var scenario: Dictionary = world.scenario_system.presentation_state(observer_team) if include_scenario else {}
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".state", Time.get_ticks_usec() - snapshot_stage_started)
@@ -339,11 +399,13 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		# Rendering only depends on this observer's grid. Enemy and neutral fog
 		# changes must not invalidate the local player's cached fog mesh.
 		"fog_revision": int(fog.revision_for_player(observer_team)),
+		"fog_exploration_revision": int(fog.exploration_revision_for_player(observer_team)),
 		"fog": presented_fog,
 		"player_state": player_state,
 		"battle_over": bool(world.battle_over),
 		"battle_message": String(world.battle_message),
 		"match_result": world.get_victory_result(),
+		"match_elapsed_seconds": float(world.victory_system.elapsed_seconds),
 		"scenario": scenario,
 	}
 
@@ -368,6 +430,7 @@ static func _world_state(world) -> Dictionary:
 		"civilizations": world.civilization_by_team.duplicate(true),
 		"players": world.player_registry.canonical_state(),
 		"population": economy["population"],
+		"population_points": economy["population_points"],
 		"population_reserved": economy["population_reserved"],
 		"population_cap": economy["population_cap"],
 		"population_limit": economy["population_limit"],
@@ -454,6 +517,7 @@ static func _compact_render_entity(entity: Dictionary) -> Dictionary:
 	var result: Dictionary = {}
 	for key in [
 		"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
+		"health_unknown", "location_only",
 		"pos", "previous_pos", "elevation", "source_elevation", "visual_height",
 		"hp", "max_hp", "amount", "max_amount", "active", "logical_only",
 		"state", "resource_state", "depletion_stage", "visible_when_depleted",
@@ -473,6 +537,8 @@ static func _compact_render_entity(entity: Dictionary) -> Dictionary:
 			result[array_key] = entity.get(array_key, []).duplicate()
 	if entity.has("footprint"):
 		result["footprint"] = entity.get("footprint", {}).duplicate(true)
+	if entity.has("presentation_state_overrides"):
+		result["presentation_state_overrides"] = entity.get("presentation_state_overrides", {}).duplicate()
 	var source_components: Dictionary = entity.get("components", {})
 	var components: Dictionary = {}
 	var ownership: Dictionary = source_components.get("ownership", {})
@@ -554,7 +620,7 @@ static func _entity_visible_to_observer(
 	if observer_team <= 0:
 		return true
 	var owner := int(entity.get("team", 0))
-	if owner > 0 and bool(observer_allies.get(owner, false)):
+	if owner == observer_team:
 		return true
 	var position := Vector2(entity.get("pos", entity.get("position", Vector2.ZERO)))
 	var cell_x := floori(position.x)
@@ -582,12 +648,15 @@ static func _compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Di
 	var result: Dictionary = {}
 	for key in [
 		"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
-		"pos", "hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
+		"pos", "hp", "max_hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
 		"resource_type_id", "harvestable", "footprint_radius", "rally_point", "attack_range",
+		"projectile_id", "blast_range",
 		"reachable_builder_ids",
 	]:
 		if entity.has(key):
 			result[key] = entity[key]
+	if (observer_team <= 0 or int(entity.get("team", 0)) == observer_team) and entity.has("resource_id"):
+		result["resource_id"] = int(entity["resource_id"])
 	if entity.has("unit_lineage"):
 		result["unit_lineage"] = entity.get("unit_lineage", []).duplicate()
 	if entity.has("behavior_tags"):
@@ -596,11 +665,31 @@ static func _compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Di
 		result["allowed_gatherer_domains"] = entity.get("allowed_gatherer_domains", []).duplicate()
 	var worker: Dictionary = entity.get("components", {}).get("worker", {})
 	var components := {"worker": {"enabled": bool(worker.get("enabled", false))}}
+	if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
+		var order: Dictionary = entity.get("components", {}).get("order", {})
+		if not order.is_empty():
+			components["order"] = {
+				"type": String(order.get("type", "none")),
+				"target_entity_id": int(order.get("target_entity_id", -1)),
+				"completed": bool(order.get("completed", true)),
+				"completion_reason": String(order.get("completion_reason", "")),
+			}
+	var healing: Dictionary = entity.get("components", {}).get("healing", {})
+	if bool(healing.get("enabled", false)):
+		components["healing"] = {"enabled": true}
+	var combat: Dictionary = entity.get("components", {}).get("combat", {})
+	if not combat.is_empty():
+		components["combat"] = {
+			"projectile_id": int(combat.get("projectile_id", entity.get("projectile_id", -1))),
+			"blast_range": float(combat.get("blast_range", entity.get("blast_range", 0.0))),
+		}
 	var cargo: Dictionary = entity.get("components", {}).get("cargo", {})
 	if bool(cargo.get("enabled", false)):
 		components["cargo"] = {
 			"enabled": true,
 			"capacity": maxi(0, int(cargo.get("capacity", 0))),
+			"allow_allied": bool(cargo.get("allow_allied", true)),
+			"allow_artifacts": bool(cargo.get("allow_artifacts", true)),
 		}
 		if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
 			components["cargo"]["passenger_ids"] = cargo.get("passenger_ids", []).duplicate()
@@ -612,7 +701,7 @@ static func _compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Di
 				if trade.has(field):
 					components["trade"][field] = trade[field]
 	result["components"] = components
-	if entity.has("production_queue"):
+	if entity.has("production_queue") and (observer_team <= 0 or int(entity.get("team", 0)) == observer_team):
 		var queue: Array = []
 		for order_value in entity.get("production_queue", []):
 			var order: Dictionary = order_value
@@ -620,6 +709,8 @@ static func _compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Di
 				"order_type": String(order.get("order_type", "unit")),
 				"kind": String(order.get("kind", "")),
 				"technology_id": int(order.get("technology_id", -1)),
+				"status": String(order.get("status", "queued")),
+				"population_cost": int(order.get("population_cost", 0)),
 			})
 		result["production_queue"] = queue
 	return result
@@ -681,74 +772,13 @@ static func _presentation_fog(fog, observer_team: int) -> Dictionary:
 	}
 
 
-static func _presentation_navigation(world, fog, observer_team: int) -> Dictionary:
-	var result := {
-		"land": [],
-		"water": [],
-		"frontier": {"land": [], "water": []},
-		"reachable": {"land": [], "water": []},
-		"reachable_frontier": {"land": [], "water": []},
-	}
-	if observer_team <= 0:
-		return result
-	var reachable_components := {"land": {}, "water": {}}
-	for unit_value in world.get_units():
-		var unit: Dictionary = unit_value
-		if int(unit.get("team", 0)) != observer_team or float(unit.get("hp", 0.0)) <= 0.0:
-			continue
-		var domain := String(unit.get("movement_domain", "land"))
-		if domain not in reachable_components:
-			continue
-		var position := Vector2(unit.get("pos", Vector2.ZERO))
-		var component_id: int = world.navigation_grid.surface_component_id(Vector2i(floori(position.x), floori(position.y)), domain)
-		if component_id >= 0:
-			reachable_components[domain][component_id] = true
-	if reachable_components["land"].is_empty():
-		for building_value in world.get_buildings():
-			var building: Dictionary = building_value
-			if int(building.get("team", 0)) != observer_team or float(building.get("hp", 0.0)) <= 0.0:
-				continue
-			var position := Vector2(building.get("pos", Vector2.ZERO))
-			var component_id: int = world.navigation_grid.surface_component_id(Vector2i(floori(position.x), floori(position.y)), "land")
-			if component_id >= 0:
-				reachable_components["land"][component_id] = true
-	for y in range(world.map_size.y):
-		for x in range(world.map_size.x):
-			var cell := Vector2i(x, y)
-			if fog.state_at_cell(observer_team, cell) == 0:
-				continue
-			var point := Vector2(x + 0.5, y + 0.5)
-			var borders_unknown := false
-			for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-				var neighbor: Vector2i = cell + offset
-				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < world.map_size.x and neighbor.y < world.map_size.y and fog.state_at_cell(observer_team, neighbor) == 0:
-					borders_unknown = true
-					break
-			if world.navigation_grid.is_walkable_for(cell, "land"):
-				result["land"].append(point)
-				if borders_unknown:
-					result["frontier"]["land"].append(point)
-				if reachable_components["land"].has(world.navigation_grid.surface_component_id(cell, "land")):
-					result["reachable"]["land"].append(point)
-					if borders_unknown:
-						result["reachable_frontier"]["land"].append(point)
-			if world.navigation_grid.is_walkable_for(cell, "water"):
-				result["water"].append(point)
-				if borders_unknown:
-					result["frontier"]["water"].append(point)
-				if reachable_components["water"].has(world.navigation_grid.surface_component_id(cell, "water")):
-					result["reachable"]["water"].append(point)
-					if borders_unknown:
-						result["reachable_frontier"]["water"].append(point)
-	return result
-
-
 static func _presentation_player_state(world, observer_team: int) -> Dictionary:
 	if observer_team <= 0:
 		return {}
 	return {
 		"team": observer_team,
 		"allies": world.get_allied_teams(observer_team),
+		"mutual_allies": world.get_allied_teams(observer_team).filter(func(other_team): return world.are_teams_allied(int(other_team), observer_team)),
 		"relations": world.get_team_relations(observer_team),
 		"status": world.player_registry.status(observer_team),
 		"players": world.player_registry.public_states(),
@@ -757,6 +787,7 @@ static func _presentation_player_state(world, observer_team: int) -> Dictionary:
 		"stone": int(world.get_resource_amount(observer_team, 2)),
 		"gold": int(world.get_resource_amount(observer_team, 3)),
 		"population": int(world.get_population(observer_team)),
+		"population_points": int(world.economy_system.get_population_points(observer_team)),
 		"population_reserved": int(world.get_reserved_population(observer_team)),
 		"population_cap": int(world.get_population_cap(observer_team)),
 		"population_limit": int(world.economy_system.get_population_limit(observer_team)),
@@ -832,7 +863,9 @@ static func _fog_state(fog) -> Dictionary:
 		"revision": int(fog.revision),
 		"revisions_by_player": fog.revisions_by_player.duplicate(true),
 		"states_by_player": states,
+		"personally_explored_by_player": fog.personally_explored_by_player.duplicate(true),
 		"allies_by_player": fog.allies_by_player.duplicate(true),
+		"shared_vision_by_player": fog.shared_vision_by_player.duplicate(true),
 	}
 
 
@@ -841,6 +874,7 @@ static func _victory_state(world) -> Dictionary:
 		"objectives": world.victory_objectives.duplicate(true),
 		"scores": world.score_by_team.duplicate(true),
 		"rules": world.victory_system.rules.duplicate(true),
+		"allied_victory_enabled": bool(world.victory_system.allied_victory_enabled),
 		"elapsed_seconds": float(world.victory_system.elapsed_seconds),
 		"hold_seconds": world.victory_system.hold_seconds.duplicate(true),
 		"result": world.victory_system.result.duplicate(true),

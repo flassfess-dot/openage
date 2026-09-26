@@ -1,6 +1,8 @@
 class_name RoRProjectileMotion
 
 const Coordinates := preload("res://scripts/coordinates.gd")
+const FacingConvention := preload("res://scripts/facing_convention.gd")
+const TerrainElevation := preload("res://scripts/terrain_elevation.gd")
 
 
 static func spawn_position(attacker: Dictionary, target_position: Vector2, weapon_offset: Array) -> Vector2:
@@ -35,6 +37,7 @@ static func aim_position(attacker: Dictionary, target: Dictionary, projectile_sp
 
 static func advance(projectile: Dictionary, delta: float) -> bool:
 	projectile["previous_pos"] = projectile["pos"]
+	projectile["previous_visual_height"] = float(projectile.get("visual_height", 0.0))
 	var destination: Vector2 = projectile["target_position"]
 	var difference: Vector2 = destination - projectile["pos"]
 	var movement := maxf(0.0, float(projectile.get("speed", 0.0))) * maxf(0.0, delta)
@@ -56,11 +59,13 @@ static func advance(projectile: Dictionary, delta: float) -> bool:
 
 
 static func logical_facing(projectile: Dictionary, angle_count: int = 72) -> int:
-	var direction: Vector2 = Vector2(projectile.get("target_position", Vector2.ZERO)) - Vector2(projectile.get("pos", Vector2.ZERO))
-	if direction.length_squared() <= 0.000001:
-		direction = Vector2(projectile.get("pos", Vector2.ZERO)) - Vector2(projectile.get("previous_pos", Vector2.ZERO))
-	if direction.length_squared() <= 0.000001:
+	var position := Vector2(projectile.get("pos", Vector2.ZERO))
+	var previous := Vector2(projectile.get("previous_pos", position))
+	var screen_direction := Coordinates.iso_raw(position - previous)
+	var height_delta := float(projectile.get("visual_height", 0.0)) - float(projectile.get("previous_visual_height", projectile.get("visual_height", 0.0)))
+	screen_direction.y -= height_delta * TerrainElevation.ELEVATION_PIXEL_STEP
+	if screen_direction.length_squared() <= 0.000001:
+		screen_direction = Coordinates.iso_raw(Vector2(projectile.get("target_position", Vector2.ZERO)) - position)
+	if screen_direction.length_squared() <= 0.000001:
 		return 0
-	var screen_direction := Coordinates.iso_raw(direction)
-	var angle := atan2(screen_direction.x, screen_direction.y)
-	return posmod(roundi(angle / (TAU / float(maxi(1, angle_count)))), maxi(1, angle_count))
+	return FacingConvention.logical_for_screen(screen_direction, angle_count)

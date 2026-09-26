@@ -1,6 +1,8 @@
 extends SceneTree
 
 const CommandMarkerPresentation := preload("res://scripts/command_marker_presentation.gd")
+const SourceCursorPresentation := preload("res://scripts/source_cursor_presentation.gd")
+const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 
 var failures: Array[String] = []
 
@@ -10,21 +12,30 @@ func _initialize() -> void:
 	marker.trigger(Vector2(7.5, 9.25))
 	var wide: Dictionary = marker.snapshot()
 	assert_equal(wide.get("world_position"), Vector2(7.5, 9.25), "marker stays anchored to accepted world target")
-	assert_equal(wide.get("half_extent"), Vector2(22.0, 14.0), "initial silhouette matches measured wide phase")
-	assert_equal(wide.get("bright_color"), Color8(255, 1, 1), "marker uses measured source red")
+	assert_equal(wide.get("frame_index"), 1, "marker starts with the source wide-arrows frame")
 
-	marker.advance(CommandMarkerPresentation.DEFAULT_DURATION * CommandMarkerPresentation.CONTRACT_DURATION_RATIO)
+	marker.advance(CommandMarkerPresentation.DEFAULT_DURATION * 0.5)
 	var contracted: Dictionary = marker.snapshot()
-	assert_vector_close(contracted.get("half_extent", Vector2.ZERO), Vector2(13.0, 10.0), 0.001, "arrows converge to measured contracted phase")
+	assert_equal(contracted.get("frame_index"), 4, "marker advances through source frames")
 	assert_true(marker.active, "contracted phase remains visible before the duration boundary")
 
 	marker.advance(CommandMarkerPresentation.DEFAULT_DURATION)
 	assert_true(not marker.active, "marker expires without simulation state")
 	assert_true(marker.snapshot().is_empty(), "expired marker has no drawable snapshot")
 
-	var horizontal := CommandMarkerPresentation.arrow_polygon(Vector2.RIGHT, 22.0)
-	assert_equal(horizontal.size(), 7, "arrow geometry is one stable pixel-art polygon")
-	assert_true(horizontal[0].x < horizontal[3].x, "arrow points inward from its outer tail")
+	var catalog = ResourceCatalog.new()
+	catalog.load_generated_data()
+	for frame_index in range(1, 7):
+		var texture: Texture2D = load("res://assets/generated/ror_command_marker_%02d.png" % frame_index)
+		assert_true(texture != null, "source marker frame %d was imported" % frame_index)
+		assert_equal(int(catalog.get_texture_metadata("ror_command_marker", frame_index).get("id", -1)), 50405, "marker frame provenance %d" % frame_index)
+	for frame_index in range(7):
+		var texture: Texture2D = load("res://assets/generated/ror_cursor_%02d.png" % frame_index)
+		assert_true(texture != null, "source cursor frame %d was imported" % frame_index)
+		assert_equal(int(catalog.get_texture_metadata("ror_cursor", frame_index).get("id", -1)), 51000, "cursor frame provenance %d" % frame_index)
+	assert_equal(SourceCursorPresentation.frame_for_semantic("attack"), 4, "attack uses source sword cursor")
+	assert_equal(SourceCursorPresentation.frame_for_semantic("gather"), 3, "gather uses source hand cursor")
+	assert_equal(SourceCursorPresentation.frame_for_semantic("default"), 0, "default uses source pointer")
 
 	if failures.is_empty():
 		print("I3/I10 command marker presentation tests passed")

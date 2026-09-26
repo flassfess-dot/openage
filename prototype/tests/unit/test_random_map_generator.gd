@@ -53,6 +53,18 @@ func _initialize() -> void:
 	var changed := RandomMapGenerator.generate(changed_definition)
 	assert_true(changed["resources"] != first["resources"], "different seed changes procedural placements")
 	assert_equal(changed["terrain_ids"], first["terrain_ids"], "seed does not alter fully declarative coast geometry")
+	var coast: Array[int] = []
+	coast.resize(12 * 12)
+	coast.fill(0)
+	coast[8 * 12 + 8] = 1
+	for y in range(2, 7):
+		for x in range(2, 7):
+			coast[y * 12 + x] = 1
+	coast[4 * 12 + 4] = 0
+	RandomMapGenerator._smooth_water_mask(coast, Vector2i(12, 12))
+	assert_equal(coast[8 * 12 + 8], 0, "isolated water spike is removed before drawing the coast")
+	assert_equal(coast[4 * 12 + 4], 1, "single land pinhole is removed from open water")
+	assert_equal(coast[3 * 12 + 3], 1, "broad navigable water survives coast smoothing")
 
 	if failures.is_empty():
 		print("I11-002 seeded random map tests passed")

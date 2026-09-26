@@ -46,6 +46,8 @@ func _create_projection(entity: Dictionary) -> Dictionary:
 			result[array_key] = entity.get(array_key, []).duplicate()
 	if entity.has("footprint"):
 		result["footprint"] = entity.get("footprint", {}).duplicate(true)
+	if entity.has("presentation_state_overrides"):
+		result["presentation_state_overrides"] = entity["presentation_state_overrides"]
 	var source_components: Dictionary = entity.get("components", {})
 	var components: Dictionary = {}
 	var ownership: Dictionary = source_components.get("ownership", {})
@@ -94,6 +96,8 @@ func _update_projection(result: Dictionary, entity: Dictionary, category: String
 	for key in keys:
 		if entity.has(key):
 			result[key] = entity[key]
+	if category == "unit":
+		result["presentation_state_overrides"] = entity.get("presentation_state_overrides", {})
 
 
 func _category(entity: Dictionary) -> String:

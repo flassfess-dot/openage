@@ -292,7 +292,9 @@ func _try_load_trade_goods(trader: Dictionary, target: Dictionary) -> bool:
 		return false
 	world.economy_system.change_resource_amount(owner, input_resource, -amount)
 	trade_goods_by_team[target_team] = maxf(0.0, trade_goods(target_team) - float(amount))
-	var gold := TradeProfitPolicy.profit_between(Vector2(home.get("pos", Vector2.ZERO)), Vector2(target.get("pos", Vector2.ZERO)), world.map_size)
+	var base_gold := TradeProfitPolicy.profit_between(Vector2(home.get("pos", Vector2.ZERO)), Vector2(target.get("pos", Vector2.ZERO)), world.map_size)
+	var profit_multiplier: float = float(world.technology_system.trade_profit_multiplier(owner))
+	var gold := maxi(0, roundi(float(base_gold) * profit_multiplier))
 	trade["cargo_goods"] = amount
 	trade["cargo_gold"] = gold
 	trader["diagnostic_reason"] = "trade_returning_gold"
@@ -302,6 +304,8 @@ func _try_load_trade_goods(trader: Dictionary, target: Dictionary) -> bool:
 		"resource_type_id": input_resource,
 		"resource_spent": amount,
 		"gold_value": gold,
+		"base_gold_value": base_gold,
+		"profit_multiplier": profit_multiplier,
 		"target_trade_goods": trade_goods(target_team),
 		"profit_policy": TradeProfitPolicy.POLICY_ID,
 	})

@@ -11,6 +11,7 @@ var slope_cells: Dictionary = {}
 var terrain_restrictions: Array = []
 var surface_component_cache: Dictionary = {}
 var revision: int = 0
+var surface_revision: int = 0
 # Bounded journal of the exact cells changed by recent revision bumps. Consumers
 # (open movement envelopes, caches) ask change_region_since() whether a change
 # far away can affect them; null means the region is no longer bounded and the
@@ -27,8 +28,15 @@ func _record_change(cell: Vector2i) -> void:
 		if int(entry["from"]) == revision:
 			entry["region"] = entry["region"].merge(region) if bool(entry["has_region"]) else region
 			entry["has_region"] = true
+			if bool(entry.get("cells_complete", false)):
+				var cells: Array = entry["cells"]
+				if cells.size() < 512:
+					cells.append(cell)
+				else:
+					cells.clear()
+					entry["cells_complete"] = false
 			return
-	_change_log.append({"from": revision, "to": revision + 1, "region": region, "has_region": true})
+	_change_log.append({"from": revision, "to": revision + 1, "region": region, "has_region": true, "cells": [cell], "cells_complete": true})
 	if _change_log.size() > 96:
 		_change_log = _change_log.slice(_change_log.size() - 48)
 
@@ -56,6 +64,27 @@ func change_region_since(old_revision: int) -> Variant:
 	return null
 
 
+func changed_cells_since(old_revision: int) -> Variant:
+	# Exact local delta for AI knowledge. An expired journal or a large bulk edit
+	# returns null so callers safely rebuild once instead of trusting a gap.
+	if old_revision == revision:
+		return []
+	if old_revision > revision:
+		return null
+	var covered_to := revision
+	var changed: Dictionary = {}
+	for index in range(_change_log.size() - 1, -1, -1):
+		var entry: Dictionary = _change_log[index]
+		if int(entry["to"]) != covered_to or not bool(entry.get("cells_complete", false)):
+			return null
+		for cell in entry["cells"]:
+			changed[cell] = true
+		covered_to = int(entry["from"])
+		if covered_to <= old_revision:
+			return changed.keys()
+	return null
+
+
 func _init(grid_size: Vector2i = Vector2i.ONE) -> void:
 	size = Vector2i(maxi(1, grid_size.x), maxi(1, grid_size.y))
 	configure_terrain()
@@ -73,10 +102,10 @@ func configure_terrain(provider: Callable = Callable()) -> void:
 			terrain_cells[cell] = terrain_kind
 			terrain_ids[cell] = TerrainRules.terrain_id_for_logical(terrain_kind)
 	revision += 1
+	surface_revision += 1
 
 
 func configure_terrain_ids(provider: Callable = Callable()) -> void:
-	surface_component_cache.clear()
 	var changed := false
 	for y in range(size.y):
 		for x in range(size.x):
@@ -95,6 +124,7 @@ func configure_restrictions(restrictions: Array) -> void:
 	terrain_restrictions = restrictions.duplicate(true)
 	surface_component_cache.clear()
 	revision += 1
+	surface_revision += 1
 
 
 func set_terrain(cell: Vector2i, terrain_kind: String) -> void:
@@ -104,6 +134,7 @@ func set_terrain(cell: Vector2i, terrain_kind: String) -> void:
 	terrain_ids[cell] = TerrainRules.terrain_id_for_logical(terrain_kind)
 	surface_component_cache.clear()
 	revision += 1
+	surface_revision += 1
 
 
 func set_terrain_id(cell: Vector2i, terrain_id: int) -> void:
@@ -111,8 +142,17 @@ func set_terrain_id(cell: Vector2i, terrain_id: int) -> void:
 		return
 	terrain_ids[cell] = terrain_id
 	_record_change(cell)
-	surface_component_cache.clear()
+	_invalidate_restricted_surface_components()
 	revision += 1
+
+
+func _invalidate_restricted_surface_components() -> void:
+	# Terrain IDs affect source restrictions, but unrestricted land and water
+	# components depend only on logical terrain. A felled tree must not rebuild
+	# the connectivity of the entire map.
+	for key_value in surface_component_cache.keys():
+		if not String(key_value).ends_with(":-1"):
+			surface_component_cache.erase(key_value)
 
 
 func configure_elevation(provider: Callable = Callable()) -> void:
@@ -138,6 +178,7 @@ func set_elevation(cell: Vector2i, level: int, slope: bool = false) -> void:
 		return
 	elevation_cells[cell] = level
 	slope_cells[cell] = slope
+	_record_change(cell)
 	revision += 1
 
 
@@ -170,6 +211,7 @@ func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []
 			changed = true
 	occupied_cells = desired
 	if changed:
+		_invalidate_restricted_surface_components()
 		revision += 1
 
 

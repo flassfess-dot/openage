@@ -14,7 +14,7 @@ func _initialize() -> void:
 	assert_semantic([soldier], {"entity_type": "unit", "id": 8, "team": 2}, "attack", "enemy unit advertises attack")
 	assert_semantic([priest], {"entity_type": "unit", "id": 8, "team": 2}, "convert", "enemy unit advertises conversion to Priest")
 	assert_semantic([worker], {"entity_type": "resource", "id": 9}, "gather", "resource advertises gather to worker")
-	assert_semantic([soldier], {"entity_type": "resource", "id": 9}, "unsupported", "resource advertises unavailable action to soldier")
+	assert_semantic([soldier], {"entity_type": "resource", "id": 9}, "default", "military cursor ignores resources")
 	assert_semantic([worker], {"entity_type": "building", "id": 10, "team": 1, "hp": 30.0, "max_hp": 100.0}, "select", "friendly building remains selectable on hover")
 	assert_semantic([soldier], null, "move", "ground advertises movement for selected units")
 	assert_semantic([trader], {"entity_type": "building", "id": 11, "team": 2, "unit_lineage": [45]}, "trade", "foreign Dock advertises trade to a Trade Boat")

@@ -94,7 +94,7 @@ func frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary
 	if frames.is_empty():
 		return {}
 	var frame_index := posmod(int(resource.get("id", 0)), frames.size())
-	if bool(metadata.get("animated", false)):
+	if bool(metadata.get("animated", false)) or kind in ["deep_fish", "shore_fish"]:
 		frame_index = _animated_frame(resource, int(resource.get("id", 0)), animation_time, frames.size())
 	var texture: Texture2D = frames[frame_index]
 	var frame_metadata: Dictionary = metadata_by_asset_frame.get(_key(asset_name, frame_index), {})
@@ -117,6 +117,15 @@ func _animated_frame(resource: Dictionary, entity_id: int, animation_time: float
 	var source: Dictionary = object_catalog.get("objects", {}).get("0:%d" % source_unit_id, {})
 	var graphic_id := int(resource.get("source_graphic_id", source.get("graphics", {}).get("idle", -1)))
 	var graphic: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
+	if kind in ["deep_fish", "shore_fish"]:
+		var frames_per_angle := maxi(1, int(graphic.get("frames_per_angle", frame_count)))
+		var angle_count := maxi(1, mini(int(graphic.get("angle_count", 1)), floori(float(frame_count) / float(frames_per_angle))))
+		var direction := posmod(entity_id, angle_count)
+		var frame_duration := maxf(0.001, float(graphic.get("frame_rate", 0.1)))
+		var animation_duration := frame_duration * float(frames_per_angle)
+		var cycle_duration := animation_duration + maxf(0.0, float(graphic.get("replay_delay", 0.0)))
+		var phase := fmod(maxf(0.0, animation_time) + float(posmod(entity_id * 1618, 1000)) / 1000.0 * cycle_duration, cycle_duration)
+		return direction * frames_per_angle + clampi(floori(minf(phase, animation_duration - 0.0001) / frame_duration), 0, frames_per_angle - 1)
 	var frame_duration := maxf(0.001, float(graphic.get("frame_rate", 0.1)))
 	var animation_duration := frame_duration * float(maxi(1, frame_count))
 	var replay_delay := maxf(0.0, float(graphic.get("replay_delay", 0.0)))

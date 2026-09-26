@@ -13,6 +13,7 @@ func _initialize() -> void:
 	test_stance_command_precedes_awareness()
 	test_attack_move_chains_targets_and_keeps_destination()
 	test_enemy_building_is_a_first_class_combat_target()
+	test_manual_move_ignores_visible_enemy_building()
 	test_lost_visibility_and_leash_end_autonomous_contact()
 	if failures.is_empty():
 		print("I6-003 autonomous combat integration tests passed")
@@ -92,12 +93,31 @@ func test_enemy_building_is_a_first_class_combat_target() -> void:
 	controller.enqueue_command(attack, true, 1)
 	for _tick in range(40):
 		controller.advance_frame(0.05, 1, 2)
-		if world.find_building(90) == null:
+		if float(building.get("hp", 0.0)) <= 0.0:
 			break
 	assert_true(bool(controller.get_command_result(attack.sequence_id).get("accepted", false)), "building attack uses the normal command result")
-	assert_equal(world.find_building(90), null, "destroyed building leaves the authoritative world")
+	assert_equal(float(building["hp"]), 0.0, "destroyed building leaves combat and victory presence immediately")
+	assert_true(String(building.get("death_phase", "")) in ["dying", "ruin"], "destroyed building leaves a temporary visual wreck")
 	var deaths := controller.events_after().filter(func(event): return String(event["type"]) == "death" and String(event["payload"].get("entity_category", "")) == "building")
 	assert_equal(deaths.size(), 1, "building destruction emits one typed death event")
+
+
+func test_manual_move_ignores_visible_enemy_building() -> void:
+	var world = open_world()
+	var soldier: Dictionary = fighter(world, 1, Vector2(4.0, 4.0), "aggressive")
+	var enemy_building: Dictionary = world.add_building(90, "house", Vector2(6.0, 4.0), 2)
+	world.update_fog_of_war()
+	var controller := GameController.new(world)
+	var destination := Vector2(4.0, 12.0)
+	var manual_move = Commands.MoveCommand.new(1, [int(soldier["id"])], destination)
+	controller.enqueue_command(manual_move, true, 1)
+	for _tick in range(10):
+		controller.advance_frame(0.05, 1, 2)
+	assert_true(bool(controller.get_command_result(manual_move.sequence_id).get("accepted", false)), "manual move is accepted before autonomous scan")
+	assert_equal(String(soldier["task"]), "move", "manual move remains active after repeated enemy-building scans")
+	assert_equal(int(soldier.get("target_id", -1)), -1, "visible enemy building never replaces the player target")
+	assert_equal(Vector2(soldier["destination"]), destination, "manual destination survives awareness")
+	assert_true(float(enemy_building["hp"]) > 0.0, "soldier does not attack the building during manual movement")
 
 
 func test_lost_visibility_and_leash_end_autonomous_contact() -> void:

@@ -20,6 +20,10 @@ static func resolve(selected_units: Array, hovered_entity: Variant, ground_targe
 			return {"semantic": "select", "entity_id": int(hovered_entity.get("id", -1))}
 	if selected_units.is_empty():
 		return {"semantic": "default", "entity_id": int(hovered_entity.get("id", -1)) if hovered_entity is Dictionary else -1}
+	if hovered_entity is Dictionary and String(hovered_entity.get("entity_type", "")) == "resource":
+		var workers := selected_units.any(func(unit): return "worker" in unit.get("behavior_tags", []) or String(unit.get("kind", "")) == "villager")
+		if not workers:
+			return {"semantic": "default", "entity_id": -1, "reason": ""}
 	var resolution := ContextResolver.resolve(selected_units, hovered_entity, ground_target, player_team)
 	return {
 		"semantic": String(resolution.get("type", "default")),

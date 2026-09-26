@@ -20,6 +20,22 @@ func _initialize() -> void:
 		push_error("A-006 test runner found no tests")
 		quit(1)
 		return
+	var start_at := ""
+	for argument_value in OS.get_cmdline_user_args():
+		var argument := String(argument_value)
+		if argument.begins_with("--start-at="):
+			start_at = argument.trim_prefix("--start-at=").trim_prefix("res://").replace("\\", "/")
+	if not start_at.is_empty():
+		var start_index := test_scripts.find(start_at)
+		if start_index < 0:
+			push_error("A-006 test runner cannot resume: test not found: %s" % start_at)
+			quit(1)
+			return
+		var remaining_scripts: Array[String] = []
+		for index in range(start_index, test_scripts.size()):
+			remaining_scripts.append(test_scripts[index])
+		test_scripts = remaining_scripts
+		print("A-006 suite resuming at %s (%d tests remaining)" % [start_at, test_scripts.size()])
 
 	for script in test_scripts:
 		var output: Array = []

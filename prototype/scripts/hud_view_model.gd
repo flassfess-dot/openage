@@ -18,6 +18,7 @@ const STANCE_LABELS_RU := {
 }
 const UNIT_ACTION_ICON_IDS := {
 	"attack_move": 4,
+	"attack_ground": 4,
 	"stop": 3,
 	"hold": 12,
 	"stance": 7,
@@ -59,6 +60,8 @@ func configure(runtime_data: Dictionary, localization_catalog, object_data: Dict
 func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: String, locale: String = "ru") -> Dictionary:
 	var selected := _selected_entities(snapshot, selected_ids)
 	var player_state: Dictionary = snapshot.get("player_state", {})
+	var spectator := String(player_state.get("status", "active")) in ["resigned", "defeated"]
+	var disabled_reason := "battle_over" if bool(snapshot.get("battle_over", false)) else "player_not_active" if spectator else ""
 	var selection_model := _selection_model(selected, locale)
 	var model := {
 		"tick": int(snapshot.get("tick", 0)),
@@ -70,6 +73,7 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 		},
 		"population": {
 			"current": int(player_state.get("population", 0)),
+			"points": int(player_state.get("population_points", int(player_state.get("population", 0)) * 2)),
 			"reserved": int(player_state.get("population_reserved", 0)),
 			"cap": int(player_state.get("population_cap", 0)),
 		},
@@ -80,12 +84,14 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 		"commands": [],
 		"queue": [],
 		"battle_over": bool(snapshot.get("battle_over", false)),
+		"read_only": not disabled_reason.is_empty(),
+		"spectator": spectator,
+		"match_result": snapshot.get("match_result", {}).duplicate(true),
 	}
 	var unit_count := selected.filter(func(entity): return _category(entity) == "unit").size()
 	if unit_count == selected.size() and unit_count > 0:
 		var leader_stance := String(selected[0].get("stance", "aggressive"))
 		var next_stance := RoRCommands.next_stance(leader_stance)
-		var disabled_reason := "battle_over" if bool(model["battle_over"]) else ""
 		for action_value in [
 			{"id": "attack_move", "label": "Атаковать по пути", "short_label": "АТАКА", "hotkey": "Q"},
 			{"id": "stop", "label": "Остановиться", "short_label": "СТОП", "hotkey": "X"},
@@ -100,6 +106,25 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 			action["active"] = false
 			action["reason"] = disabled_reason
 			model["commands"].append(action)
+		var all_ground_attackers := true
+		for entity in selected:
+			var combat: Dictionary = entity.get("components", {}).get("combat", {})
+			if not bool(entity.get("combat_enabled", false)) or int(combat.get("projectile_id", -1)) < 0 or float(combat.get("blast_range", 0.0)) <= 0.0:
+				all_ground_attackers = false
+				break
+		if all_ground_attackers:
+			model["commands"].append({
+				"type": "unit_action",
+				"id": "attack_ground",
+				"label": "Атаковать землю",
+				"short_label": "ПО ЗЕМЛЕ",
+				"hotkey": "G",
+				"icon_kind": "command",
+				"icon_id": int(UNIT_ACTION_ICON_IDS["attack_ground"]),
+				"enabled": disabled_reason.is_empty(),
+				"active": false,
+				"reason": disabled_reason,
+			})
 	if unit_count == selected.size() and unit_count > 1:
 		for definition_value in FORMATIONS:
 			var definition: Dictionary = definition_value
@@ -108,9 +133,9 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 				"id": String(definition["id"]),
 				"label": String(definition["label"]),
 				"hotkey": String(definition["hotkey"]),
-				"enabled": unit_count > 1 and not bool(model["battle_over"]),
+				"enabled": unit_count > 1 and disabled_reason.is_empty(),
 				"active": String(definition["id"]) == formation_name,
-				"reason": "single_unit" if unit_count <= 1 else "battle_over" if bool(model["battle_over"]) else "",
+				"reason": "single_unit" if unit_count <= 1 else disabled_reason,
 			})
 	var only_traders := not selected.is_empty() and unit_count == selected.size() and selected.all(func(entity):
 		return bool(entity.get("components", {}).get("trade", {}).get("enabled", false))
@@ -125,9 +150,9 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 				"label": _trade_resource_label(resource_type_id, locale),
 				"cost_text": "20 %s" % String(RESOURCE_NAMES[resource_type_id]).to_upper(),
 				"duration": 0.0,
-				"enabled": not bool(model["battle_over"]),
+				"enabled": disabled_reason.is_empty(),
 				"active": resource_type_id == selected_resource,
-				"reason": "battle_over" if bool(model["battle_over"]) else "",
+				"reason": disabled_reason,
 			})
 	var selected_worker: Dictionary = {}
 	for entity_value in selected:
@@ -142,7 +167,7 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 			if not _command_option_is_visible(option):
 				continue
 			var kind := String(option.get("kind", ""))
-			var reason := "battle_over" if bool(model["battle_over"]) else String(option.get("reason", ""))
+			var reason := disabled_reason if not disabled_reason.is_empty() else String(option.get("reason", ""))
 			model["commands"].append({
 				"type": "build",
 				"id": kind,
@@ -160,14 +185,23 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 			})
 	if selected.size() == 1 and _category(selected[0]) == "building":
 		var building: Dictionary = selected[0]
+		var production_queue: Array = building.get("production_queue", [])
 		for option_value in building.get("command_options", {}).get("train", []):
 			var option: Dictionary = option_value
 			if not _command_option_is_visible(option):
 				continue
-			var reason := "battle_over" if bool(model["battle_over"]) else String(option.get("reason", ""))
+			var reason := disabled_reason if not disabled_reason.is_empty() else String(option.get("reason", ""))
+			var unit_kind := String(option.get("kind", ""))
+			var queued_count: int = production_queue.filter(func(order): return String(order.get("order_type", "unit")) == "unit" and String(order.get("kind", "")) == unit_kind).size()
+			var last_matching_index := -1
+			for queue_index in range(production_queue.size() - 1, -1, -1):
+				var queued_order: Dictionary = production_queue[queue_index]
+				if String(queued_order.get("order_type", "unit")) == "unit" and String(queued_order.get("kind", "")) == unit_kind:
+					last_matching_index = queue_index
+					break
 			model["commands"].append({
 				"type": "train",
-				"id": String(option.get("kind", "")),
+				"id": unit_kind,
 				"building_id": int(building.get("id", -1)),
 				"label": _name_for_kind(String(option.get("kind", "")), building, locale),
 				"icon_kind": "unit",
@@ -175,6 +209,9 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 				"cost": option.get("cost", {}).duplicate(true),
 				"cost_text": _cost_text(option.get("cost", {})),
 				"population_cost": int(option.get("population_cost", 0)),
+				"queue_count": queued_count,
+				"cancel_queue_index": last_matching_index,
+				"hotkey": "Z" if unit_kind == "swordsman" else "T" if unit_kind == "scout" else "",
 				"duration": float(option.get("duration", 0.0)),
 				"enabled": bool(option.get("accepted", false)) and reason.is_empty(),
 				"active": false,
@@ -184,7 +221,7 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 			var option: Dictionary = option_value
 			if not _command_option_is_visible(option):
 				continue
-			var reason := "battle_over" if bool(model["battle_over"]) else String(option.get("reason", ""))
+			var reason := disabled_reason if not disabled_reason.is_empty() else String(option.get("reason", ""))
 			var technology_id := int(option.get("technology_id", -1))
 			model["commands"].append({
 				"type": "research",
@@ -201,19 +238,35 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 				"active": false,
 				"reason": reason,
 			})
-		model["queue"] = _queue_model(building.get("production_queue", []), building, locale)
-		if not model["queue"].is_empty():
+		var queue_model: Array = _queue_model(production_queue, building, locale)
+		model["queue"] = queue_model
+		if not queue_model.is_empty():
+			var last_index: int = queue_model.size() - 1
+			var last_order: Dictionary = queue_model[last_index]
 			model["commands"].append({
 				"type": "cancel_production",
 				"id": "cancel_0",
 				"building_id": int(building.get("id", -1)),
-				"queue_index": 0,
-				"label": "Отменить" if locale == "ru" else "Cancel",
+				"queue_index": last_index,
+				"label": "Отменить один: %s" % String(last_order.get("label", "")) if locale == "ru" else "Cancel one: %s" % String(last_order.get("label", "")),
 				"cost_text": "",
 				"duration": 0.0,
-				"enabled": not bool(model["battle_over"]),
+				"enabled": disabled_reason.is_empty(),
 				"active": false,
-				"reason": "battle_over" if bool(model["battle_over"]) else "",
+				"reason": disabled_reason,
+			})
+		if production_queue.size() > 1:
+			model["commands"].append({
+				"type": "unit_action",
+				"id": "stop",
+				"label": "Очистить ожидающую очередь" if locale == "ru" else "Clear waiting queue",
+				"short_label": "СТОП" if locale == "ru" else "STOP",
+				"hotkey": "X",
+				"icon_kind": "command",
+				"icon_id": int(UNIT_ACTION_ICON_IDS["stop"]),
+				"enabled": disabled_reason.is_empty(),
+				"active": false,
+				"reason": disabled_reason,
 			})
 	if model["commands"].any(func(command): return String(command.get("type", "")) == "trade_resource"):
 		model["command_title"] = "TRADE"
@@ -221,7 +274,26 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 		model["command_title"] = "BUILD"
 	elif model["commands"].any(func(command): return String(command.get("type", "")) in ["formation", "unit_action"]):
 		model["command_title"] = "ORDERS"
+	model["status_indicators"] = status_indicators(snapshot, model)
 	return model
+
+
+static func status_indicators(snapshot: Dictionary, model: Dictionary) -> Dictionary:
+	var population: Dictionary = model.get("population", {})
+	var player_state: Dictionary = snapshot.get("player_state", {})
+	var queue: Array = model.get("queue", [])
+	var blocked := int(player_state.get("blocked_population_queues", 0)) > 0 or (not queue.is_empty() and String(queue[0].get("status", "")) == "blocked_population")
+	var elapsed := maxf(0.0, float(snapshot.get("match_elapsed_seconds", float(snapshot.get("tick", 0)) * 0.05)))
+	var whole_seconds := floori(elapsed)
+	var hours := int(whole_seconds / 3600.0)
+	var minutes := int(whole_seconds / 60.0) % 60
+	var seconds := whole_seconds % 60
+	return {
+		"population_text": "%d/%d" % [int(population.get("current", 0)), int(population.get("cap", 0))],
+		"clock_text": "%02d:%02d:%02d" % [hours, minutes, seconds],
+		"blocked": blocked,
+		"blink_on": not blocked or floori(elapsed * 2.0) % 2 == 0,
+	}
 
 
 func _selected_entities(snapshot: Dictionary, selected_ids: Array[int]) -> Array:
@@ -230,10 +302,10 @@ func _selected_entities(snapshot: Dictionary, selected_ids: Array[int]) -> Array
 		requested[int(entity_id)] = true
 	var player_team := int(snapshot.get("observer_team", snapshot.get("player_state", {}).get("team", 0)))
 	var result: Array = []
-	for collection_name in ["units", "buildings"]:
+	for collection_name in ["units", "buildings", "resources"]:
 		for entity_value in snapshot.get(collection_name, []):
 			var entity: Dictionary = entity_value
-			if requested.has(int(entity.get("id", -1))) and int(entity.get("team", 0)) == player_team and float(entity.get("hp", 0.0)) > 0.0:
+			if requested.has(int(entity.get("id", -1))) and (collection_name == "resources" or int(entity.get("team", 0)) == player_team) and (collection_name == "resources" or float(entity.get("hp", 0.0)) > 0.0):
 				# The view model only reads the detached presentation snapshot. A
 				# second deep copy duplicated combat tables and production queues on
 				# every fixed tick without providing additional isolation.
@@ -253,6 +325,9 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 	var ownership: Dictionary = leader.get("components", {}).get("ownership", {})
 	var civilization_id := int(ownership.get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
 	var combat: Dictionary = leader.get("components", {}).get("combat", {})
+	var kind := String(leader.get("kind", ""))
+	var show_hp := not (category == "resource" and kind in ["berries", "shore_fish", "deep_fish"])
+	var show_combat_stats := category != "building" or kind in ["tower", "mirror_tower"]
 	return {
 		"count": selected.size(),
 		"category": category if selected.all(func(entity): return _category(entity) == category) else "mixed",
@@ -264,6 +339,8 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 			"civilization_name": _civilization_name(civilization_id, locale),
 			"hp": roundi(float(leader.get("hp", 0.0))),
 			"max_hp": roundi(float(leader.get("max_hp", 0.0))),
+			"show_hp": show_hp,
+			"show_combat_stats": show_combat_stats,
 			"attack": roundi(float(leader.get("attack_damage", _largest_amount(combat.get("attacks", []))))),
 			"armor": maxi(0, roundi(maxf(float(combat.get("base_armor", 0.0)), _largest_amount(combat.get("armors", []))))),
 			"task": String(leader.get("task", leader.get("state", ""))),
@@ -271,8 +348,8 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 			"carried_amount": roundi(float(leader.get("carried_amount", 0.0))),
 			"carry_capacity": roundi(float(leader.get("carry_capacity", 0.0))),
 			"carried_resource": String(RESOURCE_NAMES.get(int(leader.get("carried_resource_type_id", -1)), "")),
-			"resource_amount": int(leader.get("amount", 0)) if bool(leader.get("harvestable", false)) else 0,
-			"resource_maximum": int(leader.get("max_amount", 0)) if bool(leader.get("harvestable", false)) else 0,
+			"resource_amount": int(leader.get("amount", 0)) if bool(leader.get("harvestable", false)) or category == "resource" else 0,
+			"resource_maximum": int(leader.get("max_amount", 0)) if bool(leader.get("harvestable", false)) or category == "resource" else 0,
 			"resource_state": String(leader.get("resource_state", "")),
 			"conversion_enabled": bool(conversion.get("enabled", false)),
 			"faith": float(conversion.get("faith", 0.0)),

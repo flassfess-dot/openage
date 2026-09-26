@@ -24,7 +24,9 @@ static func mobile(kind: String, stats: Dictionary) -> Dictionary:
 
 static func building(stats: Dictionary, center: Vector2) -> Dictionary:
 	var selection: Array = stats.get("selection_radius", [0.5, 0.5, 1.0])
-	var half_size := Vector2(maxf(0.5, float(selection[0])), maxf(0.5, float(selection[1])))
+	var obstruction: Array = stats.get("footprint_radius", [])
+	var footprint_values: Array = obstruction if obstruction.size() >= 2 else selection
+	var half_size := Vector2(maxf(0.5, float(footprint_values[0])), maxf(0.5, float(footprint_values[1])))
 	return {
 		"shape": "polygon",
 		"half_size": half_size,

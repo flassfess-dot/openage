@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "matrix_id": "aoe1_ror_core_parity",
+  "plan_path": "doc/ror-modern/AOE1_ROR_CORE_PARITY_PLAN.md",
+  "status_vocabulary": ["OPEN", "IN_PROGRESS", "INTEGRATED", "PARITY", "HARDENED"],
+  "status_policy": {
+    "INTEGRATED": "Required runtime layers are connected and declared automated evidence passes.",
+    "PARITY": "INTEGRATED plus source-backed behavior and no pending blocking measurement.",
+    "HARDENED": "PARITY plus P14 release, performance, replay, save and long-run gates."
+  },
+  "items": [
+    {
+      "id": "P00",
+      "title": "Baseline and evidence boundary",
+      "status": "INTEGRATED",
+      "owner": "parity.baseline",
+      "test_levels": ["structural", "scenario", "performance"],
+      "depends_on": [],
+      "requirements": ["machine-readable gap matrix", "canonical and performance baseline", "retired false-reference tests", "measurement manifests"],
+      "evidence": ["res://data/parity/ror_core_baseline.json", "res://data/parity/ror_core_executable_gate.json", "res://tests/unit/test_ror_core_parity_baseline.gd"]
+    },
+    {
+      "id": "P01",
+      "title": "Production, research and Logistics",
+      "status": "INTEGRATED",
+      "owner": "simulation.production_economy",
+      "test_levels": ["unit", "integration", "replay", "save", "performance"],
+      "depends_on": ["P00"],
+      "requirements": ["homogeneous unit line queue", "exclusive research", "completion-time population blocking", "cancel and destruction refunds", "fixed-point Logistics population", "HUD and AI adaptation"],
+      "evidence": ["res://tests/unit/test_ror_production_queue_semantics.gd", "res://tests/unit/test_logistics_population.gd"]
+    },
+    {
+      "id": "P02",
+      "title": "Queued orders, Delete and Attack Ground",
+      "status": "INTEGRATED",
+      "owner": "simulation.commands",
+      "test_levels": ["unit", "integration", "replay", "save"],
+      "depends_on": ["P01"],
+      "requirements": ["bounded Shift order deque", "Delete and Martyrdom routing", "Attack Ground through shared impact pipeline"],
+      "evidence": ["res://tests/unit/test_queued_orders.gd", "res://tests/integration/test_delete_and_martyrdom_routing.gd", "res://tests/unit/test_attack_ground_pipeline.gd"]
+    },
+    {
+      "id": "P03",
+      "title": "Special combat and conversion rules",
+      "status": "INTEGRATED",
+      "owner": "simulation.combat_conversion",
+      "test_levels": ["unit", "integration", "stress", "performance"],
+      "depends_on": ["P02"],
+      "requirements": ["shared impact policy", "Ballistics speed bands", "source-driven conversion resistance", "RoR special damage", "Scout autonomy exception"],
+      "evidence": ["res://tests/unit/test_ror_melee_area_damage.gd", "res://tests/unit/test_ballistics_speed_bands.gd", "res://tests/unit/test_conversion_resistance_matrix.gd", "res://tests/unit/test_ror_special_damage_matrix.gd"]
+    },
+    {
+      "id": "P04",
+      "title": "Repair, healing, transport and worker actions",
+      "status": "INTEGRATED",
+      "owner": "simulation.service_actions",
+      "test_levels": ["unit", "integration", "scenario", "performance"],
+      "depends_on": ["P03"],
+      "requirements": ["shared target policy", "source repair costs and rates", "healing rules", "transport capacity and unload", "worker action lifecycle"],
+      "evidence": ["res://tests/unit/test_repair_policy_matrix.gd", "res://tests/unit/test_multi_worker_repair.gd", "res://tests/unit/test_priest_auto_heal_chain.gd", "res://tests/integration/test_transport_allied_cargo.gd", "res://tests/integration/test_transport_artifact.gd"]
+    },
+    {
+      "id": "P05",
+      "title": "Tribute, trade and civilization economy bonuses",
+      "status": "INTEGRATED",
+      "owner": "simulation.economy",
+      "test_levels": ["unit", "integration", "scenario", "replay", "save"],
+      "depends_on": ["P04"],
+      "requirements": ["authoritative tribute and tax", "source-calibrated trade profit", "runtime civilization bonuses", "AI HUD replay and save integration"],
+      "evidence": ["res://tests/integration/test_tribute_pipeline.gd", "res://tests/unit/test_palmyran_economy_bonuses.gd", "res://tests/unit/test_ror_civilization_runtime_matrix.gd", "res://tests/integration/test_naval_trade_pipeline.gd", "res://tests/integration/test_all_civilization_bonus_rules.gd"]
+    },
+    {
+      "id": "P06",
+      "title": "World knowledge, allied vision and Writing",
+      "status": "INTEGRATED",
+      "owner": "simulation.visibility",
+      "test_levels": ["unit", "integration", "performance"],
+      "depends_on": ["P05"],
+      "requirements": ["separate visibility memory and shared vision", "allied Town Center reveal", "Writing policy", "last-known static records", "AI legal knowledge"],
+      "evidence": ["res://tests/unit/test_allied_town_center_reveal.gd", "res://tests/unit/test_writing_shared_vision.gd", "res://tests/unit/test_last_known_enemy_buildings.gd", "res://tests/unit/test_fog_of_war.gd", "res://tests/unit/test_simulation_snapshot.gd"]
+    },
+    {
+      "id": "P07",
+      "title": "Victory, defeat and match lifecycle",
+      "status": "INTEGRATED",
+      "owner": "simulation.outcome",
+      "test_levels": ["unit", "integration", "scenario", "replay", "save"],
+      "depends_on": ["P06"],
+      "requirements": ["complete data-driven victory catalog", "explicit allied victory", "resign spectator state", "incremental counters and unified MatchOutcome"],
+      "evidence": ["res://tests/unit/test_victory_modes.gd", "res://tests/unit/test_allied_victory_setting.gd", "res://tests/unit/test_standard_victory_conditions.gd", "res://tests/unit/test_victory_presence_index.gd", "res://tests/unit/test_timed_victory_replay.gd", "res://tests/integration/test_generated_alliance_victory.gd", "res://tests/integration/test_resign_spectator.gd"]
+    },
+    {
+      "id": "P08",
+      "title": "HUD, input, hotkeys and sound alerts",
+      "status": "INTEGRATED",
+      "owner": "presentation.hud_input_audio",
+      "test_levels": ["unit", "integration", "golden"],
+      "depends_on": ["P07"],
+      "requirements": ["viewport double-click selection", "RoR hotkeys", "population and timer overlay", "queue controls", "match instruction panel", "fog-safe bounded sound history"],
+      "evidence": ["res://tests/unit/test_ror_selection_shortcuts.gd", "res://tests/unit/test_input_adapter.gd", "res://tests/unit/test_hud_controls.gd", "res://tests/unit/test_hud_view_model.gd", "res://tests/unit/test_population_timer_overlay.gd", "res://tests/unit/test_sound_cue_history.gd", "res://tests/unit/test_match_instruction_summary.gd", "res://tests/unit/test_interface_layout.gd"]
+    },
+    {
+      "id": "P09",
+      "title": "RoR skirmish settings and random maps",
+      "status": "INTEGRATED",
+      "owner": "match_generation",
+      "test_levels": ["unit", "integration", "scenario", "golden", "performance"],
+      "depends_on": ["P08"],
+      "requirements": ["seeded random civilization", "Full Tech Tree", "four RoR map profiles", "explicit cliffs", "fair deterministic Gigantic generation"],
+      "evidence": ["res://tests/unit/test_ror_skirmish_settings.gd", "res://tests/unit/test_full_tech_tree_rules.gd", "res://tests/unit/test_ror_random_map_profiles.gd", "res://tests/golden/test_ror_map_profile_contract.gd", "res://tests/unit/test_ror_gigantic_generation_budget.gd", "res://tests/unit/test_skirmish_settings.gd", "res://tests/unit/test_random_map_generator.gd", "res://tests/unit/test_random_map_profiles.gd"]
+    },
+    {
+      "id": "P10",
+      "title": "AI adaptation to RoR rules",
+      "status": "INTEGRATED",
+      "owner": "ai.gameplay",
+      "test_levels": ["unit", "integration", "scenario", "performance"],
+      "depends_on": ["P09"],
+      "requirements": ["production and housing adaptation", "new command and service use", "legal fog knowledge", "topology metrics", "long deterministic outcomes"],
+      "evidence": ["res://tests/unit/test_ai_ror_rule_adaptation.gd", "res://tests/unit/test_ai_player.gd", "res://tests/integration/test_ai_command_pipeline.gd", "res://tests/integration/test_transport_artifact.gd", "res://tests/scenarios/test_generated_skirmish_ai_acceptance.gd", "res://tests/scenarios/test_generated_naval_ai_acceptance.gd", "res://tests/scenarios/test_mixed_domain_ai_match.gd", "res://tests/scenarios/test_generated_skirmish_deterministic_outcome.gd"]
+    },
+    {
+      "id": "P11",
+      "title": "Saves and product shell",
+      "status": "INTEGRATED",
+      "owner": "persistence.shell",
+      "test_levels": ["unit", "integration", "replay", "save"],
+      "depends_on": ["P10"],
+      "requirements": ["versioned new state", "named saves and metadata", "safe migration or rejection", "match and spectator shell state"],
+      "evidence": ["res://tests/unit/test_game_save_archive.gd", "res://tests/unit/test_sound_cue_history.gd", "res://tests/unit/test_match_instruction_summary.gd", "res://tests/integration/test_game_save_load_pipeline.gd", "res://tests/integration/test_game_save_state_matrix.gd"]
+    },
+    {
+      "id": "P12",
+      "title": "Multiplayer",
+      "status": "INTEGRATED",
+      "owner": "network.lockstep",
+      "test_levels": ["unit", "integration", "scenario", "performance"],
+      "depends_on": ["P11"],
+      "requirements": ["versioned lockstep session", "two-to-eight-player lobby", "command frames and hashes", "desync policy", "chat reconnect and spectator policy", "long mixed-domain match"],
+      "evidence": ["res://tests/unit/test_lockstep_session.gd", "res://tests/unit/test_multiplayer_lobby.gd", "res://tests/integration/test_lockstep_tcp_relay.gd", "res://tests/integration/test_lockstep_tcp_match.gd", "res://tests/integration/test_multiplayer_main_scene.gd", "res://tests/scenarios/test_lockstep_mixed_domain_match.gd", "tools/ror-run-p12-validation.ps1"]
+    },
+    {
+      "id": "P14",
+      "title": "Final hardening",
+      "status": "IN_PROGRESS",
+      "owner": "release.parity_gate",
+      "test_levels": ["unit", "integration", "scenario", "golden", "performance", "manual", "export"],
+      "depends_on": ["P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P11", "P12"],
+      "requirements": ["full suite cache and export", "Gigantic performance workloads", "replay and save hash matrix", "manual gameplay loop", "unresolved measurement report"],
+      "evidence": ["tools/ror-run-tests.ps1", "tools/validate-cache.ps1", "tools/ror-performance-smoke.ps1", "tools/ror-run-p14-headless-workloads.ps1", "res://tests/integration/test_p14_replay_save_hash_matrix.gd", "doc/ror-modern/P14_HARDENING_REPORT.md", "tools/ror-full-build.ps1"]
+    }
+  ]
+}

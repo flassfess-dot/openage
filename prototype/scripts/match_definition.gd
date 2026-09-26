@@ -26,7 +26,7 @@ static func normalize(source: Dictionary) -> Dictionary:
 		map["size"] = Vector2i(24, 24)
 	else:
 		map["size"] = Vector2i(int(size_values[0]), int(size_values[1]))
-		if map["size"].x < 8 or map["size"].y < 8 or map["size"].x > 256 or map["size"].y > 256:
+		if map["size"].x < 8 or map["size"].y < 8 or map["size"].x > 400 or map["size"].y > 400:
 			errors.append("map_size_out_of_range")
 	map["seed"] = int(map.get("seed", 1))
 	var generator: Dictionary = map.get("generator", {})
@@ -38,6 +38,8 @@ static func normalize(source: Dictionary) -> Dictionary:
 		if vertex_levels.size() != (map["size"].x + 1) * (map["size"].y + 1):
 			errors.append("fixed_map_vertex_size_mismatch")
 	result["map"] = map
+	if result.has("full_tech_tree") and not result["full_tech_tree"] is bool:
+		errors.append("match_full_tech_tree_invalid")
 
 	var teams: Dictionary = {}
 	var human_teams: Array[int] = []
@@ -51,7 +53,7 @@ static func normalize(source: Dictionary) -> Dictionary:
 		else:
 			teams[team] = true
 		var controller := String(player.get("controller", "ai"))
-		if controller not in ["human", "ai"]:
+		if controller not in (["human", "ai", "remote"] if bool(result.get("networked", false)) else ["human", "ai"]):
 			errors.append("player_controller_invalid:%d" % team)
 		elif controller == "human":
 			human_teams.append(team)
@@ -111,6 +113,8 @@ static func normalize(source: Dictionary) -> Dictionary:
 		relation_entry["relation"] = relation
 		normalized_diplomacy.append(relation_entry)
 	result["diplomacy"] = normalized_diplomacy
+	if result.has("allied_victory_enabled") and not result["allied_victory_enabled"] is bool:
+		errors.append("allied_victory_invalid")
 
 	for entity_value in result.get("entities", []):
 		var entity: Dictionary = entity_value

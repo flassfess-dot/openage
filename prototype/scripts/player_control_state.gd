@@ -56,3 +56,28 @@ func selected_ids() -> Array[int]:
 		result.append(int(entity_id))
 	result.sort()
 	return result
+
+
+static func same_type_visible_ids(units: Array, clicked: Dictionary, player_team: int, viewport: Rect2, project_position: Callable) -> Array[int]:
+	var result: Array[int] = []
+	if int(clicked.get("team", 0)) != player_team or String(clicked.get("entity_type", "unit")) != "unit":
+		return result
+	var source_id := int(clicked.get("source_unit_id", -1))
+	var kind := String(clicked.get("kind", ""))
+	for value in units:
+		var unit: Dictionary = value
+		if int(unit.get("team", 0)) != player_team or float(unit.get("hp", 0.0)) <= 0.0:
+			continue
+		if String(unit.get("entity_type", "unit")) != "unit":
+			continue
+		if source_id >= 0:
+			if int(unit.get("source_unit_id", -1)) != source_id:
+				continue
+		elif String(unit.get("kind", "")) != kind:
+			continue
+		var position_value: Variant = unit.get("pos")
+		if not position_value is Vector2 or not viewport.has_point(project_position.call(position_value)):
+			continue
+		result.append(int(unit.get("id", -1)))
+	result.sort()
+	return result

@@ -8,7 +8,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	var source_catalog := SkirmishSettings.catalog()
 	assert_true(bool(source_catalog.get("valid", false)), "the versioned skirmish catalog loads")
-	assert_equal(source_catalog.get("civilizations", []).size(), 16, "all Rise of Rome civilizations are selectable")
+	assert_equal(source_catalog.get("civilizations", []).size(), 17, "all sixteen Rise of Rome civilizations and seeded Random are selectable")
 
 	var defaults := SkirmishSettings.default_settings()
 	var first := SkirmishSettings.build(defaults)

@@ -10,7 +10,9 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	var catalog := SkirmishSettings.catalog()
 	var profiles: Array = catalog.get("map_types", [])
-	assert_equal(profiles.size(), 4, "catalog exposes two land and two water-capable profiles")
+	assert_equal(profiles.size(), 9, "catalog exposes all nine RoR menu map profiles")
+	assert_equal(profiles.filter(func(profile): return bool(profile.get("requires_naval_starts", false))).size(), 5, "catalog has five water-capable profiles")
+	assert_equal(profiles.filter(func(profile): return not bool(profile.get("requires_naval_starts", false))).size(), 4, "catalog has four land-only profiles")
 	for profile_value in profiles:
 		var profile: Dictionary = profile_value
 		for seed in [1, 41721, 99991]:
@@ -20,6 +22,7 @@ func _initialize() -> void:
 			if not bool(built.get("valid", false)):
 				continue
 			var definition: Dictionary = built["definition"]
+			assert_true(not definition.get("map", {}).get("generator", {}).get("source_profile", {}).is_empty(), "%s uses its source RoR map record" % profile.get("id"))
 			var first: Dictionary = built["map_data"]
 			var second := RandomMapGenerator.generate(definition)
 			assert_equal(first, second, "%s seed %d is byte-for-byte deterministic" % [profile.get("id"), seed])
@@ -29,7 +32,7 @@ func _initialize() -> void:
 			if bool(profile.get("requires_naval_starts", false)):
 				assert_equal(int(quality.get("metrics", {}).get("naval_start_count", 0)), 4, "%s gives every player a legal dock/staging pair" % profile.get("id"))
 				var deep_fish: Array = first.get("resources", []).filter(func(resource): return String(resource.get("kind", "")) == "deep_fish")
-				assert_equal(deep_fish.size(), 12, "%s gives every naval start a deterministic deep-fish cluster" % profile.get("id"))
+				assert_true(deep_fish.size() >= 12, "%s gives every naval start guaranteed deep fish and adds neutral schools" % profile.get("id"))
 				assert_true(deep_fish.all(func(resource): return RandomMapGenerator._cell_matches_domain_with_clearance(Vector2i(Vector2(resource.get("position", Vector2.ZERO))), first["size"], first["terrain_ids"], "water", 2)), "%s keeps every generated deep-fish pool in navigable open water" % profile.get("id"))
 				for zone_value in first.get("naval_start_zones", []):
 					var zone: Dictionary = zone_value

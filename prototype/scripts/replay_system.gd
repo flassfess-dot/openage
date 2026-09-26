@@ -31,7 +31,9 @@ func record_command(command, issued_tick: int = 0) -> void:
 		"sequence_id": int(command.sequence_id),
 		"type": String(command.command_type()),
 		"unit_ids": command.unit_ids.duplicate(),
-		"params": encode_variant(command.params),
+		# State hashes tolerate a micro-unit, but playback command inputs must
+		# retain the exact live Vector2 values or formations drift over time.
+		"params": encode_variant(command.params, false),
 	}
 	# Runtime commands already arrive with monotonically increasing issuance
 	# ticks and sequence IDs. Preserve the two replay orderings incrementally;
@@ -85,7 +87,7 @@ func to_dictionary() -> Dictionary:
 
 
 func to_json() -> String:
-	return JSON.stringify(to_dictionary(), "\t")
+	return JSON.stringify(to_dictionary(), "\t", true, true)
 
 
 func load_dictionary(data: Dictionary) -> bool:
@@ -169,16 +171,24 @@ func command_from_record(record: Dictionary):
 			command = Commands.MoveCommand.new(tick, ids, params.get("target", Vector2.ZERO))
 		"formation_move":
 			command = Commands.FormationMoveCommand.new(tick, ids, params.get("target", Vector2.ZERO), String(params.get("formation", "RECTANGLE")), params.get("forward", Vector2.ZERO))
+			# The constructor normalizes live input. The recorded vector is already
+			# normalized; normalizing it a second time changes its last float bits.
+			command.forward = params.get("forward", Vector2.ZERO)
+			command.params["forward"] = command.forward
 		"attack_move":
 			command = Commands.AttackMoveCommand.new(tick, ids, params.get("target", Vector2.ZERO))
 		"attack":
 			command = Commands.AttackCommand.new(tick, ids, int(params.get("target_entity_id", params.get("target_unit_id", -1))), params)
+		"attack_ground":
+			command = Commands.AttackGroundCommand.new(tick, ids, params.get("target", Vector2.ZERO))
 		"convert":
 			command = Commands.ConvertCommand.new(tick, ids, int(params.get("target_entity_id", -1)))
 		"heal":
 			command = Commands.HealCommand.new(tick, ids, int(params.get("target_entity_id", -1)))
 		"martyrdom":
 			command = Commands.MartyrdomCommand.new(tick, ids)
+		"delete_entity":
+			command = Commands.DeleteEntityCommand.new(tick, ids)
 		"gather":
 			command = Commands.GatherCommand.new(tick, ids, int(params.get("resource_id", -1)))
 		"return_resources":
@@ -204,6 +214,8 @@ func command_from_record(record: Dictionary):
 			command = Commands.CancelProductionCommand.new(tick, ids, int(params.get("queue_index", 0)))
 		"repair":
 			command = Commands.RepairCommand.new(tick, ids, int(params.get("target_building_id", -1)))
+		"tribute":
+			command = Commands.TributeCommand.new(tick, int(params.get("target_team", -1)), int(params.get("resource_type_id", -1)), int(params.get("amount", 0)))
 		"stance":
 			command = Commands.StanceCommand.new(tick, ids, String(params.get("stance", "passive")))
 		"hold":
@@ -214,14 +226,18 @@ func command_from_record(record: Dictionary):
 			command = Commands.DiplomacyCommand.new(tick, int(params.get("target_team", -1)), String(params.get("relation", "enemy")))
 		"resign":
 			command = Commands.ResignCommand.new(tick)
+		"population_limit":
+			command = Commands.PopulationLimitCommand.new(tick, int(params.get("limit", 0)))
 	if command != null:
+		if bool(params.get("queue_order", false)):
+			command.params["queue_order"] = true
 		command.assign_envelope(int(record.get("issuer_id", 0)), int(record.get("sequence_id", 0)))
 	return command
 
 
-func encode_variant(value: Variant) -> Variant:
+func encode_variant(value: Variant, quantize_numbers: bool = true) -> Variant:
 	if value is Vector2:
-		return {"__vector2": [quantize(value.x), quantize(value.y)]}
+		return {"__vector2": [quantize(value.x) if quantize_numbers else value.x, quantize(value.y) if quantize_numbers else value.y]}
 	if value is Vector2i:
 		return {"__vector2i": [value.x, value.y]}
 	if value is Dictionary:
@@ -229,15 +245,15 @@ func encode_variant(value: Variant) -> Variant:
 		var keys: Array = value.keys()
 		keys.sort_custom(func(left, right): return str(left) < str(right))
 		for key in keys:
-			result[str(key)] = encode_variant(value[key])
+			result[str(key)] = encode_variant(value[key], quantize_numbers)
 		return result
 	if value is Array:
 		var result: Array = []
 		for item in value:
-			result.append(encode_variant(item))
+			result.append(encode_variant(item, quantize_numbers))
 		return result
 	if value is float:
-		return quantize(value)
+		return quantize(value) if quantize_numbers else value
 	return value
 
 

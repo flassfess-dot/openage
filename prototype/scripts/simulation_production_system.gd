@@ -13,6 +13,9 @@ var last_production_failure: String = ""
 var last_research_failure: String = ""
 var last_research_message: String = ""
 var last_completed_research_id: int = -1
+var active_building_ids: Array[int] = []
+var building_order_by_id: Dictionary = {}
+var next_building_order: int = 0
 
 
 func _init(simulation_world) -> void:
@@ -25,6 +28,19 @@ func reset() -> void:
 	last_research_failure = ""
 	last_research_message = ""
 	last_completed_research_id = -1
+	active_building_ids.clear()
+	building_order_by_id.clear()
+	next_building_order = 0
+
+
+func register_building(building_id: int) -> void:
+	building_order_by_id[building_id] = next_building_order
+	next_building_order += 1
+
+
+func unregister_building(building_id: int) -> void:
+	active_building_ids.erase(building_id)
+	building_order_by_id.erase(building_id)
 
 
 func advance(context: Dictionary) -> void:
@@ -68,7 +84,6 @@ func enqueue_unit(building_id: int, team: int, kind: String, enforce_runtime_rul
 	var cost: Dictionary = availability.get("cost", {})
 	var population_cost := int(availability.get("population_cost", 0))
 	world.economy_system.spend(team, cost)
-	world.economy_system.reserve_population(team, population_cost)
 	var duration := float(availability.get("duration", 0.05))
 	var order := {
 		"id": next_order_id,
@@ -90,7 +105,7 @@ func enqueue_unit(building_id: int, team: int, kind: String, enforce_runtime_rul
 		"team": team,
 		"unit_kind": kind,
 		"cost": cost.duplicate(true),
-		"population_reserved": population_cost,
+		"population_reserved": 0,
 	})
 	return order
 
@@ -153,17 +168,33 @@ func _unit_availability(building: Variant, team: int, kind: String, enforce_runt
 	result["cost"] = cost.duplicate(true)
 	result["population_cost"] = population_cost
 	result["duration"] = duration
-	if building.get("production_queue", []).size() >= 15:
+	var queue: Array = building.get("production_queue", [])
+	if queue.size() >= 15:
 		result["reason"] = "queue_full"
 		return result
+	for queued_value in queue:
+		var queued_order: Dictionary = queued_value
+		if String(queued_order.get("order_type", "unit")) == "research":
+			result["reason"] = "research_in_progress"
+			return result
+		if _unit_line_key(team, String(queued_order.get("kind", ""))) != _unit_line_key(team, kind):
+			result["reason"] = "different_unit_line_queued"
+			return result
 	if not world.economy_system.can_afford(team, cost):
 		result["reason"] = "insufficient_resources"
 		return result
-	if not world.economy_system.can_reserve_population(team, population_cost):
-		result["reason"] = "population_cap"
-		return result
 	result["accepted"] = true
 	return result
+
+
+func _unit_line_key(team: int, kind: String) -> String:
+	var repository = world.data_repository
+	if not repository.is_configured() or not repository.has_archetype(kind):
+		return kind
+	var source_id := int(repository.identifiers(kind).get("source_unit_id", -1))
+	if source_id < 0:
+		return kind
+	return "source:%d" % int(world.technology_system.resolved_unit_id(team, source_id))
 
 
 func _production_target_failure(building: Dictionary, team: int, kind: String) -> String:
@@ -274,8 +305,8 @@ func _research_availability(building: Variant, team: int, technology_id: int) ->
 	if not rule_reason.is_empty():
 		result["reason"] = rule_reason
 		return result
-	if building.get("production_queue", []).size() >= 15:
-		result["reason"] = "queue_full"
+	if not building.get("production_queue", []).is_empty():
+		result["reason"] = "building_busy"
 		return result
 	if not world.economy_system.can_afford(team, cost):
 		result["reason"] = "insufficient_resources"
@@ -285,12 +316,19 @@ func _research_availability(building: Variant, team: int, technology_id: int) ->
 
 
 func update(delta: float) -> void:
-	for building in world.get_buildings():
+	# Keep the world's building-creation order without visiting idle buildings each tick.
+	# A completion may remove its own ID from the active list, so iterate a copy.
+	for building_id in active_building_ids.duplicate():
+		var building: Variant = world.find_building(int(building_id))
+		if building == null:
+			unregister_building(int(building_id))
+			continue
 		if float(building.get("hp", 0.0)) <= 0.0 or String(building.get("state", "complete")) != "complete":
 			continue
 		var queue: Array = building.get("production_queue", [])
 		if queue.is_empty():
 			building["production_progress"] = 0.0
+			active_building_ids.erase(int(building_id))
 			continue
 		var order: Dictionary = queue[0]
 		order["status"] = "training"
@@ -325,7 +363,7 @@ func _complete_research(building: Dictionary, queue: Array, order: Dictionary) -
 
 func _complete_unit(building: Dictionary, queue: Array, order: Dictionary) -> void:
 	var team := int(order["team"])
-	if world.economy_system.get_population(team) + int(order["population_cost"]) > world.economy_system.get_population_cap(team):
+	if world.economy_system.get_population_points(team) + world.unit_population_points_cost(String(order["kind"]), team) > world.economy_system.get_population_cap_points(team):
 		order["status"] = "blocked_population"
 		queue[0] = order
 		building["production_queue"] = queue
@@ -337,7 +375,6 @@ func _complete_unit(building: Dictionary, queue: Array, order: Dictionary) -> vo
 		building["production_queue"] = queue
 		return
 	queue.pop_front()
-	world.economy_system.release_reserved_population(team, int(order["population_cost"]))
 	var trained: Dictionary = world.add_unit(team, String(order["kind"]), spawn, false)
 	trained["production_order_id"] = int(order["id"])
 	world.emit_domain_event("unit_produced", {
@@ -356,7 +393,7 @@ func _complete_unit(building: Dictionary, queue: Array, order: Dictionary) -> vo
 	_sync_queue(building, queue)
 
 
-func cancel(building_id: int, queue_index: int = 0) -> bool:
+func cancel(building_id: int, queue_index: int = 0, refund_cost: bool = true, reason: String = "explicit") -> bool:
 	var building: Variant = world.find_building(building_id)
 	if building == null:
 		return false
@@ -365,10 +402,11 @@ func cancel(building_id: int, queue_index: int = 0) -> bool:
 		return false
 	var order: Dictionary = queue[queue_index]
 	var team := int(order.get("team", 0))
-	world.economy_system.refund(team, order.get("cost", {}))
+	var refunded_cost: Dictionary = order.get("cost", {}).duplicate(true) if refund_cost else {}
+	if refund_cost:
+		world.economy_system.refund(team, refunded_cost)
 	if String(order.get("order_type", "unit")) == "research":
 		world.technology_system.cancel_research(team, int(order.get("technology_id", -1)))
-	world.economy_system.release_reserved_population(team, int(order.get("population_cost", 0)))
 	queue.remove_at(queue_index)
 	_sync_queue(building, queue)
 	building["components"]["technology"]["active_research_id"] = -1 if queue.is_empty() or String(queue[0].get("order_type", "unit")) != "research" else int(queue[0].get("technology_id", -1))
@@ -377,8 +415,28 @@ func cancel(building_id: int, queue_index: int = 0) -> bool:
 		"building_id": building_id,
 		"team": team,
 		"order_type": String(order.get("order_type", "unit")),
-		"refunded_cost": order.get("cost", {}).duplicate(true),
+		"refunded_cost": refunded_cost,
+		"reason": reason,
 	})
+	return true
+
+
+func abort_for_building_loss(building_id: int) -> void:
+	var building: Variant = world.find_building(building_id)
+	if building == null:
+		return
+	var queue: Array = building.get("production_queue", [])
+	for queue_index in range(queue.size() - 1, -1, -1):
+		cancel(building_id, queue_index, queue_index > 0, "building_lost")
+
+
+func stop_waiting(building_id: int) -> bool:
+	var building: Variant = world.find_building(building_id)
+	if building == null or float(building.get("hp", 0.0)) <= 0.0 or String(building.get("state", "complete")) != "complete":
+		return false
+	var queue: Array = building.get("production_queue", [])
+	for queue_index in range(queue.size() - 1, 0, -1):
+		cancel(building_id, queue_index, true, "stop")
 	return true
 
 
@@ -413,3 +471,14 @@ func _sync_queue(building: Dictionary, queue: Array) -> void:
 	building["production_queue"] = queue
 	building["components"]["production"]["queue"] = queue
 	building["production_progress"] = 0.0 if queue.is_empty() else float(queue[0].get("progress", 0.0)) / maxf(0.05, float(queue[0]["duration"]))
+	var building_id := int(building.get("id", -1))
+	if queue.is_empty():
+		active_building_ids.erase(building_id)
+	elif not active_building_ids.has(building_id):
+		var order_index := int(building_order_by_id.get(building_id, next_building_order))
+		var insertion_index := active_building_ids.size()
+		for index in range(active_building_ids.size()):
+			if int(building_order_by_id.get(active_building_ids[index], next_building_order)) > order_index:
+				insertion_index = index
+				break
+		active_building_ids.insert(insertion_index, building_id)

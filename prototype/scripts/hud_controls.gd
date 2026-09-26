@@ -30,6 +30,7 @@ const FORMATION_ICONS := {
 var formation_buttons: Dictionary = {}
 var train_button: Button
 var train_buttons: Array[Button] = []
+var queue_badges: Array[Label] = []
 var active_train_commands: Array = []
 var formation_group := ButtonGroup.new()
 var icon_registry
@@ -89,7 +90,21 @@ func _append_action_button() -> void:
 	button.clip_text = true
 	apply_button_theme(button)
 	button.pressed.connect(_on_action_pressed.bind(index))
+	button.gui_input.connect(_on_action_gui_input.bind(index))
+	var badge := Label.new()
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.anchor_right = 1.0
+	badge.anchor_bottom = 1.0
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	badge.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	badge.add_theme_font_size_override("font_size", 11)
+	badge.add_theme_color_override("font_color", Color("fff1bd"))
+	badge.add_theme_color_override("font_outline_color", Color("1a1109"))
+	badge.add_theme_constant_override("outline_size", 2)
+	badge.visible = false
+	button.add_child(badge)
 	train_buttons.append(button)
+	queue_badges.append(badge)
 	add_child(button)
 	if interface_skin != null:
 		apply_source_command_theme(button)
@@ -120,7 +135,7 @@ func set_state(formation_name: String, can_train: bool) -> void:
 		formation_buttons[key].visible = true
 		formation_buttons[key].set_pressed_no_signal(key == formation_name)
 	train_button.visible = true
-	train_button.text = "[T] TRAIN CLUBMAN — 50 FOOD"
+	train_button.text = "TRAIN"
 	layout_controls()
 	train_button.disabled = not can_train
 
@@ -181,10 +196,19 @@ func set_view_model(model: Dictionary) -> void:
 		var hotkey := String(command.get("hotkey", ""))
 		var short_label := String(command.get("short_label", label))
 		button.text = "" if icon != null else "%s%s" % ["%s\n" % hotkey if not hotkey.is_empty() else "", short_label]
+		var queue_count := int(command.get("queue_count", 0))
+		queue_badges[index].visible = queue_count > 0
+		queue_badges[index].text = "×%d" % queue_count if queue_count > 0 else ""
 		button.disabled = not bool(command.get("enabled", false))
 		var description := "%s%s" % [label, " — %s" % cost_text if not cost_text.is_empty() else ""]
 		if float(command.get("duration", 0.0)) > 0.0:
 			description += " · %.0f сек." % float(command.get("duration", 0.0))
+		if queue_count > 0:
+			description += " · В очереди: %d" % queue_count
+			if String(command.get("type", "")) == "train":
+				description += " · ПКМ: отменить одного"
+		if not hotkey.is_empty():
+			description += " · %s" % hotkey
 		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else description
 	layout_controls()
 
@@ -323,13 +347,33 @@ func _on_action_pressed(index: int) -> void:
 		"unit_action": unit_action_requested.emit(String(command.get("id", "")))
 
 
+func _on_action_gui_input(event: InputEvent, index: int) -> void:
+	if not event is InputEventMouseButton:
+		return
+	var mouse_event: InputEventMouseButton = event
+	if not mouse_event.pressed or mouse_event.button_index != MOUSE_BUTTON_RIGHT:
+		return
+	if index < 0 or index >= active_train_commands.size():
+		return
+	var command: Dictionary = active_train_commands[index]
+	if String(command.get("type", "")) != "train" or int(command.get("cancel_queue_index", -1)) < 0 or bool(current_model.get("read_only", false)):
+		return
+	cancel_production_requested.emit(int(command.get("building_id", -1)), int(command.get("cancel_queue_index", -1)))
+	if is_inside_tree():
+		train_buttons[index].accept_event()
+
+
 static func reason_text(reason: String) -> String:
 	return String({
 		"single_unit": "Для строя выберите несколько юнитов",
 		"battle_over": "Матч завершён",
+		"player_not_active": "Режим наблюдателя",
 		"insufficient_resources": "Недостаточно ресурсов",
 		"population_cap": "Достигнут предел населения",
 		"queue_full": "Очередь заполнена",
+		"different_unit_line_queued": "Сначала завершите или остановите текущую линию",
+		"research_in_progress": "В здании идёт исследование",
+		"building_busy": "Здание занято производством",
 		"unit_unavailable": "Юнит ещё не открыт",
 		"building_unavailable": "Здание ещё не открыто",
 		"invalid_production_building": "Здание не может производить этот юнит",

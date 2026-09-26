@@ -50,6 +50,7 @@ func build(match_definition: Dictionary, scenario_state: Dictionary, observer_te
 	var result: Dictionary = scenario_state.get("result", {})
 	var over := bool(result.get("over", false))
 	var winner_team := int(result.get("winner_team", -1))
+	var winning_side: Array = result.get("winner_teams", [winner_team])
 	return {
 		"visible": true,
 		"title": String(match_definition.get("title", "Сценарий")),
@@ -57,7 +58,7 @@ func build(match_definition: Dictionary, scenario_state: Dictionary, observer_te
 		"objectives": objectives,
 		"over": over,
 		"winner_team": winner_team,
-		"outcome": "victory" if over and winner_team == observer_team else "defeat" if over else "",
+		"outcome": "victory" if over and observer_team in winning_side else "defeat" if over else "",
 	}
 
 

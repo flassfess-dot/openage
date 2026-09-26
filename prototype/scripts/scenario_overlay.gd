@@ -47,6 +47,17 @@ func set_snapshot(snapshot: Dictionary) -> void:
 	if not bool(scenario_state.get("result", {}).get("over", false)) and bool(snapshot.get("match_result", {}).get("over", false)):
 		scenario_state["result"] = snapshot.get("match_result", {}).duplicate(true)
 	presentation_model = model_builder.build(match_definition, scenario_state, observer_team, "ru")
+	if not bool(presentation_model.get("visible", false)) and bool(scenario_state.get("result", {}).get("over", false)):
+		var match_result: Dictionary = scenario_state["result"]
+		var winning_side: Array = match_result.get("winner_teams", [int(match_result.get("winner_team", -1))])
+		presentation_model = {
+			"visible": true,
+			"title": String(match_definition.get("title", "Матч")),
+			"briefing": "",
+			"objectives": [],
+			"over": true,
+			"outcome": "victory" if observer_team in winning_side else "defeat",
+		}
 	visible = bool(presentation_model.get("visible", false))
 	if not visible:
 		return
@@ -62,7 +73,9 @@ func set_snapshot(snapshot: Dictionary) -> void:
 	if over:
 		var victory := String(presentation_model.get("outcome", "")) == "victory"
 		result_title.text = "ПОБЕДА" if victory else "ПОРАЖЕНИЕ"
-		result_text.text = "Цели сценария выполнены." if victory else "Ваш противник выполнил условия победы."
+		var reason := String(scenario_state.get("result", {}).get("reason", ""))
+		var reason_label := String({"conquest": "завоевание", "score": "счёт или время", "wonder": "чудо света", "ruins": "руины", "artifacts": "артефакты", "scenario": "условия сценария"}.get(reason, reason))
+		result_text.text = "Условие победы: %s." % reason_label if not reason_label.is_empty() else "Матч завершён."
 
 
 func is_blocking() -> bool:
@@ -118,6 +131,11 @@ func _build_interface() -> void:
 	result_text = _body_label(76)
 	result_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	result_column.add_child(result_text)
+	var observe_button := Button.new()
+	observe_button.text = "НАБЛЮДАТЬ"
+	observe_button.custom_minimum_size.y = 42
+	observe_button.pressed.connect(_dismiss_result)
+	result_column.add_child(observe_button)
 	var retry_button := Button.new()
 	retry_button.text = "ПОВТОРИТЬ"
 	retry_button.custom_minimum_size.y = 42
@@ -135,6 +153,11 @@ func _dismiss_briefing() -> void:
 	briefing_dismissed = true
 	briefing_layer.visible = false
 	objectives_panel.visible = true
+
+
+func _dismiss_result() -> void:
+	result_dismissed = true
+	result_layer.visible = false
 
 
 func _full_layer() -> ColorRect:

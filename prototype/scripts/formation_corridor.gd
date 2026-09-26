@@ -3,17 +3,17 @@ class_name RoRFormationCorridor
 const Geometry := preload("res://scripts/formation_geometry.gd")
 
 
-static func plan(start_world: Vector2, goal_world: Vector2, formation_type: String, member_count: int, spacing: float, member_radius: float, pathfinder, navigation_grid) -> Dictionary:
+static func plan(start_world: Vector2, goal_world: Vector2, formation_type: String, member_count: int, spacing: float, member_radius: float, pathfinder, navigation_grid, movement_domain: String = "land", restriction_id: int = -1) -> Dictionary:
 	var start := Vector2i(floori(start_world.x), floori(start_world.y))
 	var requested_goal := Vector2i(floori(goal_world.x), floori(goal_world.y))
-	var goal: Vector2i = pathfinder.nearest_walkable(requested_goal)
+	var goal: Vector2i = pathfinder.nearest_walkable(requested_goal, movement_domain, restriction_id)
 	if goal.x < 0:
 		return {"route": [], "modes": [], "required_width": 1, "has_compression": false}
 	# An unobstructed march uses the same rasterized group corridor directly.
 	# A* remains the fallback when the straight corridor is blocked.
-	var cells: Array[Vector2i] = pathfinder.direct_cell_path(start, goal)
+	var cells: Array[Vector2i] = pathfinder.direct_cell_path(start, goal, movement_domain, restriction_id)
 	if cells.is_empty():
-		cells = pathfinder.find_cell_path(start, goal)
+		cells = pathfinder.find_cell_path(start, goal, movement_domain, restriction_id)
 	if cells.is_empty():
 		return {"route": [], "modes": [], "required_width": 1, "has_compression": false}
 	var required_width := _required_width(formation_type, member_count, spacing, member_radius)
@@ -23,7 +23,7 @@ static func plan(start_world: Vector2, goal_world: Vector2, formation_type: Stri
 	for index in range(cells.size()):
 		var cell: Vector2i = cells[index]
 		var direction := _route_direction(cells, index)
-		var available := _available_lateral_width(navigation_grid, cell, direction, required_width)
+		var available := _available_lateral_width(navigation_grid, cell, direction, required_width, movement_domain, restriction_id)
 		var mode := "compressed" if available < required_width else "preferred"
 		route.append(Vector2(cell) + Vector2(0.5, 0.5))
 		modes.append(mode)
@@ -106,13 +106,13 @@ static func _world_route_direction(route: Array, index: int) -> Vector2:
 	return direction.normalized() if direction.length_squared() > 0.0001 else Vector2(0, -1)
 
 
-static func _available_lateral_width(navigation_grid, cell: Vector2i, route_direction: Vector2i, maximum: int) -> int:
+static func _available_lateral_width(navigation_grid, cell: Vector2i, route_direction: Vector2i, maximum: int, movement_domain: String = "land", restriction_id: int = -1) -> int:
 	var lateral := Vector2i(0, 1) if absi(route_direction.x) >= absi(route_direction.y) else Vector2i(1, 0)
 	var width := 1
 	for sign_value in [-1, 1]:
 		for distance in range(1, maximum + 1):
 			var probe: Vector2i = cell + lateral * int(distance) * int(sign_value)
-			if not navigation_grid.is_walkable(probe):
+			if not navigation_grid.is_walkable_for(probe, movement_domain, restriction_id):
 				break
 			width += 1
 			if width >= maximum:

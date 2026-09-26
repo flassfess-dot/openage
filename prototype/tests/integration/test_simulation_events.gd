@@ -102,7 +102,7 @@ func test_production_completion_flows_through_tick() -> void:
 	var created: Dictionary = first_event(controller.events_after(), "entity_created")
 	assert_equal(created.get("payload", {}).get("entity_category"), "unit", "production completion emits unit creation through controller stream")
 	assert_equal(created.get("payload", {}).get("kind"), "quick_unit", "production event preserves trained kind")
-	assert_equal(world.get_reserved_population(1), 0, "production completion releases population reservation")
+	assert_equal(world.get_population(1), 1, "production completion adds living population")
 
 
 func first_event(events: Array, event_type: String) -> Dictionary:

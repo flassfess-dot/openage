@@ -117,7 +117,12 @@ func test_building_death_lifecycle(catalog) -> void:
 	assert_equal(dying_items.filter(func(item): return item["kind"] == "building" and item["stable_id"] == town_center["id"]).size(), 1, "dying building remains rendered")
 
 	world.advance(float(town_center["death_duration"]), 1, 2)
-	assert_equal(world.find_building(int(town_center["id"])), null, "building is removed after its destruction animation")
+	assert_equal(town_center["death_phase"], "ruin", "destruction animation leaves temporary rubble")
+	assert_true(world.find_building(int(town_center["id"])) != null, "rubble remains visible after destruction animation")
+	var ruin_items: Array = renderer.create_world_drawables(world, func(position): return position, 1.0, Callable(self, "fake_frame_info"))
+	assert_equal(ruin_items.filter(func(item): return item["kind"] == "building" and item["stable_id"] == town_center["id"]).size(), 1, "temporary rubble stays rendered without blocking movement")
+	world.advance(8.01, 1, 2)
+	assert_equal(world.find_building(int(town_center["id"])), null, "rubble disappears after its visible lifetime")
 
 	var house: Dictionary = world.add_building(43, "house", Vector2(14.0, 14.0), 1)
 	world.begin_building_destruction(house)

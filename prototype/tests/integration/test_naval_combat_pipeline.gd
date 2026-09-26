@@ -141,8 +141,8 @@ func verify_catapult_trireme_blast(catalog) -> void:
 	assert_float(float(projectile.get("blast_range", 0.0)), 1.0, "projectile inherits source blast radius")
 	assert_true(bool(projectile.get("friendly_fire", false)), "projectile carries explicit friendly-fire policy")
 	assert_equal(projectile.get("impact_effect_graphic_id"), 270, "projectile carries original impact graphic 270")
-	assert_equal(catalog.projectile_animation_frames(368).size(), 2, "both source flight directions for projectile 368 load")
-	assert_equal(catalog.projectile_frame_info(projectile).get("asset_name"), "catapult_ship_projectile", "projectile 368 resolves source art")
+	assert_equal(catalog.projectile_animation_frames(368).size(), 3, "projectile 368 loads the three-frame rock flight")
+	assert_equal(catalog.projectile_frame_info(projectile).get("asset_name"), "siege_rock", "projectile 368 uses the corrected rock art")
 	for unused in range(200):
 		world.update_projectiles(0.05, 1)
 		if not bool(projectile.get("active", true)):

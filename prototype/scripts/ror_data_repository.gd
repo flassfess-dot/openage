@@ -94,6 +94,8 @@ func simulation_stats(alias: String, civilization_id: int = -1) -> Dictionary:
 	var normalized := normalized_record(alias, civilization_id)
 	if not normalized.is_empty():
 		var stats: Dictionary = normalized.get("simulation", {}).duplicate(true)
+		var source: Dictionary = object_record(alias, civilization_id)
+		stats["footprint_radius"] = source.get("geometry", {}).get("radius", [])
 		stats["behavior_tags"] = behavior_tags(alias)
 		stats["identifiers"] = identifiers(alias)
 		stats["runtime"] = runtime_metadata(alias)

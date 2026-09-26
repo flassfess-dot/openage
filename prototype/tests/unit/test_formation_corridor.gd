@@ -11,6 +11,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_narrow_door_compresses_and_restores()
 	test_open_route_keeps_preferred_width()
+	test_water_route_uses_the_member_navigation_domain()
 
 	if failures.is_empty():
 		print("F-008 formation corridor tests passed")
@@ -48,6 +49,15 @@ func test_open_route_keeps_preferred_width() -> void:
 	assert_equal(plan["has_compression"], false, "open field needs no compression")
 	for mode in plan["modes"]:
 		assert_equal(mode, "preferred", "open route preserves selected form")
+
+
+func test_water_route_uses_the_member_navigation_domain() -> void:
+	var grid = NavigationGrid.new(Vector2i(16, 12))
+	grid.configure_terrain(func(_cell): return "water")
+	var finder = Pathfinder.new(grid)
+	var plan := FormationCorridor.plan(Vector2(2.5, 5.5), Vector2(13.5, 5.5), FormationGeometry.LINE, 3, 1.0, 0.3, finder, grid, "water", 3)
+	assert_true(not plan["route"].is_empty(), "water formation receives a naval corridor")
+	assert_true(plan["route"].all(func(point): return grid.is_walkable_for(Vector2i(floori(point.x), floori(point.y)), "water", 3)), "naval corridor remains on water-accessible cells")
 
 
 func assert_vector_close(actual: Vector2, expected: Vector2, context: String) -> void:

@@ -1,8 +1,11 @@
 class_name RoRSimulationEconomySystem
 extends RefCounted
 
+const POPULATION_POINT_SCALE := 2
+
 var resource_stockpiles_by_team: Dictionary = {}
 var population_by_team: Dictionary = {}
+var population_points_by_team: Dictionary = {}
 var population_reserved_by_team: Dictionary = {}
 var population_cap_by_team: Dictionary = {}
 var population_limit_by_team: Dictionary = {}
@@ -13,6 +16,7 @@ var population_housing_enabled_by_team: Dictionary = {}
 func reset(default_food: int = 180, default_wood: int = 120) -> void:
 	resource_stockpiles_by_team.clear()
 	population_by_team.clear()
+	population_points_by_team.clear()
 	population_reserved_by_team.clear()
 	population_cap_by_team.clear()
 	population_limit_by_team.clear()
@@ -60,7 +64,21 @@ func get_population(team: int) -> int:
 
 
 func add_population(team: int, amount: int) -> void:
-	population_by_team[team] = maxi(0, get_population(team) + amount)
+	add_population_points(team, amount * POPULATION_POINT_SCALE)
+
+
+func get_population_points(team: int) -> int:
+	return int(population_points_by_team.get(team, 0))
+
+
+func add_population_points(team: int, amount: int) -> void:
+	var points := maxi(0, get_population_points(team) + amount)
+	population_points_by_team[team] = points
+	population_by_team[team] = ceili(float(points) / float(POPULATION_POINT_SCALE))
+
+
+func get_population_cap_points(team: int) -> int:
+	return get_population_cap(team) * POPULATION_POINT_SCALE
 
 
 func get_reserved_population(team: int) -> int:
@@ -130,6 +148,7 @@ func snapshot() -> Dictionary:
 	return {
 		"resource_stockpiles": resource_stockpiles_by_team.duplicate(true),
 		"population": population_by_team.duplicate(true),
+		"population_points": population_points_by_team.duplicate(true),
 		"population_reserved": population_reserved_by_team.duplicate(true),
 		"population_cap": population_cap_by_team.duplicate(true),
 		"population_limit": population_limit_by_team.duplicate(true),

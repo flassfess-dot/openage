@@ -14,6 +14,7 @@ func _initialize() -> void:
 	test_foundation_completion_unlocks_unit(catalog)
 	test_unknown_runtime_type_is_rejected(catalog)
 	test_local_ai_build_sites(catalog)
+	test_local_build_site_cache_is_bounded(catalog)
 	if failures.is_empty():
 		print("I8-002 production availability tests passed")
 		quit(0)
@@ -90,6 +91,19 @@ func test_local_ai_build_sites(catalog) -> void:
 	var clearance := float(existing.get("footprint_radius", 1.0)) + float(option.get("footprint_radius", 1.0)) + 2.0
 	for site_value in spaced_sites:
 		assert_true(Vector2(site_value).distance_to(Vector2(existing.get("pos", Vector2.ZERO))) >= clearance, "site query applies the structure gap before consuming its candidate budget")
+
+
+func test_local_build_site_cache_is_bounded(catalog) -> void:
+	var world = configured_world(catalog)
+	world.add_unit(1, "villager", Vector2(12.0, 12.0), false)
+	world.update_fog_of_war()
+	for index in range(80):
+		world.local_build_site_cache[index] = {"tick": 99, "sites": {"house": []}}
+	world.local_build_site_cache[10001] = {"tick": 0, "sites": {"house": []}}
+	var sites: Dictionary = world.get_cached_local_build_sites(1, ["house"], 100, 10, 1)
+	assert_true(not sites.get("house", []).is_empty(), "cache eviction preserves a fresh authoritative site query")
+	assert_true(world.local_build_site_cache.size() <= world.MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES, "build-site cache has a fixed entry bound")
+	assert_true(not world.local_build_site_cache.has(10001), "expired build-site cache entry is evicted")
 
 
 func configured_world(catalog):

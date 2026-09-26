@@ -560,14 +560,14 @@
         "presentation_states": {
           "idle": {"asset_name": "fishing_boat_idle", "enemy_asset_name": "enemy_fishing_boat_idle", "graphic_field": "idle", "loop": true},
           "move": {"asset_name": "fishing_boat_move", "enemy_asset_name": "enemy_fishing_boat_move", "graphic_field": "move", "loop": true},
-          "work": {"asset_name": "fishing_boat_work", "enemy_asset_name": "enemy_fishing_boat_work", "graphic_id": 43, "loop": true},
+          "work": {"asset_name": "fishing_boat_work", "enemy_asset_name": "enemy_fishing_boat_work", "graphic_id": 43, "loop": true, "composite_parts": [{"asset_name": "fishing_boat_idle", "enemy_asset_name": "enemy_fishing_boat_idle", "graphic_id": 42, "loop": true}]},
           "death": {"asset_name": "fishing_boat_death", "enemy_asset_name": "enemy_fishing_boat_death", "graphic_field": "death", "loop": false}
         },
         "presentation_variants": {
           "14": {
             "idle": {"asset_name": "fishing_ship_idle", "enemy_asset_name": "enemy_fishing_ship_idle", "graphic_field": "idle", "loop": true},
             "move": {"asset_name": "fishing_ship_move", "enemy_asset_name": "enemy_fishing_ship_move", "graphic_field": "move", "loop": true},
-            "work": {"asset_name": "fishing_ship_work", "enemy_asset_name": "enemy_fishing_ship_work", "graphic_id": 784, "loop": true},
+            "work": {"asset_name": "fishing_ship_work", "enemy_asset_name": "enemy_fishing_ship_work", "graphic_id": 784, "loop": true, "composite_parts": [{"asset_name": "fishing_ship_idle", "enemy_asset_name": "enemy_fishing_ship_idle", "graphic_id": 44, "loop": true}]},
             "death": {"asset_name": "fishing_boat_death", "enemy_asset_name": "enemy_fishing_boat_death", "graphic_field": "death", "loop": false}
           }
         }
@@ -1266,7 +1266,7 @@
       "category": "projectile",
       "civilization_scope": "team",
       "behavior_tags": ["projectile", "naval", "blast"],
-      "runtime": {"asset_name": "catapult_ship_projectile", "graphic_id": 368, "loop": true}
+      "runtime": {"asset_name": "siege_rock", "graphic_id": 47, "loop": true}
     },
     {
       "alias": "arrow",
@@ -1296,7 +1296,7 @@
       "category": "projectile",
       "civilization_scope": "team",
       "behavior_tags": ["projectile"],
-      "runtime": {"asset_name": "hunter_spear", "graphic_id": 513, "loop": true}
+      "runtime": {"asset_name": "hunter_spear", "graphic_id": 513, "facing_offset_quarters": 1, "loop": true}
     },
     {
       "alias": "siege_rock",
@@ -1316,7 +1316,7 @@
       "category": "projectile",
       "civilization_scope": "team",
       "behavior_tags": ["projectile", "siege"],
-      "runtime": {"asset_name": "ballista_bolt", "graphic_id": 2, "loop": true}
+      "runtime": {"asset_name": "ballista_bolt", "graphic_id": 2, "facing_offset_quarters": 1, "loop": true}
     }
   ]
 }

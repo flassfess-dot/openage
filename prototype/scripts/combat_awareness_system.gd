@@ -68,6 +68,12 @@ func collect_commands(world, tick: int) -> Array:
 		var unit: Dictionary = unit_value
 		if not _eligible_for_awareness(world, unit):
 			continue
+		# Background acquisition must never replace an explicit player order.
+		# Attack-move opts into combat; an autonomous attack may retarget when its
+		# current target disappears. Ordinary move, work and manual attack do not.
+		var task := String(unit.get("task", "idle"))
+		if task not in ["idle", "attack_move"] and not (task == "attack" and bool(unit.get("attack_autonomous", false))):
+			continue
 		var stance := String(unit.get("stance", "passive"))
 		if stance == "passive":
 			continue
@@ -165,6 +171,8 @@ func _candidate_index(targets: Array, tick: int) -> Dictionary:
 
 func _eligible_for_awareness(world, unit: Dictionary) -> bool:
 	if float(unit.get("hp", 0.0)) <= 0.0 or not bool(unit.get("combat_enabled", false)):
+		return false
+	if world.entity_has_behavior_tag(unit, "scout") and int(unit.get("retaliation_target_id", -1)) < 0:
 		return false
 	if world.entity_is_static(unit) and String(unit.get("state", "complete")) != "complete":
 		return false

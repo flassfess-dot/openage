@@ -43,6 +43,7 @@ func test_command_payloads_are_owned() -> void:
 	assert_equal(Commands.ReturnResourcesCommand.new(17, [4], 90).params["target_building_id"], 90, "return-resources target is serializable command data")
 	assert_equal(Commands.CancelProductionCommand.new(18, [90], 2).params["queue_index"], 2, "production cancellation index is serializable command data")
 	assert_equal(Commands.ResignCommand.new(19).command_type(), "resign", "resign is an explicit player command")
+	assert_equal(Commands.DeleteEntityCommand.new(19, [4, 8]).command_type(), "delete_entity", "deletion is an explicit serializable entity command")
 	var board = Commands.BoardCommand.new(20, [4, 8], 17)
 	assert_equal(board.params, {"transport_id": 17}, "boarding target is serializable command data")
 	var selected_passengers: Array[int] = [4]

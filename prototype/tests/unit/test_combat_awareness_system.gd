@@ -10,6 +10,8 @@ func _initialize() -> void:
 	test_stance_rules()
 	test_neutral_autonomous_targeting()
 	test_multirate_awareness_deadlines()
+	test_scout_only_retaliates()
+	test_manual_orders_override_building_awareness()
 	if failures.is_empty():
 		print("I6-002 combat awareness stance tests passed")
 		quit(0)
@@ -111,6 +113,44 @@ func test_multirate_awareness_deadlines() -> void:
 	# background cadence even when the spatial phase is not due.
 	observer["task"] = "attack_move"
 	assert_equal(awareness.collect_commands(world, 2).size(), 1, "attack-move scans immediately off-phase")
+
+
+func test_scout_only_retaliates() -> void:
+	var world = open_world()
+	var scout: Dictionary = world.add_unit(1, "scout", Vector2(4.0, 4.0), false)
+	var enemy: Dictionary = world.add_unit(2, "clubman", Vector2(5.0, 4.0), false)
+	# This isolated world has no runtime catalog, so assign the behavior under test.
+	scout["behavior_tags"] = ["scout", "combatant"]
+	configure_awareness(scout, "aggressive", 6.0)
+	configure_awareness(enemy, "passive", 6.0)
+	world.update_fog_of_war()
+	var awareness := CombatAwarenessSystem.new()
+	assert_equal(awareness.collect_commands(world, 5).size(), 0, "Scout does not autonomously acquire a visible enemy")
+	scout["retaliation_target_id"] = int(enemy["id"])
+	var responses := awareness.collect_commands(world, 6)
+	assert_equal(responses.size(), 1, "Scout can retaliate against its attacker")
+	if not responses.is_empty():
+		assert_equal(int(responses[0].target_entity_id), int(enemy["id"]), "Scout retaliation retains its attacker")
+
+
+func test_manual_orders_override_building_awareness() -> void:
+	var world = open_world()
+	var observer: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	var enemy_building: Dictionary = world.add_building(800, "house", Vector2(5.0, 4.0), 2)
+	configure_awareness(observer, "aggressive", 6.0)
+	world.update_fog_of_war()
+	var awareness := CombatAwarenessSystem.new()
+	observer["task"] = "move"
+	assert_equal(awareness.collect_commands(world, 5).size(), 0, "manual move is not replaced by visible enemy building")
+	observer["task"] = "build"
+	assert_equal(awareness.collect_commands(world, 5).size(), 0, "manual work is not replaced by visible enemy building")
+	observer["task"] = "idle"
+	var idle_commands := awareness.collect_commands(world, 5)
+	assert_equal(idle_commands.size(), 1, "idle aggressive unit may acquire visible enemy building")
+	if not idle_commands.is_empty():
+		assert_equal(int(idle_commands[0].target_entity_id), int(enemy_building["id"]), "idle acquisition keeps building target")
+	observer["task"] = "attack_move"
+	assert_equal(awareness.collect_commands(world, 5).size(), 1, "explicit attack-move permits background target acquisition")
 
 
 func open_world():

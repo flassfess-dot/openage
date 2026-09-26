@@ -3,6 +3,7 @@
   "source_status": "engine_contract_pending_ror_ui_calibration",
   "player_count": {"minimum": 2, "maximum": 8},
   "civilizations": [
+    {"id": 0, "name": "Случайная"},
     {"id": 1, "name": "Египтяне"},
     {"id": 2, "name": "Греки"},
     {"id": 3, "name": "Вавилоняне"},
@@ -25,13 +26,19 @@
     {"id": "standard", "name": "Стандартная", "size": [72, 72], "max_players": 6},
     {"id": "large", "name": "Большая", "size": [96, 96], "max_players": 8},
     {"id": "huge", "name": "Огромная", "size": [128, 128], "max_players": 8},
-    {"id": "giant", "name": "Гигантская", "size": [200, 200], "max_players": 8}
+    {"id": "giant", "name": "Гигантская", "size": [200, 200], "max_players": 8},
+    {"id": "supergiant", "name": "Сверхгигантская", "size": [400, 400], "max_players": 8}
   ],
   "map_types": [
-    {"id": "grasslands", "name": "Материк", "generator_profile": "inland_v1", "topology": "inland", "requires_shared_land": true, "requires_naval_starts": false, "water_ratio": [0.0, 0.02]},
+    {"id": "small_islands", "name": "Малые острова", "generator_profile": "small_islands_v2", "topology": "islands", "requires_shared_land": false, "requires_naval_starts": true, "island_radius_fraction": 0.13, "water_ratio": [0.55, 0.86]},
+    {"id": "islands", "name": "Большие острова", "generator_profile": "large_islands_v2", "topology": "islands", "requires_shared_land": false, "requires_naval_starts": true, "island_radius_fraction": 0.18, "water_ratio": [0.35, 0.75]},
+    {"id": "coastal", "name": "Побережье", "generator_profile": "coastal_v2", "topology": "coastal", "requires_shared_land": true, "requires_naval_starts": true, "coast_fraction": 0.21, "water_ratio": [0.27, 0.51]},
+    {"id": "grasslands", "name": "Внутренняя карта", "generator_profile": "inland_v2", "topology": "inland", "requires_shared_land": true, "requires_naval_starts": false, "water_ratio": [0.0, 0.02]},
     {"id": "highlands", "name": "Нагорье", "generator_profile": "highlands_v1", "topology": "highlands", "requires_shared_land": true, "requires_naval_starts": false, "water_ratio": [0.0, 0.02]},
-    {"id": "coastal", "name": "Побережье", "generator_profile": "coastal_v1", "topology": "coastal", "requires_shared_land": true, "requires_naval_starts": true, "coast_fraction": 0.12, "water_ratio": [0.12, 0.30]},
-    {"id": "islands", "name": "Острова", "generator_profile": "islands_v1", "topology": "islands", "requires_shared_land": false, "requires_naval_starts": true, "island_radius_fraction": 0.12, "water_ratio": [0.25, 0.92]}
+    {"id": "continental", "name": "Континент", "generator_profile": "continental_v2", "topology": "continental", "requires_shared_land": true, "requires_naval_starts": true, "coast_fraction": 0.16, "water_ratio": [0.38, 0.72]},
+    {"id": "mediterranean", "name": "Средиземноморье", "generator_profile": "mediterranean_v1", "topology": "mediterranean", "requires_shared_land": false, "requires_naval_starts": true, "sea_fraction": 0.23, "water_ratio": [0.18, 0.31]},
+    {"id": "hill_country", "name": "Страна холмов", "generator_profile": "hill_country_v1", "topology": "hill_country", "requires_shared_land": true, "requires_naval_starts": false, "water_ratio": [0.0, 0.02], "cliff_profile": "broken_ridges_v1"},
+    {"id": "narrows", "name": "Узкие проходы", "generator_profile": "narrows_v1", "topology": "narrows", "requires_shared_land": true, "requires_naval_starts": false, "water_ratio": [0.0, 0.02], "cliff_profile": "central_gate_v1"}
   ],
   "resource_presets": [
     {"id": "standard", "name": "Стандартные", "resources": {"food": 200, "wood": 200, "stone": 150, "gold": 0}},
@@ -46,7 +53,11 @@
   ],
   "population_limits": [25, 50, 75, 100, 200, 500],
   "victory_modes": [
-    {"id": "conquest", "name": "Завоевание"},
-    {"id": "score_60", "name": "Счёт — 60 минут", "time_limit_seconds": 3600}
+    {"id": "standard", "name": "Стандартная", "rules": [{"type": "conquest"}, {"type": "artifacts", "hold_seconds": 900}, {"type": "ruins", "hold_seconds": 900}, {"type": "wonder", "hold_seconds": 900}]},
+    {"id": "conquest", "name": "Завоевание", "rules": [{"type": "conquest"}]},
+    {"id": "score_60", "name": "Счёт — 60 минут", "rules": [{"type": "score", "time_limit_seconds": 3600}]},
+    {"id": "wonder", "name": "Чудо света", "rules": [{"type": "wonder", "hold_seconds": 900}]},
+    {"id": "ruins", "name": "Руины", "rules": [{"type": "ruins", "hold_seconds": 900}]},
+    {"id": "artifacts", "name": "Артефакты", "rules": [{"type": "artifacts", "hold_seconds": 900}]}
   ]
 }

@@ -14,6 +14,7 @@ func _initialize() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
 	test_original_projectile_data(catalog)
+	test_projectile_visual_directions(catalog)
 	test_release_flight_and_impact(catalog)
 	test_ballistic_target_can_evade(catalog)
 	test_predictive_aim_and_accuracy(catalog)
@@ -40,6 +41,29 @@ func test_original_projectile_data(catalog) -> void:
 	assert_equal(catalog.projectile_animation_frames(9).size(), 37, "all stored arrow directions loaded")
 	var arrow_frame: Dictionary = catalog.projectile_frame_info({"projectile_unit_id": 9, "origin": Vector2.ZERO, "target_position": Vector2.RIGHT, "pos": Vector2.ZERO})
 	assert_equal(arrow_frame.get("asset_name"), "arrow", "arrow resolves through source-aware projectile registry")
+	var directions := [Vector2(1, 1), Vector2(-1, 1), Vector2(-1, -1), Vector2(1, -1)]
+	var expected_frames := [0, 18, 36, 18]
+	var expected_mirrors := [false, false, false, true]
+	for index in range(directions.size()):
+		var frame: Dictionary = catalog.projectile_frame_info({"projectile_unit_id": 9, "origin": Vector2.ZERO, "target_position": directions[index], "pos": Vector2.ZERO})
+		assert_equal(frame.get("frame_index"), expected_frames[index], "arrow uses source direction %d" % index)
+		assert_equal(frame.get("mirrored"), expected_mirrors[index], "arrow mirror matches source direction %d" % index)
+
+
+func test_projectile_visual_directions(catalog) -> void:
+	var flying_right := {"pos": Vector2.ZERO, "target_position": Vector2(1.0, -1.0)}
+	for source_id in [100, 204]:
+		var projectile := flying_right.duplicate()
+		projectile["projectile_unit_id"] = source_id
+		var frame: Dictionary = catalog.projectile_frame_info(projectile)
+		assert_equal(int(frame.get("frame_index", -1)), 0, "spear and ballista source frame zero points right: %d" % source_id)
+	var ship_rock: Dictionary = catalog.projectile_frame_info({"projectile_unit_id": 368, "pos": Vector2.ZERO, "target_position": Vector2.RIGHT})
+	assert_equal(ship_rock.get("asset_name"), "siege_rock", "catapult ship launches the source rock rather than a temple graphic")
+	var climbing := {"pos": Vector2(1.0, 0.0), "previous_pos": Vector2.ZERO, "target_position": Vector2(5.0, 0.0), "visual_height": 1.0, "previous_visual_height": 0.0}
+	var descending := climbing.duplicate()
+	descending["visual_height"] = 0.0
+	descending["previous_visual_height"] = 1.0
+	assert_true(ProjectileMotion.logical_facing(climbing, 72) != ProjectileMotion.logical_facing(descending, 72), "projectile sprite follows the visible ascent and descent, not only ground-plane travel")
 
 
 func test_release_flight_and_impact(catalog) -> void:

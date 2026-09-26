@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "gate_id": "P00-ROR-CORE-SOURCE-MEASUREMENTS",
+  "status": "capture_pending",
+  "reference_build": {
+    "product": "Age of Empires, the Rise of Rome",
+    "product_version": "1.1",
+    "file_version": "00.01.6.1120",
+    "executable_name": "EMPIRESX.EXE",
+    "executable_sha256": "b5bc3050ee50cf1b548d21da0509bf5bbe8904eb766705084ab8a2fcdf6d8a9f",
+    "data_name": "data2/empires.dat",
+    "data_sha256": "d47c59d9ecaf5b83b467c647a69d28eced6a0dc5b2fa873e930c86136df5eb9d"
+  },
+  "capture_contract": {
+    "observer_player": 1,
+    "game_speed": "normal",
+    "ruleset": "Rise of Rome 1.1",
+    "minimum_repetitions": 5,
+    "comparison_rule": "Record source data and user-visible behavior. Do not copy legacy navigation, collision, timing jitter or framebuffer limitations."
+  },
+  "scenes": [
+    {
+      "id": "production_cancel_destroy_convert",
+      "blocking_packages": ["P01"],
+      "purpose": "Disambiguate active and waiting unit or research refunds for explicit cancel, Stop, destruction and building conversion.",
+      "source_unit_ids": [109],
+      "required_metrics": ["operation_type", "active_cost", "waiting_costs", "transition", "refund", "remaining_queue", "active_operation_after"],
+      "modern_evidence": ["res://tests/unit/test_production_queue.gd", "res://tests/unit/test_technology_and_ages.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "logistics_existing_and_converted_units",
+      "blocking_packages": ["P01"],
+      "purpose": "Confirm Logistics population accounting for existing, newly trained, converted and dying Barracks units.",
+      "source_unit_ids": [12, 73],
+      "required_metrics": ["eligible_source_id", "population_before", "population_after_research", "new_unit_delta", "converted_unit_delta", "death_delta"],
+      "modern_evidence": ["res://tests/unit/test_population_support.gd", "res://tests/unit/test_simulation_economy_system.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "ballistics_speed_bands",
+      "blocking_packages": ["P03"],
+      "purpose": "Measure target speed and direction bands for Stone Thrower, Catapult and Heavy Catapult with and without Ballistics.",
+      "source_unit_ids": [35, 11, 36],
+      "required_metrics": ["attacker_source_id", "target_speed", "target_heading", "ballistics_researched", "shots", "hits", "miss_distance_tiles"],
+      "modern_evidence": ["res://tests/unit/test_projectiles.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "conversion_resistance_and_macedonian_stacking",
+      "blocking_packages": ["P03"],
+      "purpose": "Separate ordinary, ship and chariot resistance and determine Macedonian multiplier stacking.",
+      "source_unit_ids": [125, 40, 13],
+      "required_metrics": ["target_source_id", "target_class", "target_civilization", "attempts", "successes", "mean_chants", "forced_completion_count"],
+      "modern_evidence": ["res://tests/integration/test_temple_priest_conversion_pipeline.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "repair_heal_transport_matrix",
+      "blocking_packages": ["P04"],
+      "purpose": "Measure repair resource loss and rate, healing eligibility and transport occupancy or unload edge cases.",
+      "source_unit_ids": [83, 125, 15],
+      "required_metrics": ["target_source_id", "action", "actors", "elapsed_seconds", "hp_delta", "resource_delta", "accepted", "failure_reason", "cargo_before", "cargo_after"],
+      "modern_evidence": ["res://tests/integration/test_priest_actions_pipeline.gd", "res://tests/integration/test_transport_pipeline.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "tribute_trade_civilization_modifiers",
+      "blocking_packages": ["P05"],
+      "purpose": "Confirm tribute tax rounding and civilization modifiers together with source Dock-to-Dock trade profit.",
+      "source_unit_ids": [45, 17],
+      "required_metrics": ["civilization", "resource", "sent", "received", "tax", "map_size", "trade_distance_tiles", "trade_gold"],
+      "modern_evidence": ["res://tests/integration/test_naval_trade_pipeline.gd", "res://tests/integration/test_all_civilization_bonus_rules.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "allied_reveal_writing_knowledge",
+      "blocking_packages": ["P06"],
+      "purpose": "Separate initial allied Town Center reveal from explored-map and current-vision sharing before and after Writing.",
+      "source_unit_ids": [109],
+      "required_metrics": ["writing_researched", "ally_tc_known", "ally_live_vision_shared", "ally_explored_cells_shared", "enemy_last_known_present", "hidden_hp_updates", "hidden_destroy_updates"],
+      "modern_evidence": ["res://tests/unit/test_fog_of_war.gd", "res://tests/unit/test_simulation_snapshot.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "victory_and_allied_victory_modes",
+      "blocking_packages": ["P07"],
+      "purpose": "Record thresholds and allied-victory behavior for standard, conquest, score, time, Wonder, ruins and artifacts.",
+      "source_unit_ids": [276],
+      "required_metrics": ["mode", "settings", "trigger_tick", "winner_players", "winner_teams", "reason", "post_resign_control_state"],
+      "modern_evidence": ["res://tests/unit/test_victory_modes.gd", "res://tests/integration/test_generated_alliance_victory.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    },
+    {
+      "id": "hotkeys_overlay_and_sound_history",
+      "blocking_packages": ["P08"],
+      "purpose": "Confirm source hotkeys, F11 indicators and positional alert navigation without treating legacy screen limits as rules.",
+      "source_unit_ids": [73],
+      "required_metrics": ["action", "key", "visible_indicator", "indicator_state", "stored_cue_count", "camera_centers", "hidden_coordinate_leak"],
+      "modern_evidence": ["res://tests/unit/test_input_adapter.gd", "res://tests/unit/test_hud_view_model.gd"],
+      "original_observation": {"status": "pending", "artifacts": [], "metrics": {}}
+    }
+  ],
+  "source_owned_gaps": [],
+  "completion_rules": [
+    "Every scene has immutable original artifact hashes and all required metrics.",
+    "Statistical scenes meet their declared repetition count and retain raw observations.",
+    "Any tolerated difference is added to the plan's deliberate-differences section.",
+    "A package may be INTEGRATED while a non-blocking measurement is pending, but may not claim PARITY while one of its blocking scenes is pending."
+  ]
+}

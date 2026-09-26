@@ -23,6 +23,9 @@ func _initialize() -> void:
 	assert_true(not bool(invalid.get("valid", true)), "invalid external match is rejected")
 	assert_true(invalid.get("errors", []).has("map_size_out_of_range"), "invalid size reports stable reason")
 	assert_true(invalid.get("errors", []).has("player_team_duplicate:1"), "duplicate team reports stable reason")
+	var oversized := definition.duplicate(true)
+	oversized["map"]["size"] = [401, 400]
+	assert_true(MatchDefinition.normalize(oversized).get("errors", []).has("map_size_out_of_range"), "maps above the supergiant ceiling remain rejected")
 
 	var missing_source_ai := MatchDefinition.normalize({
 		"map": {"size": [24, 24]},

@@ -46,7 +46,7 @@ func validate_target(converter: Dictionary, target: Variant, require_faith: bool
 	var source_unit_id := int(target.get("source_unit_id", -1))
 	if source_unit_id in [109, 276] or world.entity_has_behavior_tag(target, "wonder"):
 		return "conversion_immune"
-	var target_is_building := world.find_building(int(target.get("id", -1))) != null
+	var target_is_building: bool = world.find_building(int(target.get("id", -1))) != null
 	if (target_is_building or is_converter(target)) and not world.technology_system.is_researched(converter_team, MONOTHEISM_TECHNOLOGY_ID):
 		return "monotheism_required"
 	return ""
@@ -63,6 +63,11 @@ func is_in_range(converter: Dictionary, target: Dictionary) -> bool:
 
 
 func resistance_multiplier(converter: Dictionary, target: Dictionary) -> float:
+	var resistance: Dictionary = target.get("components", {}).get("conversion_resistance", {})
+	if not resistance.is_empty():
+		return maxf(0.0, float(resistance.get("chance_multiplier", 1.0))) * maxf(0.0, float(resistance.get("civilization_multiplier", 1.0)))
+	# Old fixtures/saves without the normalized target policy retain their
+	# previous probability until reconstructed through the current bootstrap.
 	if world.entity_has_behavior_tag(target, "chariot") or String(target.get("movement_domain", "land")) == "water" or world.entity_has_behavior_tag(target, "naval"):
 		return float(component(converter).get("resistant_target_multiplier", RESISTANT_TARGET_MULTIPLIER))
 	return 1.0

@@ -13,7 +13,7 @@ func _initialize() -> void:
 	catalog.load_generated_data()
 	test_original_age_contract(catalog)
 	test_starting_age_and_post_iron_contract(catalog)
-	test_prerequisites_shared_queue_and_completion(catalog)
+	test_prerequisites_and_research_completion(catalog)
 	test_automatic_hidden_technology(catalog)
 	test_effects_availability_and_graphics(catalog)
 	test_cancel_refund_and_command(catalog)
@@ -70,7 +70,7 @@ func test_starting_age_and_post_iron_contract(catalog) -> void:
 	assert_equal(town_center_world.technology_system.can_research(1, 101, 109), "technology_disabled", "classic Town Center node disables its age research")
 
 
-func test_prerequisites_shared_queue_and_completion(catalog) -> void:
+func test_prerequisites_and_research_completion(catalog) -> void:
 	var world = original_world(catalog)
 	var town_center: Dictionary = world.add_building(800, "town_center", Vector2(10.0, 10.0), 1)
 	assert_equal(world.get_current_age(1), 100, "match starts in Stone Age")
@@ -81,17 +81,16 @@ func test_prerequisites_shared_queue_and_completion(catalog) -> void:
 	assert_equal(world.technology_system.can_research(1, 101, 109), "", "two-of-four hidden connector unlocks Tool Age")
 	world.set_resource_amount(1, 0, 1000)
 	var research: Variant = world.enqueue_research(800, 1, 101)
-	assert_true(research != null, "valid age research enters building queue")
-	assert_equal(world.get_food(), 500, "research reserves exact original cost")
-	var trained: Variant = world.enqueue_unit_production(800, 1, "clubman")
-	assert_true(trained != null, "unit can wait behind research in same queue")
+	assert_true(research != null, "valid age research starts in an idle building")
+	assert_equal(world.get_food(), 500, "research deducts exact original cost")
+	assert_true(world.technology_system.is_researching(1, 101), "active research is tracked authoritatively")
 	world.update_production(119.95)
 	assert_equal(world.get_current_age(1), 100, "age does not complete early")
-	assert_float(float(town_center["production_queue"][1]["progress"]), 0.0, "second queue item cannot progress in parallel")
+	assert_true(float(town_center["production_progress"]) > 0.99, "building exposes active research progress")
 	world.update_production(0.05)
 	assert_equal(world.get_current_age(1), 101, "Tool Age completes at original duration")
 	assert_equal(world.last_completed_research_id, 101, "completion event stores technology id")
-	assert_equal(town_center["production_queue"].size(), 1, "completed research leaves following unit queued")
+	assert_true(not world.technology_system.is_researching(1, 101), "completion clears active research state")
 
 
 func test_effects_availability_and_graphics(catalog) -> void:
@@ -122,8 +121,8 @@ func test_cancel_refund_and_command(catalog) -> void:
 	var controller = GameController.new(world)
 	controller.enqueue_command(Commands.ResearchCommand.new(0, [802], "101"))
 	controller.process_commands()
-	assert_equal(town_center["production_queue"].size(), 1, "ResearchCommand reaches the shared queue")
-	assert_equal(world.get_food(), 200, "command path reserves research cost")
+	assert_true(world.technology_system.is_researching(1, 101), "ResearchCommand reaches authoritative research state")
+	assert_equal(world.get_food(), 200, "command path deducts research cost")
 	assert_true(world.cancel_production(802, 0), "active research can be cancelled")
 	assert_equal(world.get_food(), 700, "cancelled research refunds full cost")
 	assert_true(not world.technology_system.is_researching(1, 101), "cancel clears researching state")

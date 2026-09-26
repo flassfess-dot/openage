@@ -9,6 +9,7 @@ const COMPONENT_NAMES: Array[String] = [
 	"vision",
 	"combat",
 	"conversion",
+	"conversion_resistance",
 	"healing",
 	"resource_carrier",
 	"cargo",
@@ -48,6 +49,9 @@ static func for_unit(entity_id: int, team: int, civilization_id: int, kind: Stri
 			105: healing_command = command
 	var conversion_enabled := not conversion_command.is_empty()
 	var conversion_runtime: Dictionary = stats.get("runtime", {}).get("conversion", {})
+	var resistance_runtime: Dictionary = stats.get("runtime", {}).get("conversion_resistance", {})
+	var resistance_class := "chariot" if "chariot" in behavior_tags else "ship" if movement_domain == "water" or "naval" in behavior_tags else "ordinary"
+	var legacy_resistance := 1.0 if resistance_class == "ordinary" else float(conversion_runtime.get("resistant_target_multiplier", 0.25))
 	var healing_runtime: Dictionary = stats.get("runtime", {}).get("healing", {})
 	var cargo_runtime: Dictionary = stats.get("runtime", {}).get("cargo", {})
 	var trade_runtime: Dictionary = stats.get("runtime", {}).get("trade", {})
@@ -142,10 +146,17 @@ static func for_unit(entity_id: int, team: int, civilization_id: int, kind: Stri
 			"resistant_target_multiplier": clampf(float(conversion_runtime.get("resistant_target_multiplier", 0.25)), 0.0, 1.0),
 			"active": false,
 		},
+		"conversion_resistance": {
+			"class": String(resistance_runtime.get("class", resistance_class)),
+			"chance_multiplier": clampf(float(resistance_runtime.get("chance_multiplier", legacy_resistance)), 0.0, 1.0),
+			"civilization_multiplier": maxf(0.0, float(resistance_runtime.get("civilization_multiplier", 1.0))),
+		},
 		"healing": {
 			"enabled": not healing_command.is_empty(),
 			"base_rate": maxf(0.0, float(healing_command.get("work_value1", 0.0))),
 			"range": maxf(0.0, float(healing_runtime.get("range", 4.0))),
+			"auto_chain_enabled": bool(healing_runtime.get("auto_chain_enabled", true)),
+			"auto_chain_radius": maxf(0.0, float(healing_runtime.get("auto_chain_radius", healing_runtime.get("range", 4.0)))),
 			"bonus_resource_id": int(healing_runtime.get("bonus_resource_id", 56)),
 			"rate_multiplier": 1.0,
 			"target_id": -1,
@@ -222,6 +233,7 @@ static func for_unit(entity_id: int, team: int, civilization_id: int, kind: Stri
 			"completion_reason": "idle",
 			"revision": 0,
 			"history": [],
+			"queued": [],
 		},
 		"identity": {
 			"entity_id": entity_id,

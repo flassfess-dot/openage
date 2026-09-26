@@ -80,6 +80,8 @@ func verify_rule_resource_precision(catalog) -> void:
 
 func verify_palmyran_runtime_bonus(catalog) -> void:
 	var world = configured_world(catalog, 15)
+	assert_near(world.technology_system.tribute_tax(1), 0.0, 0.0001, "Palmyran tribute transaction reads zero source tax")
+	assert_near(world.technology_system.trade_profit_multiplier(1), 2.0, 0.0001, "Palmyran trade policy supplies double profit")
 	var villager: Dictionary = world.add_unit(1, "villager", Vector2(6.0, 6.0), false)
 	assert_near(float(villager.get("components", {}).get("combat", {}).get("base_armor", 0.0)), 1.0, 0.0001, "Palmyran villagers receive one base armor")
 	var incoming := [{"type_id": 4, "amount": 3}]

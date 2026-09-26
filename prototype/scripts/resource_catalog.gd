@@ -67,15 +67,18 @@ func load() -> void:
 		"grass": load_frames("terrain_grass", 9),
 		"sand": load_frames("terrain_sand", 9),
 		"water": load_frames("terrain_water", 4),
+		"water_dark": load_frames("terrain_water_dark", 4),
 	}
 	terrain_all_textures = {
 		"grass": load_frames("terrain_grass", 25),
 		"sand": load_frames("terrain_sand", 25),
 		"water": load_frames("terrain_water", 20),
+		"water_dark": load_frames("terrain_water_dark", 20),
 	}
 	terrain_border_textures = {
 		2: load_frames("border_desert_water", 12),
 		3: load_frames("border_grass_water", 12),
+		7: load_frames("border_water_dark", 4),
 		4: load_frames("border_grass_desert", 12),
 		5: load_frames("border_grass_forest", 12),
 		6: load_frames("border_grass_desert2", 4),
@@ -247,13 +250,13 @@ func building_frame_info(building: Dictionary, animation_time: float = 0.0) -> D
 
 
 func resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
-	var source_frame := source_resource_frame_info(resource)
+	var source_frame := source_resource_frame_info(resource, animation_time)
 	if not source_frame.is_empty():
 		return source_frame
 	return resource_presentations.frame_info(resource, animation_time)
 
 
-func source_resource_frame_info(resource: Dictionary) -> Dictionary:
+func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
 	var depleted := int(resource.get("amount", 0)) <= 0
 	var graphic_field := "source_depleted_graphic_id" if depleted else "source_graphic_id"
 	var asset_field := "source_depleted_asset_name" if depleted else "source_graphic_asset_name"
@@ -270,6 +273,15 @@ func source_resource_frame_info(resource: Dictionary) -> Dictionary:
 	var frame_index := frames.size() - 1 if depleted else posmod(int(resource.get("source_frame", int(resource.get("id", 0)))), frames.size())
 	if not depleted and int(resource.get("source_frame", -1)) < 0:
 		frame_index = posmod(int(resource.get("id", 0)), frames.size())
+	if not depleted and String(resource.get("kind", "")) in ["deep_fish", "shore_fish"]:
+		var frames_per_angle := maxi(1, int(spec.get("frames_per_angle", frames.size())))
+		var angle_count := maxi(1, mini(int(spec.get("angle_count", 1)), floori(float(frames.size()) / float(frames_per_angle))))
+		var direction := posmod(int(resource.get("id", 0)), angle_count)
+		var frame_rate := maxf(0.001, float(spec.get("frame_rate", 0.1)))
+		var animation_duration := float(frames_per_angle) * frame_rate
+		var cycle_duration := animation_duration + maxf(0.0, float(spec.get("replay_delay", 0.0)))
+		var phase := fmod(maxf(0.0, animation_time) + float(posmod(int(resource.get("id", 0)) * 1618, 1000)) / 1000.0 * cycle_duration, cycle_duration)
+		frame_index = direction * frames_per_angle + clampi(floori(minf(phase, animation_duration - 0.0001) / frame_rate), 0, frames_per_angle - 1)
 	var texture: Texture2D = frames[frame_index]
 	if texture == null:
 		return {}

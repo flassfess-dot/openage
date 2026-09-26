@@ -29,6 +29,7 @@ func test_buttons_and_signals() -> void:
 		assert_equal(hud.formation_buttons[formation_name].text, "", "%s formation uses icon-only presentation" % formation_name)
 	assert_equal(hud.train_button.tooltip_text.is_empty(), false, "train tooltip")
 	hud.set_state("WEDGE", false)
+	assert_true(not hud.train_button.text.contains("CLUBMAN"), "compatibility control no longer advertises debug Clubman training")
 	assert_equal(hud.formation_buttons["WEDGE"].button_pressed, true, "pressed formation state")
 	assert_equal(hud.formation_buttons["LINE"].button_pressed, false, "inactive formation state")
 	assert_equal(hud.train_button.disabled, true, "disabled train state")
@@ -60,6 +61,25 @@ func test_buttons_and_signals() -> void:
 	assert_equal(hud.train_button.disabled, false, "available training command is enabled")
 	hud.train_button.emit_signal("pressed")
 	assert_equal(train_request, ["clubman", 80], "training signal preserves unit and producer IDs")
+	var cancel_request := [-1, -1]
+	hud.cancel_production_requested.connect(func(building_id: int, queue_index: int):
+		cancel_request[0] = building_id
+		cancel_request[1] = queue_index
+	)
+	hud.set_view_model({"commands": [
+		{"type": "train", "id": "clubman", "building_id": 80, "label": "Воин с палицей", "queue_count": 2, "cancel_queue_index": 1, "enabled": false, "reason": "insufficient_resources"},
+	]})
+	assert_equal(hud.queue_badges[0].text, "×2", "unit button badge shows its queued count even when training is unavailable")
+	assert_true(hud.queue_badges[0].visible, "queued count badge remains visible on a disabled train command")
+	hud.set_view_model({"commands": [
+		{"type": "train", "id": "scout", "building_id": 80, "label": "Разведчик", "hotkey": "T", "queue_count": 2, "cancel_queue_index": 1, "enabled": true, "reason": ""},
+	]})
+	assert_true(hud.train_button.tooltip_text.contains("T"), "source shortcut remains discoverable beside an icon")
+	var right_click := InputEventMouseButton.new()
+	right_click.button_index = MOUSE_BUTTON_RIGHT
+	right_click.pressed = true
+	hud._on_action_gui_input(right_click, 0)
+	assert_equal(cancel_request, [80, 1], "unit button context action cancels one waiting instance")
 	var research_request := [-1, -1]
 	hud.research_requested.connect(func(technology_id: int, building_id: int):
 		research_request[0] = technology_id

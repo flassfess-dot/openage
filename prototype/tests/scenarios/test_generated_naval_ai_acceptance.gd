@@ -44,6 +44,7 @@ func _initialize() -> void:
 	var issued_types: Dictionary = {}
 	var accepted_types: Dictionary = {}
 	var rejected_reasons: Dictionary = {}
+	var rejected_types: Dictionary = {}
 	var accepted_water_orders := 0
 	var fish_discovered := false
 
@@ -69,6 +70,7 @@ func _initialize() -> void:
 			else:
 				var reason := String(result.get("reason", "unknown"))
 				rejected_reasons[reason] = int(rejected_reasons.get(reason, 0)) + 1
+				rejected_types[command_type] = int(rejected_types.get(command_type, 0)) + 1
 		var completed_dock_exists: bool = world.get_buildings().any(func(building): return int(building.get("team", 0)) == AI_TEAM and String(building.get("kind", "")) == "dock" and String(building.get("state", "complete")) == "complete")
 		var scout_exists: bool = world.get_units().any(func(unit): return int(unit.get("team", 0)) == AI_TEAM and float(unit.get("hp", 0.0)) > 0.0 and String(unit.get("kind", "")) == "scout_ship")
 		if completed_dock_exists and scout_exists and fish_discovered and accepted_water_orders > 0:
@@ -88,7 +90,26 @@ func _initialize() -> void:
 	if failures.is_empty():
 		print("E5-006C naval exploration reached at tick %d: dock=%d scouts=%d fish_discovered=%s water_orders=%d" % [controller.tick_index, completed_docks.size(), scout_ships.size(), fish_discovered, accepted_water_orders])
 	else:
-		print("E5-006C naval failure diagnostics tick=%d age=%d issued=%s accepted=%s rejected=%s result=%s" % [controller.tick_index, world.get_current_age(AI_TEAM), issued_types, accepted_types, rejected_reasons, world.get_victory_result()])
+		var final_knowledge := SimulationSnapshot.presentation(world, controller.tick_index, AI_TEAM, ai.presentation_options())
+		var visible_enemy_count: int = final_knowledge.get("units", []).filter(func(unit): return int(unit.get("team", 0)) > 0 and int(unit.get("team", 0)) != AI_TEAM).size()
+		visible_enemy_count += final_knowledge.get("buildings", []).filter(func(building): return int(building.get("team", 0)) > 0 and int(building.get("team", 0)) != AI_TEAM).size()
+		var water_navigation: Dictionary = final_knowledge.get("navigation", {})
+		var known_fish_ids: Dictionary = {}
+		for resource_value in final_knowledge.get("resources", []):
+			if String(resource_value.get("kind", "")) == "deep_fish":
+				known_fish_ids[int(resource_value.get("id", -1))] = true
+		var fish_diagnostics: Array = []
+		for resource_value in world.get_resources():
+			if String(resource_value.get("kind", "")) != "deep_fish":
+				continue
+			var position := Vector2(resource_value.get("pos", Vector2.ZERO))
+			fish_diagnostics.append({"id": resource_value.get("id"), "pos": position, "amount": resource_value.get("amount"), "known": known_fish_ids.has(int(resource_value.get("id", -1))), "fog": world.get_fog_of_war().state_at_cell(AI_TEAM, Vector2i(floori(position.x), floori(position.y)))})
+		var ship_diagnostics: Array = water_units.map(func(unit): return {"id": unit.get("id"), "kind": unit.get("kind"), "pos": unit.get("pos"), "task": unit.get("task"), "reason": unit.get("diagnostic_reason"), "path_status": unit.get("path_status"), "destination": unit.get("destination")})
+		print("E5-006C naval failure diagnostics tick=%d age=%d issued=%s accepted=%s rejected=%s rejected_types=%s visible_enemies=%d result=%s" % [controller.tick_index, world.get_current_age(AI_TEAM), issued_types, accepted_types, rejected_reasons, rejected_types, visible_enemy_count, world.get_victory_result()])
+		print("E5-006C naval exploration detail reachable_water=%d frontier_water=%d ships=%s fish=%s" % [water_navigation.get("reachable", {}).get("water", []).size(), water_navigation.get("reachable_frontier", {}).get("water", []).size(), ship_diagnostics, fish_diagnostics])
+		print("E5-006C economy state=%s units=%s" % [final_knowledge.get("player_state", {}), own_units.map(func(unit): return {"id": unit.get("id"), "kind": unit.get("kind"), "task": unit.get("task"), "reason": unit.get("diagnostic_reason"), "pos": unit.get("pos"), "target_resource": unit.get("resource_id"), "carried": unit.get("carried_amount"), "deposits": unit.get("deposit_cycles")})])
+		print("E5-006C buildings=%s" % [own_buildings.map(func(building): return {"kind": building.get("kind"), "state": building.get("state"), "pos": building.get("pos"), "progress": building.get("build_progress")})])
+		print("E5-006C dock production=%s" % [final_knowledge.get("buildings", []).filter(func(building): return int(building.get("team", 0)) == AI_TEAM and String(building.get("kind", "")) == "dock").map(func(building): return {"queue": building.get("production_queue", []), "train": building.get("command_options", {}).get("train", [])})])
 	finish()
 
 

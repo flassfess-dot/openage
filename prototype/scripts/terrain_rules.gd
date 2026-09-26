@@ -4,9 +4,10 @@ const TERRAIN_FRAME_COUNTS := {
 	"grass": 9,
 	"sand": 9,
 	"water": 4,
+	"water_dark": 4,
 }
 
-const TERRAIN_IDS := {"grass": 0, "water": 1, "sand": 6, "forest_floor": 10}
+const TERRAIN_IDS := {"grass": 0, "water": 1, "water_dark": 22, "sand": 6, "forest_floor": 10}
 const WATER_TERRAIN_IDS := [1, 4, 22]
 const OPEN_WATER_TERRAIN_IDS := [1, 22]
 const SOURCE_FOREST_TERRAIN_IDS := [10, 13, 19, 20]
@@ -28,6 +29,7 @@ const BORDER_ASSET_NAMES := {
 	4: "border_grass_desert",
 	5: "border_grass_forest",
 	6: "border_grass_desert2",
+	7: "border_water_dark",
 }
 const BORDER_DESERT_WATER := 2
 const BORDER_GRASS_WATER := 3
@@ -48,7 +50,8 @@ static func terrain_at(cell: Vector2i) -> String:
 
 
 static func is_land_walkable(terrain: String) -> bool:
-	return terrain in ["land", "shore", "grass", "sand"]
+	# Forest-floor artwork does not obstruct a cell; actual trees do.
+	return terrain in ["land", "shore", "grass", "sand", "forest_floor"]
 
 
 static func is_water_navigable(terrain: String) -> bool:
@@ -108,7 +111,8 @@ static func base_texture_kind(terrain_id: int, terrain_catalog: Dictionary) -> S
 		visited[current_id] = true
 		match current_id:
 			0: return "grass"
-			1, 22: return "water"
+			1: return "water"
+			22: return "water_dark"
 			4: return "sand"
 			6: return "sand"
 		var record: Dictionary = terrain_catalog.get("terrains", {}).get(str(current_id), {})
@@ -149,6 +153,15 @@ static func border_layers(cell: Vector2i, terrain_provider: Callable, terrain_ca
 				if mask & bit:
 					layers.append(make_border_layer(border_id, style1_frame_for_edge(bit), mask))
 		else:
+			if mask not in STYLE0_CORNER_MASKS and mask not in [EDGE_NEGATIVE_X, EDGE_NEGATIVE_Y, EDGE_POSITIVE_X, EDGE_POSITIVE_Y]:
+				# Source style-0 graphics have single edges and two-edge corners,
+				# but no three-/four-edge sprite. Draw every exposed edge instead
+				# of silently discarding all but the first one at tight bays.
+				for edge in EDGE_DIRECTIONS:
+					var bit := int(edge["bit"])
+					if mask & bit:
+						layers.append(make_border_layer(style0_sprite_border_id(border_id, bit), style0_frame_for_mask(bit, cell, map_seed), bit))
+				continue
 			var diagonal_neighbor_id := corner_diagonal_neighbor_id(cell, mask, terrain_provider)
 			var frame := style0_frame_for_mask(mask, cell, map_seed, current_id, diagonal_neighbor_id, border_id, terrain_catalog)
 			if frame >= 0:

@@ -48,6 +48,7 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 		definitions[source_id] = {
 			"asset_name": asset_name,
 			"graphic_id": int(runtime.get("graphic_id", -1)),
+			"facing_offset_quarters": int(runtime.get("facing_offset_quarters", 0)),
 			"loop": bool(runtime.get("loop", true)),
 		}
 
@@ -68,7 +69,8 @@ func frame_info(projectile: Dictionary) -> Dictionary:
 	var descriptor = descriptors_by_source.get(source_unit_id)
 	if frames.is_empty() or descriptor == null:
 		return {}
-	var facing := ProjectileMotion.logical_facing(projectile, descriptor.logical_angle_count)
+	var quarter_offset := int(definitions.get(source_unit_id, {}).get("facing_offset_quarters", 0))
+	var facing := posmod(ProjectileMotion.logical_facing(projectile, descriptor.logical_angle_count) + roundi(float(descriptor.logical_angle_count) * float(quarter_offset) / 4.0), descriptor.logical_angle_count)
 	var resolved: Dictionary = descriptor.resolve(facing, float(projectile.get("elapsed", 0.0)), frames.size())
 	var frame_index := int(resolved.get("frame_index", 0))
 	var texture: Texture2D = frames[frame_index]

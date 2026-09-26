@@ -4,17 +4,26 @@ extends RefCounted
 const Commands := preload("res://scripts/commands.gd")
 
 
-static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary = {}) -> Array:
+static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary = {}, reserved_unit_ids: Dictionary = {}) -> Array:
 	if int(snapshot.get("observer_team", -1)) != team:
 		return []
 	var commands: Array = []
 	var own_units: Array = snapshot.get("units", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
-	var idle_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("task", "idle")) == "idle")
+	var idle_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("task", "idle")) == "idle" and not reserved_unit_ids.has(int(entity.get("id", -1))))
 	var own_structures: Array = snapshot.get("buildings", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
 	var own_buildings: Array = own_structures.filter(func(entity): return String(entity.get("state", "complete")) == "complete")
+	var water_frontier: Array = snapshot.get("navigation", {}).get("reachable_frontier", {}).get("water", [])
+	var naval_scout_pending := not water_frontier.is_empty() and own_buildings.any(func(building): return String(building.get("kind", "")) == "dock")
+	if naval_scout_pending:
+		naval_scout_pending = own_units.any(func(unit): return String(unit.get("movement_domain", "")) == "water" and bool(unit.get("components", {}).get("worker", {}).get("enabled", false)))
+		naval_scout_pending = naval_scout_pending and not own_units.any(func(unit): return String(unit.get("movement_domain", "")) == "water" and (bool(unit.get("combat_enabled", false)) or "combatant" in unit.get("behavior_tags", [])))
+	var blocked_population := int(snapshot.get("player_state", {}).get("blocked_population_queues", 0)) > 0 or own_buildings.any(func(building): return not building.get("production_queue", []).is_empty() and String(building.get("production_queue", [])[0].get("status", "")) == "blocked_population")
+	var queued_population_points := _active_order_population_points(own_buildings)
 	var land_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("movement_domain", "land")) == "land")
-	var construction_workers: Array = land_workers.filter(func(entity): return String(entity.get("task", "idle")) in ["idle", "gather"])
+	var construction_workers: Array = land_workers.filter(func(entity): return String(entity.get("task", "idle")) in ["idle", "gather"] and not reserved_unit_ids.has(int(entity.get("id", -1))))
 	var land_worker_count := land_workers.size()
+	var military_count := own_units.filter(func(entity): return not bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", []))).size()
+	var wartime_combatant_target := int(policy.get("wartime_combatant_target", 0))
 	var age_intent := _age_advance_intent(own_buildings, snapshot.get("player_state", {}), policy, land_worker_count, tick)
 	if age_intent.has("command"):
 		commands.append(age_intent["command"])
@@ -29,7 +38,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 	if not active_foundations.is_empty() and not land_workers.is_empty() and int(active_foundations[0].get("builder_count", 0)) == 0 and not foundation_has_assigned_worker:
 		var foundation: Dictionary = active_foundations[0]
 		var reachable_builder_ids: Array = foundation.get("reachable_builder_ids", [])
-		var builder_candidates: Array = land_workers.filter(func(worker): return not foundation.has("reachable_builder_ids") or int(worker.get("id", -1)) in reachable_builder_ids)
+		var builder_candidates: Array = land_workers.filter(func(worker): return not reserved_unit_ids.has(int(worker.get("id", -1))) and (not foundation.has("reachable_builder_ids") or int(worker.get("id", -1)) in reachable_builder_ids))
 		builder_candidates.sort_custom(func(left, right):
 			var left_stuck := 1 if String(left.get("diagnostic_reason", "")).begins_with("stuck_") else 0
 			var right_stuck := 1 if String(right.get("diagnostic_reason", "")).begins_with("stuck_") else 0
@@ -54,6 +63,8 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 		if not active_foundations.is_empty():
 			break
 		var kind := String(kind_value)
+		if naval_scout_pending and kind not in ["house", "dock"]:
+			continue
 		if age_intent.has("command"):
 			continue
 		if bool(age_intent.get("block_construction", false)) and not _age_saving_build_allowed(kind, construction_workers, age_intent.get("cost", {}), policy.get("age_saving_construction_exceptions", [])):
@@ -65,7 +76,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 			continue
 		if same_kind.any(func(building): return String(building.get("state", "complete")) != "complete"):
 			continue
-		if kind == "house" and not _needs_housing(snapshot.get("player_state", {}), int(policy.get("housing_buffer", 0))):
+		if kind == "house" and not _needs_housing(snapshot.get("player_state", {}), int(policy.get("housing_buffer", 0)), blocked_population, queued_population_points):
 			continue
 		var sites: Array = snapshot.get("build_sites", {}).get(kind, [])
 		var candidates: Array = []
@@ -105,6 +116,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 			committed_workers[worker_id] = true
 			break
 	var resources: Array = snapshot.get("resources", []).filter(func(entity): return int(entity.get("amount", 0)) > 0)
+	var reachable_resource_cells := _reachable_cells_by_domain(snapshot.get("navigation", {}))
 	for building_value in snapshot.get("buildings", []):
 		var building: Dictionary = building_value
 		if bool(building.get("harvestable", false)) and int(building.get("team", 0)) == team and int(building.get("amount", 0)) > 0:
@@ -116,9 +128,38 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 		var age_resources := resources.filter(func(resource): return int(resource.get("resource_type_id", -1)) in age_resource_types)
 		if not age_resources.is_empty():
 			resources = age_resources
-	if not idle_workers.is_empty() and not resources.is_empty():
+	if not resources.is_empty():
 		var pairs: Array = []
-		for worker_value in idle_workers:
+		var stockpile: Dictionary = snapshot.get("player_state", {})
+		var desired_stock := {0: 600 if int(stockpile.get("age", 100)) <= 100 else 450, 1: 350, 2: 150, 3: 150}
+		for resource_type_value in age_intent.get("cost", {}).keys():
+			var type_id := int(resource_type_value)
+			if desired_stock.has(type_id):
+				desired_stock[type_id] = maxi(int(desired_stock[type_id]), int(age_intent["cost"][resource_type_value]) + 100)
+		var resource_names := ["food", "wood", "stone", "gold"]
+		var shortages: Dictionary = {}
+		var critical_type := -1
+		for resource_type in range(resource_names.size()):
+			shortages[resource_type] = maxi(0, int(desired_stock[resource_type]) - int(stockpile.get(resource_names[resource_type], 0)))
+			if int(shortages[resource_type]) > 0 and (critical_type < 0 or int(shortages[resource_type]) > int(shortages[critical_type])):
+				critical_type = resource_type
+		var resources_by_id: Dictionary = {}
+		for resource_value in snapshot.get("resources", []):
+			resources_by_id[int(resource_value.get("id", -1))] = resource_value
+		var candidate_workers: Array = idle_workers.duplicate()
+		if critical_type >= 0:
+			for worker_value in own_units:
+				var active_worker: Dictionary = worker_value
+				if not bool(active_worker.get("components", {}).get("worker", {}).get("enabled", false)) or String(active_worker.get("task", "")) != "gather" or reserved_unit_ids.has(int(active_worker.get("id", -1))) or committed_workers.has(int(active_worker.get("id", -1))):
+					continue
+				var current_resource_id := int(active_worker.get("resource_id", -1))
+				if current_resource_id < 0:
+					current_resource_id = int(active_worker.get("components", {}).get("order", {}).get("target_entity_id", -1))
+				var current_resource: Dictionary = resources_by_id.get(current_resource_id, {})
+				if current_resource.is_empty() or int(current_resource.get("resource_type_id", -1)) == critical_type:
+					continue
+				candidate_workers.append(active_worker)
+		for worker_value in candidate_workers:
 			var worker: Dictionary = worker_value
 			if committed_workers.has(int(worker.get("id", -1))):
 				continue
@@ -126,8 +167,21 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 				var resource: Dictionary = resource_value
 				if not _resource_allows_worker(resource, worker):
 					continue
-				pairs.append({"worker": worker, "resource": resource, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO)))})
+				if _resource_previously_failed_for_worker(resource, worker, policy.get("failed_gather_targets", {})):
+					continue
+				if not _resource_has_reachable_approach(resource, worker, reachable_resource_cells):
+					continue
+				var resource_type := int(resource.get("resource_type_id", -1))
+				var active_gatherer := String(worker.get("task", "idle")) == "gather"
+				if active_gatherer and resource_type != critical_type:
+					continue
+				var shortage := int(shortages.get(resource_type, 0))
+				pairs.append({"worker": worker, "resource": resource, "shortage": shortage, "active_gatherer": active_gatherer, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO)))})
 		pairs.sort_custom(func(left, right):
+			if int(left["shortage"]) != int(right["shortage"]):
+				return int(left["shortage"]) > int(right["shortage"])
+			if bool(left["active_gatherer"]) != bool(right["active_gatherer"]):
+				return not bool(left["active_gatherer"])
 			var left_failure := _navigation_failure_rank(left["worker"])
 			var right_failure := _navigation_failure_rank(right["worker"])
 			if left_failure != right_failure:
@@ -139,26 +193,37 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 			return int(left["resource"].get("id", -1)) < int(right["resource"].get("id", -1))
 		)
 		if not pairs.is_empty():
-			var assignment: Dictionary = pairs[0]
-			commands.append(Commands.GatherCommand.new(tick, [int(assignment["worker"].get("id", -1))], int(assignment["resource"].get("id", -1))))
+			var assigned_domains: Dictionary = {}
+			for assignment_value in pairs:
+				var assignment: Dictionary = assignment_value
+				var worker_domain := String(assignment["worker"].get("movement_domain", "land"))
+				if assigned_domains.has(worker_domain):
+					continue
+				commands.append(Commands.GatherCommand.new(tick, [int(assignment["worker"].get("id", -1))], int(assignment["resource"].get("id", -1))))
+				assigned_domains[worker_domain] = true
 
 	for building_value in own_buildings:
 		var building: Dictionary = building_value
-		if not building.get("production_queue", []).is_empty():
+		var queue: Array = building.get("production_queue", [])
+		if queue.size() >= 2 or (not queue.is_empty() and (String(queue[0].get("order_type", "unit")) != "unit" or String(queue[0].get("status", "")) == "blocked_population")):
 			continue
 		if age_intent.has("command"):
 			continue
 		var train_options: Array = building.get("command_options", {}).get("train", [])
 		var enabled := train_options.filter(func(option): return bool(option.get("accepted", false)))
+		if naval_scout_pending and String(building.get("kind", "")) != "dock":
+			enabled = enabled.filter(func(option): return "combatant" not in option.get("behavior_tags", []))
+		if not queue.is_empty():
+			enabled = enabled.filter(func(option): return String(option.get("kind", "")) == String(queue[0].get("kind", "")))
 		if bool(age_intent.get("saving", false)):
 			var age_cost: Dictionary = age_intent.get("cost", {})
 			var production_exceptions: Array = policy.get("age_saving_production_exceptions", [])
-			enabled = enabled.filter(func(option): return _age_saving_economic_option(option, age_cost, production_exceptions))
+			enabled = enabled.filter(func(option): return _age_saving_economic_option(option, age_cost, production_exceptions) or (military_count < wartime_combatant_target and "combatant" in option.get("behavior_tags", []) and "worker" not in option.get("behavior_tags", [])))
 		var land_worker_target := int(policy.get("land_worker_target", policy.get("worker_target", 0)))
 		if land_worker_target > 0 and land_worker_count >= land_worker_target:
 			enabled = enabled.filter(func(option): return String(option.get("kind", "")) != "villager")
 		var research_options: Array = building.get("command_options", {}).get("research", [])
-		var available_research := [] if bool(age_intent.get("saving", false)) else research_options.filter(func(option): return bool(option.get("accepted", false)))
+		var available_research := [] if bool(age_intent.get("saving", false)) or not queue.is_empty() else research_options.filter(func(option): return bool(option.get("accepted", false)))
 		if not enabled.is_empty():
 			var preferred: Dictionary = _preferred_unit(enabled, own_units, building, snapshot, team, policy)
 			if not preferred.is_empty():
@@ -270,10 +335,22 @@ static func _sort_build_kinds(kinds: Array, priorities: Array) -> void:
 	)
 
 
-static func _needs_housing(player_state: Dictionary, buffer: int) -> bool:
-	var used := int(player_state.get("population", 0)) + int(player_state.get("population_reserved", 0))
-	var cap := mini(int(player_state.get("population_cap", 0)), int(player_state.get("population_limit", 0)))
-	return cap - used <= maxi(0, buffer)
+static func _active_order_population_points(buildings: Array) -> int:
+	var points := 0
+	for building_value in buildings:
+		var queue: Array = building_value.get("production_queue", [])
+		if queue.is_empty() or String(queue[0].get("order_type", "unit")) != "unit":
+			continue
+		points += maxi(0, int(queue[0].get("population_points_cost", int(queue[0].get("population_cost", 0)) * 2)))
+	return points
+
+
+static func _needs_housing(player_state: Dictionary, buffer: int, blocked_population: bool = false, active_order_points: int = 0) -> bool:
+	if player_state.has("population_limit") and int(player_state.get("population_cap", 0)) >= int(player_state.get("population_limit", 0)):
+		return false
+	var used_points := int(player_state.get("population_points", int(player_state.get("population", 0)) * 2)) + int(player_state.get("population_reserved", 0)) * 2
+	var cap_points := mini(int(player_state.get("population_cap", 0)), int(player_state.get("population_limit", 0))) * 2
+	return blocked_population or cap_points - used_points <= maxi(0, buffer) * 2 + maxi(0, active_order_points)
 
 
 static func _resource_allows_worker(resource: Dictionary, worker: Dictionary) -> bool:
@@ -281,6 +358,40 @@ static func _resource_allows_worker(resource: Dictionary, worker: Dictionary) ->
 	if allowed_domains.is_empty():
 		allowed_domains = ["land"]
 	return String(worker.get("movement_domain", "land")) in allowed_domains
+
+
+static func _resource_previously_failed_for_worker(resource: Dictionary, worker: Dictionary, failed_targets: Dictionary = {}) -> bool:
+	if failed_targets.get(int(worker.get("id", -1)), {}).has(int(resource.get("id", -2))):
+		return true
+	var order: Dictionary = worker.get("components", {}).get("order", {})
+	return String(order.get("type", "")) == "gather" and int(order.get("target_entity_id", -1)) == int(resource.get("id", -2)) and bool(order.get("completed", false)) and String(order.get("completion_reason", "")) in ["no_approach_slot", "no_path", "local_blocked"]
+
+
+static func _reachable_cells_by_domain(navigation: Dictionary) -> Dictionary:
+	var result: Dictionary = {}
+	var reachable: Dictionary = navigation.get("reachable", {})
+	for domain in ["land", "water"]:
+		var values: Array = reachable.get(domain, [])
+		if values.is_empty():
+			continue
+		var cells: Dictionary = {}
+		for value in values:
+			cells[Vector2i(Vector2(value))] = true
+		result[domain] = cells
+	return result
+
+
+static func _resource_has_reachable_approach(resource: Dictionary, worker: Dictionary, reachable_by_domain: Dictionary) -> bool:
+	var domain := String(worker.get("movement_domain", "land"))
+	if not reachable_by_domain.has(domain):
+		return true
+	var cells: Dictionary = reachable_by_domain[domain]
+	var target := Vector2i(Vector2(resource.get("pos", Vector2.ZERO)))
+	for offset_y in range(-2, 3):
+		for offset_x in range(-2, 3):
+			if cells.has(target + Vector2i(offset_x, offset_y)):
+				return true
+	return false
 
 
 static func _preferred_unit(options: Array, own_units: Array, building: Dictionary, snapshot: Dictionary, team: int, policy: Dictionary = {}) -> Dictionary:
@@ -301,6 +412,13 @@ static func _preferred_unit(options: Array, own_units: Array, building: Dictiona
 
 static func _preferred_naval_unit(options: Array, own_units: Array, snapshot: Dictionary, team: int, water_worker_target: int = 2) -> Dictionary:
 	var water_workers := own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("movement_domain", "")) == "water").size()
+	var warships := own_units.filter(func(entity): return String(entity.get("movement_domain", "")) == "water" and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", []))).size()
+	var reachable_water_frontier: Array = snapshot.get("navigation", {}).get("reachable_frontier", {}).get("water", [])
+	# A single fishing boat can establish the naval economy. When there is still
+	# unexplored reachable water, save the next wood for an armed scout instead
+	# of indefinitely filling the dock queue with more fishing boats.
+	if water_workers > 0 and warships == 0 and not reachable_water_frontier.is_empty():
+		return _first_option_with_tag(options, "combatant")
 	var water_food_known: bool = snapshot.get("resources", []).any(func(resource):
 		return int(resource.get("amount", 0)) > 0 and 0 == int(resource.get("resource_type_id", 0)) and "water" in resource.get("allowed_gatherer_domains", [])
 	)
@@ -314,7 +432,6 @@ static func _preferred_naval_unit(options: Array, own_units: Array, snapshot: Di
 		var trader := _first_option_with_tag(options, "trader")
 		if not trader.is_empty():
 			return trader
-	var warships := own_units.filter(func(entity): return String(entity.get("movement_domain", "")) == "water" and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", []))).size()
 	if warships < 3:
 		var combatant := _first_option_with_tag(options, "combatant")
 		if not combatant.is_empty():

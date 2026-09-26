@@ -323,6 +323,8 @@ static func plan_response(snapshot: Dictionary, tick: int, team: int, contract: 
 	for category in ["units", "buildings"]:
 		for entity_value in snapshot.get(category, []):
 			var entity: Dictionary = entity_value
+			if bool(entity.get("last_known", false)):
+				continue
 			targets[int(entity.get("id", -1))] = entity
 	var signals: Array = snapshot.get("ai_distress_signals", []).duplicate(true)
 	signals.sort_custom(func(left, right):
@@ -396,6 +398,8 @@ static func plan_attack_group_lifecycle(snapshot: Dictionary, tick: int, team: i
 	for category in ["units", "buildings"]:
 		for target_value in snapshot.get(category, []):
 			var target: Dictionary = target_value
+			if bool(target.get("last_known", false)):
+				continue
 			targets_by_id[int(target.get("id", -1))] = target
 	var group_ids: Array = groups.keys()
 	group_ids.sort()
@@ -638,6 +642,8 @@ static func _target_with_id(snapshot: Dictionary, target_id: int) -> Dictionary:
 	for category in ["units", "buildings"]:
 		for target_value in snapshot.get(category, []):
 			var target: Dictionary = target_value
+			if bool(target.get("last_known", false)):
+				continue
 			if int(target.get("id", -1)) == target_id:
 				return target
 	return {}
@@ -892,6 +898,8 @@ static func _defence_enemy(snapshot: Dictionary, team: int, anchor: Vector2, rad
 	for category in ["units", "buildings"]:
 		for target_value in snapshot.get(category, []):
 			var target: Dictionary = target_value
+			if bool(target.get("last_known", false)):
+				continue
 			var owner := int(target.get("team", 0))
 			if owner <= 0 or owner == team or allies.has(owner) or float(target.get("hp", 0.0)) <= 0.0:
 				continue
@@ -1150,6 +1158,8 @@ static func _compatible_visible_target(snapshot: Dictionary, team: int, domain: 
 	for category in ["units", "buildings"]:
 		for target_value in snapshot.get(category, []):
 			var target: Dictionary = target_value
+			if bool(target.get("last_known", false)):
+				continue
 			var owner := int(target.get("team", 0))
 			if owner <= 0 or owner == team or allies.has(owner) or float(target.get("hp", 0.0)) <= 0.0:
 				continue
@@ -1367,11 +1377,12 @@ static func _idle_worker_commands(snapshot: Dictionary, tick: int, own_units: Ar
 
 static func _housing_command(snapshot: Dictionary, tick: int, own_units: Array, city_plan = null) -> Variant:
 	var player_state: Dictionary = snapshot.get("player_state", {})
-	var population := int(player_state.get("population", 0))
-	var reserved := int(player_state.get("population_reserved", 0))
 	var cap := int(player_state.get("population_cap", 0))
 	var limit := int(player_state.get("population_limit", cap))
-	if cap <= 0 or cap >= limit or population + reserved < cap - 1:
+	var used_points := int(player_state.get("population_points", int(player_state.get("population", 0)) * 2)) + int(player_state.get("population_reserved", 0)) * 2
+	var team := int(player_state.get("team", snapshot.get("observer_team", 0)))
+	var blocked_population: bool = snapshot.get("buildings", []).any(func(building): return int(building.get("team", 0)) == team and not building.get("production_queue", []).is_empty() and String(building.get("production_queue", [])[0].get("status", "")) == "blocked_population")
+	if cap <= 0 or cap >= limit or (not blocked_population and used_points < (cap - 1) * 2):
 		return null
 	var sites: Array = snapshot.get("build_sites", {}).get("house", [])
 	if city_plan != null:

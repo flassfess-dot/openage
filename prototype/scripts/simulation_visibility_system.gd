@@ -51,6 +51,10 @@ func set_relation(observer_team: int, source_team: int, allied: bool = true) -> 
 	fog.set_relation(observer_team, source_team, allied)
 
 
+func set_shared_vision(observer_team: int, source_team: int, enabled: bool) -> void:
+	fog.set_shared_vision(observer_team, source_team, enabled)
+
+
 func state_at_world(team: int, position: Vector2) -> int:
 	return fog.state_at_world(team, position)
 
@@ -66,7 +70,7 @@ func is_entity_visible(team: int, entity: Dictionary, allow_explored_static: boo
 	if team <= 0:
 		return true
 	var owner := int(entity.get("team", 0))
-	if owner > 0 and fog.are_allied(team, owner):
+	if owner == team:
 		return true
 	var state := state_at_world(team, Vector2(entity.get("pos", Vector2.ZERO)))
 	return state == FogOfWar.VISIBLE or (allow_explored_static and state == FogOfWar.EXPLORED)
