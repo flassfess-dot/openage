@@ -12,6 +12,7 @@ func _initialize() -> void:
 	test_multirate_awareness_deadlines()
 	test_scout_only_retaliates()
 	test_manual_orders_override_building_awareness()
+	test_completed_building_uses_live_cached_roster()
 	if failures.is_empty():
 		print("I6-002 combat awareness stance tests passed")
 		quit(0)
@@ -151,6 +152,22 @@ func test_manual_orders_override_building_awareness() -> void:
 		assert_equal(int(idle_commands[0].target_entity_id), int(enemy_building["id"]), "idle acquisition keeps building target")
 	observer["task"] = "attack_move"
 	assert_equal(awareness.collect_commands(world, 5).size(), 1, "explicit attack-move permits background target acquisition")
+
+
+func test_completed_building_uses_live_cached_roster() -> void:
+	var world = open_world()
+	var tower: Dictionary = world.add_building(900, "tower", Vector2(4.0, 4.0), 1, false)
+	var enemy: Dictionary = world.add_unit(2, "clubman", Vector2(5.0, 4.0), false)
+	configure_awareness(tower, "aggressive", 6.0)
+	configure_awareness(enemy, "passive", 6.0)
+	world.update_fog_of_war()
+	var awareness := CombatAwarenessSystem.new()
+	assert_equal(awareness.collect_commands(world, 1).size(), 0, "unfinished combat building remains inactive")
+	tower["state"] = "complete"
+	var completed_commands := awareness.collect_commands(world, 5)
+	assert_equal(completed_commands.size(), 1, "completed building activates without waiting for a roster refresh")
+	if not completed_commands.is_empty():
+		assert_equal(int(completed_commands[0].target_entity_id), int(enemy["id"]), "completed building keeps the visible enemy target")
 
 
 func open_world():

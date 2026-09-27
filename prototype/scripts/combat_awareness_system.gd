@@ -9,7 +9,12 @@ var perception := PerceptionService.new()
 const CANDIDATE_BUCKET_SIZE := 4.0
 const AGGRESSIVE_SCAN_INTERVAL_TICKS := 4
 const GUARDED_SCAN_INTERVAL_TICKS := 2
-const ROSTER_REFRESH_INTERVAL_TICKS := 4
+const ACTIVE_TARGET_VALIDATION_INTERVAL_TICKS := 2
+# Cached entries are live entity dictionaries, so movement, health, tasks and
+# ownership remain current without rebuilding both global combat lists. Entity
+# count changes still refresh immediately; this slower safety refresh covers
+# rare in-place capability changes such as a completed combat building.
+const ROSTER_REFRESH_INTERVAL_TICKS := 20
 const CANDIDATE_INDEX_REFRESH_INTERVAL_TICKS := 2
 
 var cached_attackers: Array = []
@@ -36,17 +41,43 @@ func collect_commands(world, tick: int) -> Array:
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	var rosters := _combat_rosters(world, tick)
 	var units: Array = rosters["attackers"]
-	var has_active_observer := false
+	var due_units: Array = []
 	for unit_value in units:
 		var unit: Dictionary = unit_value
-		if String(unit.get("stance", "passive")) != "passive" and _eligible_for_awareness(world, unit):
-			has_active_observer = true
-			break
-	if not has_active_observer:
+		var task := String(unit.get("task", "idle"))
+		if task not in ["idle", "attack_move"] and not (task == "attack" and bool(unit.get("attack_autonomous", false))):
+			continue
+		var stance := String(unit.get("stance", "passive"))
+		if stance == "passive":
+			continue
+		# Task and stance are cheap fields and reject the overwhelming majority
+		# of marching/working units. Run metadata/tag eligibility only for actors
+		# that can actually acquire or validate a target on this tick.
+		if not _eligible_for_awareness(world, unit) or not _awareness_due(unit, tick, stance):
+			continue
+		due_units.append(unit)
+	if due_units.is_empty():
 		return []
 	if probe != null:
 		probe.observe_microseconds("controller.autonomy.setup", Time.get_ticks_usec() - stage_started)
 	stage_started = Time.get_ticks_usec() if probe != null else 0
+	var acquisition_units: Array = []
+	var validation_microseconds := 0
+	for unit_value in due_units:
+		var unit: Dictionary = unit_value
+		var validation_started := Time.get_ticks_usec() if probe != null else 0
+		var current_target = world.find_combat_target(int(unit.get("target_id", -1)))
+		if String(unit.get("task", "idle")) == "attack" and _target_remains_valid(world, unit, current_target):
+			if probe != null:
+				validation_microseconds += Time.get_ticks_usec() - validation_started
+			continue
+		if probe != null:
+			validation_microseconds += Time.get_ticks_usec() - validation_started
+		acquisition_units.append(unit)
+	if acquisition_units.is_empty():
+		if probe != null:
+			probe.observe_microseconds("controller.autonomy.validation", validation_microseconds)
+		return []
 	# get_combat_attackers() already guarantees stable entity-ID order. The
 	# candidate index does not need a global order because final target ranking
 	# includes entity ID, so avoid sorting that temporary projection.
@@ -59,35 +90,13 @@ func collect_commands(world, tick: int) -> Array:
 	var commands: Array = []
 	var combat_candidate_cache: Dictionary = {}
 	var relation_cache: Dictionary = {}
-	var validation_microseconds := 0
 	var assistance_microseconds := 0
 	var query_microseconds := 0
 	var perception_microseconds := 0
 
-	for unit_value in units:
+	for unit_value in acquisition_units:
 		var unit: Dictionary = unit_value
-		if not _eligible_for_awareness(world, unit):
-			continue
-		# Background acquisition must never replace an explicit player order.
-		# Attack-move opts into combat; an autonomous attack may retarget when its
-		# current target disappears. Ordinary move, work and manual attack do not.
-		var task := String(unit.get("task", "idle"))
-		if task not in ["idle", "attack_move"] and not (task == "attack" and bool(unit.get("attack_autonomous", false))):
-			continue
 		var stance := String(unit.get("stance", "passive"))
-		if stance == "passive":
-			continue
-		stage_started = Time.get_ticks_usec() if probe != null else 0
-		var current_target = world.find_combat_target(int(unit.get("target_id", -1)))
-		if String(unit.get("task", "idle")) == "attack" and _target_remains_valid(world, unit, current_target):
-			if probe != null:
-				validation_microseconds += Time.get_ticks_usec() - stage_started
-			continue
-		if probe != null:
-			validation_microseconds += Time.get_ticks_usec() - stage_started
-		if not _awareness_due(unit, tick, stance):
-			continue
-
 		var query_range := _query_range(unit, stance)
 		var allowed_target_id := -1
 		if stance == "defensive":
@@ -150,11 +159,28 @@ func _combat_rosters(world, tick: int) -> Dictionary:
 		or entity_count != cached_entity_count
 	)
 	if refresh:
-		cached_attackers = world.get_combat_attackers()
+		cached_attackers = _combat_observers(world)
 		cached_targets = world.get_combat_targets(false)
 		cached_entity_count = entity_count
 		cached_roster_tick = tick
 	return {"attackers": cached_attackers, "targets": cached_targets}
+
+
+func _combat_observers(world) -> Array:
+	# Keep capable entities in the live-reference roster even while dead or a
+	# building is unfinished. Eligibility is checked at use time, so completion
+	# and death take effect immediately without forcing another global rebuild.
+	var result: Array = []
+	for unit_value in world.get_units():
+		var unit: Dictionary = unit_value
+		if bool(unit.get("combat_enabled", false)):
+			result.append(unit)
+	for building_value in world.get_buildings():
+		var building: Dictionary = building_value
+		if bool(building.get("combat_enabled", false)):
+			result.append(building)
+	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	return result
 
 
 func _candidate_index(targets: Array, tick: int) -> Dictionary:
@@ -320,8 +346,10 @@ func _query_range(unit: Dictionary, stance: String) -> float:
 
 func _awareness_due(unit: Dictionary, tick: int, stance: String) -> bool:
 	var task := String(unit.get("task", "idle"))
-	if int(unit.get("retaliation_target_id", -1)) >= 0 or task in ["attack", "attack_move"]:
+	if int(unit.get("retaliation_target_id", -1)) >= 0 or task == "attack_move":
 		return true
+	if task == "attack":
+		return posmod(tick + int(unit.get("id", 0)), ACTIVE_TARGET_VALIDATION_INTERVAL_TICKS) == 0
 	var interval := AGGRESSIVE_SCAN_INTERVAL_TICKS if stance == "aggressive" else GUARDED_SCAN_INTERVAL_TICKS
 	var cell := Vector2i(floori(float(unit.get("pos", Vector2.ZERO).x) / CANDIDATE_BUCKET_SIZE), floori(float(unit.get("pos", Vector2.ZERO).y) / CANDIDATE_BUCKET_SIZE))
 	var stance_offset := 0 if stance == "defensive" else 1
