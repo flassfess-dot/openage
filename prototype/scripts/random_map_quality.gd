@@ -2,6 +2,7 @@ class_name RoRRandomMapQuality
 extends RefCounted
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
+const RandomMapMetrics := preload("res://scripts/random_map_metrics.gd")
 
 
 static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
@@ -13,6 +14,16 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 	var players: Array = definition.get("players", [])
 	if terrain_ids.size() != size.x * size.y:
 		return {"valid": false, "errors": ["random_map_terrain_size_mismatch"], "metrics": {}}
+	if String(generator.get("type", "")) == "seeded_skirmish_v1":
+		var strategic_zones: Dictionary = map_data.get("strategic_zones", {})
+		for key in ["zone_ids", "nearest_start_indices", "nearest_start_distances", "second_start_distances", "coastal_land_mask"]:
+			if strategic_zones.get(key, []).size() != terrain_ids.size():
+				errors.append("random_map_strategic_zone_size_mismatch:%s" % key)
+		var sanctuary_by_team: Dictionary = strategic_zones.get("sanctuary_cell_count_by_team", {})
+		for player_value in players:
+			var team := int(player_value.get("team", 0))
+			if int(sanctuary_by_team.get(String.num_int64(team), 0)) <= 0:
+				errors.append("random_map_player_sanctuary_missing:%d" % team)
 	var cliff_cells: Array = map_data.get("cliff_cells", [])
 	var cliff_lookup: Dictionary = {}
 	for value in cliff_cells:
@@ -106,20 +117,22 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 				gate_width = maxi(gate_width, current_open)
 		if gate_width < int(quality.get("minimum_gate_width_cells", 5)):
 			errors.append("random_map_narrows_gate_too_small")
+	var metrics := {
+		"player_count": players.size(),
+		"minimum_start_distance": minimum_distance if minimum_distance != INF else 0.0,
+		"required_start_distance": required_distance,
+		"water_ratio": water_ratio,
+		"land_component_cells": component_sizes,
+		"land_analysis_cells": component_id_by_cell.size(),
+		"naval_start_count": naval_zones.size(),
+		"cliff_cell_count": cliff_lookup.size(),
+		"narrows_gate_width": gate_width,
+	}
+	metrics.merge(RandomMapMetrics.measure(definition, map_data), true)
 	return {
 		"valid": errors.is_empty(),
 		"errors": errors,
-		"metrics": {
-			"player_count": players.size(),
-			"minimum_start_distance": minimum_distance if minimum_distance != INF else 0.0,
-			"required_start_distance": required_distance,
-			"water_ratio": water_ratio,
-			"land_component_cells": component_sizes,
-			"land_analysis_cells": component_id_by_cell.size(),
-			"naval_start_count": naval_zones.size(),
-			"cliff_cell_count": cliff_lookup.size(),
-			"narrows_gate_width": gate_width,
-		},
+		"metrics": metrics,
 	}
 
 
@@ -186,7 +199,7 @@ static func _is_water(cell: Vector2i, size: Vector2i, terrain_ids: Array) -> boo
 
 
 static func _is_walkable_land(cell: Vector2i, size: Vector2i, terrain_ids: Array, cliff_cells: Dictionary = {}) -> bool:
-	if _is_water(cell, size, terrain_ids) or cliff_cells.has(cell):
+	if cell.x < 0 or cell.y < 0 or cell.x >= size.x or cell.y >= size.y or cliff_cells.has(cell):
 		return false
 	return TerrainRules.is_land_walkable(TerrainRules.logical_for_terrain_id(int(terrain_ids[cell.y * size.x + cell.x])))
 

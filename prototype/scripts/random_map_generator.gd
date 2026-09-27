@@ -2,6 +2,10 @@ class_name RoRRandomMapGenerator
 extends RefCounted
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
+const RandomMapZones := preload("res://scripts/random_map_zones.gd")
+const RandomMapSampler := preload("res://scripts/random_map_sampler.gd")
+const RandomMapMetrics := preload("res://scripts/random_map_metrics.gd")
+const RandomMapWater := preload("res://scripts/random_map_water.gd")
 const BROADLEAF_TREES := [134, 140, 141, 142, 143, 144, 146, 147, 195, 365, 367]
 const CONIFER_TREES := [136, 161, 194, 198, 203, 226]
 const PALM_TREES := [113, 114, 121, 129, 150, 152, 153]
@@ -67,8 +71,8 @@ static func _seeded_skirmish_map(match_definition: Dictionary, size: Vector2i, s
 	_smooth_water_mask(terrain_ids, size)
 	_apply_source_terrain_groups(terrain_ids, size, starts, generator.get("source_profile", {}), seed)
 	var start_corridors := _clear_start_corridors(terrain_ids, size, starts, generator.get("source_profile", {}), topology)
+	var water_features := RandomMapWater.apply(terrain_ids, size, seed, topology)
 	_apply_shore_band(terrain_ids, size)
-	_apply_water_detail(terrain_ids, size, seed)
 	var cliff_cells: Array[Vector2i] = _profile_cliff_cells(size, String(generator.get("cliff_profile", "")), seed)
 	var naval_start_settings: Dictionary = generator.get("naval_start", {})
 	var naval_start_zones: Array = []
@@ -93,28 +97,35 @@ static func _seeded_skirmish_map(match_definition: Dictionary, size: Vector2i, s
 	vertex_levels.fill(0)
 	for hill_value in generator.get("hills", []):
 		_apply_hill(vertex_levels, size, hill_value)
-	for relief_value in _seeded_relief_hills(size, starts, terrain_ids, seed):
+	for relief_value in _seeded_relief_hills(size, starts, terrain_ids, seed, topology):
 		_apply_relief_hill(vertex_levels, size, terrain_ids, relief_value)
 	_apply_cliff_elevation(vertex_levels, size, cliff_cells)
+	var strategic_zones := RandomMapZones.build(match_definition.get("players", []), size, terrain_ids, cliff_cells, generator.get("strategic_zone_contract", {}))
 	var resource_clusters: Array = generator.get("resource_clusters", []).duplicate(true)
-	resource_clusters.append_array(_neutral_source_resource_clusters(size, terrain_ids, starts, generator.get("source_profile", {}), seed))
+	resource_clusters.append_array(_neutral_source_resource_clusters(size, terrain_ids, starts, generator.get("source_profile", {}), strategic_zones, seed))
 	resource_clusters.append_array(_neutral_forest_clusters(size, terrain_ids, starts, generator.get("source_profile", {}), seed))
 	resource_clusters.append_array(_naval_resource_clusters(naval_start_zones, generator.get("naval_resource_clusters", [])))
 	if not naval_start_zones.is_empty():
 		resource_clusters.append_array(_neutral_fish_clusters(size, terrain_ids, seed))
 	var land_components := _land_component_lookup(size, terrain_ids, cliff_cells)
 	var generated_resources := _generate_resource_clusters(resource_clusters, size, seed, terrain_ids, resource_exclusion_cells, land_components)
-	return {
+	var result := {
 		"size": size,
 		"seed": seed,
 		"terrain_ids": terrain_ids,
 		"vertex_levels": vertex_levels,
 		"cliff_cells": cliff_cells,
-		"scenery": _seeded_rock_scenery(size, terrain_ids, starts, generated_resources, seed),
+		"strategic_zones": strategic_zones,
+		"water_features": water_features,
+		"scenery": [],
 		"resources": generated_resources,
 		"naval_start_zones": naval_start_zones,
 		"reserved_foundation_cells": reserved_foundation_cells,
 	}
+	var scenery_selection := _select_ambient_scenery(result, size, terrain_ids, generated_resources, strategic_zones, seed)
+	result["scenery"] = scenery_selection["scenery"]
+	result["generation_candidates"] = scenery_selection["metadata"]
+	return result
 
 
 static func _naval_resource_clusters(zones: Array, templates: Array) -> Array:
@@ -247,52 +258,84 @@ static func _neutral_forest_clusters(size: Vector2i, terrain_ids: Array[int], st
 	return result
 
 
-static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array[int], starts: Array[Vector2], source_profile: Dictionary, seed: int) -> Array:
+static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array[int], starts: Array[Vector2], source_profile: Dictionary, strategic_zones: Dictionary, seed: int) -> Array:
 	var rules := {
-		59: {"kind": "berries", "amount": 150},
-		66: {"kind": "gold_mine", "amount": 400},
-		102: {"kind": "stone_mine", "amount": 250},
+		1: {"kind": "alligator", "category": "unit", "group_scale": 0.35, "group_cap": 12},
+		48: {"kind": "elephant", "category": "unit", "group_scale": 0.45, "group_cap": 18},
+		59: {"kind": "berries", "amount": 150, "group_scale": 0.75, "group_cap": 60},
+		65: {"kind": "gazelle", "category": "unit", "group_scale": 0.55, "group_cap": 36},
+		66: {"kind": "gold_mine", "amount": 400, "group_scale": 0.75, "group_cap": 48},
+		102: {"kind": "stone_mine", "amount": 250, "group_scale": 0.75, "group_cap": 48},
+		126: {"kind": "lion", "category": "unit", "group_scale": 0.35, "group_cap": 14},
 	}
-	var land_cells: Array[Vector2i] = []
-	for y in range(2, size.y - 2):
-		for x in range(2, size.x - 2):
-			if int(terrain_ids[y * size.x + x]) not in TerrainRules.WATER_TERRAIN_IDS:
-				land_cells.append(Vector2i(x, y))
-	if land_cells.is_empty():
+	var zone_ids: PackedInt32Array = strategic_zones.get("zone_ids", PackedInt32Array())
+	if zone_ids.size() != size.x * size.y:
 		return []
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed ^ 0x51DAA921
 	var result: Array = []
-	var used_centers: Array[Vector2] = []
-	var size_factor := clampf(sqrt(float(size.x * size.y) / (96.0 * 96.0)), 0.5, 1.6)
+	var used_anchors: Array[Vector2i] = []
+	var size_factor := clampf(sqrt(float(size.x * size.y) / (72.0 * 72.0)), 0.65, 2.4)
+	var sanctuary_radius := int(strategic_zones.get("sanctuary_radius_cells", 7))
 	for group_value in source_profile.get("unit_groups", []):
 		var group: Dictionary = group_value
 		var source_id := int(group.get("unit_id", -1))
 		if not rules.has(source_id) or int(group.get("set_place_for_all_players", 0)) != -2:
 			continue
 		var rule: Dictionary = rules[source_id]
-		var group_count := clampi(int(round(float(group.get("groups_per_player", 0)) * float(starts.size()) * size_factor)), 0, 80)
-		var minimum_distance := minf(32.0, maxf(10.0, float(group.get("min_distance_to_players", 10)) * minf(1.0, mini(size.x, size.y) / 96.0)))
-		for cluster_index in range(group_count):
-			var chosen := Vector2.ZERO
-			var best_score := -INF
-			for attempt in range(48):
-				var cell: Vector2i = land_cells[rng.randi_range(0, land_cells.size() - 1)]
-				var candidate := Vector2(cell) + Vector2(0.5, 0.5)
-				var nearest_start := INF
-				for start in starts:
-					nearest_start = minf(nearest_start, candidate.distance_to(start))
-				var nearest_cluster := INF
-				for used_center in used_centers:
-					nearest_cluster = minf(nearest_cluster, candidate.distance_to(used_center))
-				var score := minf(nearest_start, minimum_distance) + minf(nearest_cluster, 7.0)
-				if score > best_score:
-					best_score = score
-					chosen = candidate
-				if nearest_start >= minimum_distance and nearest_cluster >= 5.0:
-					break
-			used_centers.append(chosen)
-			result.append({"kind": String(rule["kind"]), "center": [chosen.x, chosen.y], "count": maxi(1, int(group.get("objects_per_group", 1))), "radius": maxf(1.0, float(group.get("group_radius", 2))), "amount": int(rule["amount"]), "source_unit_id": source_id, "source_global": true})
+		var raw_group_count := float(group.get("groups_per_player", 0)) * float(maxi(1, starts.size()))
+		var group_count := clampi(roundi(raw_group_count * size_factor * float(rule.get("group_scale", 1.0))), 0, int(rule.get("group_cap", 48)))
+		if group_count <= 0:
+			continue
+		var allowed_zones: Array = [RandomMapZones.ZONE_FRONTIER, RandomMapZones.ZONE_CONTESTED]
+		var zone_weights := {RandomMapZones.ZONE_FRONTIER: 1.0, RandomMapZones.ZONE_CONTESTED: 0.85}
+		var coast_mode := ""
+		if source_id == 59:
+			allowed_zones = [RandomMapZones.ZONE_TERRITORY, RandomMapZones.ZONE_FRONTIER]
+			zone_weights = {RandomMapZones.ZONE_TERRITORY: 0.70, RandomMapZones.ZONE_FRONTIER: 1.0}
+		elif source_id in [48, 65]:
+			allowed_zones = [RandomMapZones.ZONE_TERRITORY, RandomMapZones.ZONE_FRONTIER, RandomMapZones.ZONE_CONTESTED]
+			zone_weights = {RandomMapZones.ZONE_TERRITORY: 0.45, RandomMapZones.ZONE_FRONTIER: 1.0, RandomMapZones.ZONE_CONTESTED: 0.65}
+		elif source_id == 126:
+			allowed_zones = [RandomMapZones.ZONE_FRONTIER]
+			zone_weights = {RandomMapZones.ZONE_FRONTIER: 1.0}
+		elif source_id == 1:
+			allowed_zones = [RandomMapZones.ZONE_TERRITORY, RandomMapZones.ZONE_FRONTIER, RandomMapZones.ZONE_CONTESTED]
+			zone_weights = {RandomMapZones.ZONE_TERRITORY: 0.35, RandomMapZones.ZONE_FRONTIER: 1.0, RandomMapZones.ZONE_CONTESTED: 0.55}
+			coast_mode = "coastal"
+		var group_radius := maxf(1.0, float(group.get("group_radius", 2)))
+		var anchor_spacing := maxf(5.0, group_radius * 2.0 + (3.0 if source_id in [1, 126] else 1.0))
+		var raw_start_distance := maxf(0.0, float(group.get("min_distance_to_players", 0)))
+		var minimum_start_distance := maxi(sanctuary_radius + 1, roundi(raw_start_distance * minf(1.0, float(mini(size.x, size.y)) / 96.0)))
+		var anchors := RandomMapSampler.sample_zone_cells(
+			strategic_zones,
+			size,
+			allowed_zones,
+			group_count,
+			anchor_spacing,
+			seed ^ (0x51DAA921 + source_id * 7919 + result.size() * 31),
+			{},
+			used_anchors,
+			zone_weights,
+			coast_mode,
+			minimum_start_distance
+		)
+		for anchor_value in anchors:
+			var anchor := Vector2i(anchor_value)
+			used_anchors.append(anchor)
+			var zone_id := int(zone_ids[anchor.y * size.x + anchor.x])
+			result.append({
+				"category": String(rule.get("category", "resource")),
+				"kind": String(rule["kind"]),
+				"center": [anchor.x + 0.5, anchor.y + 0.5],
+				"count": maxi(1, int(group.get("objects_per_group", 1))),
+				"radius": group_radius,
+				"amount": int(rule.get("amount", 0)),
+				"source_unit_id": source_id,
+				"source_global": true,
+				"source_group": group.duplicate(true),
+				"strategic_zone": String(RandomMapZones.ZONE_NAMES.get(zone_id, "frontier")),
+				"preserve_approach": String(rule.get("category", "resource")) == "resource",
+				"enforce_spacing": String(rule.get("category", "resource")) == "resource",
+			})
 	return result
 
 
@@ -449,25 +492,6 @@ static func _apply_shore_band(terrain_ids: Array[int], size: Vector2i) -> void:
 					break
 
 
-static func _apply_water_detail(terrain_ids: Array[int], size: Vector2i, seed: int) -> void:
-	# Dark-water patches stay offshore so the surf transition and docking strip
-	# retain their original terrain IDs and navigation guarantees.
-	var original := terrain_ids.duplicate()
-	for y in range(2, size.y - 2):
-		for x in range(2, size.x - 2):
-			var index := y * size.x + x
-			if original[index] != 1:
-				continue
-			var offshore := true
-			for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-				var neighbor: Vector2i = Vector2i(x, y) + offset * 2
-				if int(original[neighbor.y * size.x + neighbor.x]) not in TerrainRules.WATER_TERRAIN_IDS:
-					offshore = false
-					break
-			if offshore and _smooth_noise(Vector2(x, y), 13.0, seed ^ 0x2AF51) > 0.28:
-				terrain_ids[index] = 22
-
-
 static func _forest_palette(terrain_id: int, rng: RandomNumberGenerator) -> Array:
 	if terrain_id in [13, 20]:
 		return PALM_TREES
@@ -483,32 +507,53 @@ static func _forest_palette(terrain_id: int, rng: RandomNumberGenerator) -> Arra
 	return palette
 
 
-static func _seeded_relief_hills(size: Vector2i, starts: Array[Vector2], terrain_ids: Array[int], seed: int) -> Array:
+static func _seeded_relief_hills(size: Vector2i, starts: Array[Vector2], terrain_ids: Array[int], seed: int, topology: String = "inland") -> Array:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed ^ 0x64E71A
-	var count := clampi(int(float(size.x * size.y) / 1250.0), 5, 52)
 	var result: Array = []
+	var ridge_count := 0
+	if topology == "highlands":
+		ridge_count = clampi(int(float(size.x * size.y) / 3600.0), 2, 10)
+	elif topology == "hill_country":
+		ridge_count = clampi(int(float(size.x * size.y) / 2600.0), 2, 14)
+	elif topology == "narrows":
+		ridge_count = clampi(int(float(size.x * size.y) / 7000.0), 1, 5)
+	for ridge_index in range(ridge_count):
+		var direction := Vector2.RIGHT.rotated(rng.randf_range(0.0, TAU))
+		if topology == "narrows":
+			direction = Vector2.DOWN.rotated(rng.randf_range(-0.28, 0.28))
+		var segment_count := rng.randi_range(3, 5 if topology != "hill_country" else 6)
+		var spacing := rng.randf_range(4.5, 7.5)
+		var origin := Vector2(rng.randf_range(size.x * 0.18, size.x * 0.82), rng.randf_range(size.y * 0.18, size.y * 0.82)) - direction * spacing * float(segment_count - 1) * 0.5
+		for segment_index in range(segment_count):
+			if topology == "hill_country" and segment_index > 0 and rng.randf() < 0.22:
+				continue
+			var center := Vector2i(origin + direction * spacing * segment_index + Vector2(-direction.y, direction.x) * rng.randf_range(-2.0, 2.0))
+			var radius := rng.randi_range(4, 7)
+			if _relief_hill_valid(center, radius, size, starts, terrain_ids):
+				result.append({"center": center, "radius": radius, "maximum_elevation": rng.randi_range(2, 3), "relief_shape": "ridge", "ridge_index": ridge_index})
+	var count := clampi(int(float(size.x * size.y) / (1800.0 if topology not in ["highlands", "hill_country"] else 2600.0)), 3, 36)
 	for index in range(count):
 		for attempt in range(32):
 			var radius := rng.randi_range(4, 9)
-			if size.x <= radius * 2 + 4 or size.y <= radius * 2 + 4:
-				continue
 			var center := Vector2i(rng.randi_range(radius + 2, size.x - radius - 3), rng.randi_range(radius + 2, size.y - radius - 3))
-			if starts.any(func(start: Vector2): return Vector2(center).distance_to(start) < 9.0):
+			if not _relief_hill_valid(center, radius, size, starts, terrain_ids):
 				continue
-			var land_disk_clear := true
-			for y in range(maxi(0, center.y - radius - 1), mini(size.y, center.y + radius + 2)):
-				for x in range(maxi(0, center.x - radius - 1), mini(size.x, center.x + radius + 2)):
-					if int(terrain_ids[y * size.x + x]) in TerrainRules.WATER_TERRAIN_IDS:
-						land_disk_clear = false
-						break
-				if not land_disk_clear:
-					break
-			if not land_disk_clear:
-				continue
-			result.append({"center": center, "radius": radius, "maximum_elevation": rng.randi_range(1, 3)})
+			result.append({"center": center, "radius": radius, "maximum_elevation": rng.randi_range(1, 2 if topology == "inland" else 3), "relief_shape": "hill"})
 			break
 	return result
+
+
+static func _relief_hill_valid(center: Vector2i, radius: int, size: Vector2i, starts: Array[Vector2], terrain_ids: Array[int]) -> bool:
+	if center.x < radius + 2 or center.y < radius + 2 or center.x >= size.x - radius - 2 or center.y >= size.y - radius - 2:
+		return false
+	if starts.any(func(start: Vector2): return Vector2(center).distance_to(start) < 9.0):
+		return false
+	for y in range(center.y - radius - 1, center.y + radius + 2):
+		for x in range(center.x - radius - 1, center.x + radius + 2):
+			if int(terrain_ids[y * size.x + x]) in TerrainRules.WATER_TERRAIN_IDS:
+				return false
+	return true
 
 
 static func _apply_relief_hill(levels: Array[int], size: Vector2i, terrain_ids: Array[int], hill: Dictionary) -> void:
@@ -529,27 +574,205 @@ static func _apply_relief_hill(levels: Array[int], size: Vector2i, terrain_ids: 
 			levels[vertex_index] = maxi(levels[vertex_index], level)
 
 
-static func _seeded_rock_scenery(size: Vector2i, terrain_ids: Array[int], starts: Array[Vector2], resources: Array, seed: int) -> Array:
+static func _seeded_ambient_scenery(size: Vector2i, terrain_ids: Array[int], resources: Array, strategic_zones: Dictionary, seed: int) -> Array:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed ^ 0x4B0C3A
 	var result: Array = []
 	var occupied: Dictionary = {}
+	var existing_anchors: Array[Vector2i] = []
 	for resource_value in resources:
-		occupied[Vector2i(Vector2(resource_value.get("position", Vector2.ZERO)))] = true
-	var count := clampi(int(float(size.x * size.y) / 520.0), 5, 120)
-	var graphics := [572, 573, 575, 576]
-	for index in range(count):
-		for attempt in range(24):
-			var cell := Vector2i(rng.randi_range(2, size.x - 3), rng.randi_range(2, size.y - 3))
-			var terrain_id := int(terrain_ids[cell.y * size.x + cell.x])
-			if occupied.has(cell) or terrain_id in TerrainRules.WATER_TERRAIN_IDS or terrain_id in TerrainRules.SOURCE_FOREST_TERRAIN_IDS:
-				continue
-			if starts.any(func(start: Vector2): return Vector2(cell).distance_to(start) < 8.0):
-				continue
-			var graphic_id := int(graphics[rng.randi_range(0, graphics.size() - 1)])
-			result.append({"id": -600000 - index, "kind": "terrain_feature", "presentation_layer": "scenery", "position": Vector2(cell) + Vector2(0.5, 0.5), "graphic_id": graphic_id, "asset_name": "graphic_%d" % graphic_id})
-			break
+		var resource_cell := Vector2i(Vector2(resource_value.get("position", Vector2.ZERO)))
+		occupied[resource_cell] = true
+		existing_anchors.append(resource_cell)
+	for index in range(terrain_ids.size()):
+		if int(terrain_ids[index]) in TerrainRules.SOURCE_FOREST_TERRAIN_IDS or int(terrain_ids[index]) in TerrainRules.WATER_TERRAIN_IDS:
+			occupied[Vector2i(index % size.x, index / size.x)] = true
+	var area := size.x * size.y
+	var primary_count := clampi(int(float(area) / 105.0), 24, 820)
+	var primary_anchors := RandomMapSampler.sample_zone_cells(
+		strategic_zones,
+		size,
+		[RandomMapZones.ZONE_TERRITORY, RandomMapZones.ZONE_CONTESTED, RandomMapZones.ZONE_FRONTIER],
+		primary_count,
+		3.2,
+		seed ^ 0x4B0C3A,
+		occupied,
+		existing_anchors,
+		{RandomMapZones.ZONE_TERRITORY: 0.82, RandomMapZones.ZONE_CONTESTED: 0.92, RandomMapZones.ZONE_FRONTIER: 1.0}
+	)
+	var repair_anchors: Array[Vector2i] = existing_anchors.duplicate()
+	repair_anchors.append_array(primary_anchors)
+	var sparse_fill_count := clampi(int(float(area) / 300.0), 6, 160)
+	var sparse_fill_anchors := RandomMapSampler.fill_sparse_cells(
+		strategic_zones,
+		size,
+		[RandomMapZones.ZONE_TERRITORY, RandomMapZones.ZONE_CONTESTED, RandomMapZones.ZONE_FRONTIER],
+		sparse_fill_count,
+		4.0,
+		seed ^ 0x2E3155A7,
+		occupied,
+		repair_anchors,
+		{RandomMapZones.ZONE_TERRITORY: 1.0, RandomMapZones.ZONE_CONTESTED: 1.0, RandomMapZones.ZONE_FRONTIER: 1.0}
+	)
+	var detail_existing: Array[Vector2i] = repair_anchors.duplicate()
+	detail_existing.append_array(sparse_fill_anchors)
+	var ground_detail_count := clampi(int(float(area) / 180.0), 12, 420)
+	var ground_detail_anchors := RandomMapSampler.sample_zone_cells(
+		strategic_zones,
+		size,
+		[RandomMapZones.ZONE_TERRITORY, RandomMapZones.ZONE_CONTESTED, RandomMapZones.ZONE_FRONTIER],
+		ground_detail_count,
+		3.0,
+		seed ^ 0x16498D31,
+		occupied,
+		detail_existing,
+		{RandomMapZones.ZONE_TERRITORY: 0.90, RandomMapZones.ZONE_CONTESTED: 0.95, RandomMapZones.ZONE_FRONTIER: 1.0},
+		"inland"
+	)
+	var zone_ids: PackedInt32Array = strategic_zones.get("zone_ids", PackedInt32Array())
+	for cell in primary_anchors:
+		var graphics := _ambient_rock_graphics(int(terrain_ids[cell.y * size.x + cell.x]))
+		result.append(_ambient_scenery_item(result.size(), cell, int(graphics[rng.randi_range(0, graphics.size() - 1)]), "rock", zone_ids, size, false))
+	var cracks := [533, 534, 535, 536, 537]
+	for cell in ground_detail_anchors:
+		result.append(_ambient_scenery_item(result.size(), cell, int(cracks[rng.randi_range(0, cracks.size() - 1)]), "ground_detail", zone_ids, size, false))
+	for cell in sparse_fill_anchors:
+		var graphics := _ambient_rock_graphics(int(terrain_ids[cell.y * size.x + cell.x]))
+		result.append(_ambient_scenery_item(result.size(), cell, int(graphics[rng.randi_range(0, graphics.size() - 1)]), "sparse_fill", zone_ids, size, true))
+	var shallow_candidates: Array[Vector2i] = []
+	for index in range(terrain_ids.size()):
+		if int(terrain_ids[index]) == 4:
+			shallow_candidates.append(Vector2i(index % size.x, index / size.x))
+	var shallow_target := mini(clampi(int(float(area) / 1100.0), 1, 18), ceili(float(shallow_candidates.size()) / 8.0))
+	var shallow_anchors := _spaced_ambient_cells(shallow_candidates, shallow_target, 6.0, seed ^ 0x7093A11)
+	for cell in shallow_anchors:
+		var item := _ambient_scenery_item(result.size(), cell, 503, "shallows", zone_ids, size, false)
+		item["placement_domain"] = "shallow_water"
+		item["source_frame"] = rng.randi_range(0, 6)
+		result.append(item)
 	return result
+
+
+static func _ambient_rock_graphics(terrain_id: int) -> Array[int]:
+	if terrain_id in [2, 6, 13]:
+		return [564, 565, 566, 567]
+	return [572, 573, 574, 575, 576]
+
+
+static func _ambient_scenery_item(index: int, cell: Vector2i, graphic_id: int, family: String, zone_ids: PackedInt32Array, size: Vector2i, sparse_fill: bool) -> Dictionary:
+	var zone_id := int(zone_ids[cell.y * size.x + cell.x]) if zone_ids.size() == size.x * size.y else RandomMapZones.ZONE_FRONTIER
+	return {
+		"id": -600000 - index,
+		"kind": "terrain_feature",
+		"presentation_layer": "scenery",
+		"position": Vector2(cell) + Vector2(0.5, 0.5),
+		"graphic_id": graphic_id,
+		"asset_name": "graphic_%d" % graphic_id,
+		"strategic_zone": String(RandomMapZones.ZONE_NAMES.get(zone_id, "frontier")),
+		"ambient": true,
+		"feature_family": family,
+		"sparse_fill": sparse_fill,
+	}
+
+
+static func _spaced_ambient_cells(candidates: Array[Vector2i], target_count: int, minimum_distance: float, seed: int) -> Array[Vector2i]:
+	if target_count <= 0 or candidates.is_empty():
+		return []
+	var shuffled: Array[Vector2i] = candidates.duplicate()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	for index in range(shuffled.size() - 1, 0, -1):
+		var swap_index := rng.randi_range(0, index)
+		var value: Vector2i = shuffled[index]
+		shuffled[index] = shuffled[swap_index]
+		shuffled[swap_index] = value
+	var result: Array[Vector2i] = []
+	var minimum_squared := minimum_distance * minimum_distance
+	for cell in shuffled:
+		if result.all(func(other): return Vector2(cell).distance_squared_to(Vector2(other)) + 0.0001 >= minimum_squared):
+			result.append(cell)
+			if result.size() >= target_count:
+				break
+	return result
+
+
+static func _ambient_candidate_count(size: Vector2i) -> int:
+	var area := size.x * size.y
+	if area <= 128 * 128:
+		return 3
+	if area <= 240 * 240:
+		return 2
+	return 1
+
+
+static func _select_ambient_scenery(base_map_data: Dictionary, size: Vector2i, terrain_ids: Array[int], resources: Array, strategic_zones: Dictionary, seed: int) -> Dictionary:
+	var candidate_count := _ambient_candidate_count(size)
+	var selected_scenery: Array = []
+	var selected_score: Dictionary = {}
+	var selected_index := 0
+	var selected_seed := seed
+	var summaries: Array[Dictionary] = []
+	for candidate_index in range(candidate_count):
+		var candidate_seed := seed if candidate_index == 0 else seed ^ (0x5F356495 * candidate_index)
+		var candidate_scenery := _seeded_ambient_scenery(size, terrain_ids, resources, strategic_zones, candidate_seed)
+		var candidate_map := base_map_data.duplicate(false)
+		candidate_map["scenery"] = candidate_scenery
+		var score := RandomMapMetrics.measure_occupancy(candidate_map)
+		var summary := {
+			"index": candidate_index,
+			"seed": candidate_seed,
+			"outer_largest_empty_radius_cells": int(score.get("outer_largest_empty_radius_cells", score.get("largest_empty_radius_cells", 0))),
+			"outer_empty_land_ratio_max": float(score.get("outer_empty_land_ratio_max", score.get("empty_land_ratio", 1.0))),
+			"outer_feature_density_spread_per_1000": float(score.get("outer_feature_density_spread_per_1000", 0.0)),
+			"largest_empty_radius_cells": int(score.get("largest_empty_radius_cells", 0)),
+			"empty_land_ratio": float(score.get("empty_land_ratio", 1.0)),
+			"empty_window_ratio": float(score.get("empty_window_ratio", 1.0)),
+			"object_density_per_1000_land_cells": float(score.get("object_density_per_1000_land_cells", 0.0)),
+		}
+		summaries.append(summary)
+		if selected_score.is_empty() or _ambient_score_is_better(summary, selected_score):
+			selected_scenery = candidate_scenery
+			selected_score = summary
+			selected_index = candidate_index
+			selected_seed = candidate_seed
+	return {
+		"scenery": selected_scenery,
+		"metadata": {
+			"scope": "ambient_scenery",
+			"candidate_count": candidate_count,
+			"selected_candidate_index": selected_index,
+			"selected_candidate_seed": selected_seed,
+			"scores": summaries,
+		},
+	}
+
+
+static func _ambient_score_is_better(candidate: Dictionary, incumbent: Dictionary) -> bool:
+	var candidate_outer_radius := int(candidate.get("outer_largest_empty_radius_cells", candidate.get("largest_empty_radius_cells", 0)))
+	var incumbent_outer_radius := int(incumbent.get("outer_largest_empty_radius_cells", incumbent.get("largest_empty_radius_cells", 0)))
+	if candidate_outer_radius != incumbent_outer_radius:
+		return candidate_outer_radius < incumbent_outer_radius
+	var candidate_outer_empty := float(candidate.get("outer_empty_land_ratio_max", candidate.get("empty_land_ratio", 1.0)))
+	var incumbent_outer_empty := float(incumbent.get("outer_empty_land_ratio_max", incumbent.get("empty_land_ratio", 1.0)))
+	if not is_equal_approx(candidate_outer_empty, incumbent_outer_empty):
+		return candidate_outer_empty < incumbent_outer_empty
+	var candidate_spread := float(candidate.get("outer_feature_density_spread_per_1000", 0.0))
+	var incumbent_spread := float(incumbent.get("outer_feature_density_spread_per_1000", 0.0))
+	if not is_equal_approx(candidate_spread, incumbent_spread):
+		return candidate_spread < incumbent_spread
+	var candidate_radius := int(candidate.get("largest_empty_radius_cells", 0))
+	var incumbent_radius := int(incumbent.get("largest_empty_radius_cells", 0))
+	if candidate_radius != incumbent_radius:
+		return candidate_radius < incumbent_radius
+	var candidate_empty := float(candidate.get("empty_land_ratio", 1.0))
+	var incumbent_empty := float(incumbent.get("empty_land_ratio", 1.0))
+	if not is_equal_approx(candidate_empty, incumbent_empty):
+		return candidate_empty < incumbent_empty
+	var candidate_windows := float(candidate.get("empty_window_ratio", 1.0))
+	var incumbent_windows := float(incumbent.get("empty_window_ratio", 1.0))
+	if not is_equal_approx(candidate_windows, incumbent_windows):
+		return candidate_windows < incumbent_windows
+	return int(candidate.get("index", 0)) < int(incumbent.get("index", 0))
 
 
 static func _apply_source_terrain_groups(terrain_ids: Array[int], size: Vector2i, starts: Array[Vector2], source_profile: Dictionary, seed: int) -> void:
@@ -568,18 +791,45 @@ static func _apply_source_terrain_groups(terrain_ids: Array[int], size: Vector2i
 		var land_group := terrain_id != 22
 		var proportion := clampf(float(group.get("proportion", 0)), 0.0, 100.0) / 100.0
 		var radius := clampf(sqrt(proportion * float(size.x * size.y) / (PI * float(clumps))), 1.2, float(mini(size.x, size.y)) * 0.16)
+		var edge_spacing := maxi(0, int(group.get("edge_spacing", 0)))
+		var clumpiness := maxi(1, int(group.get("clumpiness", 8)))
+		var blob_count := clampi(roundi(float(clumpiness) / 8.0), 1, 5)
+		var placed_centers: Array[Vector2] = []
 		for clump_index in range(clumps):
 			var center := Vector2i(-1, -1)
-			for attempt in range(24):
-				var candidate := Vector2i(rng.randi_range(2, size.x - 3), rng.randi_range(2, size.y - 3))
+			var margin := clampi(ceili(radius * 1.35) + edge_spacing, 2, maxi(2, int(mini(size.x, size.y) / 3)))
+			for attempt in range(48):
+				var candidate := Vector2i(rng.randi_range(margin, size.x - margin - 1), rng.randi_range(margin, size.y - margin - 1))
 				var source_is_water := int(terrain_ids[candidate.y * size.x + candidate.x]) in TerrainRules.WATER_TERRAIN_IDS
-				if source_is_water != land_group:
+				var center_spacing_valid := placed_centers.all(func(other): return Vector2(candidate).distance_to(Vector2(other)) >= radius * 0.75 + edge_spacing)
+				if source_is_water != land_group and center_spacing_valid:
 					center = candidate
 					break
 			if center.x < 0:
 				continue
-			for y in range(maxi(0, floori(center.y - radius - 1.0)), mini(size.y, ceili(center.y + radius + 2.0))):
-				for x in range(maxi(0, floori(center.x - radius - 1.0)), mini(size.x, ceili(center.x + radius + 2.0))):
+			placed_centers.append(Vector2(center))
+			var lobes: Array[Dictionary] = []
+			var lobe_radius := maxf(1.2, radius / sqrt(maxf(1.0, float(blob_count) * 0.65)))
+			var cursor := Vector2(center) + Vector2(0.5, 0.5)
+			for blob_index in range(blob_count):
+				if blob_index > 0:
+					var direction := Vector2.RIGHT.rotated(rng.randf_range(0.0, TAU))
+					cursor += direction * rng.randf_range(radius * 0.25, radius * 0.58)
+					cursor.x = clampf(cursor.x, margin, size.x - margin - 1)
+					cursor.y = clampf(cursor.y, margin, size.y - margin - 1)
+				lobes.append({"center": cursor, "radius": lobe_radius * rng.randf_range(0.82, 1.18)})
+			var minimum := Vector2(INF, INF)
+			var maximum := Vector2(-INF, -INF)
+			for lobe_value in lobes:
+				var lobe: Dictionary = lobe_value
+				var lobe_center := Vector2(lobe["center"])
+				var lobe_size := float(lobe["radius"]) + 2.0
+				minimum.x = minf(minimum.x, lobe_center.x - lobe_size)
+				minimum.y = minf(minimum.y, lobe_center.y - lobe_size)
+				maximum.x = maxf(maximum.x, lobe_center.x + lobe_size)
+				maximum.y = maxf(maximum.y, lobe_center.y + lobe_size)
+			for y in range(maxi(0, floori(minimum.y)), mini(size.y, ceili(maximum.y))):
+				for x in range(maxi(0, floori(minimum.x)), mini(size.x, ceili(maximum.x))):
 					var index := y * size.x + x
 					var is_water := int(terrain_ids[index]) in TerrainRules.WATER_TERRAIN_IDS
 					if is_water == land_group:
@@ -588,7 +838,11 @@ static func _apply_source_terrain_groups(terrain_ids: Array[int], size: Vector2i
 					if terrain_id in TerrainRules.SOURCE_FOREST_TERRAIN_IDS and starts.any(func(start: Vector2): return (Vector2(cell) + Vector2.ONE * 0.5).distance_to(start) < 6.0):
 						continue
 					var edge_noise := (float(_cell_hash(cell, seed + clump_index * 101)) / 2147483647.0 - 0.5) * 1.4
-					if Vector2(cell).distance_to(Vector2(center)) <= radius + edge_noise:
+					var inside_lobe := lobes.any(func(lobe_value):
+						var lobe: Dictionary = lobe_value
+						return (Vector2(cell) + Vector2.ONE * 0.5).distance_to(Vector2(lobe["center"])) <= float(lobe["radius"]) + edge_noise
+					)
+					if inside_lobe:
 						terrain_ids[index] = terrain_id
 
 
@@ -846,8 +1100,8 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 			position.x = clampf(position.x, 1.5, float(size.x) - 1.5)
 			position.y = clampf(position.y, 1.5, float(size.y) - 1.5)
 			var placement_domain := String(cluster.get("placement_domain", "land"))
-			var preserve_approach := placement_domain == "land" and not land_components.is_empty() and not bool(cluster.get("dense_forest", false))
-			var enforce_spacing := false
+			var preserve_approach := bool(cluster.get("preserve_approach", placement_domain == "land" and not land_components.is_empty() and not bool(cluster.get("dense_forest", false))))
+			var enforce_spacing := bool(cluster.get("enforce_spacing", false))
 			var minimum_domain_clearance := maxi(0, int(cluster.get("minimum_domain_clearance_cells", 0)))
 			var guarantee_origin_values: Array = cluster.get("guarantee_origin", cluster.get("owner_start", []))
 			var guarantee_radius := maxf(0.0, float(cluster.get("guarantee_radius", 0.0)))
@@ -894,6 +1148,9 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 				generated["source_graphic_asset_name"] = String(cluster["source_graphic_asset_name"])
 			if cluster.has("source_terrain_id"):
 				generated["source_terrain_id"] = int(cluster["source_terrain_id"])
+			for metadata_key in ["source_global", "source_group", "strategic_zone"]:
+				if cluster.has(metadata_key):
+					generated[metadata_key] = cluster[metadata_key].duplicate(true) if cluster[metadata_key] is Dictionary or cluster[metadata_key] is Array else cluster[metadata_key]
 			resources.append(generated)
 	return resources
 

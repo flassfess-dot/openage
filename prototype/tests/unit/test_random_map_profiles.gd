@@ -26,9 +26,13 @@ func _initialize() -> void:
 			var first: Dictionary = built["map_data"]
 			var second := RandomMapGenerator.generate(definition)
 			assert_equal(first, second, "%s seed %d is byte-for-byte deterministic" % [profile.get("id"), seed])
+			assert_equal(first.get("strategic_zones", {}).get("zone_ids", []).size(), first["size"].x * first["size"].y, "%s publishes a complete strategic zone grid" % profile.get("id"))
 			var quality := RandomMapQuality.inspect(definition, first)
 			assert_true(bool(quality.get("valid", false)), "%s seed %d satisfies fairness/connectivity/resources: %s" % [profile.get("id"), seed, quality.get("errors", [])])
 			assert_equal(int(quality.get("metrics", {}).get("player_count", 0)), 4, "%s audits every active start" % profile.get("id"))
+			assert_true(int(quality.get("metrics", {}).get("terrain_patch_count", 0)) > 0, "%s publishes terrain diversity metrics" % profile.get("id"))
+			assert_true(float(quality.get("metrics", {}).get("empty_land_ratio", -1.0)) >= 0.0, "%s publishes empty-space metrics" % profile.get("id"))
+			assert_true(float(quality.get("metrics", {}).get("object_density_per_1000_land_cells", -1.0)) >= 0.0, "%s publishes normalized object density" % profile.get("id"))
 			if bool(profile.get("requires_naval_starts", false)):
 				assert_equal(int(quality.get("metrics", {}).get("naval_start_count", 0)), 4, "%s gives every player a legal dock/staging pair" % profile.get("id"))
 				var deep_fish: Array = first.get("resources", []).filter(func(resource): return String(resource.get("kind", "")) == "deep_fish")

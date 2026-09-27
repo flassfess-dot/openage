@@ -92,6 +92,7 @@ static func build(map_type: Dictionary, size: Vector2i, starts: Array[Vector2]) 
 		"island_radius_fraction": float(map_type.get("island_radius_fraction", 0.12)),
 		"sea_fraction": float(map_type.get("sea_fraction", 0.23)),
 		"cliff_profile": String(map_type.get("cliff_profile", "")),
+		"strategic_zone_contract": _strategic_zone_contract(map_type, size, source_start_radius),
 		"naval_start": {
 			"dock_footprint_radius_cells": 1,
 			"water_staging_clearance_cells": 1,
@@ -115,4 +116,35 @@ static func build(map_type: Dictionary, size: Vector2i, starts: Array[Vector2]) 
 			"minimum_land_component_cells": 64,
 			"minimum_gate_width_cells": 5 if topology == "narrows" else 0,
 		},
+	}
+
+
+static func _strategic_zone_contract(map_type: Dictionary, size: Vector2i, source_start_radius: float) -> Dictionary:
+	var map_type_id := String(map_type.get("id", ""))
+	var topology := String(map_type.get("topology", "inland"))
+	var radius_scale := 0.10
+	if map_type_id == "small_islands":
+		radius_scale = 0.085
+	elif map_type_id == "islands":
+		radius_scale = 0.095
+	elif map_type_id in ["highlands", "hill_country", "narrows"]:
+		radius_scale = 0.09
+	var sanctuary_radius := clampi(roundi(float(mini(size.x, size.y)) * radius_scale), 7, 18)
+	if topology == "islands":
+		sanctuary_radius = mini(sanctuary_radius, maxi(7, roundi(source_start_radius)))
+	var frontier_multiplier := 2.4
+	if map_type_id == "grasslands":
+		frontier_multiplier = 2.8
+	elif map_type_id in ["hill_country", "narrows"]:
+		frontier_multiplier = 2.1
+	elif map_type_id in ["small_islands", "islands"]:
+		frontier_multiplier = 2.0
+	return {
+		"profile": map_type_id,
+		"sanctuary_radius_cells": sanctuary_radius,
+		"sanctuary_radius_min_cells": 7,
+		"sanctuary_radius_max_cells": 18,
+		"frontier_distance_cells": roundi(float(sanctuary_radius) * frontier_multiplier),
+		"contested_safety_max": 0.12,
+		"territory_safety_min": 0.30,
 	}

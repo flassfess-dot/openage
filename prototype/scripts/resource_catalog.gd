@@ -82,6 +82,7 @@ func load() -> void:
 		4: load_frames("border_grass_desert", 12),
 		5: load_frames("border_grass_forest", 12),
 		6: load_frames("border_grass_desert2", 4),
+		8: load_custom_frames("border_desert_water_smooth", 4),
 	}
 	town_center_texture = load("res://assets/generated/town_center.png")
 	town_center_construction_textures = load_frames("town_center_construction", 4)
@@ -177,6 +178,18 @@ func load_frames(prefix: String, count: int) -> Array:
 	var frames: Array = []
 	for index in range(count):
 		frames.append(load("res://assets/generated/%s_%02d.png" % [prefix, index]))
+	return frames
+
+
+func load_custom_frames(prefix: String, count: int) -> Array:
+	var frames: Array = []
+	for index in range(count):
+		var path := "res://assets/custom/%s_%02d.png" % [prefix, index]
+		var image := Image.new()
+		if image.load(ProjectSettings.globalize_path(path)) == OK:
+			frames.append(ImageTexture.create_from_image(image))
+		else:
+			frames.append(null)
 	return frames
 
 func unit_stats(kind: String) -> Dictionary:

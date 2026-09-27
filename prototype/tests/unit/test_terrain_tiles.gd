@@ -14,6 +14,7 @@ func _initialize() -> void:
 	test_seeded_variation()
 	test_slope_tiles_have_base_and_raised_underlays()
 	test_water_corner_frames_follow_diagonal_terrain()
+	test_smooth_external_corner_assets()
 	test_shallows_do_not_render_as_open_water()
 	test_forest_resources_preserve_source_forest_terrain()
 
@@ -97,8 +98,8 @@ func test_water_corner_frames_follow_diagonal_terrain() -> void:
 	}
 	var external_layers := TerrainRules.border_layers(Vector2i(1, 1), Callable(self, "terrain_from_external_corner_map").bind(external_map), catalog.terrain_catalog_data, 41721)
 	assert_equal(external_layers.size(), 1, "external water corner emits one border layer")
-	assert_equal(int(external_layers[0]["border_id"]), 2, "grass shoreline uses the rounded desert/water corner sprite")
-	assert_equal(String(external_layers[0]["asset_name"]), "border_desert_water", "external water corner resolves the non-degenerate sprite set")
+	assert_equal(int(external_layers[0]["border_id"]), TerrainRules.BORDER_DESERT_WATER_SMOOTH, "external water corner uses the custom tapered shoreline sprite")
+	assert_equal(String(external_layers[0]["asset_name"]), "border_desert_water_smooth", "external water corner resolves the smooth sprite set")
 	assert_equal(int(external_layers[0]["frame"]), 1, "land protruding into water uses the external corner frame")
 
 	var internal_map := external_map.duplicate()
@@ -117,12 +118,29 @@ func test_water_corner_frames_follow_diagonal_terrain() -> void:
 	assert_equal(int(straight_layers[0]["frame"]), 8, "straight shoreline keeps its original edge frame")
 
 
+func test_smooth_external_corner_assets() -> void:
+	var catalog = ResourceCatalog.new()
+	catalog.load()
+	var frames: Array = catalog.terrain_border_textures.get(TerrainRules.BORDER_DESERT_WATER_SMOOTH, [])
+	assert_equal(frames.size(), 4, "smooth shoreline contains all four external corner orientations")
+	for index in range(frames.size()):
+		var texture: Texture2D = frames[index]
+		assert_true(texture != null, "smooth shoreline frame %d loads" % index)
+		if texture != null:
+			assert_equal(texture.get_size(), Vector2(65, 33), "smooth shoreline frame %d preserves the terrain lattice" % index)
+	for mask in TerrainRules.STYLE0_CORNER_MASKS:
+		for frame in range(4):
+			assert_equal(TerrainRules.style0_sprite_border_id(TerrainRules.BORDER_DESERT_WATER, int(mask), frame), TerrainRules.BORDER_DESERT_WATER_SMOOTH, "every external orientation resolves the smooth asset family")
+
+
 func test_shallows_do_not_render_as_open_water() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
 	assert_equal(TerrainRules.base_texture_kind(22, catalog.terrain_catalog_data), "water_dark", "source deep water keeps its own RoR texture")
 	assert_equal(TerrainRules.base_texture_kind(4, catalog.terrain_catalog_data), "sand", "source Shallows does not use the flat open-water placeholder")
 	assert_true(4 in TerrainRules.WATER_TERRAIN_IDS, "source Shallows remains water-domain terrain for scenario placement")
+	assert_true(TerrainRules.is_land_walkable(TerrainRules.logical_for_terrain_id(4)), "source Shallows is traversable by land units")
+	assert_true(TerrainRules.is_water_navigable(TerrainRules.logical_for_terrain_id(4)), "source Shallows remains traversable by ships")
 
 
 func test_forest_resources_preserve_source_forest_terrain() -> void:

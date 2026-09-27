@@ -1,46 +1,95 @@
 extends SceneTree
 
+const RandomMapMetrics := preload("res://scripts/random_map_metrics.gd")
+const RandomMapZones := preload("res://scripts/random_map_zones.gd")
 const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
-const TerrainRules := preload("res://scripts/terrain_rules.gd")
-const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
+
+var failures: Array[String] = []
 
 
 func _initialize() -> void:
-	var settings := SkirmishSettings.default_settings()
-	settings["map_type_id"] = "islands"
-	settings["map_size_id"] = "compact"
-	settings["seed"] = 41721
-	for index in range(settings["players"].size()):
-		settings["players"][index]["enabled"] = index < 2
-	var built := SkirmishSettings.build(settings)
+	_test_inland_ecology_and_density()
+	_test_coastal_predators()
+	_finish("Random map zoned ecology tests passed")
+
+
+func _test_inland_ecology_and_density() -> void:
+	var built := _build("grasslands", 4, 41721)
+	assert_true(bool(built.get("valid", false)), "grasslands fixture builds: %s" % str(built.get("errors", [])))
 	if not bool(built.get("valid", false)):
-		push_error("Ecology fixture did not build: %s" % [built.get("errors", [])])
-		quit(1)
+		return
+	var definition: Dictionary = built["definition"]
+	var map_data: Dictionary = built["map_data"]
+	var global_objects: Array = map_data.get("resources", []).filter(func(entity): return bool(entity.get("source_global", false)))
+	var global_wildlife: Array = global_objects.filter(func(entity): return String(entity.get("category", "")) == "unit")
+	for kind in ["gazelle", "elephant", "lion"]:
+		assert_true(global_wildlife.any(func(entity): return String(entity.get("kind", "")) == kind), "inland ecology includes source-global %s groups" % kind)
+	assert_true(global_objects.all(func(entity): return String(entity.get("strategic_zone", "")) in ["territory", "frontier", "contested"]), "global groups retain a non-sanctuary strategic role")
+	var scenery: Array = map_data.get("scenery", [])
+	assert_true(scenery.size() >= 20, "standard inland map receives a visible ambient scenery budget")
+	assert_true(scenery.all(func(entity): return bool(entity.get("ambient", false)) and String(entity.get("strategic_zone", "")) != "sanctuary"), "ambient scenery stays outside start sanctuaries")
+	assert_true(scenery.any(func(entity): return String(entity.get("feature_family", "")) == "rock"), "ambient layer contains terrain-matched rocks")
+	assert_true(scenery.any(func(entity): return String(entity.get("feature_family", "")) == "ground_detail"), "ambient layer contains cracks and bare-ground detail")
+	var land_scenery: Array = scenery.filter(func(entity): return String(entity.get("feature_family", "")) != "shallows")
+	for first_index in range(land_scenery.size()):
+		for second_index in range(first_index + 1, land_scenery.size()):
+			assert_true(Vector2(land_scenery[first_index]["position"]).distance_to(Vector2(land_scenery[second_index]["position"])) + 0.0001 >= 3.0, "ambient land detail preserves blue-noise spacing")
+	var without_scenery := map_data.duplicate(true)
+	without_scenery["scenery"] = []
+	var dense_metrics := RandomMapMetrics.measure(definition, map_data)
+	var sparse_metrics := RandomMapMetrics.measure(definition, without_scenery)
+	assert_true(float(dense_metrics["object_density_per_1000_land_cells"]) > float(sparse_metrics["object_density_per_1000_land_cells"]), "ambient pass increases normalized map occupancy")
+	assert_true(int(dense_metrics["largest_empty_radius_cells"]) <= int(sparse_metrics["largest_empty_radius_cells"]), "ambient pass never enlarges the largest empty region")
+
+
+func _test_coastal_predators() -> void:
+	var built := _build("coastal", 2, 7919)
+	assert_true(bool(built.get("valid", false)), "coastal fixture builds: %s" % str(built.get("errors", [])))
+	if not bool(built.get("valid", false)):
 		return
 	var map_data: Dictionary = built["map_data"]
+	var alligators: Array = map_data.get("resources", []).filter(func(entity):
+		return bool(entity.get("source_global", false)) and int(entity.get("source_unit_id", -1)) == 1 and String(entity.get("kind", "")) == "alligator"
+	)
+	assert_true(not alligators.is_empty(), "coastal source profile produces global alligators")
+	assert_true(alligators.all(func(entity): return _near_published_coast(map_data, Vector2i(Vector2(entity.get("position", Vector2.ZERO))), 2)), "global alligators remain near their coastal anchor")
+	var water_features: Dictionary = map_data.get("water_features", {})
+	assert_true(int(water_features.get("coastal_water_cells", 0)) > 0, "coastal map contains a light near-shore water band")
+	assert_true(int(water_features.get("deep_water_cells", 0)) > 0, "coastal map contains deep water away from land")
+	assert_true(int(water_features.get("walkable_shallow_cells", 0)) > 0, "coastal map contains walkable sandbars")
+	assert_true(map_data.get("scenery", []).any(func(entity): return String(entity.get("feature_family", "")) == "shallows" and int(entity.get("graphic_id", -1)) == 503), "walkable shallows receive varied original-game water detail")
+
+
+func _near_published_coast(map_data: Dictionary, origin: Vector2i, radius: int) -> bool:
 	var size: Vector2i = map_data["size"]
-	var terrain_ids: Array = map_data["terrain_ids"]
-	var resources: Array = map_data["resources"]
-	var trees: Array = resources.filter(func(resource): return String(resource.get("kind", "")) == "tree")
-	var palms: Array = trees.filter(func(resource): return int(resource.get("source_unit_id", -1)) in RandomMapGenerator.PALM_TREES)
-	var deep_fish: Array = resources.filter(func(resource): return String(resource.get("kind", "")) == "deep_fish")
-	var close_tree_pairs := 0
-	var occupied_tree_cells: Dictionary = {}
-	for tree in trees:
-		var cell := Vector2i(Vector2(tree["position"]))
-		if occupied_tree_cells.has(cell + Vector2i.LEFT) or occupied_tree_cells.has(cell + Vector2i.UP):
-			close_tree_pairs += 1
-		occupied_tree_cells[cell] = true
-	var valid := trees.size() >= 30 and close_tree_pairs > 0 and palms.size() > 0 and deep_fish.size() > 6
-	for palm in palms:
-		var cell := Vector2i(Vector2(palm["position"]))
-		valid = valid and int(terrain_ids[cell.y * size.x + cell.x]) in [6, 13, 20]
-	for fish in deep_fish:
-		var cell := Vector2i(Vector2(fish["position"]))
-		valid = valid and int(terrain_ids[cell.y * size.x + cell.x]) in TerrainRules.OPEN_WATER_TERRAIN_IDS
-	if not valid:
-		push_error("Generated ecology lacks dense biome-matched woods or open-water fish: trees=%d close_pairs=%d palms=%d deep_fish=%d" % [trees.size(), close_tree_pairs, palms.size(), deep_fish.size()])
-		quit(1)
+	var zones: Dictionary = map_data["strategic_zones"]
+	for y in range(maxi(0, origin.y - radius), mini(size.y, origin.y + radius + 1)):
+		for x in range(maxi(0, origin.x - radius), mini(size.x, origin.x + radius + 1)):
+			if RandomMapZones.is_coastal_at(zones, size, Vector2i(x, y)):
+				return true
+	return false
+
+
+func _build(profile: String, player_count: int, seed: int) -> Dictionary:
+	var settings := SkirmishSettings.default_settings()
+	settings["map_type_id"] = profile
+	settings["seed"] = seed
+	for index in range(settings["players"].size()):
+		settings["players"][index]["enabled"] = index < player_count
+		settings["players"][index]["controller"] = "human" if index == 0 else "ai"
+	return SkirmishSettings.build(settings)
+
+
+func assert_true(value: bool, context: String) -> void:
+	if not value:
+		failures.append("%s: expected true" % context)
+
+
+func _finish(success_message: String) -> void:
+	if failures.is_empty():
+		print(success_message)
+		quit(0)
 		return
-	print("Generated dense forest, palm biome and fish-school tests passed")
-	quit(0)
+	for failure in failures:
+		push_error(failure)
+	quit(1)
