@@ -14,6 +14,7 @@ func _initialize() -> void:
 	test_hash_covers_authoritative_subsystems()
 	test_presentation_snapshot_is_filtered_and_detached()
 	test_known_resource_cache_tracks_incremental_exploration()
+	test_known_resource_memory_freezes_under_fog()
 	test_navigation_cache_tracks_local_changes()
 	test_navigation_cache_reachable_domain_switch()
 	test_builder_presentation_projection()
@@ -245,6 +246,38 @@ func test_known_resource_cache_tracks_incremental_exploration() -> void:
 	assert_equal(repeated_ids.count(int(second["id"])), 1, "resource cache does not duplicate resources after repeated reads")
 	var bounded_ids: Array = world.get_known_resources_in_bounds(1, Rect2(Vector2(22.0, 22.0), Vector2(4.0, 4.0))).map(func(resource): return int(resource["id"]))
 	assert_equal(bounded_ids, [int(second["id"])], "bounded resource cache returns only explored resources intersecting the camera")
+
+
+func test_known_resource_memory_freezes_under_fog() -> void:
+	var world = SimulationWorld.new(Vector2i(32, 32))
+	world.navigation_grid.configure_terrain(func(_cell): return "grass")
+	var scout: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
+	scout["components"]["vision"] = {"enabled": true, "range": 3.0}
+	var gold: Dictionary = world.add_scenario_resource("gold_mine", Vector2(5.0, 4.0), 75)
+	world.update_fog_of_war()
+	var initial_memory: Array = world.get_known_resources(1).filter(func(resource): return int(resource.get("id", -1)) == int(gold["id"]))
+	assert_equal(initial_memory.size(), 1, "visible resource enters exploration memory")
+	assert_equal(int(initial_memory[0].get("amount", -1)), 75, "resource memory captures the observed amount")
+
+	scout["pos"] = Vector2(24.0, 24.0)
+	world.update_fog_of_war()
+	gold["amount"] = 0
+	world.update_resource_state(gold)
+	var hidden_memory: Array = world.get_known_resources(1).filter(func(resource): return int(resource.get("id", -1)) == int(gold["id"]))
+	assert_equal(hidden_memory.size(), 1, "depleted resource remains remembered while its cell is fogged")
+	assert_equal(int(hidden_memory[0].get("amount", -1)), 75, "fogged resource does not leak its live depleted amount")
+	var bounded_hidden_memory: Array = world.get_known_resources_in_bounds(1, Rect2(Vector2.ZERO, Vector2(12.0, 12.0)))
+	assert_equal(bounded_hidden_memory.size(), 1, "camera-bounded snapshot keeps a fogged resource visible from memory")
+	assert_equal(int(bounded_hidden_memory[0].get("amount", -1)), 75, "camera-bounded snapshot does not leak live depletion")
+	var saved_memory: Dictionary = world.known_resource_memory_state()
+	world.restore_known_resource_memory(saved_memory)
+	var restored_memory: Array = world.get_known_resources(1).filter(func(resource): return int(resource.get("id", -1)) == int(gold["id"]))
+	assert_equal(int(restored_memory[0].get("amount", -1)), 75, "save/load view state preserves frozen resource memory")
+
+	scout["pos"] = Vector2(4.0, 4.0)
+	world.update_fog_of_war()
+	var revealed_again: Array = world.get_known_resources(1).filter(func(resource): return int(resource.get("id", -1)) == int(gold["id"]))
+	assert_true(revealed_again.is_empty(), "depleted resource disappears only after the cell becomes visible again")
 
 
 func assert_not_equal(actual: Variant, expected: Variant, context: String) -> void:

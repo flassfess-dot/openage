@@ -43,6 +43,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var include_scenario := bool(options.get("include_scenario", true))
 	var include_worker_command_options := bool(options.get("include_worker_command_options", true))
 	var include_overview := bool(options.get("include_overview", false))
+	var include_overview_resources := bool(options.get("include_overview_resources", include_overview))
 	var entity_bounds: Variant = options.get("entity_bounds")
 	var has_entity_bounds: bool = false
 	if entity_bounds is Rect2:
@@ -195,7 +196,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		known_resources = world.get_known_resources(observer_team)
 	else:
 		known_resources = world.get_resources()
-	if include_overview:
+	if include_overview_resources:
 		var overview_source_resources: Array = world.get_known_resources(observer_team) if resources_are_preordered else world.get_resources()
 		for resource_value in overview_source_resources:
 			overview_resources.append(resource_value if borrow_overview_entities else _overview_entity(resource_value))
@@ -400,6 +401,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		# changes must not invalidate the local player's cached fog mesh.
 		"fog_revision": int(fog.revision_for_player(observer_team)),
 		"fog_exploration_revision": int(fog.exploration_revision_for_player(observer_team)),
+		"resource_memory_revision": int(world.known_resource_revision(observer_team)) if observer_team > 0 and world.has_method("known_resource_revision") else 0,
 		"fog": presented_fog,
 		"player_state": player_state,
 		"battle_over": bool(world.battle_over),

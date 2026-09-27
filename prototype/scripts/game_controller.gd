@@ -17,6 +17,7 @@ const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const FIXED_STEP_SECONDS: float = 0.05
 const GAME_SPEEDS := [1.0, 1.5, 2.0]
 const MAX_STEPS_PER_FRAME: int = 12
+const FORMATION_RECONCILE_INTERVAL_TICKS: int = 2
 const QUEUEABLE_ORDERS := ["move", "gather", "return_resources", "build", "repair", "attack", "unload"]
 const REPLACING_ORDERS := ["move", "formation_move", "attack_move", "attack", "attack_ground", "convert", "heal", "gather", "return_resources", "board", "unload", "trade", "build", "repair", "stop", "hold"]
 
@@ -54,6 +55,8 @@ func set_world(world) -> void:
 		simulation_world.set_performance_probe(performance_probe)
 	if simulation_world != null and simulation_world.has_method("set_formation_cohesion_active"):
 		simulation_world.set_formation_cohesion_active(not formation_groups.is_empty())
+	if simulation_world != null and simulation_world.has_method("set_formation_groups_view"):
+		simulation_world.set_formation_groups_view(formation_groups)
 
 
 func set_performance_probe(probe: Variant) -> void:
@@ -1089,11 +1092,14 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 	var world_started := Time.get_ticks_usec() if performance_probe != null else 0
 	if simulation_world.has_method("set_formation_cohesion_active"):
 		simulation_world.set_formation_cohesion_active(not formation_groups.is_empty())
+	if simulation_world.has_method("set_formation_groups_view"):
+		simulation_world.set_formation_groups_view(formation_groups)
 	simulation_world.advance(FIXED_STEP_SECONDS, player_team, enemy_team)
 	_advance_deferred_orders()
 	var world_microseconds := Time.get_ticks_usec() - world_started if performance_probe != null else 0
 	var formation_started := Time.get_ticks_usec() if performance_probe != null else 0
-	reconcile_formation_groups()
+	if posmod(tick_index, FORMATION_RECONCILE_INTERVAL_TICKS) == 0:
+		reconcile_formation_groups()
 	var formation_microseconds := Time.get_ticks_usec() - formation_started if performance_probe != null else 0
 	var event_started := Time.get_ticks_usec() if performance_probe != null else 0
 	simulation_world.end_event_capture()

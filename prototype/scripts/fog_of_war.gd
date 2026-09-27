@@ -11,6 +11,7 @@ var visible_counts_by_player: Dictionary = {}
 var revisions_by_player: Dictionary = {}
 var exploration_revisions_by_player: Dictionary = {}
 var newly_explored_cells_by_player: Dictionary = {}
+var newly_visible_cells_by_player: Dictionary = {}
 var navigation_newly_explored_by_player: Dictionary = {}
 var allies_by_player: Dictionary = {}
 var shared_vision_by_player: Dictionary = {}
@@ -42,6 +43,7 @@ func reset() -> void:
 	revisions_by_player.clear()
 	exploration_revisions_by_player.clear()
 	newly_explored_cells_by_player.clear()
+	newly_visible_cells_by_player.clear()
 	navigation_newly_explored_by_player.clear()
 	allies_by_player.clear()
 	shared_vision_by_player.clear()
@@ -80,6 +82,7 @@ func ensure_player(player_id: int) -> void:
 		revisions_by_player[player_id] = 0
 		exploration_revisions_by_player[player_id] = 0
 		newly_explored_cells_by_player[player_id] = []
+		newly_visible_cells_by_player[player_id] = {}
 		visibility_topology_dirty = true
 	if not allies_by_player.has(player_id):
 		allies_by_player[player_id] = {player_id: true}
@@ -198,6 +201,16 @@ func consume_newly_explored_cells(player_id: int) -> Array:
 	return result
 
 
+func consume_newly_visible_cells(player_id: int) -> Array:
+	if player_id <= 0:
+		return []
+	ensure_player(player_id)
+	var cells: Dictionary = newly_visible_cells_by_player[player_id]
+	var result: Array = cells.keys()
+	cells.clear()
+	return result
+
+
 func track_navigation_exploration(player_id: int) -> void:
 	ensure_player(player_id)
 	navigation_newly_explored_by_player[player_id] = []
@@ -221,14 +234,18 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 	var phase_started := Time.get_ticks_usec() if performance_probe != null else 0
 	vision_cells_microseconds = 0
 	regenerated_sources = 0
-	for entity in units:
-		var team := int(entity["team"])
-		if team > 0 and not states_by_player.has(team):
-			ensure_player(team)
-	for entity in buildings:
-		var team := int(entity["team"])
-		if team > 0 and not states_by_player.has(team):
-			ensure_player(team)
+	# Known teams do not change during ordinary ticks. A topology rebuild still
+	# performs the complete discovery pass; a genuinely new team discovered by
+	# the delta collector below requests a rebuild through ensure_player().
+	if visibility_topology_dirty:
+		for entity in units:
+			var team := int(entity["team"])
+			if team > 0 and not states_by_player.has(team):
+				ensure_player(team)
+		for entity in buildings:
+			var team := int(entity["team"])
+			if team > 0 and not states_by_player.has(team):
+				ensure_player(team)
 	if performance_probe != null:
 		performance_probe.observe_microseconds("simulation.fog.ensure_players", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
@@ -239,20 +256,34 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 	var added_sources: Array[Dictionary] = []
 	var previous_replacements: Array[Dictionary] = []
 	var current_replacements: Array[Dictionary] = []
+	var full_roster_scan := maxi(1, movement_bucket_count) <= 1 or posmod(movement_bucket_index, maxi(1, movement_bucket_count)) == 0
 	if visibility_topology_dirty:
 		_collect_sources(units, 0, current_sources, movement_bucket_count, movement_bucket_index)
 		_collect_sources(buildings, 1, current_sources, movement_bucket_count, movement_bucket_index)
 	else:
-		source_scan_generation += 1
+		if full_roster_scan:
+			source_scan_generation += 1
 		_collect_source_deltas(units, 0, movement_bucket_count, movement_bucket_index, added_sources, previous_replacements, current_replacements)
-		_collect_source_deltas(buildings, 1, movement_bucket_count, movement_bucket_index, added_sources, previous_replacements, current_replacements)
-		for source_key in vision_sources.keys():
-			var source: Dictionary = vision_sources[source_key]
-			var numeric_source_key := int(source_key)
-			if numeric_source_key < source_seen_generations.size() and int(source_seen_generations[numeric_source_key]) == source_scan_generation:
-				continue
-			removed_sources.append(source)
-			vision_sources.erase(source_key)
+		# Buildings are static sources in normal play. Re-scan them, and detect
+		# removed unit/building sources, once per movement bucket cycle. This
+		# bounds death/completion visibility latency to 200 ms while removing
+		# three quarters of the static-roster and removal-map traversal.
+		if full_roster_scan:
+			_collect_source_deltas(buildings, 1, movement_bucket_count, movement_bucket_index, added_sources, previous_replacements, current_replacements)
+			for source_key in vision_sources.keys():
+				var source: Dictionary = vision_sources[source_key]
+				var numeric_source_key := int(source_key)
+				if numeric_source_key < source_seen_generations.size() and int(source_seen_generations[numeric_source_key]) == source_scan_generation:
+					continue
+				removed_sources.append(source)
+				vision_sources.erase(source_key)
+		# Runtime teams are normally registered before the first tick. Preserve
+		# compatibility with fixtures that introduce one later by rebuilding once
+		# if a collector had to allocate its visibility state.
+		if visibility_topology_dirty:
+			current_sources.clear()
+			_collect_sources(units, 0, current_sources, 1, 0)
+			_collect_sources(buildings, 1, current_sources, 1, 0)
 	if performance_probe != null:
 		performance_probe.observe_microseconds("simulation.fog.collect_sources", Time.get_ticks_usec() - phase_started)
 		performance_probe.observe_microseconds("simulation.fog.vision_cells", vision_cells_microseconds)
@@ -313,6 +344,8 @@ func _collect_sources(entities: Array, category_id: int, result: Dictionary, mov
 		var source_player := int(entity["team"])
 		if source_player <= 0:
 			continue
+		if not states_by_player.has(source_player):
+			ensure_player(source_player)
 		# Isolated compatibility fixtures may omit an ID; runtime entities always
 		# provide one. Preserve the existing deterministic array-index fallback.
 		var entity_id := int(entity.get("id", -1))
@@ -373,6 +406,8 @@ func _collect_source_deltas(
 		var source_player := int(entity["team"])
 		if source_player <= 0:
 			continue
+		if not states_by_player.has(source_player):
+			ensure_player(source_player)
 		var entity_id := int(entity.get("id", -1))
 		var stable_id := entity_id if entity_id >= 0 else index
 		var source_key := (stable_id << 1) | (category_id & 1)
@@ -451,6 +486,7 @@ func _rebuild_visibility(current_sources: Dictionary) -> Dictionary:
 		var observer_changed := false
 		var exploration_changed := false
 		var newly_explored: Array = newly_explored_cells_by_player[observer]
+		var newly_visible: Dictionary = newly_visible_cells_by_player[observer]
 		var navigation_newly: Variant = navigation_newly_explored_by_player.get(observer)
 		for index in range(states.size()):
 			if states[index] == VISIBLE:
@@ -459,7 +495,7 @@ func _rebuild_visibility(current_sources: Dictionary) -> Dictionary:
 		var allies: Dictionary = shared_vision_by_player.get(observer, {})
 		for source in current_sources.values():
 			if bool(allies.get(int(source["team"]), false)):
-				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly)
+				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly, newly_visible)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		states_by_player[observer] = states
@@ -489,13 +525,14 @@ func _apply_source_deltas(
 		var observer_changed := false
 		var exploration_changed := false
 		var newly_explored: Array = newly_explored_cells_by_player[observer]
+		var newly_visible: Dictionary = newly_visible_cells_by_player[observer]
 		var navigation_newly: Variant = navigation_newly_explored_by_player.get(observer)
 		for source in removed_sources:
 			if bool(allies.get(int(source["team"]), false)):
 				observer_changed = _apply_remove_visible_cells(states, counts, source["cells"]) or observer_changed
 		for source in added_sources:
 			if bool(allies.get(int(source["team"]), false)):
-				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly)
+				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly, newly_visible)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		for replacement_index in range(previous_replacements.size()):
@@ -505,14 +542,14 @@ func _apply_source_deltas(
 			var current_team := int(current["team"])
 			if previous_team == current_team:
 				if bool(allies.get(current_team, false)):
-					var flags := _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"], newly_explored, navigation_newly)
+					var flags := _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"], newly_explored, navigation_newly, newly_visible)
 					observer_changed = (flags & 1) != 0 or observer_changed
 					exploration_changed = (flags & 2) != 0 or exploration_changed
 				continue
 			if bool(allies.get(previous_team, false)):
 				observer_changed = _apply_remove_visible_cells(states, counts, previous["cells"]) or observer_changed
 			if bool(allies.get(current_team, false)):
-				var flags := _apply_add_visible_cells(states, counts, current["cells"], newly_explored, navigation_newly)
+				var flags := _apply_add_visible_cells(states, counts, current["cells"], newly_explored, navigation_newly, newly_visible)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		states_by_player[observer] = states
@@ -537,17 +574,19 @@ func _add_visible_cells(observer: int, cells: PackedInt32Array) -> bool:
 	var states: PackedByteArray = states_by_player[observer]
 	var counts: PackedInt32Array = visible_counts_by_player[observer]
 	var newly_explored: Array = newly_explored_cells_by_player[observer]
-	var flags := _apply_add_visible_cells(states, counts, cells, newly_explored, navigation_newly_explored_by_player.get(observer))
+	var flags := _apply_add_visible_cells(states, counts, cells, newly_explored, navigation_newly_explored_by_player.get(observer), newly_visible_cells_by_player[observer])
 	states_by_player[observer] = states
 	visible_counts_by_player[observer] = counts
 	if (flags & 2) != 0:
 		exploration_revisions_by_player[observer] = int(exploration_revisions_by_player.get(observer, 0)) + 1
 	return (flags & 1) != 0
 
-func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null) -> int:
+func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null, newly_visible: Variant = null) -> int:
 	var flags := 0
 	for index in cells:
 		if counts[index] == 0 and states[index] != VISIBLE:
+			if newly_visible is Dictionary:
+				newly_visible[index] = true
 			if states[index] == UNKNOWN:
 				flags |= 2
 				if newly_explored is Array:
@@ -570,7 +609,7 @@ func _apply_remove_visible_cells(states: PackedByteArray, counts: PackedInt32Arr
 	return changed
 
 
-func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Array, previous_cells: PackedInt32Array, current_cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null) -> int:
+func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Array, previous_cells: PackedInt32Array, current_cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null, newly_visible: Variant = null) -> int:
 	var previous_index := 0
 	var current_index := 0
 	var flags := 0
@@ -588,6 +627,8 @@ func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Ar
 			previous_index += 1
 		else:
 			if counts[current_cell] == 0 and states[current_cell] != VISIBLE:
+				if newly_visible is Dictionary:
+					newly_visible[current_cell] = true
 				if states[current_cell] == UNKNOWN:
 					flags |= 2
 					if newly_explored is Array:

@@ -149,6 +149,24 @@ func query_aabb(rectangle: Rect2, category: String = "") -> Array:
 	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	return result
 
+
+func has_external_unit_in_aabb(rectangle: Rect2, formation_group_id: int) -> bool:
+	# Formation cohesion only needs to know whether an external unit exists.
+	# Avoid allocating and ID-sorting a complete result array for this boolean
+	# broad-phase query, and stop on the first relevant candidate.
+	var expanded := rectangle.grow(maximum_unit_radius)
+	var minimum := cell_for(expanded.position)
+	var maximum := cell_for(expanded.end)
+	for y in range(minimum.y, maximum.y + 1):
+		for x in range(minimum.x, maximum.x + 1):
+			for unit_index in unit_buckets.get(Vector2i(x, y), []):
+				var candidate: Dictionary = unit_entities[unit_index]
+				if int(candidate.get("formation_group_id", -1)) == formation_group_id:
+					continue
+				if rectangle.grow(unit_radii[unit_index]).has_point(unit_positions[unit_index]):
+					return true
+	return false
+
 func query_neighbors(entity: Dictionary, radius: float, category: String = "unit") -> Array:
 	var result: Array = []
 	query_neighbors_into(entity, radius, category, result)

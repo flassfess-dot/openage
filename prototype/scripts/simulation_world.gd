@@ -62,12 +62,10 @@ var resource_nodes: Array = []
 var resource_nodes_by_id: Dictionary = {}
 var resource_nodes_by_cell: Dictionary = {}
 var decaying_resource_nodes: Array = []
-var resource_roster_revision: int = 0
-var resource_minimap_revision: int = 0
 var known_resources_by_player: Dictionary = {}
 var ai_navigation_knowledge = AiNavigationKnowledge.new()
-var compact_ai_resource_by_id: Dictionary = {}
 var known_ai_resources_by_player: Dictionary = {}
+const RESOURCE_MEMORY_CHUNK_SIZE := 8
 var last_known_buildings_by_player: Dictionary = {}
 var local_build_site_cache: Dictionary = {}
 const MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES := 64
@@ -91,6 +89,7 @@ var building_navigation_cells_by_id: Dictionary = {}
 
 var entity_id_sequence := EntityIds.new()
 var spatial_index := SpatialHash.new(2.0)
+var formation_groups_view: Dictionary = {}
 var navigation_grid: NavigationGrid
 var pathfinder
 var navigation_service: NavigationService
@@ -373,12 +372,9 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	resource_nodes_by_id.clear()
 	resource_nodes_by_cell.clear()
 	decaying_resource_nodes.clear()
-	resource_roster_revision += 1
-	resource_minimap_revision += 1
 	known_resources_by_player.clear()
 	ai_navigation_knowledge.clear()
 	last_known_buildings_by_player.clear()
-	compact_ai_resource_by_id.clear()
 	known_ai_resources_by_player.clear()
 	local_build_site_cache.clear()
 	build_option_catalog_cache.clear()
@@ -735,10 +731,7 @@ func _add_resource(kind: String, position: Vector2, amount: int, resolve_placeme
 	if not resource_nodes_by_cell.has(resource_cell_index):
 		resource_nodes_by_cell[resource_cell_index] = []
 	resource_nodes_by_cell[resource_cell_index].append(resource)
-	resource_roster_revision += 1
-	resource_minimap_revision += 1
-	known_resources_by_player.clear()
-	known_ai_resources_by_player.clear()
+	_mark_known_resource_dirty(resource)
 	if float(resource.get("decay_rate", 0.0)) > 0.0:
 		decaying_resource_nodes.append(resource)
 	if safe_amount > 0 and kind == "tree":
@@ -1255,7 +1248,7 @@ func _configure_tick_pipeline() -> void:
 	tick_pipeline.add_active("victory", Callable(self, "_tick_victory"))
 	tick_pipeline.add_active("purge", Callable(self, "_tick_purge"))
 	tick_pipeline.add_active("spatial_index", Callable(self, "_tick_spatial_index"))
-	tick_pipeline.add_active("fog", Callable(visibility_system, "advance"))
+	tick_pipeline.add_active("fog", Callable(self, "_tick_fog"))
 	tick_pipeline.add_active("component_sync", Callable(self, "_tick_component_sync"))
 
 	tick_pipeline.add_completed("death_lifecycle", Callable(self, "_tick_death_lifecycle"))
@@ -1263,7 +1256,7 @@ func _configure_tick_pipeline() -> void:
 	tick_pipeline.add_completed("projectiles", Callable(combat_system, "advance_projectiles"))
 	tick_pipeline.add_completed("purge", Callable(self, "_tick_purge"))
 	tick_pipeline.add_completed("spatial_index", Callable(self, "_tick_spatial_index"))
-	tick_pipeline.add_completed("fog", Callable(visibility_system, "advance"))
+	tick_pipeline.add_completed("fog", Callable(self, "_tick_fog"))
 	tick_pipeline.add_completed("component_sync", Callable(self, "_tick_component_sync"))
 
 
@@ -1478,10 +1471,26 @@ func sync_all_components() -> void:
 
 
 func update_fog_of_war() -> void:
-	visibility_system.advance({"force": true})
+	_tick_fog({"force": true})
+
+
+func _tick_fog(context: Dictionary) -> void:
+	visibility_system.advance(context)
+	var fog = get_fog_of_war()
+	# Resource memory is sampled at the exact visibility transition. This keeps
+	# hidden state frozen even when an AI snapshot is requested less often than
+	# the simulation tick.
+	for observer_value in known_resources_by_player.keys():
+		var observer_team := int(observer_value)
+		var cached: Dictionary = known_resources_by_player[observer_value]
+		_refresh_known_resource_cache(observer_team, cached, fog)
 
 func query_units_near(position: Vector2, radius: float) -> Array:
 	return spatial_index.query_circle(position, radius, "unit")
+
+
+func _has_external_formation_unit(bounds: Rect2, formation_group_id: int) -> bool:
+	return spatial_index.has_external_unit_in_aabb(bounds, formation_group_id)
 
 
 func query_combat_entities_near(position: Vector2, radius: float) -> Array:
@@ -1507,7 +1516,16 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	pathfinder.reset_path_query_tick_observation()
 	var phase_started := Time.get_ticks_usec() if probe != null else 0
 	if formation_cohesion_active:
-		FormationCohesion.update(units)
+		if formation_groups_view.is_empty():
+			FormationCohesion.update(units)
+		else:
+			FormationCohesion.update_active_groups(
+				formation_groups_view,
+				Callable(self, "find_unit"),
+				Callable(self, "_has_external_formation_unit"),
+				spatial_index.maximum_unit_radius,
+				spatial_index.maximum_unit_clearance
+			)
 	if probe != null:
 		probe.observe_microseconds("simulation.unit_orders.formation_cohesion", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
@@ -1742,6 +1760,10 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 
 func set_formation_cohesion_active(value: bool) -> void:
 	formation_cohesion_active = value
+
+
+func set_formation_groups_view(groups: Dictionary) -> void:
+	formation_groups_view = groups
 
 
 func update_static_combatants(delta: float, player_team: int) -> void:
@@ -2544,9 +2566,6 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 		return 0.0
 	var amount_before := int(resource["amount"])
 	resource["amount"] = maxi(0, amount_before - int(amount))
-	if amount_before > 0 and int(resource["amount"]) <= 0:
-		resource_minimap_revision += 1
-	_sync_compact_ai_resource(resource)
 	worker["carried_amount"] = float(worker["carried_amount"]) + amount
 	worker["carried_resource_type_id"] = resource_type_id
 	if capture_domain_events:
@@ -3811,6 +3830,8 @@ func update_resource_state(resource: Dictionary) -> void:
 		resource[state_key] = "available"
 		resource[stage_key] = 0
 	EntityComponents.sync_resource_amount(resource)
+	if resource_nodes_by_id.has(int(resource.get("id", -1))):
+		_mark_known_resource_dirty(resource)
 	if previous_state != "depleted" and String(resource.get(state_key, "")) == "depleted":
 		if not harvestable_building:
 			_unregister_forest_resource(resource)
@@ -3838,9 +3859,6 @@ func advance_resource_lifecycle(delta: float) -> void:
 			continue
 		var amount_before := int(resource["amount"])
 		resource["amount"] = maxi(0, amount_before - lost)
-		if amount_before > 0 and int(resource["amount"]) <= 0:
-			resource_minimap_revision += 1
-		_sync_compact_ai_resource(resource)
 		# update_resource_state releases the depleted footprint incrementally.
 		update_resource_state(resource)
 		if capture_domain_events:
@@ -3872,17 +3890,14 @@ func advance_resource_lifecycle(delta: float) -> void:
 			for resource_id_value in retired_ids.keys():
 				var resource_id := int(resource_id_value)
 				var retired: Dictionary = retired_ids[resource_id]
+				_mark_known_resource_dirty(retired)
 				resource_nodes_by_id.erase(resource_id)
-				compact_ai_resource_by_id.erase(resource_id)
 				var position: Vector2 = retired.get("pos", Vector2.ZERO)
 				var cell_index := floori(position.y) * map_size.x + floori(position.x)
 				var cell_resources: Array = resource_nodes_by_cell.get(cell_index, [])
 				cell_resources.erase(retired)
 				if cell_resources.is_empty():
 					resource_nodes_by_cell.erase(cell_index)
-			resource_roster_revision += 1
-			known_resources_by_player.clear()
-			known_ai_resources_by_player.clear()
 
 
 func _update_huntable_reaction(unit: Dictionary) -> void:
@@ -5180,6 +5195,43 @@ func get_resources() -> Array:
 	return resource_nodes
 
 
+func known_resource_memory_state() -> Dictionary:
+	var result: Dictionary = {}
+	var observers: Array = known_resources_by_player.keys()
+	for observer_value in observers:
+		var observer_team := int(observer_value)
+		get_known_resources(observer_team)
+		var cached: Dictionary = known_resources_by_player[observer_value]
+		result[observer_team] = cached.get("resources", []).duplicate(true)
+	return result
+
+
+func known_resource_revision(observer_team: int) -> int:
+	get_known_resources(observer_team)
+	return int(known_resources_by_player.get(observer_team, {}).get("revision", 0))
+
+
+func restore_known_resource_memory(encoded: Dictionary) -> void:
+	known_resources_by_player.clear()
+	known_ai_resources_by_player.clear()
+	var fog = get_fog_of_war()
+	for observer_key in encoded.keys():
+		var observer_team := int(observer_key)
+		if observer_team <= 0 or not encoded[observer_key] is Array:
+			continue
+		fog.ensure_player(observer_team)
+		var ally_ids: Array = fog.shared_vision_by_player.get(observer_team, {}).keys()
+		ally_ids.sort()
+		var cached := _empty_known_resource_cache(hash(ally_ids))
+		for record_value in encoded[observer_key]:
+			if record_value is Dictionary:
+				_remember_known_resource(cached, record_value, true)
+		cached["revision"] = 1
+		known_resources_by_player[observer_team] = cached
+		fog.consume_newly_explored_cells(observer_team)
+		fog.consume_newly_visible_cells(observer_team)
+
+
 func compact_render_projection(entity: Dictionary) -> Dictionary:
 	return render_entity_projection_cache.project(entity)
 
@@ -5193,34 +5245,17 @@ func get_known_resources(observer_team: int) -> Array:
 	ally_ids.sort()
 	var alliance_signature := hash(ally_ids)
 	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
-	if (
-		int(cached.get("resource_roster_revision", -1)) == resource_roster_revision
-		and int(cached.get("alliance_signature", 0)) == alliance_signature
-	):
-		var known: Array = cached.get("resources", [])
-		var known_ids: Dictionary = cached.get("ids", {})
-		var changed := false
-		for cell_index_value in fog.consume_newly_explored_cells(observer_team):
-			for resource_value in resource_nodes_by_cell.get(int(cell_index_value), []):
-				var resource: Dictionary = resource_value
-				var resource_id := int(resource.get("id", -1))
-				if not known_ids.has(resource_id):
-					known_ids[resource_id] = true
-					_insert_known_resource_sorted(known, resource)
-					changed = true
-		if changed:
-			cached["revision"] = int(cached.get("revision", 0)) + 1
-		return known
+	if not cached.is_empty() and int(cached.get("alliance_signature", 0)) == alliance_signature:
+		_refresh_known_resource_cache(observer_team, cached, fog)
+		return cached.get("resources", [])
 	var states: PackedByteArray = fog.states_by_player[observer_team]
 	var allies: Dictionary = fog.shared_vision_by_player.get(observer_team, {})
-	var known: Array = []
-	var known_ids: Dictionary = {}
+	cached = _empty_known_resource_cache(alliance_signature)
 	for resource_value in resource_nodes:
 		var resource: Dictionary = resource_value
 		var owner := int(resource.get("team", 0))
 		if owner > 0 and bool(allies.get(owner, false)):
-			known.append(resource)
-			known_ids[int(resource.get("id", -1))] = true
+			_remember_known_resource(cached, resource)
 			continue
 		var position: Vector2 = resource.get("pos", Vector2.ZERO)
 		var cell_x := floori(position.x)
@@ -5228,18 +5263,12 @@ func get_known_resources(observer_team: int) -> Array:
 		if cell_x < 0 or cell_y < 0 or cell_x >= fog.map_size.x or cell_y >= fog.map_size.y:
 			continue
 		if int(states[cell_y * fog.map_size.x + cell_x]) != FogOfWar.UNKNOWN:
-			known.append(resource)
-			known_ids[int(resource.get("id", -1))] = true
-	known.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+			_remember_known_resource(cached, resource)
 	fog.consume_newly_explored_cells(observer_team)
-	known_resources_by_player[observer_team] = {
-		"resource_roster_revision": resource_roster_revision,
-		"alliance_signature": alliance_signature,
-		"resources": known,
-		"ids": known_ids,
-		"revision": int(cached.get("revision", 0)) + 1,
-	}
-	return known
+	fog.consume_newly_visible_cells(observer_team)
+	cached["revision"] = 1
+	known_resources_by_player[observer_team] = cached
+	return cached.get("resources", [])
 
 
 func get_known_ai_resources(observer_team: int) -> Array:
@@ -5252,17 +5281,13 @@ func get_known_ai_resources(observer_team: int) -> Array:
 	var known_cache: Dictionary = known_resources_by_player.get(observer_team, {})
 	var known_revision := int(known_cache.get("revision", 0))
 	var cached: Dictionary = known_ai_resources_by_player.get(observer_team, {})
-	if (
-		int(cached.get("resource_roster_revision", -1)) == resource_roster_revision
-		and int(cached.get("known_revision", -1)) == known_revision
-	):
+	if int(cached.get("known_revision", -1)) == known_revision:
 		return cached.get("resources", [])
 	var result: Array = []
 	result.resize(known.size())
 	for index in range(known.size()):
 		result[index] = _compact_ai_resource(known[index])
 	known_ai_resources_by_player[observer_team] = {
-		"resource_roster_revision": resource_roster_revision,
 		"known_revision": known_revision,
 		"resources": result,
 	}
@@ -5270,50 +5295,200 @@ func get_known_ai_resources(observer_team: int) -> Array:
 
 
 func _compact_ai_resource(resource: Dictionary) -> Dictionary:
-	var resource_id := int(resource.get("id", -1))
-	var result: Dictionary = compact_ai_resource_by_id.get(resource_id, {})
-	if result.is_empty():
-		result = {
-			"id": resource_id,
-			"team": int(resource.get("team", 0)),
-			"kind": String(resource.get("kind", "")),
-			"entity_type": String(resource.get("entity_type", "resource")),
-			"pos": Vector2(resource.get("pos", Vector2.ZERO)),
-			"movement_domain": String(resource.get("movement_domain", resource.get("placement_domain", "land"))),
-			"resource_type_id": int(resource.get("resource_type_id", -1)),
-			"harvestable": bool(resource.get("harvestable", true)),
-			"allowed_gatherer_domains": resource.get("allowed_gatherer_domains", []).duplicate(),
-		}
-		compact_ai_resource_by_id[resource_id] = result
-	result["amount"] = int(resource.get("amount", 0))
-	return result
+	return {
+		"id": int(resource.get("id", -1)),
+		"team": int(resource.get("team", 0)),
+		"kind": String(resource.get("kind", "")),
+		"entity_type": String(resource.get("entity_type", "resource")),
+		"pos": Vector2(resource.get("pos", Vector2.ZERO)),
+		"movement_domain": String(resource.get("movement_domain", resource.get("placement_domain", "land"))),
+		"resource_type_id": int(resource.get("resource_type_id", -1)),
+		"harvestable": bool(resource.get("harvestable", true)),
+		"allowed_gatherer_domains": resource.get("allowed_gatherer_domains", []).duplicate(),
+		"amount": int(resource.get("amount", 0)),
+	}
 
 
-func _sync_compact_ai_resource(resource: Dictionary) -> void:
+func _empty_known_resource_cache(alliance_signature: int) -> Dictionary:
+	return {
+		"alliance_signature": alliance_signature,
+		"resources": [],
+		"ids": {},
+		"by_cell": {},
+		"by_chunk": {},
+		"dirty_ids": {},
+		"revision": 0,
+	}
+
+
+func _refresh_known_resource_cache(observer_team: int, cached: Dictionary, fog) -> void:
+	var changed := false
+	var allies: Dictionary = fog.shared_vision_by_player.get(observer_team, {})
+	var candidate_cells: Dictionary = {}
+	for cell_index_value in fog.consume_newly_explored_cells(observer_team):
+		candidate_cells[int(cell_index_value)] = true
+	for cell_index_value in fog.consume_newly_visible_cells(observer_team):
+		candidate_cells[int(cell_index_value)] = true
+	for cell_index_value in candidate_cells.keys():
+		var cell_index := int(cell_index_value)
+		var cell := Vector2i(cell_index % map_size.x, cell_index / map_size.x)
+		if fog.state_at_cell(observer_team, cell) != FogOfWar.VISIBLE:
+			continue
+		var live_ids: Dictionary = {}
+		for resource_value in resource_nodes_by_cell.get(cell_index, []):
+			var resource: Dictionary = resource_value
+			var resource_id := int(resource.get("id", -1))
+			live_ids[resource_id] = true
+			changed = _remember_known_resource(cached, resource) or changed
+		var remembered_in_cell: Dictionary = cached.get("by_cell", {}).get(cell_index, {})
+		for resource_id_value in remembered_in_cell.keys():
+			var resource_id := int(resource_id_value)
+			if not live_ids.has(resource_id):
+				changed = _forget_known_resource(cached, resource_id) or changed
+	var dirty_ids: Dictionary = cached.get("dirty_ids", {})
+	for resource_id_value in dirty_ids.keys():
+		var resource_id := int(resource_id_value)
+		var live: Variant = resource_nodes_by_id.get(resource_id)
+		var remembered: Variant = cached.get("ids", {}).get(resource_id)
+		var position := Vector2.ZERO
+		if live is Dictionary:
+			position = Vector2(live.get("pos", Vector2.ZERO))
+		elif remembered is Dictionary:
+			position = Vector2(remembered.get("pos", Vector2.ZERO))
+		else:
+			continue
+		var ownership_source: Dictionary = live if live is Dictionary else remembered
+		var owner := int(ownership_source.get("team", 0))
+		var allied_resource := owner > 0 and bool(allies.get(owner, false))
+		if not allied_resource and fog.state_at_world(observer_team, position) != FogOfWar.VISIBLE:
+			continue
+		if live is Dictionary:
+			changed = _remember_known_resource(cached, live) or changed
+		else:
+			changed = _forget_known_resource(cached, resource_id) or changed
+	dirty_ids.clear()
+	if changed:
+		cached["revision"] = int(cached.get("revision", 0)) + 1
+
+
+func _mark_known_resource_dirty(resource: Dictionary) -> void:
 	var resource_id := int(resource.get("id", -1))
-	if compact_ai_resource_by_id.has(resource_id):
-		var result: Dictionary = compact_ai_resource_by_id[resource_id]
-		result["amount"] = int(resource.get("amount", 0))
+	if resource_id < 0:
+		return
+	for observer_value in known_resources_by_player.keys():
+		var cached: Dictionary = known_resources_by_player[observer_value]
+		var dirty_ids: Dictionary = cached.get("dirty_ids", {})
+		dirty_ids[resource_id] = true
+		cached["dirty_ids"] = dirty_ids
+
+
+func _remember_known_resource(cached: Dictionary, resource: Dictionary, compact_source: bool = false) -> bool:
+	var resource_id := int(resource.get("id", -1))
+	if resource_id < 0:
+		return false
+	if int(resource.get("amount", 0)) <= 0 and not bool(resource.get("visible_when_depleted", false)):
+		return _forget_known_resource(cached, resource_id)
+	var memory: Dictionary = resource.duplicate(true) if compact_source else render_entity_projection_cache.project(resource).duplicate(true)
+	var ids: Dictionary = cached.get("ids", {})
+	var existing: Variant = ids.get(resource_id)
+	if existing is Dictionary:
+		if existing == memory:
+			return false
+		existing.clear()
+		existing.merge(memory, true)
+		return true
+	var known: Array = cached.get("resources", [])
+	_insert_known_resource_sorted(known, memory)
+	ids[resource_id] = memory
+	var cell_index := _resource_cell_index(memory)
+	var by_cell: Dictionary = cached.get("by_cell", {})
+	var cell_ids: Dictionary = by_cell.get(cell_index, {})
+	cell_ids[resource_id] = true
+	by_cell[cell_index] = cell_ids
+	var chunk_key := _resource_chunk_key(memory)
+	var by_chunk: Dictionary = cached.get("by_chunk", {})
+	var chunk_ids: Dictionary = by_chunk.get(chunk_key, {})
+	chunk_ids[resource_id] = true
+	by_chunk[chunk_key] = chunk_ids
+	cached["resources"] = known
+	cached["ids"] = ids
+	cached["by_cell"] = by_cell
+	cached["by_chunk"] = by_chunk
+	return true
+
+
+func _forget_known_resource(cached: Dictionary, resource_id: int) -> bool:
+	var ids: Dictionary = cached.get("ids", {})
+	var memory: Variant = ids.get(resource_id)
+	if not memory is Dictionary:
+		return false
+	var known: Array = cached.get("resources", [])
+	known.erase(memory)
+	ids.erase(resource_id)
+	var cell_index := _resource_cell_index(memory)
+	var by_cell: Dictionary = cached.get("by_cell", {})
+	var cell_ids: Dictionary = by_cell.get(cell_index, {})
+	cell_ids.erase(resource_id)
+	if cell_ids.is_empty():
+		by_cell.erase(cell_index)
+	else:
+		by_cell[cell_index] = cell_ids
+	var chunk_key := _resource_chunk_key(memory)
+	var by_chunk: Dictionary = cached.get("by_chunk", {})
+	var chunk_ids: Dictionary = by_chunk.get(chunk_key, {})
+	chunk_ids.erase(resource_id)
+	if chunk_ids.is_empty():
+		by_chunk.erase(chunk_key)
+	else:
+		by_chunk[chunk_key] = chunk_ids
+	return true
+
+
+func _resource_cell_index(resource: Dictionary) -> int:
+	var position := Vector2(resource.get("pos", Vector2.ZERO))
+	return floori(position.y) * map_size.x + floori(position.x)
+
+
+func _resource_chunk_key(resource: Dictionary) -> Vector2i:
+	var position := Vector2(resource.get("pos", Vector2.ZERO))
+	return Vector2i(
+		floori(position.x / float(RESOURCE_MEMORY_CHUNK_SIZE)),
+		floori(position.y / float(RESOURCE_MEMORY_CHUNK_SIZE))
+	)
 
 
 func get_known_resources_in_bounds(observer_team: int, bounds: Rect2) -> Array:
 	if observer_team <= 0:
 		return resource_nodes.filter(func(resource): return bounds.has_point(Vector2(resource.get("pos", Vector2.ZERO))))
 	# Ensure the incremental exploration cache is current, then traverse only
-	# resource cells intersecting the camera rather than all source-map trees.
+	# remembered resource cells intersecting the camera. Reading the live cell
+	# index here would leak hidden depletion/removal through the fog.
 	get_known_resources(observer_team)
 	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
 	var known_ids: Dictionary = cached.get("ids", {})
+	var known_by_chunk: Dictionary = cached.get("by_chunk", {})
 	var start_x := clampi(floori(bounds.position.x), 0, map_size.x)
 	var start_y := clampi(floori(bounds.position.y), 0, map_size.y)
 	var end_x := clampi(ceili(bounds.end.x), 0, map_size.x)
 	var end_y := clampi(ceili(bounds.end.y), 0, map_size.y)
 	var result: Array = []
-	for y in range(start_y, end_y):
-		for x in range(start_x, end_x):
-			for resource_value in resource_nodes_by_cell.get(y * map_size.x + x, []):
-				var resource: Dictionary = resource_value
-				if known_ids.has(int(resource.get("id", -1))):
+	if end_x <= start_x or end_y <= start_y:
+		return result
+	var first_chunk_x := floori(float(start_x) / float(RESOURCE_MEMORY_CHUNK_SIZE))
+	var first_chunk_y := floori(float(start_y) / float(RESOURCE_MEMORY_CHUNK_SIZE))
+	var last_chunk_x := floori(float(end_x - 1) / float(RESOURCE_MEMORY_CHUNK_SIZE))
+	var last_chunk_y := floori(float(end_y - 1) / float(RESOURCE_MEMORY_CHUNK_SIZE))
+	for chunk_y in range(first_chunk_y, last_chunk_y + 1):
+		for chunk_x in range(first_chunk_x, last_chunk_x + 1):
+			var chunk_ids: Dictionary = known_by_chunk.get(Vector2i(chunk_x, chunk_y), {})
+			for resource_id_value in chunk_ids.keys():
+				var resource: Variant = known_ids.get(int(resource_id_value))
+				if not resource is Dictionary:
+					continue
+				var position := Vector2(resource.get("pos", Vector2.ZERO))
+				var cell_x := floori(position.x)
+				var cell_y := floori(position.y)
+				if cell_x >= start_x and cell_x < end_x and cell_y >= start_y and cell_y < end_y:
 					result.append(resource)
 	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	return result

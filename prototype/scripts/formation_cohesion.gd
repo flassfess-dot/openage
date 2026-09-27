@@ -40,6 +40,46 @@ static func update(units: Array) -> void:
 	_mark_isolated_shared_groups(groups, ungrouped_units, maximum_unit_radius, maximum_unit_clearance)
 
 
+static func update_active_groups(
+	group_records: Dictionary,
+	find_unit: Callable,
+	has_external_unit_in_bounds: Callable,
+	maximum_unit_radius: float,
+	maximum_unit_clearance: float
+) -> void:
+	# The controller already owns the authoritative, ordered member lists. Use
+	# those instead of rebuilding groups by scanning every world unit. External
+	# isolation is resolved through the spatial hash below, avoiding the former
+	# group-pair and group-versus-all-units passes.
+	var groups: Dictionary = {}
+	var group_ids: Array = group_records.keys()
+	group_ids.sort()
+	for group_id_value in group_ids:
+		var group_id := int(group_id_value)
+		var group = group_records[group_id_value]
+		var members: Array = []
+		for member_id_value in group.member_ids:
+			var unit = find_unit.call(int(member_id_value))
+			if unit == null or float(unit.get("hp", 0.0)) <= 0.0:
+				continue
+			if int(unit.get("formation_group_id", -1)) != group_id:
+				continue
+			unit["cohesion_speed_scale"] = 1.0
+			unit["formation_shared_motion"] = false
+			unit["formation_shared_isolated"] = false
+			members.append(unit)
+		if not members.is_empty():
+			groups[group_id] = members
+	for members_value in groups.values():
+		var members: Array = members_value
+		if members.any(func(member): return String(member.get("task", "")) != "move"):
+			continue
+		_mark_shared_motion(members)
+		if not bool(members[0]["formation_shared_motion"]):
+			_update_group(members)
+	_mark_isolated_shared_groups_spatial(groups, has_external_unit_in_bounds, maximum_unit_radius, maximum_unit_clearance)
+
+
 static func remaining_distance(unit: Dictionary) -> float:
 	var path: Array = unit.get("path", [])
 	var path_index := int(unit.get("path_index", 0))
@@ -154,6 +194,28 @@ static func _mark_isolated_shared_groups(groups: Dictionary, ungrouped_units: Ar
 				if nearby_bounds.has_point(Vector2(candidate["pos"])):
 					isolated = false
 					break
+		if isolated:
+			for member in members:
+				member["formation_shared_isolated"] = true
+
+
+static func _mark_isolated_shared_groups_spatial(
+	groups: Dictionary,
+	has_external_unit_in_bounds: Callable,
+	maximum_unit_radius: float,
+	maximum_unit_clearance: float
+) -> void:
+	for group_id_value in groups.keys():
+		var group_id := int(group_id_value)
+		var members: Array = groups[group_id_value]
+		if members.is_empty() or not bool(members[0]["formation_shared_motion"]):
+			continue
+		var maximum_member_radius := 0.0
+		for member in members:
+			maximum_member_radius = maxf(maximum_member_radius, float(member["footprint_radius"]))
+		var margin := 1.6 * (maximum_member_radius + maximum_unit_radius + maximum_unit_clearance)
+		var nearby_bounds := _member_bounds(members).grow(margin)
+		var isolated := not bool(has_external_unit_in_bounds.call(nearby_bounds, group_id))
 		if isolated:
 			for member in members:
 				member["formation_shared_isolated"] = true
