@@ -167,7 +167,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
 	_observe_stage("units", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
-	drawables.sort_custom(RenderItem.less)
+	drawables = _sort_drawables_by_layer(drawables)
 	_observe_stage("sort", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	var result: Array = drawables
@@ -176,6 +176,31 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	if not resource_drawables.is_empty():
 		result = _merge_sorted_drawables(result, resource_drawables)
 	_observe_stage("merge", stage_started)
+	return result
+
+
+static func _sort_drawables_by_layer(drawables: Array) -> Array:
+	# Layer is the primary RenderItem order key. Partition first so the custom
+	# comparator only runs inside a layer instead of repeatedly comparing known,
+	# unequal layers during the global sort.
+	var layer_buckets: Array = []
+	layer_buckets.resize(RenderItem.Layer.size())
+	for layer_index in range(layer_buckets.size()):
+		layer_buckets[layer_index] = []
+	for drawable_value in drawables:
+		var drawable: Dictionary = drawable_value
+		var layer := clampi(int(drawable.get("layer", RenderItem.Layer.UNIT_BUILDING)), 0, layer_buckets.size() - 1)
+		layer_buckets[layer].append(drawable)
+	var result: Array = []
+	result.resize(drawables.size())
+	var result_index := 0
+	for bucket_value in layer_buckets:
+		var bucket: Array = bucket_value
+		if bucket.size() > 1:
+			bucket.sort_custom(RenderItem.less_same_layer)
+		for drawable in bucket:
+			result[result_index] = drawable
+			result_index += 1
 	return result
 
 

@@ -450,8 +450,8 @@ func worker_resource_animation_state(resource_type_id: int, carrying: bool) -> S
 	return String(profile.get("carry_state" if carrying else "work_state", "carry_food" if carrying else "work_food"))
 
 
-func unit_frame_info(unit: Dictionary, animation_state: String) -> Dictionary:
-	return unit_presentations.frame_info(unit, animation_state)
+func unit_frame_info(unit: Dictionary, animation_state: String, animation_time: float = -1.0) -> Dictionary:
+	return unit_presentations.frame_info(unit, animation_state, animation_time)
 
 
 func unit_presentation_state(unit: Dictionary, default_state: String) -> String:

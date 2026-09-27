@@ -11,6 +11,7 @@ func _initialize() -> void:
 	test_flat_elevated_fog_projection_is_exact()
 	test_hidden_slope_boundary_does_not_cover_visible_overlap()
 	test_fog_chunk_rows_are_chunk_local()
+	test_fog_chunk_cache_is_bounded()
 
 	if failures.is_empty():
 		print("fog terrain boundary tests passed")
@@ -62,6 +63,18 @@ func test_fog_chunk_rows_are_chunk_local() -> void:
 	cells[1 * game.map_size.x + 1] = FogOfWar.VISIBLE
 	assert_equal(game._fog_rows_for_bounds(cells, right_bounds), right_rows, "change in left fog chunk leaves right chunk rows unchanged")
 	assert_true(game._fog_rows_for_bounds(cells, left_bounds) != right_rows, "left chunk rows are independent from right chunk rows")
+	game.free()
+
+
+func test_fog_chunk_cache_is_bounded() -> void:
+	var game = MainScript.new()
+	for index in range(80):
+		game.cached_world_fog_chunks[Vector2i(index, 0)] = {"last_used": index}
+	var active := {Vector2i(0, 0): true, Vector2i(79, 0): true}
+	var removed := game._prune_world_fog_chunk_cache(active, 48)
+	assert_equal(removed, 32, "fog cache prunes the least recently used offscreen chunks")
+	assert_equal(game.cached_world_fog_chunks.size(), 48, "fog cache remains bounded after exploring many camera regions")
+	assert_true(game.cached_world_fog_chunks.has(Vector2i(0, 0)) and game.cached_world_fog_chunks.has(Vector2i(79, 0)), "active fog chunks are never evicted")
 	game.free()
 
 

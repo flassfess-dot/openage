@@ -68,7 +68,9 @@ const HUD_BOTTOM := InterfaceLayout.BOTTOM_HEIGHT
 # the camera rectangle remains frame-smooth. The mesh no longer invalidates on
 # intermediate fog revisions, so the cadence actually bounds rebuild spikes.
 const OVERVIEW_REFRESH_TICKS := 10
-const WORLD_FOG_CHUNK_SIZE := 32
+const WORLD_FOG_CHUNK_SIZE := 8
+const WORLD_FOG_CACHE_MIN_CHUNKS := 48
+const WORLD_FOG_CACHE_VIEW_MULTIPLIER := 4
 const MAX_PRESENTATION_EVENT_HISTORY := 16384
 const PRESENTATION_EVENT_HISTORY_TAIL := 4096
 
@@ -166,6 +168,7 @@ var terrain_canvas: TerrainCanvas
 var cached_fog_revision: int = -1
 var cached_fog_runs: Array = []
 var cached_world_fog_chunks: Dictionary = {}
+var world_fog_cache_use_counter: int = 0
 var cached_world_fog_zoom := -1.0
 var cached_world_fog_terrain_revision: int = -1
 var cached_fog_slope_neighbor_cells := PackedByteArray()
@@ -191,6 +194,7 @@ var cached_presentation_bounds := Rect2i()
 var cached_presentation_selection_signature: int = 0
 var cached_presentation_diagnostics := false
 var cached_overview_tick: int = -1
+var cached_overview_resource_revision: int = -1
 var cached_environment_bounds := Rect2i()
 var cached_environment_items: Array = []
 var cached_world_drawables: Array = []
@@ -400,6 +404,7 @@ func reset_game() -> void:
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
 	cached_world_fog_chunks.clear()
+	world_fog_cache_use_counter = 0
 	cached_world_fog_zoom = -1.0
 	cached_world_fog_terrain_revision = -1
 	cached_fog_slope_neighbor_cells.resize(0)
@@ -419,6 +424,8 @@ func reset_game() -> void:
 	cached_minimap_resource_signature = 0
 	cached_minimap_resource_rectangle = Rect2()
 	cached_minimap_resource_pixels.clear()
+	cached_overview_tick = -1
+	cached_overview_resource_revision = -1
 	cached_environment_bounds = Rect2i()
 	cached_environment_items.clear()
 	if render_world != null:
@@ -1125,6 +1132,7 @@ func save_game_to_path(path: String, slot_name: String = "Быстрое сох�
 		"formation": formation,
 		"control_groups": control_groups.groups.duplicate(true),
 		"last_known_buildings": simulation_world.last_known_buildings_by_player.duplicate(true),
+		"last_known_resources": simulation_world.known_resource_memory_state(),
 		"last_recalled_group": control_groups.last_recalled_group,
 		"compact_status_visible": compact_status_visible,
 		"sound_cue_history": sound_cue_history.canonical_state(),
@@ -1209,6 +1217,7 @@ func load_game_from_path(path: String) -> bool:
 	game_controller.set_paused(bool(saved_controller.get("paused", false)))
 	modal_restore_paused = game_controller.paused
 	simulation_world.restore_last_known_buildings(saved_view.get("last_known_buildings", {}))
+	simulation_world.restore_known_resource_memory(saved_view.get("last_known_resources", {}))
 	view_offset = saved_view.get("view_offset", view_offset)
 	view_zoom = float(saved_view.get("view_zoom", view_zoom))
 	formation = String(saved_view.get("formation", "RECTANGLE"))
@@ -1232,9 +1241,13 @@ func load_game_from_path(path: String) -> bool:
 	command_marker_presentation.reset()
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
+	cached_world_fog_chunks.clear()
+	world_fog_cache_use_counter = 0
 	cached_minimap_fog_texture = null
 	cached_minimap_exploration_revision = -1
 	cached_minimap_fog_rectangle = Rect2()
+	cached_overview_tick = -1
+	cached_overview_resource_revision = -1
 	pending_build_kind = ""
 	pending_target_command = ""
 	local_spectator = false
@@ -1460,9 +1473,7 @@ func unit_frame_info(unit: Dictionary) -> Dictionary:
 		var entity_id := int(unit.get("id", 0))
 		var period := 7.0 + float(posmod(entity_id * 17, 61)) * 0.1
 		var phase := fposmod(float(presentation_snapshot.get("tick", 0)) * GameController.FIXED_STEP_SECONDS + float(posmod(entity_id * 37, 100)) * 0.13, period)
-		var presentation_unit := unit.duplicate()
-		presentation_unit["anim"] = phase if phase < 0.8 else 0.0
-		return resource_catalog.unit_frame_info(presentation_unit, animation_state)
+		return resource_catalog.unit_frame_info(unit, animation_state, phase if phase < 0.8 else 0.0)
 	return resource_catalog.unit_frame_info(unit, animation_state)
 
 func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: bool = false) -> void:
@@ -1912,10 +1923,13 @@ func sync_world_state(force: bool = true) -> void:
 	var snapshot_bounds := visible_tile_bounds(8)
 	var previous_overview: Dictionary = presentation_snapshot.get("overview", {})
 	var refresh_overview := cached_overview_tick < 0 or current_tick < cached_overview_tick or current_tick - cached_overview_tick >= OVERVIEW_REFRESH_TICKS
+	var current_resource_memory_revision := simulation_world.known_resource_revision(local_player_team)
+	var refresh_overview_resources := refresh_overview and (previous_overview.is_empty() or current_resource_memory_revision != cached_overview_resource_revision)
 	var snapshot_options := {
 		"include_navigation": false,
 		"include_build_sites": false,
 		"include_overview": refresh_overview,
+		"include_overview_resources": refresh_overview_resources,
 		"compact_render_entities": not diagnostics_enabled,
 		"borrow_visible_render_entities": not diagnostics_enabled,
 		"borrow_overview_entities": not diagnostics_enabled,
@@ -1932,6 +1946,10 @@ func sync_world_state(force: bool = true) -> void:
 		stage_started = Time.get_ticks_usec()
 	if refresh_overview:
 		cached_overview_tick = current_tick
+		if refresh_overview_resources:
+			cached_overview_resource_revision = int(presentation_snapshot.get("resource_memory_revision", current_resource_memory_revision))
+		elif previous_overview.has("resources"):
+			presentation_snapshot["overview"]["resources"] = previous_overview["resources"]
 	elif not previous_overview.is_empty():
 		presentation_snapshot["overview"] = previous_overview
 	presentation_snapshot["overview_tick"] = cached_overview_tick
@@ -2232,6 +2250,8 @@ func draw_fog_overlay() -> void:
 		ceili(float(expanded_bounds.end.y) / float(WORLD_FOG_CHUNK_SIZE))
 	)
 	var visible_meshes: Array[ArrayMesh] = []
+	var visible_chunk_keys: Dictionary = {}
+	world_fog_cache_use_counter += 1
 	var scan_started := Time.get_ticks_usec() if probe != null else 0
 	var rebuilt_chunks := 0
 	for chunk_y in range(chunk_minimum.y, chunk_maximum.y):
@@ -2240,6 +2260,7 @@ func draw_fog_overlay() -> void:
 			var chunk_bounds := _world_fog_chunk_bounds(chunk_key)
 			if chunk_bounds.size.x <= 0 or chunk_bounds.size.y <= 0:
 				continue
+			visible_chunk_keys[chunk_key] = true
 			var entry: Dictionary = cached_world_fog_chunks.get(chunk_key, {})
 			if int(entry.get("revision", -1)) != fog_revision:
 				# Row-slice memcmp replaces the 1024-iteration hash loop per chunk;
@@ -2260,14 +2281,19 @@ func draw_fog_overlay() -> void:
 					if probe != null:
 						probe.observe_microseconds("presentation.fog.chunk_rebuild", Time.get_ticks_usec() - rebuild_started)
 				entry["revision"] = fog_revision
-				cached_world_fog_chunks[chunk_key] = entry
+			entry["last_used"] = world_fog_cache_use_counter
+			cached_world_fog_chunks[chunk_key] = entry
 			var mesh: Variant = entry.get("mesh")
 			if mesh is ArrayMesh:
 				visible_meshes.append(mesh)
+	var cache_limit := maxi(WORLD_FOG_CACHE_MIN_CHUNKS, visible_chunk_keys.size() * WORLD_FOG_CACHE_VIEW_MULTIPLIER)
+	var pruned_chunks := _prune_world_fog_chunk_cache(visible_chunk_keys, cache_limit)
 	if probe != null:
 		probe.observe_microseconds("presentation.fog.chunk_scan", Time.get_ticks_usec() - scan_started)
 		if rebuilt_chunks > 0:
 			probe.increment("presentation.fog.chunks_rebuilt", rebuilt_chunks)
+		if pruned_chunks > 0:
+			probe.increment("presentation.fog.chunks_pruned", pruned_chunks)
 	var submit_started := Time.get_ticks_usec() if probe != null else 0
 	draw_set_transform(PixelScaling.snap_screen(view_offset))
 	for mesh in visible_meshes:
@@ -2286,6 +2312,35 @@ func _world_fog_chunk_bounds(chunk_key: Vector2i) -> Rect2i:
 	start.x = maxi(0, start.x)
 	start.y = maxi(0, start.y)
 	return Rect2i(start, Vector2i(maxi(0, finish.x - start.x), maxi(0, finish.y - start.y)))
+
+
+func _prune_world_fog_chunk_cache(active_keys: Dictionary, maximum_entries: int) -> int:
+	maximum_entries = maxi(active_keys.size(), maximum_entries)
+	if cached_world_fog_chunks.size() <= maximum_entries:
+		return 0
+	var candidates: Array = []
+	for chunk_key_value in cached_world_fog_chunks.keys():
+		var chunk_key: Vector2i = chunk_key_value
+		if active_keys.has(chunk_key):
+			continue
+		var entry: Dictionary = cached_world_fog_chunks[chunk_key]
+		candidates.append({"key": chunk_key, "last_used": int(entry.get("last_used", -1))})
+	candidates.sort_custom(func(left, right):
+		if int(left["last_used"]) != int(right["last_used"]):
+			return int(left["last_used"]) < int(right["last_used"])
+		var left_key: Vector2i = left["key"]
+		var right_key: Vector2i = right["key"]
+		if left_key.y != right_key.y:
+			return left_key.y < right_key.y
+		return left_key.x < right_key.x
+	)
+	var removed := 0
+	for candidate in candidates:
+		if cached_world_fog_chunks.size() <= maximum_entries:
+			break
+		cached_world_fog_chunks.erase(candidate["key"])
+		removed += 1
+	return removed
 
 
 func _fog_rows_for_bounds(cells: Variant, bounds: Rect2i) -> Array:
@@ -2894,7 +2949,9 @@ func _minimap_resource_pixels(center: Vector2, scale: float, rectangle: Rect2) -
 	if not overview_resource_nodes.is_empty():
 		first_id = int(overview_resource_nodes.front().get("id", -1))
 		last_id = int(overview_resource_nodes.back().get("id", -1))
-	var resource_revision := int(simulation_world.resource_minimap_revision) if simulation_world != null else 0
+	# Hidden resource changes must not invalidate the player's stale exploration
+	# memory or trigger an all-resource minimap rebuild.
+	var resource_revision := int(presentation_snapshot.get("resource_memory_revision", 0))
 	var signature := hash([overview_resource_nodes.size(), first_id, last_id, resource_revision])
 	if signature == cached_minimap_resource_signature and rectangle == cached_minimap_resource_rectangle:
 		return cached_minimap_resource_pixels

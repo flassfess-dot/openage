@@ -14,6 +14,7 @@ var graphic_ids: Dictionary = {}
 var composite_parts: Dictionary = {}
 var definitions: Dictionary = {}
 var records_by_name: Dictionary = {}
+var source_records: Dictionary = {}
 var effect_presentations
 
 
@@ -27,6 +28,7 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 	graphic_ids.clear()
 	composite_parts.clear()
 	definitions.clear()
+	source_records.clear()
 	records_by_name = indexed_frame_records.duplicate() if not indexed_frame_records.is_empty() else _records_by_name()
 	effect_presentations = effect_registry
 	var archetypes: Dictionary = runtime_catalog.get("archetypes", {})
@@ -124,7 +126,9 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -
 	var graphic_id := int(graphic_ids.get(texture_key, {}).get(resolved_state, -1))
 	var resolved_parts := _resolved_composite_parts(texture_key, resolved_state, int(unit.get("facing", 0)), time)
 	var damage_graphic_id := -1
-	if resolved_state not in ["death", "corpse"] and effect_presentations != null:
+	var hp := float(unit.get("hp", 0.0))
+	var max_hp := maxf(1.0, float(unit.get("max_hp", 1.0)))
+	if resolved_state not in ["death", "corpse"] and effect_presentations != null and hp + 0.0001 < max_hp:
 		var source := _source_record(archetype_for_unit(alias), source_id, unit)
 		damage_graphic_id = DamageSelector.select_graphic_id(unit, source)
 		if damage_graphic_id >= 0:
@@ -154,9 +158,13 @@ func archetype_for_unit(alias: String) -> Dictionary:
 func _source_record(archetype: Dictionary, source_unit_id: int, unit: Dictionary) -> Dictionary:
 	var resolved_source_id := source_unit_id if source_unit_id >= 0 else int(archetype.get("identifiers", {}).get("source_unit_id", -1))
 	var civilization_id := int(unit.get("components", {}).get("ownership", {}).get("civilization_id", archetype.get("default_civilization_id", runtime_catalog.get("default_civilization_id", 13))))
+	var cache_key := Vector2i(civilization_id, resolved_source_id)
+	if source_records.has(cache_key):
+		return source_records[cache_key]
 	var source: Dictionary = object_catalog.get("objects", {}).get("%d:%d" % [civilization_id, resolved_source_id], {})
 	if source.is_empty():
 		source = object_catalog.get("objects", {}).get("0:%d" % resolved_source_id, {})
+	source_records[cache_key] = source
 	return source
 
 

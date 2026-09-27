@@ -48,6 +48,10 @@ static func create(kind: String, layer: int, world_anchor: Vector2, screen_posit
 static func less(left: Dictionary, right: Dictionary) -> bool:
 	if int(left["layer"]) != int(right["layer"]):
 		return int(left["layer"]) < int(right["layer"])
+	return less_same_layer(left, right)
+
+
+static func less_same_layer(left: Dictionary, right: Dictionary) -> bool:
 	if not is_equal_approx(float(left["screen_y"]), float(right["screen_y"])):
 		return float(left["screen_y"]) < float(right["screen_y"])
 	if not is_equal_approx(float(left["elevation"]), float(right["elevation"])):
