@@ -5569,6 +5569,12 @@ func get_fog_state_at(team: int, position: Vector2) -> int:
 	return visibility_system.state_at_world(team, position)
 
 
+func consume_fog_presentation_dirty_cells(team: int) -> Array:
+	if team <= 0:
+		return []
+	return get_fog_of_war().consume_presentation_dirty_cells(team)
+
+
 func get_fog_state_name_at(team: int, position: Vector2) -> String:
 	return visibility_system.state_name(get_fog_state_at(team, position))
 

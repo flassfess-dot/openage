@@ -14,6 +14,7 @@ func _initialize() -> void:
 	test_gaia_visibility_contract()
 	test_native_visibility_cells_match_gdscript()
 	test_player_revisions_are_isolated()
+	test_presentation_dirty_cells_track_visibility_transitions()
 
 	if failures.is_empty():
 		print("S-006 fog of war tests passed")
@@ -110,6 +111,25 @@ func test_player_revisions_are_isolated() -> void:
 	player_scout["pos"] = Vector2(6.5, 3.5)
 	fog.update([player_scout, enemy_scout], [])
 	assert_true(fog.revision_for_player(1) > player_revision, "local vision changes invalidate the local player's fog mesh")
+
+
+func test_presentation_dirty_cells_track_visibility_transitions() -> void:
+	var untracked_fog = FogOfWar.new(Vector2i(20, 20))
+	untracked_fog.update([vision_entity(2, Vector2(3.5, 3.5), 2.0)], [])
+	assert_true(untracked_fog.presentation_dirty_cells_by_player[2].is_empty(), "players without an active presentation mask do not accumulate dirty cells")
+	var fog = FogOfWar.new(Vector2i(20, 20))
+	assert_equal(fog.consume_presentation_dirty_cells(1), [], "presentation tracking starts without a synthetic full-map delta")
+	var scout := vision_entity(1, Vector2(3.5, 3.5), 2.0)
+	scout["id"] = 30
+	fog.update([scout], [])
+	var initial_dirty := fog.consume_presentation_dirty_cells(1)
+	assert_true(not initial_dirty.is_empty(), "initial sight publishes dirty fog-mask cells")
+	assert_equal(fog.consume_presentation_dirty_cells(1), [], "presentation dirty cells are consumed exactly once")
+	scout["pos"] = Vector2(10.5, 3.5)
+	fog.update([scout], [])
+	var moved_dirty := fog.consume_presentation_dirty_cells(1)
+	assert_true(3 * 20 + 3 in moved_dirty, "leaving sight dirties the formerly visible cell")
+	assert_true(3 * 20 + 10 in moved_dirty, "entering sight dirties the newly visible cell")
 
 
 func test_simulation_and_render_visibility() -> void:

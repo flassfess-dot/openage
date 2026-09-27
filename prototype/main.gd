@@ -68,9 +68,8 @@ const HUD_BOTTOM := InterfaceLayout.BOTTOM_HEIGHT
 # the camera rectangle remains frame-smooth. The mesh no longer invalidates on
 # intermediate fog revisions, so the cadence actually bounds rebuild spikes.
 const OVERVIEW_REFRESH_TICKS := 10
-const WORLD_FOG_CHUNK_SIZE := 8
-const WORLD_FOG_CACHE_MIN_CHUNKS := 48
-const WORLD_FOG_CACHE_VIEW_MULTIPLIER := 4
+const WORLD_FOG_GEOMETRY_CHUNK_SIZE := 16
+const WORLD_FOG_GEOMETRY_RETAIN_MARGIN := 1
 const MAX_PRESENTATION_EVENT_HISTORY := 16384
 const PRESENTATION_EVENT_HISTORY_TAIL := 4096
 
@@ -167,10 +166,11 @@ var scenario_overlay: ScenarioOverlay
 var terrain_canvas: TerrainCanvas
 var cached_fog_revision: int = -1
 var cached_fog_runs: Array = []
-var cached_world_fog_chunks: Dictionary = {}
-var world_fog_cache_use_counter: int = 0
-var cached_world_fog_zoom := -1.0
-var cached_world_fog_terrain_revision: int = -1
+var cached_world_fog_meshes: Dictionary = {}
+var cached_world_fog_mesh_terrain_revision: int = -1
+var cached_world_fog_texture: ImageTexture
+var cached_world_fog_texture_data := PackedByteArray()
+var cached_world_fog_texture_revision: int = -1
 var cached_fog_slope_neighbor_cells := PackedByteArray()
 var cached_fog_slope_neighbor_terrain_revision: int = -1
 var cached_map_edge_chains: Array[PackedVector2Array] = []
@@ -403,10 +403,11 @@ func reset_game() -> void:
 	presentation_effect_timeline.reset()
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
-	cached_world_fog_chunks.clear()
-	world_fog_cache_use_counter = 0
-	cached_world_fog_zoom = -1.0
-	cached_world_fog_terrain_revision = -1
+	cached_world_fog_meshes.clear()
+	cached_world_fog_mesh_terrain_revision = -1
+	cached_world_fog_texture = null
+	cached_world_fog_texture_data.resize(0)
+	cached_world_fog_texture_revision = -1
 	cached_fog_slope_neighbor_cells.resize(0)
 	cached_fog_slope_neighbor_terrain_revision = -1
 	cached_map_edge_chains.clear()
@@ -1241,8 +1242,11 @@ func load_game_from_path(path: String) -> bool:
 	command_marker_presentation.reset()
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
-	cached_world_fog_chunks.clear()
-	world_fog_cache_use_counter = 0
+	cached_world_fog_meshes.clear()
+	cached_world_fog_mesh_terrain_revision = -1
+	cached_world_fog_texture = null
+	cached_world_fog_texture_data.resize(0)
+	cached_world_fog_texture_revision = -1
 	cached_minimap_fog_texture = null
 	cached_minimap_exploration_revision = -1
 	cached_minimap_fog_rectangle = Rect2()
@@ -2227,188 +2231,191 @@ func draw_fog_overlay() -> void:
 	if presentation_snapshot.is_empty():
 		return
 	var probe: Variant = game_controller.performance_probe if game_controller != null else null
-	var bounds := visible_tile_bounds()
 	var cells: Variant = presentation_snapshot.get("fog", {}).get("cells", [])
 	if cells.size() < map_size.x * map_size.y:
 		return
 	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
 	var terrain_revision := int(simulation_world.terrain_revision) if simulation_world != null else -1
-	if not is_equal_approx(cached_world_fog_zoom, view_zoom) or cached_world_fog_terrain_revision != terrain_revision:
-		cached_world_fog_chunks.clear()
-		cached_world_fog_zoom = view_zoom
-		cached_world_fog_terrain_revision = terrain_revision
 	if cached_fog_slope_neighbor_terrain_revision != terrain_revision:
 		cached_fog_slope_neighbor_cells.resize(0)
 		cached_fog_slope_neighbor_terrain_revision = terrain_revision
-	var expanded_bounds := _expanded_tile_bounds(bounds, 12)
-	var chunk_minimum := Vector2i(
-		floori(float(expanded_bounds.position.x) / float(WORLD_FOG_CHUNK_SIZE)),
-		floori(float(expanded_bounds.position.y) / float(WORLD_FOG_CHUNK_SIZE))
-	)
-	var chunk_maximum := Vector2i(
-		ceili(float(expanded_bounds.end.x) / float(WORLD_FOG_CHUNK_SIZE)),
-		ceili(float(expanded_bounds.end.y) / float(WORLD_FOG_CHUNK_SIZE))
-	)
+		cached_world_fog_meshes.clear()
+		cached_world_fog_mesh_terrain_revision = -1
+		cached_world_fog_texture_revision = -1
+	var prepare_started := Time.get_ticks_usec() if probe != null else 0
+	if cached_world_fog_mesh_terrain_revision != terrain_revision:
+		cached_world_fog_meshes.clear()
+		cached_world_fog_mesh_terrain_revision = terrain_revision
+	_sync_world_fog_texture(cells, fog_revision, probe)
 	var visible_meshes: Array[ArrayMesh] = []
-	var visible_chunk_keys: Dictionary = {}
-	world_fog_cache_use_counter += 1
-	var scan_started := Time.get_ticks_usec() if probe != null else 0
-	var rebuilt_chunks := 0
-	for chunk_y in range(chunk_minimum.y, chunk_maximum.y):
-		for chunk_x in range(chunk_minimum.x, chunk_maximum.x):
+	var bounds := _expanded_tile_bounds(visible_tile_bounds(), 12)
+	var first_chunk := Vector2i(
+		floori(float(bounds.position.x) / float(WORLD_FOG_GEOMETRY_CHUNK_SIZE)),
+		floori(float(bounds.position.y) / float(WORLD_FOG_GEOMETRY_CHUNK_SIZE))
+	)
+	var last_chunk := Vector2i(
+		floori(float(maxi(bounds.position.x, bounds.end.x - 1)) / float(WORLD_FOG_GEOMETRY_CHUNK_SIZE)),
+		floori(float(maxi(bounds.position.y, bounds.end.y - 1)) / float(WORLD_FOG_GEOMETRY_CHUNK_SIZE))
+	)
+	var built_meshes := 0
+	for chunk_y in range(first_chunk.y, last_chunk.y + 1):
+		for chunk_x in range(first_chunk.x, last_chunk.x + 1):
 			var chunk_key := Vector2i(chunk_x, chunk_y)
-			var chunk_bounds := _world_fog_chunk_bounds(chunk_key)
-			if chunk_bounds.size.x <= 0 or chunk_bounds.size.y <= 0:
-				continue
-			visible_chunk_keys[chunk_key] = true
-			var entry: Dictionary = cached_world_fog_chunks.get(chunk_key, {})
-			if int(entry.get("revision", -1)) != fog_revision:
-				# Row-slice memcmp replaces the 1024-iteration hash loop per chunk;
-				# unchanged chunks now cost one PackedByteArray compare per row.
-				var rows: Array = entry.get("rows", [])
-				var rows_match := rows.size() == chunk_bounds.size.y
-				if rows_match:
-					var current_rows := _fog_rows_for_bounds(cells, chunk_bounds)
-					for row_index in range(chunk_bounds.size.y):
-						if current_rows[row_index] != rows[row_index]:
-							rows_match = false
-							break
-				if not rows_match:
-					var rebuild_started := Time.get_ticks_usec() if probe != null else 0
-					entry["mesh"] = _build_world_fog_mesh(chunk_bounds, cells)
-					entry["rows"] = _fog_rows_for_bounds(cells, chunk_bounds)
-					rebuilt_chunks += 1
-					if probe != null:
-						probe.observe_microseconds("presentation.fog.chunk_rebuild", Time.get_ticks_usec() - rebuild_started)
-				entry["revision"] = fog_revision
-			entry["last_used"] = world_fog_cache_use_counter
-			cached_world_fog_chunks[chunk_key] = entry
-			var mesh: Variant = entry.get("mesh")
+			var mesh: Variant = cached_world_fog_meshes.get(chunk_key)
+			if not mesh is ArrayMesh:
+				mesh = _build_world_fog_mesh(_world_fog_geometry_chunk_bounds(chunk_key))
+				if mesh is ArrayMesh:
+					cached_world_fog_meshes[chunk_key] = mesh
+					built_meshes += 1
 			if mesh is ArrayMesh:
 				visible_meshes.append(mesh)
-	var cache_limit := maxi(WORLD_FOG_CACHE_MIN_CHUNKS, visible_chunk_keys.size() * WORLD_FOG_CACHE_VIEW_MULTIPLIER)
-	var pruned_chunks := _prune_world_fog_chunk_cache(visible_chunk_keys, cache_limit)
+	var retained_bounds := Rect2i(
+		first_chunk - Vector2i.ONE * WORLD_FOG_GEOMETRY_RETAIN_MARGIN,
+		(last_chunk - first_chunk) + Vector2i.ONE * (WORLD_FOG_GEOMETRY_RETAIN_MARGIN * 2 + 1)
+	)
+	var evicted_meshes := _prune_world_fog_geometry_cache(retained_bounds)
 	if probe != null:
-		probe.observe_microseconds("presentation.fog.chunk_scan", Time.get_ticks_usec() - scan_started)
-		if rebuilt_chunks > 0:
-			probe.increment("presentation.fog.chunks_rebuilt", rebuilt_chunks)
-		if pruned_chunks > 0:
-			probe.increment("presentation.fog.chunks_pruned", pruned_chunks)
+		probe.observe_microseconds("presentation.fog.prepare", Time.get_ticks_usec() - prepare_started)
+		if built_meshes > 0:
+			probe.increment("presentation.fog.geometry_chunks_built", built_meshes)
+		if evicted_meshes > 0:
+			probe.increment("presentation.fog.geometry_chunks_evicted", evicted_meshes)
+	if visible_meshes.is_empty() or cached_world_fog_texture == null:
+		return
 	var submit_started := Time.get_ticks_usec() if probe != null else 0
-	draw_set_transform(PixelScaling.snap_screen(view_offset))
+	draw_set_transform(PixelScaling.snap_screen(view_offset), 0.0, Vector2(view_zoom, view_zoom))
 	for mesh in visible_meshes:
-		draw_mesh(mesh, null)
+		draw_mesh(mesh, cached_world_fog_texture)
 	draw_set_transform(Vector2.ZERO)
 	if probe != null:
 		probe.observe_microseconds("presentation.fog.mesh_submit", Time.get_ticks_usec() - submit_started)
 
 
-func _world_fog_chunk_bounds(chunk_key: Vector2i) -> Rect2i:
-	var start := chunk_key * WORLD_FOG_CHUNK_SIZE
+func _world_fog_geometry_chunk_bounds(chunk_key: Vector2i) -> Rect2i:
+	var start := chunk_key * WORLD_FOG_GEOMETRY_CHUNK_SIZE
 	var finish := Vector2i(
-		mini(map_size.x, start.x + WORLD_FOG_CHUNK_SIZE),
-		mini(map_size.y, start.y + WORLD_FOG_CHUNK_SIZE)
+		mini(map_size.x, start.x + WORLD_FOG_GEOMETRY_CHUNK_SIZE),
+		mini(map_size.y, start.y + WORLD_FOG_GEOMETRY_CHUNK_SIZE)
 	)
 	start.x = maxi(0, start.x)
 	start.y = maxi(0, start.y)
 	return Rect2i(start, Vector2i(maxi(0, finish.x - start.x), maxi(0, finish.y - start.y)))
 
 
-func _prune_world_fog_chunk_cache(active_keys: Dictionary, maximum_entries: int) -> int:
-	maximum_entries = maxi(active_keys.size(), maximum_entries)
-	if cached_world_fog_chunks.size() <= maximum_entries:
-		return 0
-	var candidates: Array = []
-	for chunk_key_value in cached_world_fog_chunks.keys():
-		var chunk_key: Vector2i = chunk_key_value
-		if active_keys.has(chunk_key):
-			continue
-		var entry: Dictionary = cached_world_fog_chunks[chunk_key]
-		candidates.append({"key": chunk_key, "last_used": int(entry.get("last_used", -1))})
-	candidates.sort_custom(func(left, right):
-		if int(left["last_used"]) != int(right["last_used"]):
-			return int(left["last_used"]) < int(right["last_used"])
-		var left_key: Vector2i = left["key"]
-		var right_key: Vector2i = right["key"]
-		if left_key.y != right_key.y:
-			return left_key.y < right_key.y
-		return left_key.x < right_key.x
-	)
+func _prune_world_fog_geometry_cache(retained_bounds: Rect2i) -> int:
 	var removed := 0
-	for candidate in candidates:
-		if cached_world_fog_chunks.size() <= maximum_entries:
-			break
-		cached_world_fog_chunks.erase(candidate["key"])
+	for chunk_key_value in cached_world_fog_meshes.keys():
+		var chunk_key: Vector2i = chunk_key_value
+		if retained_bounds.has_point(chunk_key):
+			continue
+		cached_world_fog_meshes.erase(chunk_key)
 		removed += 1
 	return removed
 
 
-func _fog_rows_for_bounds(cells: Variant, bounds: Rect2i) -> Array:
-	var rows: Array = []
-	for row_index in range(bounds.size.y):
-		var row_offset := (bounds.position.y + row_index) * map_size.x + bounds.position.x
-		rows.append(cells.slice(row_offset, row_offset + bounds.size.x))
-	return rows
-
-
-func _build_world_fog_mesh(bounds: Rect2i, cells: Variant) -> ArrayMesh:
-	# Project the shared terrain lattice once. The previous implementation built
-	# two temporary triangle arrays and projected four corners independently for
-	# every hidden cell. On a typical viewport most corners belong to four cells,
-	# so that multiplied elevation sampling and allocations during every fog
-	# revision. This produces the identical 0->2 diagonal with one projection per
-	# lattice vertex and one exactly-sized vertex/color allocation.
-	var lattice_width := bounds.size.x + 1
-	var projected := PackedVector2Array()
-	projected.resize(lattice_width * (bounds.size.y + 1))
-	for local_y in range(bounds.size.y + 1):
-		for local_x in range(bounds.size.x + 1):
-			var world := Vector2(bounds.position + Vector2i(local_x, local_y))
-			projected[local_y * lattice_width + local_x] = PixelScaling.snap_screen(_world_to_fog_mesh(world))
-	var covered_cells := 0
-	var cover_flags := PackedByteArray()
-	cover_flags.resize(bounds.size.x * bounds.size.y)
-	for y in range(bounds.position.y, bounds.end.y):
-		for x in range(bounds.position.x, bounds.end.x):
-			var cover_index := (y - bounds.position.y) * bounds.size.x + (x - bounds.position.x)
-			if _fog_cell_should_cover(Vector2i(x, y), cells):
-				cover_flags[cover_index] = 1
-				covered_cells += 1
-	if covered_cells == 0:
+func _build_world_fog_mesh(bounds: Rect2i) -> ArrayMesh:
+	# Geometry never depends on fog state. Chunks are created only as the camera
+	# reaches them and retained for the current viewport plus one surrounding
+	# ring, so exploration cannot grow a history of GPU objects.
+	if simulation_world == null or bounds.size.x <= 0 or bounds.size.y <= 0:
 		return null
+	var lattice_width := bounds.size.x + 1
+	var lattice_height := bounds.size.y + 1
 	var vertices := PackedVector3Array()
-	vertices.resize(covered_cells * 6)
-	var colors := PackedColorArray()
-	colors.resize(covered_cells * 6)
-	var vertex_index := 0
-	for y in range(bounds.position.y, bounds.end.y):
-		for x in range(bounds.position.x, bounds.end.x):
-			var state := int(cells[y * map_size.x + x])
-			if int(cover_flags[(y - bounds.position.y) * bounds.size.x + (x - bounds.position.x)]) == 0:
-				continue
-			var color := FogPresentation.color_for_state(state)
-			var local_x := x - bounds.position.x
-			var local_y := y - bounds.position.y
-			var top_left: Vector2 = projected[local_y * lattice_width + local_x]
-			var top_right: Vector2 = projected[local_y * lattice_width + local_x + 1]
-			var bottom_right: Vector2 = projected[(local_y + 1) * lattice_width + local_x + 1]
-			var bottom_left: Vector2 = projected[(local_y + 1) * lattice_width + local_x]
-			vertices[vertex_index] = Vector3(top_left.x, top_left.y, 0.0)
-			vertices[vertex_index + 1] = Vector3(top_right.x, top_right.y, 0.0)
-			vertices[vertex_index + 2] = Vector3(bottom_right.x, bottom_right.y, 0.0)
-			vertices[vertex_index + 3] = Vector3(top_left.x, top_left.y, 0.0)
-			vertices[vertex_index + 4] = Vector3(bottom_right.x, bottom_right.y, 0.0)
-			vertices[vertex_index + 5] = Vector3(bottom_left.x, bottom_left.y, 0.0)
-			for color_offset in range(6):
-				colors[vertex_index + color_offset] = color
-			vertex_index += 6
+	var uvs := PackedVector2Array()
+	vertices.resize(lattice_width * lattice_height)
+	uvs.resize(vertices.size())
+	for y in range(lattice_height):
+		for x in range(lattice_width):
+			var vertex_index := y * lattice_width + x
+			var world := Vector2(bounds.position + Vector2i(x, y))
+			var projected: Vector2 = simulation_world.terrain_elevation.world_to_screen(world, 1.0, Vector2.ZERO)
+			projected = PixelScaling.snap_screen(projected)
+			vertices[vertex_index] = Vector3(projected.x, projected.y, 0.0)
+			uvs[vertex_index] = Vector2(world.x / float(map_size.x), world.y / float(map_size.y))
+	var indices := PackedInt32Array()
+	indices.resize(bounds.size.x * bounds.size.y * 6)
+	var index_offset := 0
+	for y in range(bounds.size.y):
+		for x in range(bounds.size.x):
+			var top_left := y * lattice_width + x
+			var top_right := top_left + 1
+			var bottom_left := top_left + lattice_width
+			var bottom_right := bottom_left + 1
+			indices[index_offset] = top_left
+			indices[index_offset + 1] = top_right
+			indices[index_offset + 2] = bottom_right
+			indices[index_offset + 3] = top_left
+			indices[index_offset + 4] = bottom_right
+			indices[index_offset + 5] = bottom_left
+			index_offset += 6
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	return mesh
+
+
+func _sync_world_fog_texture(cells: Variant, fog_revision: int, probe: Variant = null) -> void:
+	var expected_cells := map_size.x * map_size.y
+	if cells.size() < expected_cells:
+		return
+	var mask_started := Time.get_ticks_usec() if probe != null else 0
+	_ensure_fog_slope_neighbor_cache()
+	var full_refresh := cached_world_fog_texture == null or cached_world_fog_texture_data.size() != expected_cells * 4 or cached_world_fog_texture_revision < 0
+	var affected: Dictionary = {}
+	if full_refresh:
+		cached_world_fog_texture_data.resize(expected_cells * 4)
+		for index in range(expected_cells):
+			affected[index] = true
+		if simulation_world != null and simulation_world.has_method("consume_fog_presentation_dirty_cells"):
+			simulation_world.consume_fog_presentation_dirty_cells(local_player_team)
+	elif fog_revision != cached_world_fog_texture_revision:
+		var dirty_cells: Array = simulation_world.consume_fog_presentation_dirty_cells(local_player_team) if simulation_world != null and simulation_world.has_method("consume_fog_presentation_dirty_cells") else []
+		# A revision without a queue is possible after loading an older save or in
+		# isolated presentation fixtures. Fall back to a complete mask refresh so
+		# correctness never depends on the incremental producer being present.
+		if dirty_cells.is_empty():
+			for index in range(expected_cells):
+				affected[index] = true
+		else:
+			for cell_index_value in dirty_cells:
+				var cell_index := int(cell_index_value)
+				var cell := Vector2i(cell_index % map_size.x, cell_index / map_size.x)
+				for y_offset in range(-1, 2):
+					for x_offset in range(-1, 2):
+						var affected_cell := cell + Vector2i(x_offset, y_offset)
+						if affected_cell.x >= 0 and affected_cell.y >= 0 and affected_cell.x < map_size.x and affected_cell.y < map_size.y:
+							affected[affected_cell.y * map_size.x + affected_cell.x] = true
+	elif cached_world_fog_texture != null:
+		return
+	for cell_index_value in affected.keys():
+		_write_world_fog_pixel(int(cell_index_value), cells)
+	var image := Image.create_from_data(map_size.x, map_size.y, false, Image.FORMAT_RGBA8, cached_world_fog_texture_data)
+	if cached_world_fog_texture == null:
+		cached_world_fog_texture = ImageTexture.create_from_image(image)
+	else:
+		cached_world_fog_texture.update(image)
+	cached_world_fog_texture_revision = fog_revision
+	if probe != null:
+		probe.observe_microseconds("presentation.fog.mask_update", Time.get_ticks_usec() - mask_started)
+		probe.increment("presentation.fog.mask_cells_updated", affected.size())
+
+
+func _write_world_fog_pixel(index: int, cells: Variant) -> void:
+	var cell := Vector2i(index % map_size.x, index / map_size.x)
+	var state := int(cells[index])
+	var color := Color.TRANSPARENT
+	if state != FogOfWar.VISIBLE and _fog_cell_should_cover(cell, cells):
+		color = FogPresentation.color_for_state(state)
+	var byte_offset := index * 4
+	cached_world_fog_texture_data[byte_offset] = clampi(roundi(color.r * 255.0), 0, 255)
+	cached_world_fog_texture_data[byte_offset + 1] = clampi(roundi(color.g * 255.0), 0, 255)
+	cached_world_fog_texture_data[byte_offset + 2] = clampi(roundi(color.b * 255.0), 0, 255)
+	cached_world_fog_texture_data[byte_offset + 3] = clampi(roundi(color.a * 255.0), 0, 255)
 
 
 func _world_to_fog_mesh(world: Vector2) -> Vector2:
