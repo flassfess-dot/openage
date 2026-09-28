@@ -1,6 +1,7 @@
 extends SceneTree
 
 const MATCH_PATH := "res://tests/fixtures/e3_save_state_matrix_match.json"
+const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 
 var failures: Array[String] = []
 
@@ -27,6 +28,8 @@ func _initialize() -> void:
 			assert_true(rectangle.grow(1.0).has_point(corner), "building outline encloses each footprint corner")
 	var drawable_items: Array = game.current_world_drawables()
 	assert_true(not drawable_items.any(func(item): return String(item.get("kind", "")) == "shadow" and int(item.get("stable_id", -1)) == int(building["id"])), "building outline has no separate shadow drawable")
+	var selection_item := {"screen_position": Vector2(101.4, 79.6)}
+	assert_true(game.unit_selection_center(selection_item).is_equal_approx(PixelScaling.snap_screen(selection_item["screen_position"])), "unit and ship selection rings stay on the ground anchor without an extra vertical offset")
 	var ghost := {"kind": "house", "team": 1, "pos": Vector2(20.0, 20.0), "state": "foundation", "construction_stage": 0}
 	assert_true(game.resource_catalog.building_frame_info(ghost, 0.0).get("texture") != null, "placement preview resolves the source foundation sprite")
 	game.free()

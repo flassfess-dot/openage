@@ -38,6 +38,10 @@ func test_forward_frame_order_and_looping() -> void:
 	assert_equal(looping.resolve(0, 0.0, 4)["animation_frame"], 0, "animation starts at first frame")
 	assert_equal(looping.resolve(0, 0.11, 4)["animation_frame"], 1, "animation advances forward")
 	assert_equal(looping.resolve(0, 0.41, 4)["animation_frame"], 0, "loop returns to first frame")
+	var intermittent = GraphicDescriptor.new("campfire", {"frames_per_angle": 2, "angle_count": 1, "frame_rate": 0.1, "replay_delay": 0.3}, 2, true)
+	assert_equal(intermittent.resolve(0, 0.11, 2)["animation_frame"], 1, "intermittent animation plays its active frames")
+	assert_equal(intermittent.resolve(0, 0.35, 2)["animation_frame"], 0, "intermittent animation rests on its neutral frame between cycles")
+	assert_equal(intermittent.resolve(0, 0.61, 2)["animation_frame"], 1, "intermittent animation resumes after the source replay delay")
 	var one_shot = GraphicDescriptor.new("death", {"frames_per_angle": 4, "angle_count": 1, "frame_rate": 0.1}, 4, false)
 	assert_equal(one_shot.resolve(0, 2.0, 4)["animation_frame"], 3, "one-shot clamps to final frame")
 

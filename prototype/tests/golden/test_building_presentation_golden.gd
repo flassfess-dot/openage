@@ -3,7 +3,7 @@ extends SceneTree
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 
 const GOLDEN_SIZE := Vector2i(1024, 640)
-const EXPECTED_RGBA_SHA256 := "0a5127aeb2dd835ca5fb17808dfc495c010350626e7eae06744cefed99b47cf2"
+const EXPECTED_RGBA_SHA256 := "eba6c0abc689affa3f6b67a382cdcbc0e2f1bbe8b69d33afe925425bf9d1dde2"
 const ANIMATION_TIME := 0.35
 
 var failures: Array[String] = []

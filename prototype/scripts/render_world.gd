@@ -67,7 +67,9 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	source_environment = environment_projection["animated"]
 	_observe_stage("environment_cache", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
+	var building_by_id: Dictionary = {}
 	for building in source_buildings:
+		building_by_id[int(building.get("id", -1))] = building
 		if building["hp"] <= 0.0 and String(building.get("death_phase", "removed")) not in ["dying", "ruin"]:
 			continue
 		if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, building, true):
@@ -77,12 +79,13 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		var building_info := _frame_info(frame_info_provider, "building", building)
 		var building_id := int(building["id"])
 		var building_elevation := float(building.get("elevation", 0.0))
-		var base_sub_order := int(building_info.get("graphic_layer", 20)) * 1000
+		var is_interior_resource := bool(building.get("harvestable", false))
+		var base_sub_order := int(building_info.get("graphic_layer", 20)) * 1000 - (100 if is_interior_resource else 0)
 		drawables.append(RenderItem.create("building", RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, building_info, building_elevation, Color.WHITE, 1.0, base_sub_order))
 		var building_part_index := 0
 		for part in building_info.get("composite_parts", []):
 			building_part_index += 1
-			var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + building_part_index
+			var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + (100 if is_interior_resource else 0) + building_part_index
 			drawables.append(RenderItem.create("building_part", RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order))
 		if selected_ids.has(building_id) or preview_ids.has(building_id):
 			drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, building_screen, building_id, building, building_info, building_elevation, RenderItem.color_for_team(int(building.get("team", 0))), 1.0, 1))
@@ -147,6 +150,10 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			var previous_position: Vector2 = unit.get("previous_pos", unit["pos"])
 			var render_position: Vector2 = previous_position.lerp(unit["pos"], alpha)
 			var unit_screen: Vector2 = world_to_screen.call(render_position)
+			var unit_sort_screen := unit_screen
+			var gathered_building: Variant = building_by_id.get(int(unit.get("resource_id", -1)))
+			if gathered_building != null and bool(gathered_building.get("harvestable", false)) and String(unit.get("task", "")) == "gather":
+				unit_sort_screen.y = world_to_screen.call(Vector2(gathered_building.get("pos", Vector2.ZERO))).y
 			var frame_info := _frame_info(frame_info_provider, "unit", unit)
 			var stable_id := int(unit["id"])
 			var elevation := float(unit.get("elevation", 0.0))
@@ -154,13 +161,17 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			if death_phase != "corpse":
 				drawables.append(RenderItem.create("shadow", RenderItem.Layer.SHADOW, render_position, unit_screen, stable_id, unit, {}, elevation, Color(0.0, 0.0, 0.0, 0.32)))
 			var unit_base_sub_order := int(frame_info.get("graphic_layer", 20)) * 1000
-			drawables.append(RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, unit_base_sub_order))
+			var unit_item := RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, unit_base_sub_order)
+			unit_item["screen_y"] = unit_sort_screen.y
+			drawables.append(unit_item)
 			var unit_part_index := 0
 			for part_value in frame_info.get("composite_parts", []):
 				var part: Dictionary = part_value
 				unit_part_index += 1
 				var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + unit_part_index
-				drawables.append(RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order))
+				var unit_part_item := RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order)
+				unit_part_item["screen_y"] = unit_sort_screen.y
+				drawables.append(unit_part_item)
 			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or preview_ids.has(stable_id)):
 				drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
 			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or preview_ids.has(stable_id)):

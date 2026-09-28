@@ -13,6 +13,7 @@ var logical_angle_count: int = 1
 var stored_angle_count: int = 1
 var frames_per_angle: int = 1
 var frame_duration: float = 0.1
+var replay_delay: float = 0.0
 var loop: bool = true
 var mirroring_mode: int = 0
 var start_angle_degrees: int = 0
@@ -28,6 +29,7 @@ func _init(name: String = "", spec: Dictionary = {}, available_frame_count: int 
 	frames_per_angle = maxi(1, int(spec.get("frames_per_angle", available_frame_count)))
 	stored_angle_count = maxi(1, ceili(float(available_frame_count) / float(frames_per_angle)))
 	frame_duration = maxf(0.001, float(spec.get("frame_rate", 0.1)))
+	replay_delay = maxf(0.0, float(spec.get("replay_delay", 0.0)))
 	loop = bool(spec.get("loop", loop_enabled))
 	mirroring_mode = int(spec.get("mirroring_mode", 0))
 	start_angle_degrees = posmod(int(spec.get("start_angle", 0)), 360)
@@ -56,7 +58,14 @@ func resolve(logical_facing: int, animation_time: float, available_frame_count: 
 	if source_direction >= stored_angle_count:
 		source_direction = stored_angle_count - 1
 
-	var elapsed_frame := maxi(0, floori(animation_time / frame_duration))
+	var local_time := maxf(0.0, animation_time)
+	if loop:
+		var animation_duration := float(frames_per_angle) * frame_duration
+		var cycle_duration := animation_duration + replay_delay
+		local_time = fmod(local_time, maxf(frame_duration, cycle_duration))
+		if local_time >= animation_duration:
+			local_time = 0.0
+	var elapsed_frame := maxi(0, floori(local_time / frame_duration))
 	var animation_frame := elapsed_frame % frames_per_angle if loop else mini(elapsed_frame, frames_per_angle - 1)
 	var frame_index := source_direction * frames_per_angle + animation_frame
 	frame_index = clampi(frame_index, 0, maxi(0, available_frame_count - 1))

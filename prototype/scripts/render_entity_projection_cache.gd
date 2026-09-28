@@ -15,6 +15,11 @@ func clear() -> void:
 	categories_by_id.clear()
 
 
+func erase(entity_id: int) -> void:
+	projections_by_id.erase(entity_id)
+	categories_by_id.erase(entity_id)
+
+
 func project(entity: Dictionary) -> Dictionary:
 	var entity_id := int(entity.get("id", -1))
 	var result: Dictionary = projections_by_id.get(entity_id, {})
@@ -80,9 +85,9 @@ func _update_projection(result: Dictionary, entity: Dictionary, category: String
 			keys = ["amount", "state", "resource_state", "depletion_stage", "display_graphic_id"]
 		"building":
 			keys = [
-				"team", "entity_type", "hp", "state", "resource_state", "amount",
+				"team", "kind", "entity_type", "source_unit_id", "hp", "state", "resource_state", "amount",
 				"construction_stage", "construction_progress", "display_graphic_id",
-				"anim", "anim_state", "death_phase", "death_elapsed",
+				"anim", "anim_state", "presentation_facing", "death_phase", "death_elapsed",
 			]
 		_:
 			keys = [

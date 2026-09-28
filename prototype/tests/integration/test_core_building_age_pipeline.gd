@@ -56,9 +56,16 @@ func verify_source_contracts_and_age_replacements(catalog) -> void:
 	var queued_order_id := int(queued_villager.get("id", -1)) if queued_villager != null else -1
 	house["hp"] = 37.5
 	house.get("components", {}).get("health", {})["current"] = 37.5
+	var stone_center_projection: Dictionary = world.compact_render_projection(town_center)
+	assert_true(not stone_center_projection.has("presentation_facing"), "Stone Age Town Center projection starts on the default facet")
 
 	world.grant_technology(1, 101)
+	assert_equal(town_center.get("presentation_facing"), 2, "Roman Tool Age Town Center selects its Tool/RoR source facet")
+	var tool_center_projection: Dictionary = world.compact_render_projection(town_center)
+	assert_equal(tool_center_projection.get("presentation_facing"), 2, "render projection refreshes the Town Center Tool Age facet")
+	assert_equal(tool_center_projection.get("source_unit_id"), 109, "render projection retains the Tool Age Town Center source identity")
 	assert_equal(house.get("source_unit_id"), 154, "Tool Age replaces existing House 70 with source 154")
+	assert_true(catalog.building_frame_info(house).get("composite_parts", []).all(func(part): return int(part.get("source_direction", -1)) == 0), "Tool Age House selects the first architecture-age facet")
 	assert_equal(house.get("id"), house_id, "House replacement preserves entity ID")
 	assert_float(float(house.get("hp", 0.0)), 37.5, "House replacement preserves health percentage")
 	assert_equal(house.get("population_support"), 4, "House replacement preserves population support component")
@@ -71,6 +78,7 @@ func verify_source_contracts_and_age_replacements(catalog) -> void:
 	assert_true(catalog.building_frame_info(enemy_house).get("composite_parts", []).any(func(part): return String(part.get("asset_name", "")) == "graphic_868_p2"), "Tool Age House resolves player-two palette")
 
 	world.grant_technology(1, 102)
+	assert_equal(house.get("presentation_facing"), 1, "Bronze Age updates the existing House to its Bronze facet")
 	assert_equal(town_center.get("source_unit_id"), 71, "Bronze Age replaces existing Town Center 109 with source 71")
 	assert_equal(barracks.get("source_unit_id"), 132, "Bronze Age replaces existing Barracks 12 with source 132")
 	assert_equal(storage.get("source_unit_id"), 105, "Bronze Age replaces existing Storage Pit 103 with source 105")

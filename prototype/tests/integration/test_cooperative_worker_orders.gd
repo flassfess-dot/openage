@@ -21,6 +21,8 @@ func _initialize() -> void:
 	verify_neighboring_berry_slots(catalog)
 	verify_depleted_cluster_handoff(catalog)
 	verify_shared_construction(catalog)
+	verify_independent_workers_join_existing_foundation(catalog)
+	verify_completed_builder_handoff(catalog)
 	verify_generated_shared_gather(catalog, "berries")
 	verify_generated_shared_gather(catalog, "gold_mine")
 	verify_generated_shared_gather(catalog, "stone_mine")
@@ -126,6 +128,44 @@ func verify_shared_construction(catalog) -> void:
 			break
 	if contributing_workers.size() < 2 or peak_builders < 2 or String(foundation.get("state", "")) != "complete":
 		failures.append("house: %d/%d workers contributed, peak simultaneous=%d, state=%s progress=%.3f; %s" % [contributing_workers.size(), workers.size(), peak_builders, foundation.get("state", ""), float(foundation.get("construction_progress", 0.0)), worker_diagnostics(workers)])
+
+
+func verify_independent_workers_join_existing_foundation(catalog) -> void:
+	var world = fixture(catalog)
+	world.set_resource_amount(1, 1, 1000)
+	var first: Dictionary = world.add_unit(1, "villager", Vector2(8.5, 13.5), false)
+	var second: Dictionary = world.add_unit(1, "villager", Vector2(8.5, 15.5), false)
+	world.update_fog_of_war()
+	var foundation: Variant = world.assign_command_build([first], "house", Vector2(11.5, 14.5))
+	var joined: Variant = world.assign_command_build([second], "house", Vector2(11.5, 14.5))
+	if foundation == null or joined == null:
+		failures.append("independently selected workers could not target the same foundation: %s" % world.last_build_failure)
+		return
+	if int(joined.get("id", -1)) != int(foundation.get("id", -1)):
+		failures.append("second selection created a different project instead of joining foundation %d" % int(foundation.get("id", -1)))
+	if [first, second].any(func(worker): return int(worker.get("target_building_id", -1)) != int(foundation.get("id", -1)) or String(worker.get("task", "")) != "build"):
+		failures.append("construction assignment depends on the workers having shared an earlier selection group; %s" % worker_diagnostics([first, second]))
+
+
+func verify_completed_builder_handoff(catalog) -> void:
+	var world = fixture(catalog)
+	world.set_resource_amount(1, 1, 1000)
+	var worker: Dictionary = world.add_unit(1, "villager", Vector2(10.5, 14.5), false)
+	world.update_fog_of_war()
+	var first: Variant = world.place_foundation(1, "house", Vector2(11.5, 14.5), [worker])
+	var second: Variant = world.place_foundation(1, "house", Vector2(14.5, 14.5))
+	if first == null or second == null:
+		failures.append("builder handoff fixture could not place adjacent foundations: %s" % world.last_build_failure)
+		return
+	world.update_fog_of_war()
+	first["construction_required"] = 0.01
+	for unused in range(40):
+		world.update_units(0.05, 1, 2)
+		world.rebuild_spatial_index()
+		if String(first.get("state", "")) == "complete" and int(worker.get("target_building_id", -1)) == int(second.get("id", -1)):
+			break
+	if String(first.get("state", "")) != "complete" or String(worker.get("task", "")) != "build" or int(worker.get("target_building_id", -1)) != int(second.get("id", -1)):
+		failures.append("builder does not continue with a visible reachable foundation after completing its goal; %s" % worker_diagnostics([worker]))
 
 
 func verify_generated_shared_gather(catalog, kind: String) -> void:

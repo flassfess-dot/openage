@@ -24,9 +24,9 @@ func _initialize() -> void:
 
 	assert_equal(world.get_units().size(), 11, "bootstrap creates all declared starting units")
 	assert_equal(world.get_buildings().size(), 1, "legacy hidden Town Center is replaced by declared building")
-	assert_equal(world.get_resources().size(), 23, "land and naval procedural resource clusters enter simulation")
+	assert_equal(world.get_resources().size(), 21, "fish schools enter simulation as single selectable resources")
 	assert_true(not world.is_bulk_loading(), "bootstrap closes its bulk-load transaction")
-	assert_equal(world.get_resources().filter(func(resource): return String(resource.get("kind", "")) in ["deep_fish", "shore_fish", "whale"]).size(), 5, "bootstrap preserves all seeded fish and Whale resources")
+	assert_equal(world.get_resources().filter(func(resource): return String(resource.get("kind", "")) in ["deep_fish", "shore_fish", "whale"]).size(), 3, "bootstrap preserves both merged fish schools and the Whale resource")
 	assert_equal(result["selected_ids"].size(), 7, "initial selection is presentation bootstrap data")
 	assert_equal(world.get_resource_amount(1, 0), 200, "starting food comes from player definition")
 	assert_equal(world.get_resource_amount(1, 1), 200, "starting wood comes from player definition")

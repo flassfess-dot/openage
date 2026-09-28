@@ -15,6 +15,7 @@ var composite_parts: Dictionary = {}
 var definitions: Dictionary = {}
 var records_by_name: Dictionary = {}
 var source_records: Dictionary = {}
+var loaded_states: Dictionary = {}
 var effect_presentations
 
 
@@ -29,6 +30,7 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 	composite_parts.clear()
 	definitions.clear()
 	source_records.clear()
+	loaded_states.clear()
 	records_by_name = indexed_frame_records.duplicate() if not indexed_frame_records.is_empty() else _records_by_name()
 	effect_presentations = effect_registry
 	var archetypes: Dictionary = runtime_catalog.get("archetypes", {})
@@ -60,7 +62,7 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 
 
 func descriptor(texture_key: String, state: String) -> Variant:
-	ensure_loaded(texture_key)
+	ensure_loaded(texture_key, state)
 	return descriptors.get(texture_key, {}).get(state)
 
 
@@ -82,22 +84,38 @@ func animation_states(texture_key: String) -> Array:
 
 
 func animation_frames(texture_key: String, state: String) -> Array:
-	ensure_loaded(texture_key)
+	ensure_loaded(texture_key, state)
 	return textures.get(texture_key, {}).get(state, [])
 
 
-func ensure_loaded(texture_key: String) -> void:
-	if textures.has(texture_key):
+func ensure_loaded(texture_key: String, requested_state: String = "") -> void:
+	var attempted: Dictionary = loaded_states.get(texture_key, {})
+	if not requested_state.is_empty() and attempted.has(requested_state):
 		return
 	var definition: Dictionary = definitions.get(texture_key, {})
 	if definition.is_empty():
+		return
+	# Rendering needs one animation state. Loading the entire unit here decoded
+	# every work/attack/death clip synchronously on its first visible frame.
+	# Explicit callers without a state still request the complete animation set.
+	var specs: Dictionary = definition.get("state_specs", {})
+	var requested: Array = specs.keys() if requested_state.is_empty() else [requested_state]
+	var missing: Dictionary = {}
+	for state in requested:
+		if attempted.has(state):
+			continue
+		attempted[state] = true
+		if specs.has(state):
+			missing[state] = specs[state]
+	loaded_states[texture_key] = attempted
+	if missing.is_empty():
 		return
 	_load_team(
 		String(definition.get("alias", "")),
 		texture_key,
 		int(definition.get("team", 1)),
 		definition.get("archetype", {}),
-		definition.get("state_specs", {}),
+		missing,
 		int(definition.get("source_unit_id", -1))
 	)
 
@@ -112,7 +130,9 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -
 	var source_id := int(unit.get("source_unit_id", -1))
 	var variant_key := "%s#%d" % [prefix, source_id]
 	var texture_key := variant_key if definitions.has(variant_key) else prefix
-	ensure_loaded(texture_key)
+	ensure_loaded(texture_key, state)
+	if not textures.get(texture_key, {}).has(state):
+		ensure_loaded(texture_key, "idle")
 	var animation_sets: Dictionary = textures.get(texture_key, {})
 	var resolved_state := state if animation_sets.has(state) else "idle"
 	var frames: Array = animation_sets.get(resolved_state, [])
@@ -179,10 +199,11 @@ func _register_team(alias: String, texture_key: String, team: int, archetype: Di
 
 
 func _load_team(alias: String, texture_key: String, team: int, archetype: Dictionary, state_specs: Dictionary, source_unit_id: int = -1) -> void:
-	textures[texture_key] = {}
-	descriptors[texture_key] = {}
-	graphic_ids[texture_key] = {}
-	composite_parts[texture_key] = {}
+	if not textures.has(texture_key):
+		textures[texture_key] = {}
+		descriptors[texture_key] = {}
+		graphic_ids[texture_key] = {}
+		composite_parts[texture_key] = {}
 	for state_value in state_specs:
 		var state := String(state_value)
 		var state_spec: Dictionary = state_specs[state]

@@ -1830,8 +1830,10 @@ func commit_build_placement(screen_position: Vector2, queue_order: bool = false,
 	update_interaction_cursor(input_adapter.pointer_position)
 	var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, _selection_ids(workers), kind, target)
 	if defer_order:
-		command.params["queue_order"] = true
-	enqueue_with_feedback(command, "Строительство: %s" % kind, "command:%s" % String(workers[0].get("kind", "villager")), target)
+		# A queued building is still a real world object: reserve and render its
+		# foundation now, then queue only the workers' trip to that foundation.
+		command.params["plan_only"] = true
+	enqueue_with_feedback(command, "Строительство: %s" % kind, "command:%s" % String(workers[0].get("kind", "villager")), null)
 
 
 func queue_wall_line(workers: Array, cells: Array[Vector2i]) -> void:
@@ -1844,7 +1846,7 @@ func queue_wall_line(workers: Array, cells: Array[Vector2i]) -> void:
 		var target := Vector2(cells[index])
 		var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, worker_ids, "wall", target)
 		if index == 0:
-			enqueue_with_feedback(command, "Стена: %d секций" % cells.size(), "command:%s" % String(workers[0].get("kind", "villager")), target)
+			enqueue_with_feedback(command, "Стена: %d секций" % cells.size(), "command:%s" % String(workers[0].get("kind", "villager")), null)
 		else:
 			_queue_local_command(command)
 	for index in range(1, cells.size()):
@@ -2175,7 +2177,7 @@ func draw_world_objects() -> void:
 			stage_started = Time.get_ticks_usec()
 		for drawable in drawables:
 			match drawable["kind"]:
-				"building", "building_part", "resource", "unit", "projectile", "effect", "marker", "environment": draw_render_body(drawable)
+				"building", "building_part", "resource", "unit", "unit_part", "projectile", "effect", "marker", "environment": draw_render_body(drawable)
 				"shadow": draw_unit_shadow(drawable)
 				"selection": draw_unit_selection(drawable)
 				"health_bar": draw_unit_health(drawable)
@@ -2571,9 +2573,9 @@ func draw_unit_selection(item: Dictionary) -> void:
 	var unit: Dictionary = item["data"]
 	if String(unit.get("entity_type", "")) == "resource" and resource_feedback_time > 0.0 and int(unit.get("id", -1)) == resource_feedback_id:
 		if int(resource_feedback_time * 10.0) % 2 == 0:
-			draw_selection_ellipse(PixelScaling.snap_screen(item["screen_position"]) + Vector2(0, 7) * view_zoom, Color("45e958"), Vector2(15.0, 6.5))
+			draw_selection_ellipse(unit_selection_center(item), Color("45e958"), Vector2(15.0, 6.5))
 		return
-	var screen := PixelScaling.snap_screen(item["screen_position"])
+	var screen := unit_selection_center(item)
 	var is_building := String(unit.get("entity_type", "")) in ["building", "foundation"] or String(unit.get("footprint", {}).get("shape", "")) == "polygon"
 	var radius := Vector2(15.0, 6.5)
 	var half_size: Variant = unit.get("footprint", {}).get("half_size")
@@ -2588,18 +2590,24 @@ func draw_unit_selection(item: Dictionary) -> void:
 		if is_building:
 			draw_building_selection_rectangle(unit, preview_color)
 		else:
-			draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, preview_color, radius)
+			draw_selection_ellipse(screen, preview_color, radius)
 	elif hovered:
 		var hover_color := Color("ef5d55") if interaction_cursor_semantic == "attack" else Color("d6bc63") if interaction_cursor_semantic == "gather" else Color("66e8ff")
 		if is_building:
 			draw_building_selection_rectangle(unit, hover_color)
 		else:
-			draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, hover_color, radius)
+			draw_selection_ellipse(screen, hover_color, radius)
 	elif selected:
 		if is_building:
 			draw_building_selection_rectangle(unit, Color("e8f45b"))
 		else:
-			draw_selection_ellipse(screen + Vector2(0, 7) * view_zoom, Color("e8f45b"), radius)
+			draw_selection_ellipse(screen, Color("e8f45b"), radius)
+
+
+func unit_selection_center(item: Dictionary) -> Vector2:
+	# Render-item screen_position is the object's ground anchor. Adding another
+	# sprite-height offset detached ship/resource rings from the water or ground.
+	return PixelScaling.snap_screen(Vector2(item.get("screen_position", Vector2.ZERO)))
 
 
 func draw_building_selection_rectangle(building: Dictionary, color: Color) -> void:
@@ -2771,6 +2779,8 @@ func draw_hud() -> void:
 		if String(selection.get("category", "")) == "resource":
 			draw_string(font, info_rect.position + Vector2(text_x, 63), "РЕС %d" % int(leader.get("resource_amount", 0)), HORIZONTAL_ALIGNMENT_LEFT, 65.0, 10, Color.WHITE)
 			draw_string(font, info_rect.position + Vector2(text_x, 77), "ИЗ %d" % int(leader.get("resource_maximum", 0)), HORIZONTAL_ALIGNMENT_LEFT, 65.0, 10, Color.WHITE)
+		elif bool(leader.get("show_population", false)):
+			draw_string(font, info_rect.position + Vector2(text_x, 63), "НАС %d/%d" % [int(leader.get("population_current", 0)), int(leader.get("population_cap", 0))], HORIZONTAL_ALIGNMENT_LEFT, 70.0, 10, Color.WHITE)
 		elif bool(leader.get("show_combat_stats", true)):
 			draw_string(font, info_rect.position + Vector2(text_x, 63), "АТК %d" % int(leader.get("attack", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
 			draw_string(font, info_rect.position + Vector2(text_x, 77), "БРН %d" % int(leader.get("armor", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
@@ -2816,9 +2826,12 @@ func draw_source_hud_shell(layout: Dictionary) -> void:
 	draw_rect(bottom_rect, Color("4f3926"), true)
 	if interface_panel_texture != null:
 		var x := 0.0
+		var panel_width := float(interface_panel_texture.get_width())
+		var overlap := minf(2.0, maxf(0.0, panel_width - 1.0))
+		var stride := maxf(1.0, panel_width - overlap)
 		while x < viewport_size.x:
 			draw_texture(interface_panel_texture, Vector2(x, bottom_rect.position.y))
-			x += float(interface_panel_texture.get_width())
+			x += stride
 	var shell: Dictionary = resource_catalog.interface_skin.hud_shell(int(layout["source_width"]), interface_style_index)
 	var top_texture: Texture2D = shell.get("top")
 	var bottom_texture: Texture2D = shell.get("bottom")
@@ -2837,15 +2850,19 @@ func draw_split_hud_texture(texture: Texture2D, destination_y: float, destinatio
 	var left_width := float(split["left_width"])
 	var right_width := float(split["right_width"])
 	var right_source_x := float(split["right_source_x"])
+	var overlap := 2.0
 	draw_texture_rect_region(texture, Rect2(0, destination_y, left_width, texture.get_height()), Rect2(0, 0, left_width, texture.get_height()))
-	draw_texture_rect_region(texture, Rect2(destination_width - right_width, destination_y, right_width, texture.get_height()), Rect2(right_source_x, 0, right_width, texture.get_height()))
-	var source_center_width := right_source_x - left_width
-	var destination_x := left_width
-	var destination_end := destination_width - right_width
+	var source_x := maxf(0.0, left_width - overlap)
+	var source_center_width := right_source_x - source_x
+	var destination_x := maxf(0.0, left_width - overlap)
+	var destination_end := minf(destination_width, destination_width - right_width + overlap)
 	while destination_x < destination_end:
 		var piece_width := minf(source_center_width, destination_end - destination_x)
-		draw_texture_rect_region(texture, Rect2(destination_x, destination_y, piece_width, texture.get_height()), Rect2(left_width, 0, piece_width, texture.get_height()))
-		destination_x += piece_width
+		draw_texture_rect_region(texture, Rect2(destination_x, destination_y, piece_width, texture.get_height()), Rect2(source_x, 0, piece_width, texture.get_height()))
+		if piece_width <= overlap:
+			break
+		destination_x += piece_width - overlap
+	draw_texture_rect_region(texture, Rect2(destination_width - right_width, destination_y, right_width, texture.get_height()), Rect2(right_source_x, 0, right_width, texture.get_height()))
 
 func living_player_count() -> int:
 	return units.filter(func(unit): return unit["team"] == local_player_team and unit["hp"] > 0.0).size()

@@ -76,6 +76,13 @@ func _initialize() -> void:
 	assert_equal(tool_age["label"], "Неолит", "research command uses original localized technology name")
 	assert_equal(tool_age["icon_kind"], "technology", "research command identifies the technology icon sheet")
 	assert_equal(tool_age["icon_id"], 65, "research command preserves Tool Age DAT icon ID")
+	var residence: Dictionary = world.add_building(84, "house", Vector2(10.0, 15.0), 1)
+	world.set_population_cap(1, 12)
+	var residence_snapshot := SimulationSnapshot.presentation(world, 10, 1)
+	model = view_model.build(residence_snapshot, [int(residence["id"])], "RECTANGLE", "ru")
+	assert_true(bool(model["selection"]["leader"].get("show_population", false)), "single selected House requests the population readout")
+	assert_equal(int(model["selection"]["leader"].get("population_current", -1)), int(residence_snapshot["player_state"].get("population", -2)), "House card shows current population")
+	assert_equal(int(model["selection"]["leader"].get("population_cap", -1)), int(residence_snapshot["player_state"].get("population_cap", -2)), "House card shows the authoritative population limit")
 
 	var worker: Dictionary = world.add_unit(1, "villager", Vector2(7.0, 7.0), false)
 	var tree: Dictionary = world.add_resource("tree", Vector2(7.5, 9.5), 75)

@@ -38,7 +38,17 @@ func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary
 	var source := _source_record(building)
 	if String(building.get("death_phase", "alive")) in ["dying", "ruin"] or String(building.get("state", "complete")) == "destroyed":
 		var death_graphic := int(source.get("graphics", {}).get("death", -1))
-		var death_time := minf(float(building.get("death_elapsed", animation_time)), maxf(0.0, float(building.get("death_duration", 0.05)) - 0.001)) if String(building.get("death_phase", "alive")) == "ruin" else float(building.get("death_elapsed", animation_time))
+		var is_ruin := String(building.get("death_phase", "alive")) == "ruin"
+		var death_time := minf(float(building.get("death_elapsed", animation_time)), maxf(0.0, float(building.get("death_duration", 0.05)) - 0.001)) if is_ruin else float(building.get("death_elapsed", animation_time))
+		if is_ruin:
+			var rubble_parts: Array = []
+			for part_value in _composite_parts(death_graphic, player, 0, death_time):
+				var part: Dictionary = part_value
+				var part_spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(int(part.get("graphic_id", -1))), {})
+				if int(part_spec.get("frames_per_angle", 1)) <= 1 or int(part_spec.get("sequence_type", 0)) == 0:
+					rubble_parts.append(part)
+			if not rubble_parts.is_empty():
+				return {"texture": null, "graphic_id": death_graphic, "composite_parts": rubble_parts}
 		var death_info := _resolved_frame(death_graphic, player, 0, death_time)
 		death_info["graphic_id"] = death_graphic
 		death_info["composite_parts"] = _composite_parts(death_graphic, player, 0, death_time)
@@ -63,7 +73,7 @@ func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary
 		return depleted_result
 
 	var clip := AnimationController.clip_for_state(String(building.get("anim_state", AnimationController.IDLE)))
-	var presentation_time := float(building.get("anim", animation_time)) if clip == "attack" else animation_time
+	var presentation_time := float(building.get("anim", animation_time)) if clip == "attack" else _idle_presentation_time(building, animation_time)
 	var base_graphic := int(building.get("display_graphic_id", source.get("graphics", {}).get("idle", -1)))
 	if clip == "attack":
 		var attack_graphic := int(source.get("graphics", {}).get("attack", -1))
@@ -140,11 +150,22 @@ func _ensure_loaded(graphic_id: int, player: int) -> String:
 	var spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
 	var sequence_type := int(spec.get("sequence_type", 0))
 	var descriptor := GraphicDescriptor.new(asset_name, spec, frames.size(), sequence_type != 0 and (sequence_type & 0x08) == 0)
+	if descriptor.loop and descriptor.frames_per_angle > 1 and descriptor.replay_delay <= 0.0:
+		var animation_duration := descriptor.frame_duration * float(descriptor.frames_per_angle)
+		descriptor.replay_delay = clampf(animation_duration * 0.5, 0.35, 2.5)
 	descriptor.set_hotspots(hotspots)
 	textures_by_key[requested_key] = frames
 	descriptors_by_key[requested_key] = descriptor
 	resolved_graphic_keys[requested_key] = requested_key
 	return requested_key
+
+
+func _idle_presentation_time(building: Dictionary, animation_time: float) -> float:
+	# Stable per-entity phase keeps replays deterministic while preventing every
+	# campfire and smoke layer from starting on the same simulation tick.
+	var entity_id := int(building.get("id", 0))
+	var phase := float(posmod(entity_id * 1618 + 7919, 10000)) / 10000.0 * 7.0
+	return maxf(0.0, animation_time + phase)
 
 
 func _frame_records(graphic_id: int, player: int) -> Array:
@@ -187,9 +208,10 @@ func _presentation_facing(building: Dictionary, graphic_id: int) -> int:
 	if angle_count <= 1:
 		presentation_facing_by_key[cache_key] = 0
 		return 0
-	# RoR stores the expansion's Roman architecture as the final static
-	# direction in otherwise non-rotating building graphics.
-	var facing := angle_count - 1 if int(civilization_icon_sets.get(civilization_id, 0)) == 4 else 0
+	# Age-packed building directions are selected explicitly by the simulation.
+	# Other buildings are static and must not inherit a Roman-only last-angle
+	# heuristic.
+	var facing := 0
 	presentation_facing_by_key[cache_key] = facing
 	return facing
 

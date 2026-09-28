@@ -119,6 +119,13 @@ func test_building_death_lifecycle(catalog) -> void:
 	world.advance(float(town_center["death_duration"]), 1, 2)
 	assert_equal(town_center["death_phase"], "ruin", "destruction animation leaves temporary rubble")
 	assert_true(world.find_building(int(town_center["id"])) != null, "rubble remains visible after destruction animation")
+	var ruin_frame: Dictionary = catalog.building_frame_info(town_center, 4.0)
+	assert_equal(ruin_frame.get("texture"), null, "finished destruction no longer keeps the animated root layer")
+	assert_true(not ruin_frame.get("composite_parts", []).is_empty(), "finished destruction retains its static rubble layers")
+	for part_value in ruin_frame.get("composite_parts", []):
+		var part: Dictionary = part_value
+		var part_spec: Dictionary = catalog.graphics_catalog_data.get("graphics", {}).get(String.num_int64(int(part.get("graphic_id", -1))), {})
+		assert_true(int(part_spec.get("frames_per_angle", 1)) <= 1 or int(part_spec.get("sequence_type", 0)) == 0, "finished rubble excludes active collapse layers")
 	var ruin_items: Array = renderer.create_world_drawables(world, func(position): return position, 1.0, Callable(self, "fake_frame_info"))
 	assert_equal(ruin_items.filter(func(item): return item["kind"] == "building" and item["stable_id"] == town_center["id"]).size(), 1, "temporary rubble stays rendered without blocking movement")
 	world.advance(8.01, 1, 2)

@@ -4,7 +4,7 @@ const AnimationController := preload("res://scripts/animation_controller.gd")
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 
 const GOLDEN_SIZE := Vector2i(1280, 720)
-const EXPECTED_RGBA_SHA256 := "34e72d619ca5e66ac59b5cece86be15850fe8f43a8d7d86170951c33caea2c4e"
+const EXPECTED_RGBA_SHA256 := "129d8ff46778b1f1b0eaafcaa2d516411cd5fc8e25af424b2485381326e7afd2"
 const ANIMATION_TIME := 0.35
 
 var failures: Array[String] = []

@@ -62,7 +62,7 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 	var player_state: Dictionary = snapshot.get("player_state", {})
 	var spectator := String(player_state.get("status", "active")) in ["resigned", "defeated"]
 	var disabled_reason := "battle_over" if bool(snapshot.get("battle_over", false)) else "player_not_active" if spectator else ""
-	var selection_model := _selection_model(selected, locale)
+	var selection_model := _selection_model(selected, player_state, locale)
 	var model := {
 		"tick": int(snapshot.get("tick", 0)),
 		"resources": {
@@ -314,7 +314,7 @@ func _selected_entities(snapshot: Dictionary, selected_ids: Array[int]) -> Array
 	return result
 
 
-func _selection_model(selected: Array, locale: String) -> Dictionary:
+func _selection_model(selected: Array, player_state: Dictionary, locale: String) -> Dictionary:
 	if selected.is_empty():
 		return {"count": 0, "category": "none", "leader": {}, "summary": "Ничего не выбрано" if locale == "ru" else "Nothing selected"}
 	var leader: Dictionary = selected[0]
@@ -351,6 +351,9 @@ func _selection_model(selected: Array, locale: String) -> Dictionary:
 			"resource_amount": int(leader.get("amount", 0)) if bool(leader.get("harvestable", false)) or category == "resource" else 0,
 			"resource_maximum": int(leader.get("max_amount", 0)) if bool(leader.get("harvestable", false)) or category == "resource" else 0,
 			"resource_state": String(leader.get("resource_state", "")),
+			"show_population": category == "building" and kind == "house" and selected.size() == 1,
+			"population_current": int(player_state.get("population", 0)),
+			"population_cap": int(player_state.get("population_cap", 0)),
 			"conversion_enabled": bool(conversion.get("enabled", false)),
 			"faith": float(conversion.get("faith", 0.0)),
 			"max_faith": float(conversion.get("max_faith", 100.0)),

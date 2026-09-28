@@ -16,12 +16,18 @@ func _initialize() -> void:
 	assert_equal(first["vertex_levels"].size(), 25 * 25, "height field covers every vertex")
 	assert_equal(first["terrain_ids"][0], 1, "declared coastal water reaches terrain grid")
 	assert_equal(first["terrain_ids"][1 * 24 + 2], 2, "declared shore band reaches terrain grid")
-	assert_equal(first["resources"].size(), 23, "land and naval resource clusters generate declared count")
+	assert_equal(first["resources"].size(), 23, "fish clusters preserve their declared number of large selectable schools")
 	var deep_fish: Array = first["resources"].filter(func(resource): return String(resource.get("kind", "")) == "deep_fish")
 	var shore_fish: Array = first["resources"].filter(func(resource): return String(resource.get("kind", "")) == "shore_fish")
 	var whales: Array = first["resources"].filter(func(resource): return String(resource.get("kind", "")) == "whale")
-	assert_equal(deep_fish.size(), 2, "seeded map includes declared deep fish")
-	assert_equal(shore_fish.size(), 2, "seeded map includes declared shore fish")
+	assert_equal(deep_fish.size(), 2, "seeded map includes every declared large deep-fish school")
+	assert_equal(shore_fish.size(), 2, "seeded map includes every declared large shore-fish school")
+	assert_true(deep_fish.all(func(resource): return int(resource.get("amount", 0)) == 250), "each large deep-fish school keeps its declared food")
+	assert_true(shore_fish.all(func(resource): return int(resource.get("amount", 0)) == 250), "each large shore-fish school keeps its declared food")
+	assert_equal(int(deep_fish[0].get("source_unit_id", -1)), 53, "deep fish use the large-school source unit")
+	assert_equal(int(deep_fish[0].get("source_graphic_id", -1)), 316, "deep fish use the large-school source graphic")
+	assert_equal(int(shore_fish[0].get("source_unit_id", -1)), 263, "shore fish use the large-school source unit")
+	assert_equal(int(shore_fish[0].get("source_graphic_id", -1)), 319, "shore fish use the large-school source graphic")
 	assert_equal(whales.size(), 1, "seeded map includes source Whale 370")
 	assert_true(deep_fish.all(func(resource):
 		var pos := Vector2(resource["position"])
@@ -65,6 +71,13 @@ func _initialize() -> void:
 	assert_equal(coast[8 * 12 + 8], 0, "isolated water spike is removed before drawing the coast")
 	assert_equal(coast[4 * 12 + 4], 1, "single land pinhole is removed from open water")
 	assert_equal(coast[3 * 12 + 3], 1, "broad navigable water survives coast smoothing")
+	var diagonal_shore: Array[int] = []
+	diagonal_shore.resize(3 * 3)
+	diagonal_shore.fill(0)
+	diagonal_shore[0] = 1
+	RandomMapGenerator._apply_shore_band(diagonal_shore, Vector2i(3, 3))
+	assert_equal(diagonal_shore[1 * 3 + 1], 2, "diagonal coast cells join the beach band instead of rendering isolated land diamonds")
+	assert_equal(diagonal_shore[0], 1, "shore-band painting never replaces navigable water")
 
 	if failures.is_empty():
 		print("I11-002 seeded random map tests passed")

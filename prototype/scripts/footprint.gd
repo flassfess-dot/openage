@@ -25,18 +25,21 @@ static func mobile(kind: String, stats: Dictionary) -> Dictionary:
 static func building(stats: Dictionary, center: Vector2) -> Dictionary:
 	var selection: Array = stats.get("selection_radius", [0.5, 0.5, 1.0])
 	var obstruction: Array = stats.get("footprint_radius", [])
-	var footprint_values: Array = obstruction if obstruction.size() >= 2 else selection
-	var half_size := Vector2(maxf(0.5, float(footprint_values[0])), maxf(0.5, float(footprint_values[1])))
+	var obstruction_values: Array = obstruction if obstruction.size() >= 2 else selection
+	var obstruction_half_size := Vector2(maxf(0.5, float(obstruction_values[0])), maxf(0.5, float(obstruction_values[1])))
+	var selection_half_size := Vector2(maxf(0.5, float(selection[0])), maxf(0.5, float(selection[1])))
+	var half_size := Vector2(maxf(obstruction_half_size.x, selection_half_size.x), maxf(obstruction_half_size.y, selection_half_size.y))
 	return {
 		"shape": "polygon",
 		"half_size": half_size,
+		"obstruction_half_size": obstruction_half_size,
 		"polygon": PackedVector2Array([
 			center + Vector2(-half_size.x, -half_size.y),
 			center + Vector2(half_size.x, -half_size.y),
 			center + Vector2(half_size.x, half_size.y),
 			center + Vector2(-half_size.x, half_size.y),
 		]),
-		"occupied_cells": occupied_cells(center, half_size),
+		"occupied_cells": occupied_cells(center, obstruction_half_size),
 	}
 
 

@@ -185,11 +185,9 @@ func load_custom_frames(prefix: String, count: int) -> Array:
 	var frames: Array = []
 	for index in range(count):
 		var path := "res://assets/custom/%s_%02d.png" % [prefix, index]
-		var image := Image.new()
-		if image.load(ProjectSettings.globalize_path(path)) == OK:
-			frames.append(ImageTexture.create_from_image(image))
-		else:
-			frames.append(null)
+		# Imported textures resolve in both the project and exported PCK. Raw
+		# filesystem image loading cannot read resources inside the package.
+		frames.append(load(path))
 	return frames
 
 func unit_stats(kind: String) -> Dictionary:

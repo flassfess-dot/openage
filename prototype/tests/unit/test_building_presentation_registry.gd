@@ -42,9 +42,12 @@ func test_distinct_buildings(catalog) -> void:
 		assert_true(info.get("texture") != null, "%s base texture is loaded" % kind)
 		assert_equal(int(info.get("graphic_id", -1)), ids[1], "%s uses source graphic ID" % kind)
 		if int(catalog.graphics_catalog_data.get("graphics", {}).get(str(ids[1]), {}).get("angle_count", 1)) > 1:
-			assert_equal(int(info.get("source_direction", -1)), int(catalog.graphics_catalog_data["graphics"][str(ids[1])]["angle_count"]) - 1, "%s selects the Roman architecture facet" % kind)
+			assert_equal(int(info.get("source_direction", -1)), 0, "%s keeps the Stone Age facet until source technology selects another one" % kind)
 		asset_names[String(info.get("asset_name", ""))] = true
 	assert_equal(asset_names.size(), expected.size(), "building kinds do not collapse to the Town Center texture")
+	var tool_center := building("town_center", 109, 598)
+	tool_center["presentation_facing"] = 2
+	assert_equal(int(catalog.building_frame_info(tool_center).get("source_direction", -1)), 2, "technology-selected Town Center facet overrides the Stone Age default")
 
 
 func test_composite_only_house(catalog) -> void:

@@ -105,7 +105,10 @@ static func _seeded_skirmish_map(match_definition: Dictionary, size: Vector2i, s
 	resource_clusters.append_array(_neutral_source_resource_clusters(size, terrain_ids, starts, generator.get("source_profile", {}), strategic_zones, seed))
 	resource_clusters.append_array(_neutral_forest_clusters(size, terrain_ids, starts, generator.get("source_profile", {}), seed))
 	resource_clusters.append_array(_naval_resource_clusters(naval_start_zones, generator.get("naval_resource_clusters", [])))
-	if not naval_start_zones.is_empty():
+	# Fish ecology belongs to the water-capable map profile, not to the success
+	# of Dock-start placement. A crowded or unusual coast must not empty the
+	# entire ocean when no legal starting Dock footprint can be found.
+	if bool(generator.get("requires_naval_starts", false)):
 		resource_clusters.append_array(_neutral_fish_clusters(size, terrain_ids, seed))
 	var land_components := _land_component_lookup(size, terrain_ids, cliff_cells)
 	var generated_resources := _generate_resource_clusters(resource_clusters, size, seed, terrain_ids, resource_exclusion_cells, land_components)
@@ -177,7 +180,7 @@ static func _neutral_fish_clusters(size: Vector2i, terrain_ids: Array[int], seed
 					open_cells.append(Vector2i(x, y))
 			elif terrain_id == 4:
 				shore_cells.append(Vector2i(x, y))
-	var school_count := mini(120, open_cells.size() / 145)
+	var school_count := mini(120, maxi(1, ceili(float(open_cells.size()) / 145.0))) if not open_cells.is_empty() else 0
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed ^ 0x46A451
 	var result: Array = []
@@ -185,7 +188,8 @@ static func _neutral_fish_clusters(size: Vector2i, terrain_ids: Array[int], seed
 		var cell := open_cells[rng.randi_range(0, open_cells.size() - 1)]
 		var center := Vector2(cell) + Vector2(0.5, 0.5)
 		result.append({"kind": "deep_fish", "placement_domain": "water", "minimum_domain_clearance_cells": 2, "center": [center.x, center.y], "count": rng.randi_range(2, 3), "radius": 1.5, "amount": 200})
-	for index in range(mini(90, shore_cells.size() / 70)):
+	var shore_school_count := mini(90, maxi(1, ceili(float(shore_cells.size()) / 70.0))) if not shore_cells.is_empty() else 0
+	for index in range(shore_school_count):
 		var cell := shore_cells[rng.randi_range(0, shore_cells.size() - 1)]
 		var center := Vector2(cell) + Vector2(0.5, 0.5)
 		result.append({"kind": "shore_fish", "placement_domain": "water", "center": [center.x, center.y], "guarantee_origin": [center.x, center.y], "placement_radius": 3.0, "count": rng.randi_range(1, 2), "radius": 1.0, "amount": 100})
@@ -480,12 +484,19 @@ static func _apply_cliff_elevation(levels: Array[int], size: Vector2i, cliff_cel
 
 static func _apply_shore_band(terrain_ids: Array[int], size: Vector2i) -> void:
 	var water_mask := terrain_ids.duplicate()
+	var shoreline_neighbors := [
+		Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN,
+		Vector2i(-1, -1), Vector2i(1, -1), Vector2i(1, 1), Vector2i(-1, 1),
+	]
 	for y in range(size.y):
 		for x in range(size.x):
 			var index := y * size.x + x
 			if int(water_mask[index]) in TerrainRules.WATER_TERRAIN_IDS:
 				continue
-			for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			# Diagonal coastlines alternate edge-sharing and corner-sharing cells.
+			# Including both produces one continuous beach instead of isolated full
+			# sand diamonds jutting into otherwise green shoreline.
+			for offset in shoreline_neighbors:
 				var neighbor: Vector2i = Vector2i(x, y) + Vector2i(offset)
 				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y and int(water_mask[neighbor.y * size.x + neighbor.x]) in TerrainRules.WATER_TERRAIN_IDS:
 					terrain_ids[index] = 2
@@ -1092,6 +1103,18 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 			var bearing := rng.randf_range(0.0, TAU)
 			center = owner_start + Vector2(cos(bearing), sin(bearing)) * rng.randf_range(minimum_distance, maximum_distance)
 		var count := maxi(0, int(cluster.get("count", 0)))
+		if String(cluster.get("kind", "")) in ["deep_fish", "shore_fish"] and count > 0:
+			# Every generated object is already one selectable large school. Keep
+			# the declared cluster count so oceans retain their intended ecology.
+			cluster = cluster.duplicate(true)
+			if String(cluster.get("kind", "")) == "deep_fish":
+				cluster["source_unit_id"] = 53
+				cluster["source_graphic_id"] = 316
+				cluster["source_graphic_asset_name"] = "graphic_316"
+			else:
+				cluster["source_unit_id"] = 263
+				cluster["source_graphic_id"] = 319
+				cluster["source_graphic_asset_name"] = "graphic_319"
 		var radius := maxf(0.0, float(cluster.get("radius", 0.0)))
 		for index in range(count):
 			var angle := TAU * float(index) / maxf(1.0, float(count)) + rng.randf_range(-0.3, 0.3)
@@ -1144,6 +1167,8 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 				generated["source_graphic_asset_name"] = "graphic_%d" % int(TREE_GRAPHICS[tree_id])
 			elif cluster.has("source_unit_id"):
 				generated["source_unit_id"] = int(cluster["source_unit_id"])
+			if cluster.has("source_graphic_id"):
+				generated["source_graphic_id"] = int(cluster["source_graphic_id"])
 			if cluster.has("source_graphic_asset_name"):
 				generated["source_graphic_asset_name"] = String(cluster["source_graphic_asset_name"])
 			if cluster.has("source_terrain_id"):

@@ -56,9 +56,11 @@ static func less_same_layer(left: Dictionary, right: Dictionary) -> bool:
 		return float(left["screen_y"]) < float(right["screen_y"])
 	if not is_equal_approx(float(left["elevation"]), float(right["elevation"])):
 		return float(left["elevation"]) < float(right["elevation"])
+	if int(left.get("sub_order", 0)) != int(right.get("sub_order", 0)):
+		return int(left.get("sub_order", 0)) < int(right.get("sub_order", 0))
 	if int(left["stable_id"]) != int(right["stable_id"]):
 		return int(left["stable_id"]) < int(right["stable_id"])
-	return int(left.get("sub_order", 0)) < int(right.get("sub_order", 0))
+	return false
 
 
 static func color_for_team(team: int) -> Color:

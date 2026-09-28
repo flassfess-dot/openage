@@ -16,6 +16,9 @@ var last_completed_research_id: int = -1
 var active_building_ids: Array[int] = []
 var building_order_by_id: Dictionary = {}
 var next_building_order: int = 0
+var unit_aliases_by_civilization: Dictionary = {}
+var research_ids_by_location: Dictionary = {}
+var research_index_ready := false
 
 
 func _init(simulation_world) -> void:
@@ -31,6 +34,54 @@ func reset() -> void:
 	active_building_ids.clear()
 	building_order_by_id.clear()
 	next_building_order = 0
+	invalidate_option_catalogs()
+
+
+func invalidate_option_catalogs() -> void:
+	unit_aliases_by_civilization.clear()
+	research_ids_by_location.clear()
+	research_index_ready = false
+
+
+func _unit_aliases_for(lineage: Array, civilization_id: int) -> Array:
+	if not unit_aliases_by_civilization.has(civilization_id):
+		var by_location: Dictionary = {}
+		for alias in world.data_repository.archetype_aliases("unit"):
+			var location: int = world.data_repository.train_location_unit_id(alias, civilization_id)
+			if location < 0:
+				continue
+			if not by_location.has(location):
+				by_location[location] = []
+			by_location[location].append(alias)
+		unit_aliases_by_civilization[civilization_id] = by_location
+	return _options_for_lineage(unit_aliases_by_civilization[civilization_id], lineage)
+
+
+func _research_ids_for(lineage: Array) -> Array:
+	if not research_index_ready:
+		for id_value in world.object_catalog_data.get("technologies", {}):
+			var technology_id := int(id_value)
+			var record: Dictionary = world.technology_system.technology(technology_id)
+			if int(record.get("language", {}).get("name_id", 0)) <= 0 or float(record.get("research_time", 0.0)) <= 0.0:
+				continue
+			var location := int(record.get("research_location_id", -1))
+			if not research_ids_by_location.has(location):
+				research_ids_by_location[location] = []
+			research_ids_by_location[location].append(technology_id)
+		research_index_ready = true
+	return _options_for_lineage(research_ids_by_location, lineage)
+
+
+func _options_for_lineage(by_location: Dictionary, lineage: Array) -> Array:
+	# Only the static producer/catalog relationship is retained. Costs, queue
+	# limits, age, civilization bonuses and availability are evaluated live.
+	var unique: Dictionary = {}
+	for location in lineage:
+		for option in by_location.get(location, []):
+			unique[option] = true
+	var result := unique.keys()
+	result.sort()
+	return result
 
 
 func register_building(building_id: int) -> void:
@@ -121,10 +172,7 @@ func unit_options(building_id: int, team: int) -> Array:
 	var lineage: Array = building.get("unit_lineage", [int(building.get("source_unit_id", -1))])
 	var civilization_id := int(world.civilization_by_team.get(team, 13))
 	var result: Array = []
-	for alias in world.data_repository.archetype_aliases("unit"):
-		var expected_location: int = world.data_repository.train_location_unit_id(alias, civilization_id)
-		if expected_location < 0 or not lineage.has(expected_location):
-			continue
+	for alias in _unit_aliases_for(lineage, civilization_id):
 		var option := _unit_availability(building, team, alias, true)
 		if String(option.get("reason", "")) in ["unit_replaced", "unit_unavailable"]:
 			continue
@@ -264,8 +312,7 @@ func research_options(building_id: int, team: int) -> Array:
 	if building == null:
 		return []
 	var lineage: Array = building.get("unit_lineage", [int(building.get("source_unit_id", -1))])
-	var ids: Array = world.object_catalog_data.get("technologies", {}).keys()
-	ids.sort_custom(func(left, right): return int(left) < int(right))
+	var ids := _research_ids_for(lineage)
 	var result: Array = []
 	for id_value in ids:
 		var technology_id := int(id_value)

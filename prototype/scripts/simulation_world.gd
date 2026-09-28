@@ -217,6 +217,7 @@ func set_performance_probe(probe: Variant) -> void:
 func set_gamespec(data: Dictionary) -> void:
 	gamespec_data = data
 	data_repository.configure_compatibility_gamespec(data)
+	production_system.invalidate_option_catalogs()
 	attack_animation_spec_cache.clear()
 
 
@@ -230,6 +231,7 @@ func set_terrain_catalog(data: Dictionary) -> void:
 func set_object_catalog(data: Dictionary) -> void:
 	object_catalog_data = data
 	data_repository.configure_objects(data)
+	production_system.invalidate_option_catalogs()
 	technology_system.configure(data)
 	attack_animation_spec_cache.clear()
 	for team in civilization_by_team.keys():
@@ -243,6 +245,7 @@ func set_graphics_catalog(data: Dictionary) -> void:
 
 func set_runtime_catalog(data: Dictionary) -> void:
 	data_repository.configure_runtime(data)
+	production_system.invalidate_option_catalogs()
 	attack_animation_spec_cache.clear()
 	var trade_policy: Dictionary = data_repository.runtime_metadata("trade_boat").get("trade", {})
 	for team in civilization_by_team.keys():
@@ -804,6 +807,7 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 	var health: Dictionary = components["health"]
 	var combat: Dictionary = components["combat"]
 	var attacks: Array = combat.get("attacks", [])
+	var obstruction_half_size := Vector2(footprint.get("obstruction_half_size", footprint["half_size"]))
 	var construction_required := maxf(1.0, float(components.get("production", {}).get("creation_time", 1.0)))
 	var starting_health := float(health["maximum"]) if completed else maxf(1.0, float(health["maximum"]) * 0.1)
 	var production_queue: Array = []
@@ -818,7 +822,7 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 		"hp": starting_health,
 		"max_hp": health["maximum"],
 		"footprint": footprint,
-		"footprint_radius": maxf(float(footprint["half_size"].x), float(footprint["half_size"].y)),
+		"footprint_radius": maxf(obstruction_half_size.x, obstruction_half_size.y),
 		"occupied_cells": footprint["occupied_cells"],
 		"obstruction_type": obstruction_type,
 		"passable": obstruction_type == 0 or "passable" in stats.get("behavior_tags", []),
@@ -877,7 +881,7 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 	configure_harvestable_building(building, completed)
 	building["components"]["production"]["queue"] = production_queue
 	apply_technology_state_to_entity(building, team)
-	_sync_town_center_age_presentation(building)
+	_sync_building_age_presentation(building)
 	configure_entity_combat_awareness(building)
 	EntityComponents.sync_dynamic(building)
 	buildings.append(building)
@@ -2057,6 +2061,7 @@ func purge_removed_units() -> void:
 			if bool(units[index].get("removed", false)):
 				if entity_has_behavior_tag(units[index], "capturable"):
 					capturable_units.erase(units[index])
+				render_entity_projection_cache.erase(int(units[index].get("id", -1)))
 				units_by_id.erase(int(units[index].get("id", -1)))
 				units.remove_at(index)
 		for index in range(dying_units.size() - 1, -1, -1):
@@ -2067,6 +2072,7 @@ func purge_removed_units() -> void:
 		for index in range(buildings.size() - 1, -1, -1):
 			if bool(buildings[index].get("removed", false)):
 				production_system.unregister_building(int(buildings[index].get("id", -1)))
+				render_entity_projection_cache.erase(int(buildings[index].get("id", -1)))
 				buildings_by_id.erase(int(buildings[index].get("id", -1)))
 				buildings.remove_at(index)
 		for index in range(dying_buildings.size() - 1, -1, -1):
@@ -2336,6 +2342,7 @@ func detach_unit_for_transport(id: int) -> Variant:
 		return null
 	units.erase(unit)
 	units_by_id.erase(id)
+	render_entity_projection_cache.erase(id)
 	capturable_units.erase(unit)
 	return unit
 
@@ -3133,13 +3140,39 @@ func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
 	for building in buildings:
 		if float(building.get("hp", 0.0)) <= 0.0:
 			continue
+		var existing_half_size := Vector2(building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5)))
+		var candidate_half_size := Vector2(footprint.get("half_size", Vector2(0.5, 0.5)))
+		var delta := (Vector2(building.get("pos", Vector2.ZERO)) - position).abs()
+		if delta.x < existing_half_size.x + candidate_half_size.x - 0.001 and delta.y < existing_half_size.y + candidate_half_size.y - 0.001:
+			last_build_failure = "blocked_or_sloped"
+			return false
 		for cell in footprint.get("occupied_cells", []):
 			if cell in building.get("occupied_cells", []):
 				last_build_failure = "blocked_or_sloped"
 				return false
 	var occupied_cells: Array = footprint.get("occupied_cells", [])
+	var occupied_bounds := Rect2()
+	for cell_value in occupied_cells:
+		var cell: Vector2i = cell_value
+		var cell_bounds := Rect2(Vector2(cell), Vector2.ONE)
+		occupied_bounds = cell_bounds if not occupied_bounds.has_area() else occupied_bounds.merge(cell_bounds)
 	for unit in units:
 		if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)):
+			continue
+		var unit_position: Vector2 = unit.get("pos", Vector2.ZERO)
+		var unit_radius := maxf(0.0, float(unit.get("footprint_radius", 0.3)))
+		# Use Vector2 arithmetic like the narrow phase: scalar double precision
+		# can disagree with rounded Vector2 edges (e.g. 11.7 + 0.3).
+		var extent := Vector2(unit_radius, unit_radius)
+		var unit_min := unit_position - extent
+		var unit_max := unit_position + extent
+		if (
+			occupied_cells.is_empty()
+			or unit_max.x < occupied_bounds.position.x
+			or unit_max.y < occupied_bounds.position.y
+			or unit_min.x >= occupied_bounds.end.x
+			or unit_min.y >= occupied_bounds.end.y
+		):
 			continue
 		if mobile_footprint_overlaps_cells(unit, occupied_cells):
 			last_build_failure = "occupied_by_unit"
@@ -3318,6 +3351,7 @@ func cancel_foundation(building_id: int) -> bool:
 		for index in range(buildings.size() - 1, -1, -1):
 			if int(buildings[index].get("id", -1)) == building_id:
 				production_system.unregister_building(building_id)
+				render_entity_projection_cache.erase(building_id)
 				buildings_by_id.erase(building_id)
 				buildings.remove_at(index)
 				break
@@ -3577,6 +3611,8 @@ func complete_foundation(building: Dictionary) -> void:
 				gatherers.append(builder)
 		if not gatherers.is_empty():
 			assign_command_gather(gatherers, building_id)
+	else:
+		_assign_builders_to_next_visible_foundation(completing_builder_ids, building_id)
 	building_approach_slots.erase(building_id)
 	_sync_building_navigation_occupancy(building)
 	update_fog_of_war()
@@ -3891,6 +3927,7 @@ func advance_resource_lifecycle(delta: float) -> void:
 				var resource_id := int(resource_id_value)
 				var retired: Dictionary = retired_ids[resource_id]
 				_mark_known_resource_dirty(retired)
+				render_entity_projection_cache.erase(resource_id)
 				resource_nodes_by_id.erase(resource_id)
 				var position: Vector2 = retired.get("pos", Vector2.ZERO)
 				var cell_index := floori(position.y) * map_size.x + floori(position.x)
@@ -4419,6 +4456,31 @@ func pay_tribute(sender_team: int, recipient_team: int, resource_type_id: int, a
 	return ""
 
 
+func _assign_builders_to_next_visible_foundation(builder_ids: Array, completed_building_id: int) -> void:
+	for builder_id_value in builder_ids:
+		var worker = find_unit(int(builder_id_value))
+		if worker == null or float(worker.get("hp", 0.0)) <= 0.0 or not entity_is_worker(worker) or not OrderPipeline.queued(worker).is_empty():
+			continue
+		var team := int(worker.get("team", 0))
+		var vision_range := maxf(0.0, float(worker.get("components", {}).get("vision", {}).get("range", 0.0)))
+		var candidates: Array = []
+		for candidate_value in buildings:
+			var candidate: Dictionary = candidate_value
+			if int(candidate.get("id", -1)) == completed_building_id or int(candidate.get("team", 0)) != team or String(candidate.get("state", "complete")) != "foundation" or float(candidate.get("hp", 0.0)) <= 0.0:
+				continue
+			var distance_squared := Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(candidate.get("pos", Vector2.ZERO)))
+			if distance_squared > vision_range * vision_range or visibility_system.state_at_world(team, Vector2(candidate.get("pos", Vector2.ZERO))) != FogOfWar.VISIBLE:
+				continue
+			if int(worker.get("id", -1)) not in reachable_builder_ids(candidate):
+				continue
+			candidates.append({"building": candidate, "distance_squared": distance_squared})
+		candidates.sort_custom(func(left, right):
+			if not is_equal_approx(float(left["distance_squared"]), float(right["distance_squared"])):
+				return float(left["distance_squared"]) < float(right["distance_squared"])
+			return int(left["building"].get("id", -1)) < int(right["building"].get("id", -1))
+		)
+		if not candidates.is_empty():
+			assign_workers_to_building([worker], candidates[0]["building"], "build")
 func assign_command_trade(traders: Array, target_dock: Dictionary) -> String:
 	return trade_system.start_route(traders, target_dock)
 
@@ -4822,7 +4884,7 @@ func apply_technology_commands(team: int, commands: Array, resolve_automatic: bo
 	for entity in get_all_units_including_embarked() + buildings:
 		if int(entity.get("team", 0)) == team and not bool(entity.get("technology_locked", false)):
 			entity.get("components", {}).get("technology", {})["researched_ids"] = researched.duplicate()
-			_sync_town_center_age_presentation(entity)
+			_sync_building_age_presentation(entity)
 	if not is_bulk_loading():
 		# Age upgrades can change building footprints (Town Center variants);
 		# each upgraded building reconciles only its own cells.
@@ -4892,24 +4954,15 @@ func apply_technology_state_to_entity(entity: Dictionary, team: int) -> void:
 	for command_value in technology_system.persistent_entity_effects(team):
 		apply_attribute_effect(entity, command_value)
 	entity.get("components", {}).get("technology", {})["researched_ids"] = technology_system.researched_ids(team)
-	_sync_town_center_age_presentation(entity)
+	_sync_building_age_presentation(entity)
 
 
-func _sync_town_center_age_presentation(entity: Dictionary) -> void:
-	if String(entity.get("kind", "")) != "town_center":
-		return
-	if int(entity.get("source_unit_id", -1)) != 109:
-		entity.erase("presentation_facing")
-		return
-	var civilization_id := int(entity.get("components", {}).get("ownership", {}).get("civilization_id", 13))
-	var icon_set := 0
-	for civilization_value in object_catalog_data.get("civilizations", []):
-		var civilization: Dictionary = civilization_value
-		if int(civilization.get("civilization_id", -1)) == civilization_id:
-			icon_set = int(civilization.get("icon_set", 0))
-			break
-	if icon_set == 4:
-		entity["presentation_facing"] = 2 if technology_system.current_age(int(entity.get("team", 0))) >= 101 else 0
+func _sync_building_age_presentation(entity: Dictionary) -> void:
+	# Original age technologies use attribute 17 to select the packed building
+	# facet. apply_attribute_effect owns that value for every civilization and
+	# every affected building; this hook only normalizes restored state.
+	if entity.has("presentation_facing"):
+		entity["presentation_facing"] = maxi(0, int(entity["presentation_facing"]))
 
 
 func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapply_persistent_effects: bool = true) -> void:
@@ -5045,7 +5098,9 @@ func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 			entity["projectile_id"] = roundi(apply_effect_operator(float(entity.get("projectile_id", -1)), effect_type, value))
 			components.get("combat", {})["projectile_id"] = entity["projectile_id"]
 		17:
-			entity["graphic_angle_count"] = roundi(apply_effect_operator(float(entity.get("graphic_angle_count", 0)), effect_type, value))
+			var presentation_facing := roundi(apply_effect_operator(float(entity.get("presentation_facing", 0)), effect_type, value))
+			entity["graphic_angle_count"] = presentation_facing
+			entity["presentation_facing"] = maxi(0, presentation_facing)
 		19:
 			components.get("combat", {})["ballistics"] = value > 0.0
 		100:
@@ -5057,6 +5112,10 @@ func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 func technology_effect_matches_entity(entity: Dictionary, command: Dictionary) -> bool:
 	var unit_id := int(command.get("attr_a", -1))
 	if unit_id >= 0:
+		if int(command.get("attr_c", -1)) == 17:
+			# Age display-facet effects target the original DAT line and must
+			# survive the source-record replacement performed by the same age.
+			return entity.get("unit_lineage", []).has(unit_id)
 		# Genie effects address a concrete current DAT record. Upgrade bundles
 		# commonly contain one command per variant, so matching every historical
 		# lineage ID would stack the same research bonus after an upgrade.

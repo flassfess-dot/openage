@@ -107,6 +107,15 @@ func verify_initialized_rules(catalog, civilization: Dictionary, civilization_id
 			expected_disabled[int(command.get("attr_d", -1))] = true
 	for technology_id in range(catalog.object_catalog_data.get("technologies", {}).size()):
 		assert_equal(world.technology_system.is_technology_disabled(1, technology_id), expected_disabled.has(technology_id), "civilization %d technology %d restriction" % [civilization_id, technology_id])
+	var town_center: Dictionary = world.add_building(10000 + civilization_id * 2, "town_center", Vector2(2.0, 2.0), 1)
+	var house: Dictionary = world.add_building(10001 + civilization_id * 2, "house", Vector2(6.0, 6.0), 1)
+	world.grant_technology(1, 101)
+	assert_equal(town_center.get("presentation_facing"), 2, "civilization %d Tool Age Town Center uses source display facet" % civilization_id)
+	assert_equal(house.get("source_unit_id"), 154, "civilization %d Tool Age upgrades House source" % civilization_id)
+	world.grant_technology(1, 102)
+	assert_equal(house.get("presentation_facing"), 1, "civilization %d Bronze Age House uses source display facet" % civilization_id)
+	world.grant_technology(1, 103)
+	assert_equal(house.get("presentation_facing"), 2, "civilization %d Iron Age House uses source display facet" % civilization_id)
 
 
 func verify_common_roster(matrix: Dictionary, catalog) -> void:

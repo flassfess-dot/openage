@@ -11,6 +11,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_required_render_item_fields()
 	test_stable_layer_sorting_and_overlays()
+	test_harvestable_building_sandwiches_worker_and_unit_parts()
 	test_projected_depth_precedes_source_elevation()
 	test_scenery_and_units_share_depth_order()
 	test_health_bars_follow_selection_visibility()
@@ -62,6 +63,22 @@ func test_stable_layer_sorting_and_overlays() -> void:
 	assert_true(selection_item["layer"] < bodies[0]["layer"], "selection ground marker precedes the selected body")
 	assert_equal(resource_item["layer"], bodies[0]["layer"], "resources and units share one depth-sorted layer")
 	assert_true(items.find(resource_item) > items.find(bodies[1]), "foreground tree renders after units behind it")
+
+
+func test_harvestable_building_sandwiches_worker_and_unit_parts() -> void:
+	var farm := {"id": 100, "kind": "farm", "team": 1, "pos": Vector2(5.0, 5.0), "hp": 50.0, "max_hp": 50.0, "state": "complete", "death_phase": "alive", "harvestable": true}
+	var worker := {"id": 7, "kind": "villager", "team": 1, "pos": Vector2(4.0, 4.0), "previous_pos": Vector2(4.0, 4.0), "hp": 25.0, "max_hp": 25.0, "death_phase": "alive", "task": "gather", "resource_id": 100}
+	var snapshot := {"buildings": [farm], "resources": [], "objectives": [], "projectiles": [], "effects": [], "units": [worker], "markers": [], "environment": []}
+	var renderer = RenderWorld.new()
+	var items: Array = renderer.create_world_drawables(snapshot, func(position: Vector2) -> Vector2: return position * 10.0, 1.0, Callable(self, "fake_composite_frame_info"))
+	var farm_base: Dictionary = items.filter(func(item): return item["kind"] == "building")[0]
+	var farm_part: Dictionary = items.filter(func(item): return item["kind"] == "building_part")[0]
+	var worker_body: Dictionary = items.filter(func(item): return item["kind"] == "unit")[0]
+	var worker_part: Dictionary = items.filter(func(item): return item["kind"] == "unit_part")[0]
+	assert_equal(worker_body["screen_y"], farm_base["screen_y"], "farmer uses the Farm depth anchor while gathering")
+	assert_true(items.find(farm_base) < items.find(worker_body), "Farm ground layer renders behind its farmer")
+	assert_true(items.find(worker_body) < items.find(worker_part), "composite worker hull or tool renders with its body")
+	assert_true(items.find(worker_part) < items.find(farm_part), "Farm foreground layer renders in front without swallowing the farmer")
 
 
 func test_projected_depth_precedes_source_elevation() -> void:
@@ -221,6 +238,15 @@ func test_ambient_wildlife_flies_without_simulation_paths() -> void:
 
 func fake_frame_info(_kind: String, _data: Variant) -> Dictionary:
 	return {"frame_index": 3, "hotspot": Vector2(8, 20), "mirrored": false}
+
+
+func fake_composite_frame_info(kind: String, _data: Variant) -> Dictionary:
+	return {
+		"frame_index": 0,
+		"hotspot": Vector2.ZERO,
+		"graphic_layer": 20,
+		"composite_parts": [{"frame_index": 0, "hotspot": Vector2.ZERO, "graphic_layer": 20}] if kind in ["building", "unit"] else [],
+	}
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:

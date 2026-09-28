@@ -11,8 +11,9 @@ const CombatAwarenessSystem := preload("res://scripts/combat_awareness_system.gd
 const WildlifeBehaviorSystem := preload("res://scripts/wildlife_behavior_system.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 
-# Existing openage simulation clock data limits an iteration to 50 ms.
-# See libopenage/time/clock.cpp. Game-speed multipliers are documented in
+# Prototype-owned 20 Hz simulation step, independent of rendering and AI cadence.
+# libopenage/time/clock.cpp clamps long clock gaps to 50 ms; it does not prescribe
+# a 20 Hz simulation rate. Game-speed multipliers are documented in
 # doc/reverse_engineering/networking/13-other.md.
 const FIXED_STEP_SECONDS: float = 0.05
 const GAME_SPEEDS := [1.0, 1.5, 2.0]
@@ -316,6 +317,19 @@ func _queue_deferred_command(command) -> String:
 		if OrderPipeline.queued(unit).size() >= OrderPipeline.MAX_QUEUED_ORDERS:
 			return "order_queue_full"
 		units.append(unit)
+	if command_type == "build" and int(command.params.get("planned_foundation_id", -1)) < 0:
+		var team := int(units[0].get("team", 0)) if not units.is_empty() else int(command.issuer_id)
+		var foundation: Variant = null
+		for building_value in simulation_world.get_buildings():
+			var building: Dictionary = building_value
+			if int(building.get("team", 0)) == team and String(building.get("kind", "")) == String(command.building_type) and String(building.get("state", "complete")) == "foundation" and Vector2(building.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(command.target)) < 0.01:
+				foundation = building
+				break
+		if foundation == null:
+			foundation = simulation_world.place_foundation(team, command.building_type, command.target)
+		if foundation == null:
+			return String(simulation_world.last_build_failure if not simulation_world.last_build_failure.is_empty() else "build_rejected")
+		command.params["planned_foundation_id"] = int(foundation.get("id", -1))
 	for unit in units:
 		var entry := {
 			"tick": tick_index,
@@ -638,6 +652,28 @@ func _apply_build(command) -> String:
 	var workers: Array = selected.filter(func(unit): return simulation_world.entity_is_worker(unit))
 	if workers.is_empty():
 		return "no_eligible_workers"
+	var planned_foundation_id := int(command.params.get("planned_foundation_id", -1))
+	if planned_foundation_id >= 0:
+		var planned_foundation = simulation_world.find_building(planned_foundation_id)
+		if planned_foundation == null or String(planned_foundation.get("state", "complete")) != "foundation" or int(planned_foundation.get("team", 0)) != int(command.issuer_id):
+			return "planned_foundation_unavailable"
+		_detach_units_from_formations(workers)
+		simulation_world.assign_workers_to_building(workers, planned_foundation, "build")
+		return ""
+	if bool(command.params.get("plan_only", false)):
+		var team := int(workers[0].get("team", 0))
+		var foundation = simulation_world.place_foundation(team, command.building_type, command.target)
+		if foundation == null:
+			return String(simulation_world.last_build_failure if not simulation_world.last_build_failure.is_empty() else "build_rejected")
+		command.params.erase("plan_only")
+		command.params["planned_foundation_id"] = int(foundation.get("id", -1))
+		command.params["queue_order"] = true
+		var queue_reason := _queue_deferred_command(command)
+		command.params["queue_order"] = false
+		if not queue_reason.is_empty():
+			simulation_world.cancel_foundation(int(foundation.get("id", -1)))
+			return queue_reason
+		return ""
 	_detach_units_from_formations(workers)
 	var foundation = simulation_world.assign_command_build(workers, command.building_type, command.target)
 	return "" if foundation != null else String(simulation_world.last_build_failure if not simulation_world.last_build_failure.is_empty() else "build_rejected")

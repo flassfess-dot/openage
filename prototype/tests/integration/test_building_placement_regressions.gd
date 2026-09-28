@@ -16,6 +16,7 @@ func _initialize() -> void:
 	check_fish_animation(catalog)
 	check_town_center_age_art(catalog)
 	check_farm_footprint_and_queued_build(catalog)
+	check_building_selection_envelopes_do_not_overlap(catalog)
 	check_storage_pit_on_forest_floor(catalog)
 	check_repeated_houses(catalog)
 	check_wall_line_pipeline(catalog)
@@ -71,12 +72,32 @@ func check_farm_footprint_and_queued_build(catalog) -> void:
 	controller.enqueue_command(first, true, 1)
 	controller.enqueue_command(second, true, 1)
 	controller.process_commands()
+	var planned_farms: Array = world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "farm")
+	check(planned_farms.size() == 2, "Queued Farm foundation is visible and reserves its footprint immediately")
+	check(planned_farms.any(func(building): return Vector2(building.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(23, 24)) < 0.01 and String(building.get("state", "")) == "foundation"), "Queued Farm is represented by a real planned foundation")
 	for unused in range(1600):
 		controller.advance_frame(0.05, 1, 2)
-		if world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "farm").size() >= 2:
+		if world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "farm" and String(building.get("state", "")) == "complete").size() >= 2:
 			break
-	check(world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "farm").size() == 2, "Queued Farm starts after first Farm completes: worker=%s pos=%s dest=%s slot=%s path=%s path_index=%s status=%s reason=%s farms=%s first=%s second=%s" % [str(worker.get("task", "")), str(worker.get("pos", "")), str(worker.get("destination", "")), str(worker.get("building_approach_slot", "")), str(worker.get("path", [])), str(worker.get("path_index", -1)), str(worker.get("path_status", "")), str(worker.get("diagnostic_reason", "")), str(world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "farm").map(func(building): return [building.get("state", ""), building.get("construction_progress", 0.0)])), str(controller.get_command_result(first.sequence_id)), str(controller.get_command_result(second.sequence_id))])
+	check(world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "farm" and String(building.get("state", "")) == "complete").size() == 2, "Queued Farm starts after first Farm completes: worker=%s pos=%s dest=%s slot=%s path=%s path_index=%s status=%s reason=%s farms=%s first=%s second=%s" % [str(worker.get("task", "")), str(worker.get("pos", "")), str(worker.get("destination", "")), str(worker.get("building_approach_slot", "")), str(worker.get("path", [])), str(worker.get("path_index", -1)), str(worker.get("path_status", "")), str(worker.get("diagnostic_reason", "")), str(world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "farm").map(func(building): return [building.get("state", ""), building.get("construction_progress", 0.0)])), str(controller.get_command_result(first.sequence_id)), str(controller.get_command_result(second.sequence_id))])
 	check(int(worker.get("target_building_id", -1)) != 700, "Worker does not remain on completed Farm")
+
+
+func check_building_selection_envelopes_do_not_overlap(catalog) -> void:
+	var world = configured_world(catalog)
+	for resource_id in range(4):
+		world.set_resource_amount(1, resource_id, 10000)
+	world.add_building(710, "granary", Vector2(5, 5), 1)
+	world.grant_technology(1, 101)
+	var market: Dictionary = world.add_building(711, "market", Vector2(12, 12), 1)
+	var market_half_size := Vector2(market.get("footprint", {}).get("half_size", Vector2.ONE))
+	var farm_half_size := Vector2(Footprint.building(world.unit_stats("farm"), Vector2.ZERO).get("half_size", Vector2.ONE))
+	var touching := Vector2(market["pos"]) + Vector2(market_half_size.x + farm_half_size.x, 0.0)
+	var overlapping := touching - Vector2(0.25, 0.0)
+	world.add_unit(1, "villager", touching + Vector2(0.0, farm_half_size.y + 1.0), false)
+	world.update_fog_of_war()
+	check(not world.can_place_foundation(1, "farm", overlapping), "Farm cannot overlap the Market selection envelope")
+	check(world.can_place_foundation(1, "farm", touching), "Farm can be placed directly beside the Market when envelopes only touch")
 
 
 func check_storage_pit_on_forest_floor(catalog) -> void:
