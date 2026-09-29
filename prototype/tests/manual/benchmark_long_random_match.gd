@@ -37,10 +37,21 @@ func _run() -> void:
 	var verifier := Replay.new()
 	for minute in range(minutes):
 		probe.clear()
+		var ai_cycles: Array[int] = []
+		var ordinary_cycles: Array[int] = []
+		var planning_ticks: Array[int] = []
 		var started := Time.get_ticks_usec()
 		for step in range(1200):
+			var plans_before: int = probe.sample_count("presentation.ai.snapshot")
+			var cycle_started := Time.get_ticks_usec()
 			game._process(0.05)
 			game.current_world_drawables()
+			var cycle_us := Time.get_ticks_usec() - cycle_started
+			if probe.sample_count("presentation.ai.snapshot") > plans_before:
+				ai_cycles.append(cycle_us)
+				planning_ticks.append(game.game_controller.tick_index)
+			else:
+				ordinary_cycles.append(cycle_us)
 			if step % 100 == 0:
 				await process_frame
 		var sample := {
@@ -56,6 +67,9 @@ func _run() -> void:
 			"memory_bytes": OS.get_static_memory_usage(),
 			"object_count": Performance.get_monitor(Performance.OBJECT_COUNT),
 			"probe": probe.report(),
+			"cycles_with_ai_us": Probe.summarize(ai_cycles),
+			"cycles_without_ai_us": Probe.summarize(ordinary_cycles),
+			"planning_ticks": planning_ticks,
 		}
 		sample["canonical_hash"] = verifier.world_state_hash(game.simulation_world, game.game_controller.tick_index, game.game_controller)
 		samples.append(sample)

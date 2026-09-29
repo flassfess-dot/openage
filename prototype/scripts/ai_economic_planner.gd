@@ -4,6 +4,37 @@ extends RefCounted
 const Commands := preload("res://scripts/commands.gd")
 
 
+# Cheap necessary conditions from plan(). Keep site generation conservative:
+# reservations, age saving and tactical priorities are still decided by plan().
+static func construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary, team: int, policy: Dictionary) -> Array:
+	var structures: Array = buildings.filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
+	if structures.any(func(entity): return String(entity.get("state", "complete")) == "foundation"):
+		return []
+	var has_builder := units.any(func(entity):
+		return (
+			int(entity.get("team", 0)) == team
+			and float(entity.get("hp", 0.0)) > 0.0
+			and bool(entity.get("components", {}).get("worker", {}).get("enabled", false))
+			and String(entity.get("movement_domain", "land")) == "land"
+			and String(entity.get("task", "idle")) in ["idle", "gather"]
+		)
+	)
+	if not has_builder:
+		return []
+	var complete: Array = structures.filter(func(entity): return String(entity.get("state", "complete")) == "complete")
+	var blocked_population := int(player_state.get("blocked_population_queues", 0)) > 0 or complete.any(func(entity): return not entity.get("production_queue", []).is_empty() and String(entity.get("production_queue", [])[0].get("status", "")) == "blocked_population")
+	var needs_housing := _needs_housing(player_state, int(policy.get("housing_buffer", 0)), blocked_population, _active_order_population_points(complete))
+	var result: Array = []
+	for kind in kinds:
+		var same_kind: Array = structures.filter(func(entity): return String(entity.get("kind", "")) == String(kind))
+		if same_kind.size() >= int(policy.get("building_limits", {}).get(kind, 1)) or same_kind.any(func(entity): return String(entity.get("state", "complete")) != "complete"):
+			continue
+		if kind == "house" and not needs_housing:
+			continue
+		result.append(kind)
+	return result
+
+
 static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary = {}, reserved_unit_ids: Dictionary = {}) -> Array:
 	if int(snapshot.get("observer_team", -1)) != team:
 		return []

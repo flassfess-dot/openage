@@ -1,5 +1,7 @@
 class_name RoRTerrainRules
 
+const ShorelineTiles := preload("res://scripts/shoreline_tiles.gd")
+
 const TERRAIN_FRAME_COUNTS := {
 	"grass": 9,
 	"sand": 9,
@@ -30,11 +32,11 @@ const BORDER_ASSET_NAMES := {
 	5: "border_grass_forest",
 	6: "border_grass_desert2",
 	7: "border_water_dark",
-	8: "border_desert_water_smooth",
+	8: "border_shoreline",
 }
 const BORDER_DESERT_WATER := 2
 const BORDER_GRASS_WATER := 3
-const BORDER_DESERT_WATER_SMOOTH := 8
+const BORDER_SHORELINE := 8
 const STYLE0_CORNER_MASKS := [
 	EDGE_NEGATIVE_X | EDGE_NEGATIVE_Y,
 	EDGE_NEGATIVE_Y | EDGE_POSITIVE_X,
@@ -133,6 +135,7 @@ static func border_layers(cell: Vector2i, terrain_provider: Callable, terrain_ca
 	var current: Dictionary = terrain_catalog.get("terrains", {}).get(str(current_id), {})
 	var border_table: Array = current.get("borders", [])
 	var masks_by_border := {}
+	var shoreline_mask := 0
 	for edge in EDGE_DIRECTIONS:
 		var neighbor_id := int(terrain_provider.call(cell + edge["offset"]))
 		if neighbor_id == current_id or neighbor_id < 0 or neighbor_id >= border_table.size():
@@ -140,11 +143,21 @@ static func border_layers(cell: Vector2i, terrain_provider: Callable, terrain_ca
 		var border_id := int(border_table[neighbor_id])
 		if border_id <= 0 or not BORDER_ASSET_NAMES.has(border_id):
 			continue
+		if border_id in [BORDER_DESERT_WATER, BORDER_GRASS_WATER]:
+			shoreline_mask |= int(edge["bit"])
+			continue
 		masks_by_border[border_id] = int(masks_by_border.get(border_id, 0)) | int(edge["bit"])
+
+	for corner in range(4):
+		var neighbor_id := int(terrain_provider.call(cell + ShorelineTiles.CORNER_OFFSETS[corner]))
+		if neighbor_id >= 0 and neighbor_id < border_table.size() and int(border_table[neighbor_id]) in [BORDER_DESERT_WATER, BORDER_GRASS_WATER]:
+			shoreline_mask |= 1 << (corner + 4)
 
 	var border_ids: Array = masks_by_border.keys()
 	border_ids.sort()
 	var layers: Array = []
+	if shoreline_mask != 0:
+		layers.append(make_border_layer(BORDER_SHORELINE, shoreline_mask, shoreline_mask & 15))
 	for border_id_value in border_ids:
 		var border_id := int(border_id_value)
 		var border: Dictionary = terrain_catalog.get("borders", {}).get(str(border_id), {})
@@ -164,12 +177,12 @@ static func border_layers(cell: Vector2i, terrain_provider: Callable, terrain_ca
 					var bit := int(edge["bit"])
 					if mask & bit:
 						var edge_frame := style0_frame_for_mask(bit, cell, map_seed)
-						layers.append(make_border_layer(style0_sprite_border_id(border_id, bit, edge_frame), edge_frame, bit))
+						layers.append(make_border_layer(border_id, edge_frame, bit))
 				continue
 			var diagonal_neighbor_id := corner_diagonal_neighbor_id(cell, mask, terrain_provider)
 			var frame := style0_frame_for_mask(mask, cell, map_seed, current_id, diagonal_neighbor_id, border_id, terrain_catalog)
 			if frame >= 0:
-				layers.append(make_border_layer(style0_sprite_border_id(border_id, mask, frame), frame, mask))
+				layers.append(make_border_layer(border_id, frame, mask))
 	return layers
 
 
@@ -189,20 +202,6 @@ static func style1_frame_for_edge(edge_bit: int) -> int:
 		EDGE_POSITIVE_X: return 3
 		EDGE_POSITIVE_Y: return 2
 	return -1
-
-
-static func style0_sprite_border_id(border_id: int, mask: int, frame: int = -1) -> int:
-	# The original external corner frames are geometrically correct but leave a
-	# conspicuous diamond-shaped cape. Custom frames 0..3 keep the same edge
-	# orientation while tapering the sand footprint more gradually.
-	if border_id in [BORDER_DESERT_WATER, BORDER_GRASS_WATER] and mask in STYLE0_CORNER_MASKS and frame in [0, 1, 2, 3]:
-		return BORDER_DESERT_WATER_SMOOTH
-	# Grass/water's flat corner pairs are byte-identical in the source SLP, so
-	# they cannot distinguish a small cape from a small bay. Desert/water uses
-	# the same shoreline palette and contains the intended convex/concave pair.
-	if border_id == BORDER_GRASS_WATER and mask in STYLE0_CORNER_MASKS:
-		return BORDER_DESERT_WATER
-	return border_id
 
 
 static func style0_frame_for_mask(mask: int, cell: Vector2i, map_seed: int, current_id: int = -1, diagonal_neighbor_id: int = -1, border_id: int = -1, terrain_catalog: Dictionary = {}) -> int:

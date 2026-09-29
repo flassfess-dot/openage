@@ -7,7 +7,7 @@ const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 
 const MAP_SEED := 41721
 const GOLDEN_SIZE := Vector2i(960, 560)
-const EXPECTED_RGBA_SHA256 := "a21f53736f5bb91743ee557b38c790ac7ff60f1536cc51e38daa4a2014be4f99"
+const EXPECTED_RGBA_SHA256 := "efe43716bef9042465c2bde32df649436caa200eb14a4c075d2eca2597c0cca1"
 
 var failures: Array[String] = []
 
@@ -77,7 +77,10 @@ func biome_map(panel_index: int) -> Dictionary:
 			match panel_index:
 				0: result[cell] = 0
 				1: result[cell] = 6 if x + y < 9 else 0
-				2: result[cell] = 1 if x <= 2 else 2 if x == 3 else 0
+				2:
+					# A stepped cape exercises diagonal-only inlets and convex corners.
+					var water_edge := 1 + mini(y, 7 - y) / 2
+					result[cell] = 1 if x <= water_edge else 2 if x <= water_edge + 2 else 0
 				_: result[cell] = 10 if cell in [Vector2i(3, 3), Vector2i(4, 3), Vector2i(4, 4), Vector2i(5, 4)] else 0
 	return result
 

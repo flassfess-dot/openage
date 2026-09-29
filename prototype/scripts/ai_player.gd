@@ -324,12 +324,17 @@ func presentation_options() -> Dictionary:
 			"include_scenario": false,
 			"include_worker_command_options": false,
 			"requested_build_site_kinds": economic_policy.get("construction_priorities", []).duplicate(),
+			"build_site_filter": Callable(self, "_construction_site_kinds"),
 			"planning_technology_ids": economic_policy.get("age_advance_technology_ids", []).duplicate(),
 			"maximum_build_sites_per_kind": 12,
 			"build_site_search_radius": 12,
 			"minimum_structure_gap": float(economic_policy.get("minimum_structure_gap", 0.0)),
 		}
 	return {}
+
+
+func _construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary) -> Array:
+	return EconomicPlanner.construction_site_kinds(kinds, units, buildings, player_state, team, economic_policy)
 
 
 func canonical_state() -> Dictionary:

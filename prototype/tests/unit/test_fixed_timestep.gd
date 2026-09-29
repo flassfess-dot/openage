@@ -12,6 +12,7 @@ func _initialize() -> void:
 	test_frame_rate_independence()
 	test_pause_and_speed()
 	test_render_interpolation()
+	test_planning_tick_does_not_leave_recoverable_debt()
 
 	if failures.is_empty():
 		print("A-005 fixed timestep tests passed")
@@ -75,6 +76,27 @@ func test_render_interpolation() -> void:
 	assert_vector_close(rendered_position, expected, "half-tick render interpolation")
 
 
+func test_planning_tick_does_not_leave_recoverable_debt() -> void:
+	var world = SimulationWorld.new(Vector2i(16, 16))
+	world.add_unit(1, "villager", Vector2(2.0, 2.0), false)
+	world.add_unit(2, "clubman", Vector2(14.0, 14.0), false)
+	var controller = GameController.new(world)
+	controller.set_speed_multiplier(1.0)
+	var observed_ticks: Array[int] = []
+	controller.set_before_fixed_tick(func(next_tick: int) -> bool:
+		observed_ticks.append(next_tick)
+		return next_tick == 1
+	)
+
+	# A slow rendered frame owes three fixed steps. Planning on the first step
+	# must not postpone the other two and leave the world behind the camera.
+	controller.advance_frame(0.16, 1, 2)
+	assert_equal(controller.tick_index, 3, "planning tick preserves fixed-step catch-up")
+	assert_equal(observed_ticks, [1, 2, 3], "planning tick preserves callback order")
+	assert_float_close(controller.accumulator_seconds, 0.01, "planning tick keeps only sub-step remainder")
+	assert_float_close(controller.get_interpolation_alpha(), 0.2, "planning tick preserves interpolation remainder")
+
+
 func moving_world() -> Dictionary:
 	var world = SimulationWorld.new(Vector2i(16, 16))
 	var unit: Dictionary = world.add_unit(1, "villager", Vector2(2.0, 2.0), false)
@@ -87,6 +109,11 @@ func moving_world() -> Dictionary:
 
 func assert_vector_close(actual: Vector2, expected: Vector2, context: String) -> void:
 	if not actual.is_equal_approx(expected):
+		failures.append("%s: expected %s, got %s" % [context, expected, actual])
+
+
+func assert_float_close(actual: float, expected: float, context: String) -> void:
+	if not is_equal_approx(actual, expected):
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
 
 

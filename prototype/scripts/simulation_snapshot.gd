@@ -329,6 +329,17 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".projectiles", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
+	var player_state: Dictionary = _presentation_player_state(world, observer_team)
+	if observer_team > 0:
+		player_state["blocked_population_queues"] = blocked_population_queues
+	if snapshot_probe != null:
+		snapshot_probe.observe_microseconds(snapshot_prefix + ".player_state", Time.get_ticks_usec() - snapshot_stage_started)
+		snapshot_stage_started = Time.get_ticks_usec()
+	# Optional policy filtering uses only the same observer-visible data supplied
+	# to the planner. It never reads hidden entities or caches placement validity.
+	var build_site_filter: Callable = options.get("build_site_filter", Callable())
+	if build_site_filter.is_valid() and not available_requested_build_site_kinds.is_empty():
+		available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state)
 	var build_sites: Dictionary = {}
 	if observer_team > 0 and not requested_build_site_kinds.is_empty():
 		if build_site_cache_ticks > 0 and world.has_method("get_cached_local_build_sites"):
@@ -360,9 +371,6 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		snapshot_stage_started = Time.get_ticks_usec()
 	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, fog, observer_team, snapshot_probe) if include_navigation and observer_team > 0 else {}
 	var presented_fog: Dictionary = _presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []}
-	var player_state: Dictionary = _presentation_player_state(world, observer_team)
-	if observer_team > 0:
-		player_state["blocked_population_queues"] = blocked_population_queues
 	var scenario: Dictionary = world.scenario_system.presentation_state(observer_team) if include_scenario else {}
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".state", Time.get_ticks_usec() - snapshot_stage_started)

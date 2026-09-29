@@ -46,10 +46,10 @@ func test_neighbor_masks() -> void:
 	var cells := {center: 0}
 	var provider := func(cell: Vector2i) -> int: return int(cells.get(cell, 0))
 	var cases := {
-		Vector2i(-1, 0): 8,
-		Vector2i(0, -1): 11,
-		Vector2i(1, 0): 9,
-		Vector2i(0, 1): 10,
+		Vector2i(-1, 0): 1,
+		Vector2i(0, -1): 2,
+		Vector2i(1, 0): 4,
+		Vector2i(0, 1): 8,
 	}
 	for offset in cases:
 		cells.clear()
@@ -57,7 +57,7 @@ func test_neighbor_masks() -> void:
 		cells[center + offset] = 1
 		var layers := TerrainRules.border_layers(center, provider, data, 41721)
 		assert_equal(layers.size(), 1, "single water edge has one border")
-		assert_equal(layers[0]["border_id"], 3, "single water edge uses original border 3")
+		assert_equal(layers[0]["border_id"], TerrainRules.BORDER_SHORELINE, "single water edge uses source-derived shoreline")
 		assert_equal(layers[0]["frame"], cases[offset], "single edge orientation %s" % offset)
 
 	cells.clear()
@@ -80,7 +80,8 @@ func test_neighbor_masks() -> void:
 	cells[center + Vector2i.RIGHT] = 1
 	cells[center + Vector2i.UP] = 1
 	var narrow_bay_layers := TerrainRules.border_layers(center, provider, data, 41721)
-	assert_equal(narrow_bay_layers.size(), 3, "tight bays draw all three water edges instead of the first only")
+	assert_equal(narrow_bay_layers.size(), 1, "tight bays compose water edges without opaque layers erasing each other")
+	assert_equal(narrow_bay_layers[0]["frame"], 7, "tight bay retains all three exposed sides")
 
 
 func test_transparent_border_assets() -> void:

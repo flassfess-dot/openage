@@ -9,8 +9,8 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	var catalog := Catalog.new()
 	catalog.load()
-	for frame in range(4):
-		_check(catalog.get_terrain_border_texture(8, frame) != null, "custom coast frame %d resolves in source and exported games" % frame)
+	for frame in [1, 16, 38, 255]:
+		_check(catalog.get_terrain_border_texture(8, frame) != null, "source-derived coast frame %d resolves in source and exported games" % frame)
 	_test_state_loading(catalog)
 	_test_projection_retirement()
 	_test_production_refresh(catalog)

@@ -5,6 +5,7 @@ const SimulationWorld := preload("res://scripts/simulation_world.gd")
 const TerrainElevation := preload("res://scripts/terrain_elevation.gd")
 const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
+const ShorelineTiles := preload("res://scripts/shoreline_tiles.gd")
 
 var failures: Array[String] = []
 
@@ -13,8 +14,8 @@ func _initialize() -> void:
 	test_original_frame_sets()
 	test_seeded_variation()
 	test_slope_tiles_have_base_and_raised_underlays()
-	test_water_corner_frames_follow_diagonal_terrain()
-	test_smooth_external_corner_assets()
+	test_shoreline_neighbor_combinations()
+	test_shoreline_pixels()
 	test_shallows_do_not_render_as_open_water()
 	test_forest_resources_preserve_source_forest_terrain()
 
@@ -87,50 +88,74 @@ func test_slope_tiles_have_base_and_raised_underlays() -> void:
 	assert_true(Vector2(underlays[0]["position"]) != Vector2(underlays[1]["position"]), "slope underlays cover different vertical bands")
 
 
-func test_water_corner_frames_follow_diagonal_terrain() -> void:
+func test_shoreline_neighbor_combinations() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
-	var external_map := {
-		Vector2i(1, 1): 0,
-		Vector2i(0, 1): 1,
-		Vector2i(1, 0): 1,
-		Vector2i(0, 0): 1,
-	}
-	var external_layers := TerrainRules.border_layers(Vector2i(1, 1), Callable(self, "terrain_from_external_corner_map").bind(external_map), catalog.terrain_catalog_data, 41721)
-	assert_equal(external_layers.size(), 1, "external water corner emits one border layer")
-	assert_equal(int(external_layers[0]["border_id"]), TerrainRules.BORDER_DESERT_WATER_SMOOTH, "external water corner uses the custom tapered shoreline sprite")
-	assert_equal(String(external_layers[0]["asset_name"]), "border_desert_water_smooth", "external water corner resolves the smooth sprite set")
-	assert_equal(int(external_layers[0]["frame"]), 1, "land protruding into water uses the external corner frame")
-
-	var internal_map := external_map.duplicate()
-	internal_map[Vector2i(0, 0)] = 0
-	var internal_layers := TerrainRules.border_layers(Vector2i(1, 1), Callable(self, "terrain_from_external_corner_map").bind(internal_map), catalog.terrain_catalog_data, 41721)
-	assert_equal(internal_layers.size(), 1, "internal water corner emits one border layer")
-	assert_equal(int(internal_layers[0]["border_id"]), 2, "internal grass shoreline uses the matching desert/water corner sprite")
-	assert_equal(int(internal_layers[0]["frame"]), 6, "diagonal land uses the internal corner frame")
-
-	var straight_map := {
-		Vector2i(1, 1): 0,
-		Vector2i(0, 1): 1,
-	}
-	var straight_layers := TerrainRules.border_layers(Vector2i(1, 1), Callable(self, "terrain_from_external_corner_map").bind(straight_map), catalog.terrain_catalog_data, 41721)
-	assert_equal(int(straight_layers[0]["border_id"]), 3, "straight shoreline keeps the grass/water sprite set")
-	assert_equal(int(straight_layers[0]["frame"]), 8, "straight shoreline keeps its original edge frame")
+	var center := Vector2i(1, 1)
+	var offsets := [Vector2i.LEFT, Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN, Vector2i(-1, -1), Vector2i(1, -1), Vector2i(1, 1), Vector2i(-1, 1)]
+	for water_id in [1, 4, 22]:
+		for mask in range(256):
+			var cells := {}
+			for bit in range(8):
+				if mask & (1 << bit):
+					cells[center + offsets[bit]] = water_id
+			var provider := func(cell: Vector2i) -> int: return int(cells.get(cell, 2))
+			var layers := TerrainRules.border_layers(center, provider, catalog.terrain_catalog_data, 41721)
+			assert_equal(layers.size(), 0 if mask == 0 else 1, "shore mask %d water %d composes without overpainting" % [mask, water_id])
+			if not layers.is_empty():
+				assert_equal(int(layers[0]["border_id"]), TerrainRules.BORDER_SHORELINE, "shoreline uses source-derived graphics")
+				assert_equal(int(layers[0]["frame"]), mask, "all eight neighbors reach the shoreline frame")
+				assert_true(catalog.get_terrain_border_texture(TerrainRules.BORDER_SHORELINE, mask) != null, "shore mask %d has a texture" % mask)
 
 
-func test_smooth_external_corner_assets() -> void:
+func test_shoreline_pixels() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
-	var frames: Array = catalog.terrain_border_textures.get(TerrainRules.BORDER_DESERT_WATER_SMOOTH, [])
-	assert_equal(frames.size(), 4, "smooth shoreline contains all four external corner orientations")
-	for index in range(frames.size()):
-		var texture: Texture2D = frames[index]
-		assert_true(texture != null, "smooth shoreline frame %d loads" % index)
-		if texture != null:
-			assert_equal(texture.get_size(), Vector2(65, 33), "smooth shoreline frame %d preserves the terrain lattice" % index)
-	for mask in TerrainRules.STYLE0_CORNER_MASKS:
-		for frame in range(4):
-			assert_equal(TerrainRules.style0_sprite_border_id(TerrainRules.BORDER_DESERT_WATER, int(mask), frame), TerrainRules.BORDER_DESERT_WATER_SMOOTH, "every external orientation resolves the smooth asset family")
+	var water_colors := {}
+	for texture in catalog.terrain_textures["water"]:
+		var image: Image = texture.get_image()
+		for y in image.get_height():
+			for x in image.get_width():
+				var pixel := image.get_pixel(x, y)
+				if pixel.a == 1.0:
+					water_colors[pixel.to_rgba32()] = true
+	var source_colors := {}
+	for texture in catalog.terrain_border_textures[2]:
+		var image: Image = texture.get_image()
+		for y in image.get_height():
+			for x in image.get_width():
+				source_colors[image.get_pixel(x, y).to_rgba32()] = true
+	var unique_textures := {}
+	var edge_samples := [Vector2i(16, 8), Vector2i(48, 8), Vector2i(48, 24), Vector2i(16, 24)]
+	var corner_samples := [Vector2i(32, 2), Vector2i(60, 16), Vector2i(32, 30), Vector2i(4, 16)]
+	for mask in range(256):
+		var texture: Texture2D = catalog.get_terrain_border_texture(TerrainRules.BORDER_SHORELINE, mask)
+		unique_textures[texture.get_rid()] = true
+		var image := texture.get_image()
+		assert_equal(image.get_size(), Vector2i(65, 33), "shoreline preserves the source lattice")
+		for side in range(4):
+			if mask & (1 << side):
+				assert_true(water_colors.has(image.get_pixelv(edge_samples[side]).to_rgba32()), "mask %d meets open water at side %d" % [mask, side])
+		for y in image.get_height():
+			for x in image.get_width():
+				var pixel := image.get_pixel(x, y)
+				assert_true(pixel.a == 0.0 or pixel.a == 1.0, "shoreline never introduces translucent diamonds")
+				assert_true(pixel.a == 0.0 or source_colors.has(pixel.to_rgba32()) or water_colors.has(pixel.to_rgba32()), "shoreline retains the source palette")
+	assert_equal(unique_textures.size(), 47, "equivalent neighbors reuse textures instead of growing the atlas")
+	var island: Image = catalog.get_terrain_border_texture(TerrainRules.BORDER_SHORELINE, 15).get_image()
+	assert_equal(island.get_pixel(32, 16).a, 1.0, "isolated shore cell retains opaque land at its center")
+	assert_true(not water_colors.has(island.get_pixel(32, 16).to_rgba32()), "four water edges do not erase the central island")
+	assert_equal(island.get_pixel(0, 0).a, 0.0, "isolated island keeps transparent outer corners")
+	for y in island.get_height():
+		for x in island.get_width():
+			var pixel := island.get_pixel(x, y)
+			if pixel.a > 0.0 and absi(x - 32) + 2 * absi(y - 16) >= 28:
+				assert_true(water_colors.has(pixel.to_rgba32()), "isolated island has water along its entire perimeter")
+	for corner in range(4):
+		var texture: Texture2D = catalog.get_terrain_border_texture(TerrainRules.BORDER_SHORELINE, 1 << (corner + 4))
+		var image := texture.get_image()
+		assert_true(water_colors.has(image.get_pixelv(corner_samples[corner]).to_rgba32()), "diagonal-only inlet has water in corner %d" % corner)
+		assert_equal(image.get_pixelv(corner_samples[(corner + 2) % 4]).a, 0.0, "diagonal inlet preserves opposite land")
 
 
 func test_shallows_do_not_render_as_open_water() -> void:
@@ -167,10 +192,6 @@ func test_forest_resources_preserve_source_forest_terrain() -> void:
 
 func grass_terrain_id(_cell: Vector2i) -> int:
 	return int(TerrainRules.TERRAIN_IDS["grass"])
-
-
-func terrain_from_external_corner_map(cell: Vector2i, terrain_map: Dictionary) -> int:
-	return int(terrain_map.get(cell, 0))
 
 
 func assert_no_repeated_stripes(values: Array[int], width: int, context: String) -> void:

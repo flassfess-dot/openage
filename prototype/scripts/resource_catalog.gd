@@ -1,5 +1,7 @@
 class_name RoRResourceCatalog
 
+const ShorelineTiles := preload("res://scripts/shoreline_tiles.gd")
+
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
 const CompositeGraphic := preload("res://scripts/composite_graphic.gd")
 const FacingConvention := preload("res://scripts/facing_convention.gd")
@@ -82,8 +84,12 @@ func load() -> void:
 		4: load_frames("border_grass_desert", 12),
 		5: load_frames("border_grass_forest", 12),
 		6: load_frames("border_grass_desert2", 4),
-		8: load_custom_frames("border_desert_water_smooth", 4),
 	}
+	var shoreline_hotspots: Array = []
+	for frame in range(12):
+		var hotspot: Array = get_texture_metadata("border_desert_water", frame).get("hotspot", [0, 0])
+		shoreline_hotspots.append(Vector2i(hotspot[0], hotspot[1]))
+	terrain_border_textures[8] = ShorelineTiles.build_frames(terrain_border_textures[2], shoreline_hotspots, terrain_textures["water"][0])
 	town_center_texture = load("res://assets/generated/town_center.png")
 	town_center_construction_textures = load_frames("town_center_construction", 4)
 	tree_texture = load("res://assets/generated/tree.png")
@@ -180,15 +186,6 @@ func load_frames(prefix: String, count: int) -> Array:
 		frames.append(load("res://assets/generated/%s_%02d.png" % [prefix, index]))
 	return frames
 
-
-func load_custom_frames(prefix: String, count: int) -> Array:
-	var frames: Array = []
-	for index in range(count):
-		var path := "res://assets/custom/%s_%02d.png" % [prefix, index]
-		# Imported textures resolve in both the project and exported PCK. Raw
-		# filesystem image loading cannot read resources inside the package.
-		frames.append(load(path))
-	return frames
 
 func unit_stats(kind: String) -> Dictionary:
 	return gamespec_data.get("units", {}).get(kind, {})

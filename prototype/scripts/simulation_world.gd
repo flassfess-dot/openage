@@ -2972,12 +2972,17 @@ func get_mixed_domain_build_sites(team: int, maximum_per_kind: int = 4) -> Dicti
 
 func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
 	var result: Dictionary = {}
+	if kinds.is_empty():
+		return result
 	var workers: Array = units.filter(func(unit):
 		return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land"
 	)
 	workers.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	if workers.is_empty():
 		return result
+	# One synchronous query sees fixed unit positions. Index the exact five
+	# occupancy probes once, instead of scanning every unit for every site.
+	var mobile_occupied_cells := _mobile_foundation_obstructions()
 	var previous_failure := last_build_failure
 	for kind_value in kinds:
 		var kind := String(kind_value)
@@ -2992,7 +2997,7 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 			seen_cells[preferred_cell] = true
 			if visibility_system.state_at_world(team, preferred_position) == FogOfWar.UNKNOWN:
 				continue
-			if can_place_foundation(team, kind, preferred_position) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
+			if _can_place_foundation(team, kind, preferred_position, mobile_occupied_cells) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
 				if foundation_preserves_structure_gap(team, kind, preferred_position, minimum_structure_gap):
 					sites.append(preferred_position)
 					if sites.size() >= maximum_per_kind:
@@ -3009,15 +3014,15 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 			var center := Vector2i(floori(float(worker.get("pos", Vector2.ZERO).x)), floori(float(worker.get("pos", Vector2.ZERO).y)))
 			for radius in range(1, maxi(1, search_radius) + 1):
 				for y in range(center.y - radius, center.y + radius + 1):
-					for x in range(center.x - radius, center.x + radius + 1):
-						if maxi(absi(x - center.x), absi(y - center.y)) != radius:
-							continue
+					# Preserve row-major ring order without visiting its interior.
+					var columns: Array = range(center.x - radius, center.x + radius + 1) if absi(y - center.y) == radius else [center.x - radius, center.x + radius]
+					for x in columns:
 						var cell := Vector2i(x, y)
 						if seen_cells.has(cell) or not navigation_grid.contains(cell):
 							continue
 						seen_cells[cell] = true
 						var position := Vector2(cell) + Vector2(0.5, 0.5)
-						if can_place_foundation(team, kind, position) and worker_can_reach_foundation(worker, kind, position):
+						if _can_place_foundation(team, kind, position, mobile_occupied_cells) and worker_can_reach_foundation(worker, kind, position):
 							if foundation_preserves_structure_gap(team, kind, position, minimum_structure_gap):
 								sites.append(position)
 								if sites.size() >= maximum_per_kind:
@@ -3119,6 +3124,10 @@ func foundation_preserves_structure_gap(team: int, kind: String, position: Vecto
 
 
 func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
+	return _can_place_foundation(team, kind, position)
+
+
+func _can_place_foundation(team: int, kind: String, position: Vector2, mobile_occupied_cells: Variant = null) -> bool:
 	last_build_failure = ""
 	if data_repository.is_configured() and (not data_repository.has_archetype(kind) or data_repository.category(kind) != "building"):
 		last_build_failure = "unknown_building_type"
@@ -3151,32 +3160,38 @@ func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
 				last_build_failure = "blocked_or_sloped"
 				return false
 	var occupied_cells: Array = footprint.get("occupied_cells", [])
-	var occupied_bounds := Rect2()
-	for cell_value in occupied_cells:
-		var cell: Vector2i = cell_value
-		var cell_bounds := Rect2(Vector2(cell), Vector2.ONE)
-		occupied_bounds = cell_bounds if not occupied_bounds.has_area() else occupied_bounds.merge(cell_bounds)
-	for unit in units:
-		if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)):
-			continue
-		var unit_position: Vector2 = unit.get("pos", Vector2.ZERO)
-		var unit_radius := maxf(0.0, float(unit.get("footprint_radius", 0.3)))
-		# Use Vector2 arithmetic like the narrow phase: scalar double precision
-		# can disagree with rounded Vector2 edges (e.g. 11.7 + 0.3).
-		var extent := Vector2(unit_radius, unit_radius)
-		var unit_min := unit_position - extent
-		var unit_max := unit_position + extent
-		if (
-			occupied_cells.is_empty()
-			or unit_max.x < occupied_bounds.position.x
-			or unit_max.y < occupied_bounds.position.y
-			or unit_min.x >= occupied_bounds.end.x
-			or unit_min.y >= occupied_bounds.end.y
-		):
-			continue
-		if mobile_footprint_overlaps_cells(unit, occupied_cells):
-			last_build_failure = "occupied_by_unit"
-			return false
+	if mobile_occupied_cells != null:
+		for cell in occupied_cells:
+			if mobile_occupied_cells.has(cell):
+				last_build_failure = "occupied_by_unit"
+				return false
+	else:
+		var occupied_bounds := Rect2()
+		for cell_value in occupied_cells:
+			var cell: Vector2i = cell_value
+			var cell_bounds := Rect2(Vector2(cell), Vector2.ONE)
+			occupied_bounds = cell_bounds if not occupied_bounds.has_area() else occupied_bounds.merge(cell_bounds)
+		for unit in units:
+			if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)):
+				continue
+			var unit_position: Vector2 = unit.get("pos", Vector2.ZERO)
+			var unit_radius := maxf(0.0, float(unit.get("footprint_radius", 0.3)))
+			# Use Vector2 arithmetic like the narrow phase: scalar double precision
+			# can disagree with rounded Vector2 edges (e.g. 11.7 + 0.3).
+			var extent := Vector2(unit_radius, unit_radius)
+			var unit_min := unit_position - extent
+			var unit_max := unit_position + extent
+			if (
+				occupied_cells.is_empty()
+				or unit_max.x < occupied_bounds.position.x
+				or unit_max.y < occupied_bounds.position.y
+				or unit_min.x >= occupied_bounds.end.x
+				or unit_min.y >= occupied_bounds.end.y
+			):
+				continue
+			if mobile_footprint_overlaps_cells(unit, occupied_cells):
+				last_build_failure = "occupied_by_unit"
+				return false
 	if visibility_system.state_at_world(team, position) == FogOfWar.UNKNOWN:
 		last_build_failure = "unexplored"
 		return false
@@ -3193,6 +3208,19 @@ func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
 		last_build_failure = "insufficient_resources"
 		return false
 	return true
+
+
+func _mobile_foundation_obstructions() -> Dictionary:
+	var occupied: Dictionary = {}
+	for unit in units:
+		if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)):
+			continue
+		var position: Vector2 = unit.get("pos", Vector2.ZERO)
+		var radius := maxf(0.0, float(unit.get("footprint_radius", 0.3)))
+		# Match mobile_footprint_overlaps_cells, including Vector2 rounding.
+		for probe in [position, position + Vector2(radius, 0.0), position + Vector2(-radius, 0.0), position + Vector2(0.0, radius), position + Vector2(0.0, -radius)]:
+			occupied[Vector2i(floori(probe.x), floori(probe.y))] = true
+	return occupied
 
 
 func mobile_footprint_overlaps_cells(unit: Dictionary, occupied_cells: Array) -> bool:

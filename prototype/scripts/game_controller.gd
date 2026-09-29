@@ -1087,14 +1087,9 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	accumulator_seconds += minf(frame_delta, 0.25) * get_speed_multiplier()
 	var steps := 0
 	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
-		var expensive_planning_tick := _run_fixed_tick(player_team, enemy_team)
+		_run_fixed_tick(player_team, enemy_team)
 		accumulator_seconds -= FIXED_STEP_SECONDS
 		steps += 1
-		# Do not let several independent AI planning phases accumulate inside
-		# one rendered frame. The remaining fixed-step debt is retained and is
-		# recovered by the following cheap ticks, preserving exact tick order.
-		if expensive_planning_tick:
-			break
 	return simulation_world.get_last_battle_message()
 
 func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
