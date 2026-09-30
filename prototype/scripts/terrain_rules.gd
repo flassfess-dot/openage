@@ -63,6 +63,9 @@ static func is_water_navigable(terrain: String) -> bool:
 
 
 static func is_terrain_accessible(restrictions: Array, restriction_id: int, terrain_id: int) -> bool:
+	# Optional environment surfaces have the same movement class as RoR grass.
+	if is_environment_terrain_id(terrain_id):
+		terrain_id = 0
 	if restriction_id < 0 or restriction_id >= restrictions.size():
 		return false
 	var values: Array = restrictions[restriction_id].get("accessible_damage_multiplier", [])
@@ -118,7 +121,7 @@ static func base_texture_kind(terrain_id: int, terrain_catalog: Dictionary) -> S
 			0: return "grass"
 			1: return "water"
 			22: return "water_dark"
-			4: return "sand"
+			4: return "water"
 			6: return "sand"
 		var record: Dictionary = terrain_catalog.get("terrains", {}).get(str(current_id), {})
 		var replacement_id := int(record.get("replacement_terrain_id", -1))
@@ -258,3 +261,7 @@ static func _style0_corner_is_external(current_id: int, diagonal_neighbor_id: in
 
 static func is_source_forest_terrain_id(terrain_id: int) -> bool:
 	return terrain_id in SOURCE_FOREST_TERRAIN_IDS
+
+
+static func is_environment_terrain_id(terrain_id: int) -> bool:
+	return terrain_id >= 1000 and terrain_id <= 1003

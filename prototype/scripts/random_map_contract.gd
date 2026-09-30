@@ -24,8 +24,7 @@ static func build(map_type: Dictionary, size: Vector2i, starts: Array[Vector2]) 
 			source_start_radius = maxf(8.0, float(zones[0].get("start_area_radius", 12)))
 	for index in range(starts.size()):
 		var start: Vector2 = starts[index]
-		# Native RoR forest patches are terrain groups. A nearby tree group keeps
-		# the opening viable while larger forests are generated across the map.
+		# Guaranteed nearby wood is allocated before the neutral ecological forest.
 		clusters.append({"kind": "tree", "count": 12, "radius": 2.8, "amount": 75, "tree_palette": [134, 140, 141, 142, 143, 144, 146, 147, 161, 194], "owner_start": [start.x, start.y], "minimum_distance": 7.0, "maximum_distance": minf(12.0, source_start_radius), "guarantee_radius": 20.0, "guarantee": "player_wood"})
 		var first_kind: Dictionary = {}
 		for group_value in source_profile.get("unit_groups", []):
@@ -74,14 +73,11 @@ static func build(map_type: Dictionary, size: Vector2i, starts: Array[Vector2]) 
 			continue
 		prioritized_clusters.append(cluster)
 	clusters = prioritized_clusters
-	var hills: Array = []
-	if topology in ["inland", "highlands", "coastal", "continental", "hill_country"]:
-		hills.append({"center": [size.x * 0.5, size.y * 0.5], "radius": maxi(3, mini(size.x, size.y) / (7 if topology in ["highlands", "hill_country"] else 12)), "maximum_elevation": 3 if topology in ["highlands", "hill_country"] else 2})
-	if topology in ["highlands", "hill_country"]:
-		for start in starts:
-			hills.append({"center": [start.x, start.y], "radius": 4, "maximum_elevation": 1})
 	return {
-		"type": "seeded_skirmish_v1",
+		"type": "landscape_skirmish_v2",
+		"version": 2,
+		"theme": "temperate_v2",
+		"map_type_id": String(map_type.get("id", "grasslands")),
 		"profile": profile,
 		"source_profile": source_profile,
 		"topology": topology,
@@ -104,7 +100,6 @@ static func build(map_type: Dictionary, size: Vector2i, starts: Array[Vector2]) 
 		"naval_resource_clusters": [
 			{"kind": "deep_fish", "count": 3, "radius": 2.5, "amount": 250, "placement_domain": "water", "minimum_domain_clearance_cells": 2, "water_offset": 6.0, "guarantee_radius": 12.0},
 		] if bool(map_type.get("requires_naval_starts", false)) else [],
-		"hills": hills,
 		"resource_clusters": clusters,
 		"quality_contract": {
 			"minimum_start_distance_fraction": 0.08,

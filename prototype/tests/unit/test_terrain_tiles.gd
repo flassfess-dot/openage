@@ -16,7 +16,7 @@ func _initialize() -> void:
 	test_slope_tiles_have_base_and_raised_underlays()
 	test_shoreline_neighbor_combinations()
 	test_shoreline_pixels()
-	test_shallows_do_not_render_as_open_water()
+	test_shallows_use_source_water_base()
 	test_forest_resources_preserve_source_forest_terrain()
 
 	if failures.is_empty():
@@ -158,11 +158,11 @@ func test_shoreline_pixels() -> void:
 		assert_equal(image.get_pixelv(corner_samples[(corner + 2) % 4]).a, 0.0, "diagonal inlet preserves opposite land")
 
 
-func test_shallows_do_not_render_as_open_water() -> void:
+func test_shallows_use_source_water_base() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
 	assert_equal(TerrainRules.base_texture_kind(22, catalog.terrain_catalog_data), "water_dark", "source deep water keeps its own RoR texture")
-	assert_equal(TerrainRules.base_texture_kind(4, catalog.terrain_catalog_data), "sand", "source Shallows does not use the flat open-water placeholder")
+	assert_equal(TerrainRules.base_texture_kind(4, catalog.terrain_catalog_data), "water", "source Shallows follows RoR water replacement rather than opaque desert")
 	assert_true(4 in TerrainRules.WATER_TERRAIN_IDS, "source Shallows remains water-domain terrain for scenario placement")
 	assert_true(TerrainRules.is_land_walkable(TerrainRules.logical_for_terrain_id(4)), "source Shallows is traversable by land units")
 	assert_true(TerrainRules.is_water_navigable(TerrainRules.logical_for_terrain_id(4)), "source Shallows remains traversable by ships")

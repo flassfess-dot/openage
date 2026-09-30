@@ -1,0 +1,20 @@
+{
+  "format_version": 1,
+  "id": "aoe2_temperate",
+  "title": "Умеренный ландшафт",
+  "source_game": "Age of Empires II / The Conquerors (classic)",
+  "tile_pitch": [64, 32],
+  "object_scale": 0.6666666666666666,
+  "materials": [
+    {"key":"earth", "terrain_id":1000, "title":"Лесная земля", "slp":15000, "priority":40, "saturation":0.78, "gain":[0.84,0.92,1.02], "minimap":"877447", "tags":["forest_interior","worn_ground","rock_foot"], "neighbors":["grass_dirt","dry_grass","forest_grass"], "movement_terrain_id":0},
+    {"key":"grass_dirt", "terrain_id":1001, "title":"Трава с землёй", "slp":15006, "priority":30, "saturation":0.87, "gain":[0.93,0.98,0.96], "minimap":"7e804c", "tags":["forest_edge","path_margin"], "neighbors":["ror_grass","earth","dry_grass","forest_grass"], "movement_terrain_id":0},
+    {"key":"dry_grass", "terrain_id":1002, "title":"Сухая трава", "slp":15007, "priority":20, "saturation":0.84, "gain":[0.94,0.98,0.96], "minimap":"969253", "tags":["dry_slope","meadow_margin"], "neighbors":["ror_grass","grass_dirt","earth"], "movement_terrain_id":0},
+    {"key":"forest_grass", "terrain_id":1003, "title":"Тёмная трава", "slp":15008, "priority":10, "saturation":0.86, "gain":[1.03,1.00,0.95], "minimap":"52613a", "tags":["forest_edge","moist_meadow"], "neighbors":["ror_grass","grass_dirt","earth"], "movement_terrain_id":0}
+  ],
+  "objects": [
+    {"key":"oak", "title":"Лиственные деревья", "slp":4652, "frames":[0,9,10], "saturation":0.82, "gain":[1.02,0.96,0.93], "role":"tree", "resource_kind":"tree", "depleted_key":"stump", "footprint_radius":0.28, "max_slope_levels":0, "materials":["ror_grass","forest_grass","grass_dirt","earth"]},
+    {"key":"pine", "title":"Хвойные деревья", "slp":4654, "frames":[1,2,3,4,7], "saturation":0.80, "gain":[1.03,0.98,0.92], "role":"tree", "resource_kind":"tree", "depleted_key":"stump", "footprint_radius":0.28, "max_slope_levels":0, "materials":["ror_grass","forest_grass","grass_dirt","earth"]},
+    {"key":"boulders", "title":"Каменные группы", "slp":3737, "frames":[0,1,2,3,4,5], "saturation":0.76, "gain":[0.95,0.98,0.96], "role":"scenery", "footprint_radius":0.5, "max_slope_levels":1, "materials":["earth","grass_dirt","dry_grass"]},
+    {"key":"stump", "title":"Пни", "slp":1035, "frames":[0,1,2], "saturation":0.82, "gain":[0.97,1.00,0.96], "role":"scenery", "footprint_radius":0.12, "max_slope_levels":0, "materials":["earth","grass_dirt","forest_grass"]}
+  ]
+}

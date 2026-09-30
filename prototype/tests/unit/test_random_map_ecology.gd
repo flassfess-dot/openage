@@ -29,11 +29,11 @@ func _test_inland_ecology_and_density() -> void:
 	assert_true(scenery.size() >= 20, "standard inland map receives a visible ambient scenery budget")
 	assert_true(scenery.all(func(entity): return bool(entity.get("ambient", false)) and String(entity.get("strategic_zone", "")) != "sanctuary"), "ambient scenery stays outside start sanctuaries")
 	assert_true(scenery.any(func(entity): return String(entity.get("feature_family", "")) == "rock"), "ambient layer contains terrain-matched rocks")
-	assert_true(scenery.any(func(entity): return String(entity.get("feature_family", "")) == "ground_detail"), "ambient layer contains cracks and bare-ground detail")
+	assert_true(scenery.any(func(entity): return String(entity.get("feature_family", "")) == "ground_detail"), "ambient layer contains forest stumps and clearing detail")
 	var land_scenery: Array = scenery.filter(func(entity): return String(entity.get("feature_family", "")) != "shallows")
 	for first_index in range(land_scenery.size()):
 		for second_index in range(first_index + 1, land_scenery.size()):
-			assert_true(Vector2(land_scenery[first_index]["position"]).distance_to(Vector2(land_scenery[second_index]["position"])) + 0.0001 >= 3.0, "ambient land detail preserves blue-noise spacing")
+			assert_true(Vector2(land_scenery[first_index]["position"]).distance_to(Vector2(land_scenery[second_index]["position"])) + 0.0001 >= 2.0, "ecological details retain clearance after sub-cell jitter")
 	var without_scenery := map_data.duplicate(true)
 	without_scenery["scenery"] = []
 	var dense_metrics := RandomMapMetrics.measure(definition, map_data)

@@ -10,7 +10,6 @@ func _initialize() -> void:
 	_test_deterministic_minimum_distance_sampling()
 	_test_zone_and_blocking_filters()
 	_test_coastal_filter()
-	_test_sparse_fill_targets_the_largest_gap()
 	_finish("Random map zone sampler tests passed")
 
 
@@ -52,21 +51,6 @@ func _test_coastal_filter() -> void:
 	var sampled := RandomMapSampler.sample_zone_cells(zones, size, [RandomMapZones.ZONE_FRONTIER], 4, 2.5, 123, {}, [], {}, "coastal")
 	assert_true(not sampled.is_empty(), "coastal fixture produces anchors")
 	assert_true(sampled.all(func(cell): return cell.x == 3), "coastal mode only samples the published coast mask")
-
-
-func _test_sparse_fill_targets_the_largest_gap() -> void:
-	var size := Vector2i(30, 18)
-	var zones := _zones(size, RandomMapZones.ZONE_FRONTIER)
-	var existing: Array[Vector2i] = [Vector2i(4, 4), Vector2i(4, 13), Vector2i(12, 4), Vector2i(12, 13)]
-	var first := RandomMapSampler.fill_sparse_cells(zones, size, [RandomMapZones.ZONE_FRONTIER], 4, 4.0, 41721, {}, existing)
-	var repeated := RandomMapSampler.fill_sparse_cells(zones, size, [RandomMapZones.ZONE_FRONTIER], 4, 4.0, 41721, {}, existing)
-	assert_equal(first, repeated, "largest-gap repair remains deterministic")
-	assert_true(not first.is_empty() and first[0].x >= 26, "first repair anchor lands in the farthest empty side of the map")
-	var combined: Array[Vector2i] = existing.duplicate()
-	combined.append_array(first)
-	for left in range(combined.size()):
-		for right in range(left + 1, combined.size()):
-			assert_true(Vector2(combined[left]).distance_to(Vector2(combined[right])) + 0.0001 >= 4.0, "repair anchors preserve minimum spacing")
 
 
 func _zones(size: Vector2i, default_zone: int) -> Dictionary:

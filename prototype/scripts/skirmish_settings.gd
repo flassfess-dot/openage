@@ -136,6 +136,11 @@ static func normalize(source: Dictionary) -> Dictionary:
 
 
 static func build(source: Dictionary) -> Dictionary:
+	return build_with_progress(source, Callable())
+
+
+static func build_with_progress(source: Dictionary, progress_callback: Callable = Callable()) -> Dictionary:
+	_report_progress(progress_callback, 0.01, "Проверка настроек")
 	var normalized := normalize(source)
 	if not bool(normalized.get("valid", false)):
 		return {"valid": false, "errors": normalized.get("errors", []), "settings": normalized.get("settings", {})}
@@ -149,6 +154,7 @@ static func build(source: Dictionary) -> Dictionary:
 	var ai_policy := SkirmishAiPolicy.resolve("random_map_balanced", String(settings["ai_difficulty_id"]))
 	if not bool(ai_policy.get("valid", false)):
 		return {"valid": false, "errors": ai_policy.get("errors", []), "settings": settings}
+	_report_progress(progress_callback, 0.07, "Подготовка игроков")
 	var size_values: Array = size_entry.get("size", [72, 72])
 	var size := Vector2i(int(size_values[0]), int(size_values[1]))
 	var starts := _start_positions(settings["players"].size(), size, String(settings["map_type_id"]), int(settings["seed"]), map_type_entry)
@@ -203,10 +209,19 @@ static func build(source: Dictionary) -> Dictionary:
 	}
 	if bool(settings.get("networked", false)):
 		raw_definition["networked"] = true
+	_report_progress(progress_callback, 0.13, "Создание правил матча")
 	var definition := MatchDefinition.normalize(raw_definition)
 	if not bool(definition.get("valid", false)):
 		return {"valid": false, "errors": definition.get("errors", []), "settings": settings, "definition": definition}
-	var map_data := RandomMapGenerator.generate(definition)
+	var map_progress := func(value: float, stage: String) -> void:
+		_report_progress(progress_callback, lerpf(0.15, 0.78, value), stage)
+	var generation_diagnostics: Dictionary = {}
+	var map_data := RandomMapGenerator.generate(definition, map_progress, generation_diagnostics)
+	if map_data.has("generation_error"):
+		return {"valid": false, "errors": [map_data["generation_error"]], "settings": settings}
+	raw_definition["map"]["content_hash"] = map_data.get("content_hash", "")
+	definition["map"]["content_hash"] = map_data.get("content_hash", "")
+	_report_progress(progress_callback, 0.80, "Размещение целей победы")
 	var objective_entities := _generated_victory_objectives(definition, map_data)
 	var required_objective_modes: int = definition.get("victory_rules", []).filter(func(rule): return String(rule.get("type", "")) in ["ruins", "artifacts"]).size()
 	if objective_entities.size() != required_objective_modes * 2:
@@ -216,11 +231,13 @@ static func build(source: Dictionary) -> Dictionary:
 		definition = MatchDefinition.normalize(raw_definition)
 		if not bool(definition.get("valid", false)):
 			return {"valid": false, "errors": definition.get("errors", []), "settings": settings, "definition": definition, "map_data": map_data}
+	_report_progress(progress_callback, 0.88, "Проверка качества карты")
 	var map_quality := RandomMapQuality.inspect(definition, map_data)
 	if not bool(map_quality.get("valid", false)):
 		return {"valid": false, "errors": map_quality.get("errors", []), "settings": settings, "definition": definition, "map_data": map_data, "map_quality": map_quality}
+	_report_progress(progress_callback, 0.97, "Подготовка игры")
 	var fingerprint := GameSaveArchive.fingerprint(definition)
-	return {
+	var result := {
 		"valid": true,
 		"errors": [],
 		"settings": settings,
@@ -228,7 +245,15 @@ static func build(source: Dictionary) -> Dictionary:
 		"map_data": map_data,
 		"map_quality": map_quality,
 		"identity": "generated://skirmish/%s" % fingerprint.left(24),
+		"generation_diagnostics": generation_diagnostics,
 	}
+	_report_progress(progress_callback, 1.0, "Готово")
+	return result
+
+
+static func _report_progress(progress_callback: Callable, value: float, stage: String) -> void:
+	if progress_callback.is_valid():
+		progress_callback.call(clampf(value, 0.0, 1.0), stage)
 
 
 static func _validate_catalog_reference(settings: Dictionary, source_catalog: Dictionary, key: String, collection: String, errors: Array[String]) -> void:
@@ -369,6 +394,16 @@ static func _generated_victory_objectives(definition: Dictionary, map_data: Dict
 	var result: Array = []
 	var count_per_category := mini(2, starts.size())
 	var total_cells := size.x * size.y
+	var accessible := PackedByteArray()
+	accessible.resize(total_cells)
+	if int(map_data.get("generator_version", 0)) == 2:
+		var navigation := RandomMapGenerator.LandscapeNavigation.mask(map_data, definition)
+		for start in starts:
+			var distances: PackedInt32Array = RandomMapGenerator.LandscapeNavigation.flood(size, navigation, Vector2i(start))["distances"]
+			for i in range(total_cells):
+				if distances[i] >= 0: accessible[i] = 1
+	else:
+		accessible.fill(1)
 	var start_index := posmod(int(map_data.get("seed", 1)), total_cells)
 	for category in categories:
 		for _objective_index in range(count_per_category):
@@ -379,7 +414,7 @@ static func _generated_victory_objectives(definition: Dictionary, map_data: Dict
 				var cell := Vector2i(index % size.x, floori(float(index) / float(size.x)))
 				if cell.x < 2 or cell.y < 2 or cell.x >= size.x - 2 or cell.y >= size.y - 2 or excluded.has(cell) or cliff_cells.has(cell):
 					continue
-				if int(terrain_ids[index]) in [1, 4, 22]:
+				if accessible[index] == 0 or int(terrain_ids[index]) in [1, 4, 22]:
 					continue
 				var candidate := Vector2(cell) + Vector2.ONE * 0.5
 				var minimum_distance := INF

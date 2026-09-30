@@ -55,67 +55,6 @@ static func sample_zone_cells(strategic_zones: Dictionary, size: Vector2i, allow
 	return result
 
 
-static func fill_sparse_cells(strategic_zones: Dictionary, size: Vector2i, allowed_zone_ids: Array, target_count: int, minimum_distance: float, seed: int, blocked_cells: Dictionary = {}, existing_anchors: Array[Vector2i] = [], zone_weights: Dictionary = {}, coast_mode: String = "", minimum_start_distance: int = 0) -> Array[Vector2i]:
-	var zone_ids: PackedInt32Array = strategic_zones.get("zone_ids", PackedInt32Array())
-	var coastal_mask: PackedByteArray = strategic_zones.get("coastal_land_mask", PackedByteArray())
-	var start_distances: PackedInt32Array = strategic_zones.get("nearest_start_distances", PackedInt32Array())
-	if zone_ids.size() != size.x * size.y or target_count <= 0:
-		return []
-	var allowed_lookup: Dictionary = {}
-	for zone_id_value in allowed_zone_ids:
-		allowed_lookup[int(zone_id_value)] = true
-	var candidates: Array[Vector2i] = []
-	for index in range(zone_ids.size()):
-		var zone_id := int(zone_ids[index])
-		if not allowed_lookup.has(zone_id) or float(zone_weights.get(zone_id, 1.0)) <= 0.0:
-			continue
-		var cell := Vector2i(index % size.x, index / size.x)
-		if cell.x < 2 or cell.y < 2 or cell.x >= size.x - 2 or cell.y >= size.y - 2 or blocked_cells.has(cell):
-			continue
-		if minimum_start_distance > 0 and start_distances.size() == zone_ids.size() and start_distances[index] >= 0 and start_distances[index] < minimum_start_distance:
-			continue
-		var coastal := coastal_mask.size() == zone_ids.size() and coastal_mask[index] != 0
-		if coast_mode == "coastal" and not coastal:
-			continue
-		if coast_mode == "inland" and coastal:
-			continue
-		candidates.append(cell)
-	var nearest_squared := PackedFloat32Array()
-	nearest_squared.resize(candidates.size())
-	nearest_squared.fill(INF)
-	for candidate_index in range(candidates.size()):
-		for anchor in existing_anchors:
-			nearest_squared[candidate_index] = minf(nearest_squared[candidate_index], Vector2(candidates[candidate_index]).distance_squared_to(Vector2(anchor)))
-	var result: Array[Vector2i] = []
-	var selected: Dictionary = {}
-	var minimum_squared := minimum_distance * minimum_distance
-	for selection_index in range(target_count):
-		var best_index := -1
-		var best_score := -INF
-		for candidate_index in range(candidates.size()):
-			var cell := candidates[candidate_index]
-			if selected.has(cell) or float(nearest_squared[candidate_index]) + 0.0001 < minimum_squared:
-				continue
-			var zone_id := int(zone_ids[cell.y * size.x + cell.x])
-			var weight := clampf(float(zone_weights.get(zone_id, 1.0)), 0.0, 1.0)
-			var distance_score := float(nearest_squared[candidate_index])
-			if is_inf(distance_score):
-				distance_score = float(size.x * size.x + size.y * size.y)
-			var tie_break := float(_stable_hash(cell, seed ^ selection_index * 7919) & 0xffff) / 65535.0
-			var score := distance_score * lerpf(0.82, 1.0, weight) + tie_break * 0.001
-			if score > best_score:
-				best_score = score
-				best_index = candidate_index
-		if best_index < 0:
-			break
-		var chosen := candidates[best_index]
-		result.append(chosen)
-		selected[chosen] = true
-		for candidate_index in range(candidates.size()):
-			nearest_squared[candidate_index] = minf(nearest_squared[candidate_index], Vector2(candidates[candidate_index]).distance_squared_to(Vector2(chosen)))
-	return result
-
-
 static func _add_to_bucket(buckets: Dictionary, cell: Vector2i, bucket_size: float) -> void:
 	var bucket := Vector2i(floori(float(cell.x) / bucket_size), floori(float(cell.y) / bucket_size))
 	if not buckets.has(bucket):
@@ -132,10 +71,3 @@ static func _has_nearby_anchor(buckets: Dictionary, cell: Vector2i, bucket_size:
 				if Vector2(cell).distance_squared_to(Vector2(other_value)) + 0.0001 < minimum_squared:
 					return true
 	return false
-
-
-static func _stable_hash(cell: Vector2i, seed: int) -> int:
-	var value := (int(cell.x) * 73856093) ^ (int(cell.y) * 19349663) ^ (seed * 83492791)
-	value = ((value ^ (value >> 16)) * 0x7feb352d) & 0xffffffff
-	value = ((value ^ (value >> 15)) * 0x846ca68b) & 0xffffffff
-	return (value ^ (value >> 16)) & 0x7fffffff

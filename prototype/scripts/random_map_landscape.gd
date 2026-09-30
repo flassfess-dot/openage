@@ -1,0 +1,394 @@
+class_name RoRRandomMapLandscape
+extends RefCounted
+
+const Replay := preload("res://scripts/replay_system.gd")
+const Navigation := preload("res://scripts/random_map_navigation.gd")
+const THEME_PATH := "res://data/random_maps/temperate_v2.json"
+const VERSION := 2
+const TYPE := "landscape_skirmish_v2"
+const WATER := [1, 2, 4, 22]
+# Green families and rare autumn/dry accents are selected separately.
+static var _theme_cache: Dictionary = {}
+
+
+static func theme() -> Dictionary:
+	if _theme_cache.is_empty():
+		_theme_cache = JSON.parse_string(FileAccess.get_file_as_string(THEME_PATH).trim_prefix("\ufeff"))
+	return _theme_cache
+
+
+static func candidate_count(size: Vector2i) -> int:
+	return 1 if size.x * size.y >= 90000 else 2 if size.x * size.y >= 16000 else 3
+
+
+static func select_fields(size: Vector2i, terrain: Array[int], starts: Array[Vector2], profile: String, seed: int) -> Dictionary:
+	var recipe: Dictionary = theme()["profiles"].get(profile, theme()["profiles"]["grasslands"])
+	var coast := coast_distances(size, terrain)
+	var scores: Array = []
+	var selected: Dictionary = {}
+	var best := -INF
+	var winner := 0
+	for candidate in range(candidate_count(size)):
+		var candidate_seed := seed ^ (0x2A63B91 + candidate * 104729)
+		var fields := build_fields(size, terrain, starts, recipe, coast, candidate_seed)
+		# Score forest opportunities around every base, not decorative coverage.
+		var opportunities: Array[int] = []
+		for start in starts:
+			var count := 0
+			for y in range(maxi(0, int(start.y) - 18), mini(size.y, int(start.y) + 19)):
+				for x in range(maxi(0, int(start.x) - 18), mini(size.x, int(start.x) + 19)):
+					var distance := start.distance_to(Vector2(x + 0.5, y + 0.5))
+					if distance >= 9.0 and distance <= 18.0 and int(fields["forest_potential"][y * size.x + x]) != 0: count += 1
+			opportunities.append(count)
+		var minimum := int(opportunities.min()) if not opportunities.is_empty() else 0
+		var maximum := int(opportunities.max()) if not opportunities.is_empty() else 0
+		var score := float(minimum) - float(maximum - minimum) * 0.4
+		scores.append({"index": candidate, "seed": candidate_seed, "score": score, "forest_opportunities": opportunities})
+		if selected.is_empty() or score > best:
+			best = score
+			selected = fields
+			winner = candidate
+	selected["generation_candidates"] = {"scope": "relief_and_ecology", "candidate_count": scores.size(), "scores": scores,
+		"selected_candidate_index": winner, "selected_candidate_seed": int(scores[winner]["seed"])}
+	return selected
+
+
+static func build_fields(size: Vector2i, terrain: Array[int], starts: Array[Vector2], recipe: Dictionary, coast: PackedInt32Array, seed: int) -> Dictionary:
+	var scale := clampf(float(mini(size.x, size.y)) * 0.15, 9.0, 24.0)
+	var macro := noise_field(size, scale * 1.8, seed)
+	var detail := noise_field(size, scale * 0.62, seed ^ 0x732AF)
+	var moisture := noise_field(size, scale * 1.25, seed ^ 0x793D15)
+	var woodland := noise_field(size, scale * 0.85, seed ^ 0xBAC712)
+	var geology := noise_field(size, scale * 0.66, seed ^ 0x72623)
+	var potential := PackedByteArray()
+	potential.resize(terrain.size())
+	var cell_levels := PackedInt32Array()
+	cell_levels.resize(terrain.size())
+	for i in range(terrain.size()):
+		if int(terrain[i]) in WATER: continue
+		var point := Vector2(i % size.x + 0.5, i / size.x + 0.5)
+		var start_distance := INF
+		for start in starts: start_distance = minf(start_distance, point.distance_to(start))
+		var ridge := clampf((macro[i] * 0.65 + detail[i] * 0.35 - 0.34) * 2.0, 0.0, 1.0)
+		var height := mini(int(recipe["relief"]), floori(ridge * (float(recipe["relief"]) + 0.7)))
+		# Distance to the actual shoreline replaces the old all-dry bounding-box test.
+		height = mini(height, maxi(0, (coast[i] - 2) / 3))
+		if not is_inf(start_distance): height = mini(height, maxi(0, floori((start_distance - 5.0) / 3.0)))
+		cell_levels[i] = height
+		moisture[i] = clampf(moisture[i] + float(recipe["moisture_bias"]) + maxf(0.0, 0.16 - float(coast[i]) * 0.012) - ridge * 0.13, 0.0, 1.0)
+		var suitability := woodland[i] * 0.78 + moisture[i] * 0.22
+		potential[i] = int(suitability > float(recipe["forest_threshold"]) and start_distance > 6.0 and coast[i] > 1)
+	var levels: Array[int] = []
+	levels.resize((size.x + 1) * (size.y + 1))
+	for y in range(size.y + 1):
+		for x in range(size.x + 1):
+			var height := 4
+			for dy in [-1, 0]:
+				for dx in [-1, 0]:
+					var cell := Vector2i(clampi(x + dx, 0, size.x - 1), clampi(y + dy, 0, size.y - 1))
+					height = mini(height, cell_levels[cell.y * size.x + cell.x])
+			levels[y * (size.x + 1) + x] = height
+	relax_heights(levels, size)
+	return {"moisture": moisture, "woodland": woodland, "geology": geology, "coast_distance": coast,
+		"forest_potential": potential, "vertex_levels": levels, "recipe": recipe}
+
+
+static func paint_ground(map_data: Dictionary, fields: Dictionary) -> void:
+	var terrain: Array[int] = map_data["terrain_ids"]
+	var size: Vector2i = map_data["size"]
+	var levels: Array[int] = map_data["vertex_levels"]
+	for i in range(terrain.size()):
+		if int(terrain[i]) in WATER: continue
+		var height := levels[(i / size.x) * (size.x + 1) + i % size.x]
+		var moisture := float(fields["moisture"][i])
+		var rock := float(fields["geology"][i])
+		if rock > float(fields["recipe"]["rock_threshold"]) and height > 0:
+			terrain[i] = 1000 if rock > float(fields["recipe"]["rock_threshold"]) + 0.10 else 1001
+		elif moisture < 0.40 and height > 0:
+			terrain[i] = 1002
+		elif moisture < 0.48 and height > 0:
+			terrain[i] = 1001
+		else:
+			terrain[i] = 0
+
+
+static func forests(map_data: Dictionary, fields: Dictionary, exclusions: Dictionary, seed: int) -> void:
+	var size: Vector2i = map_data["size"]
+	var terrain: Array[int] = map_data["terrain_ids"]
+	var levels: Array[int] = map_data["vertex_levels"]
+	var resources: Array = map_data["resources"]
+	var occupied := exclusions.duplicate()
+	for resource in resources:
+		occupied[Vector2i(resource["position"])] = true
+		if String(resource.get("kind", "")) == "tree":
+			bind_tree(resource, fields, size, seed)
+	var forest_mask := PackedByteArray()
+	forest_mask.resize(terrain.size())
+	for i in range(terrain.size()):
+		if fields["forest_potential"][i] == 0: continue
+		var cell := Vector2i(i % size.x, i / size.x)
+		if occupied.has(cell) or not flat_cell(cell, size, levels): continue
+		var edge := false
+		for next in Navigation.neighbors(i, size):
+			if fields["forest_potential"][next] == 0: edge = true
+		var density := 0.38 if edge else 0.80
+		# Shared low-frequency holes create clearings, with a few loose edge trees.
+		if float(fields["geology"][i]) < 0.20: continue
+		if random_at(cell, seed ^ 0x737AE) > density: continue
+		var resource := {"category": "resource", "kind": "tree", "amount": 75, "position": Vector2(cell) + Vector2(0.5, 0.5),
+			"placement_domain": "land", "source_unit_id": 134, "source_graphic_id": 601, "source_graphic_asset_name": "graphic_601",
+			"ecology_role": "forest_edge" if edge else "forest_core", "strategic_zone": _zone(map_data, i)}
+		bind_tree(resource, fields, size, seed)
+		resources.append(resource)
+		occupied[cell] = true
+	forest_accents(map_data, fields, occupied, seed)
+	for resource in resources:
+		if String(resource.get("kind", "")) != "tree": continue
+		var cell := Vector2i(resource["position"])
+		forest_mask[cell.y * size.x + cell.x] = 1
+	# Paint the forest that actually exists, not a disconnected source terrain mask.
+	for i in range(forest_mask.size()):
+		if forest_mask[i] == 0: continue
+		var cell := Vector2i(i % size.x, i / size.x)
+		for y in range(maxi(0, cell.y - 1), mini(size.y, cell.y + 2)):
+			for x in range(maxi(0, cell.x - 1), mini(size.x, cell.x + 2)):
+				var index := y * size.x + x
+				if int(terrain[index]) in WATER: continue
+				var light_woodland := float(fields["woodland"][index]) * 0.7 + float(fields["moisture"][index]) * 0.3 < 0.63
+				# Ground follows canopy density, independently of the game a tree came from.
+				terrain[index] = (10 if light_woodland else 1003) if forest_mask[index] != 0 else (0 if light_woodland else 1001)
+	map_data["forest_mask"] = forest_mask
+
+
+static func bind_tree(resource: Dictionary, fields: Dictionary, size: Vector2i, seed: int) -> void:
+	var cell := Vector2i(resource["position"])
+	var index := cell.y * size.x + cell.x
+	var pine := float(fields["moisture"][index]) < 0.47 or int(fields["vertex_levels"][cell.y * (size.x + 1) + cell.x]) >= 2
+	var palette: Dictionary = theme()["tree_palettes"]
+	var family: Dictionary = palette["conifer" if pine else "broadleaf"]
+	var variants: Array = family["native"]
+	var native: Dictionary = variants[int(random_at(cell, seed ^ 0x73814) * 10000.0) % variants.size()]
+	# Both sources share native gameplay; art is selected once and survives saves.
+	_bind_native_tree(resource, native)
+	var native_share := lerpf(float(palette["native_share_min"]), float(palette["native_share_max"]), float(fields["geology"][index]))
+	resource.erase("environment_asset")
+	resource.erase("environment_variant")
+	if random_at(cell, seed ^ 0x421CDF) >= native_share:
+		resource["environment_asset"] = family["imported"]
+		resource["environment_variant"] = int(random_at(cell, seed ^ 0x71873) * 10000.0) % int(family["imported_variants"])
+	resource["visible_when_depleted"] = true
+	resource["position"] = Vector2(cell) + Vector2(0.5, 0.5) + Vector2(random_at(cell, seed ^ 0xAF52) - 0.5, random_at(cell, seed ^ 0x7541) - 0.5) * 0.36
+
+
+static func _bind_native_tree(resource: Dictionary, native: Dictionary) -> void:
+	resource["source_unit_id"] = int(native["unit_id"])
+	resource["source_graphic_id"] = int(native["graphic_id"])
+	resource["source_graphic_asset_name"] = "graphic_%d" % int(native["graphic_id"])
+	resource["source_frame"] = 0 # Native multi-frame trees include felled states.
+	resource["source_depleted_graphic_id"] = 600
+	resource["source_depleted_asset_name"] = "tree_stump"
+
+
+static func forest_accents(map_data: Dictionary, fields: Dictionary, occupied: Dictionary, seed: int) -> void:
+	var size: Vector2i = map_data["size"]
+	var resources: Array = map_data["resources"]
+	var accents: Dictionary = theme()["tree_palettes"]["accents"]
+	var spacing := int(accents["minimum_spacing"])
+	var accent_cells: Dictionary = {}
+	# Sparse exceptions within green broadleaf woods, never whole yellow groves.
+	for resource in resources:
+		if resource.get("kind", "") != "tree": continue
+		var cell := Vector2i(resource["position"])
+		var i := cell.y * size.x + cell.x
+		if float(fields["moisture"][i]) < 0.47 or int(fields["vertex_levels"][cell.y * (size.x + 1) + cell.x]) >= 2: continue
+		if random_at(cell, seed ^ 0x251AD) >= float(accents["forest_chance"]) or not _clear_neighborhood(cell, accent_cells, spacing): continue
+		_bind_accent(resource, accents, seed)
+		accent_cells[cell] = true
+	# A few isolated specimens occupy open, flat ground away from all reserved routes.
+	var candidates: Array = []
+	var terrain: Array[int] = map_data["terrain_ids"]
+	for by in range(5, size.y - 5, 12):
+		for bx in range(5, size.x - 5, 12):
+			var anchor := Vector2i(bx, by)
+			var cell := anchor + Vector2i(int(random_at(anchor, seed ^ 0x523E) * 7.0) - 3, int(random_at(anchor, seed ^ 0x635F) * 7.0) - 3)
+			var i := cell.y * size.x + cell.x
+			if terrain[i] in WATER or fields["forest_potential"][i] != 0 or _zone(map_data, i) in ["sanctuary", "blocked"]: continue
+			if fields["coast_distance"][i] <= 2 or not flat_cell(cell, size, map_data["vertex_levels"]): continue
+			if _clear_neighborhood(cell, occupied, 2): candidates.append(cell)
+	candidates.sort_custom(func(a, b): return random_at(a, seed ^ 0x123A) < random_at(b, seed ^ 0x123A))
+	var dry_land := terrain.size()
+	for water_id in WATER: dry_land -= terrain.count(water_id)
+	var budget := maxi(1, dry_land / int(accents["solitary_area_per_tree"]))
+	for cell in candidates:
+		if budget <= 0: break
+		if not _clear_neighborhood(cell, accent_cells, spacing): continue
+		var resource := {"category": "resource", "kind": "tree", "amount": 75, "position": Vector2(cell) + Vector2(0.5, 0.5),
+			"placement_domain": "land", "ecology_role": "solitary_tree", "strategic_zone": _zone(map_data, cell.y * size.x + cell.x)}
+		bind_tree(resource, fields, size, seed)
+		_bind_accent(resource, accents, seed)
+		resources.append(resource)
+		occupied[cell] = true
+		accent_cells[cell] = true
+		budget -= 1
+
+
+static func _bind_accent(resource: Dictionary, accents: Dictionary, seed: int) -> void:
+	var cell := Vector2i(resource["position"])
+	var variants: Array = accents["variants"]
+	var variant: Dictionary = variants[int(random_at(cell, seed ^ 0x82E1) * 10000.0) % variants.size()]
+	resource.erase("environment_asset")
+	resource.erase("environment_variant")
+	_bind_native_tree(resource, variant)
+	resource["tree_condition"] = variant["condition"]
+
+
+static func _clear_neighborhood(cell: Vector2i, occupied: Dictionary, radius: int) -> bool:
+	for y in range(cell.y - radius, cell.y + radius + 1):
+		for x in range(cell.x - radius, cell.x + radius + 1):
+			if occupied.has(Vector2i(x, y)): return false
+	return true
+
+
+static func scenery(map_data: Dictionary, fields: Dictionary, reserved: Dictionary, seed: int, density_scale: float = 1.0) -> Array:
+	var size: Vector2i = map_data["size"]
+	var terrain: Array[int] = map_data["terrain_ids"]
+	var blocked := reserved.duplicate()
+	for resource in map_data["resources"]:
+		var cell := Vector2i(resource["position"])
+		var clearance := 0 if resource.get("kind", "") == "tree" else 1
+		for y in range(cell.y - clearance, cell.y + clearance + 1):
+			for x in range(cell.x - clearance, cell.x + clearance + 1): blocked[Vector2i(x, y)] = true
+	var result: Array = []
+	# Fixed 3-cell buckets bound work and spacing, preserving whole empty meadows.
+	for by in range(1, size.y - 1, 3):
+		for bx in range(1, size.x - 1, 3):
+			var cell := Vector2i(bx, by)
+			var index := by * size.x + bx
+			if blocked.has(cell) or _zone(map_data, index) in ["sanctuary", "blocked"]: continue
+			var key := ""
+			var family := ""
+			var chance := random_at(cell, seed ^ 0x652DA)
+			if terrain[index] in [1000, 1001, 1002] and float(fields["geology"][index]) > float(fields["recipe"]["rock_threshold"]) - 0.10 and chance < 0.72 * density_scale:
+				key = "boulders"
+				family = "rock"
+			elif terrain[index] in [0, 10, 1000, 1001, 1003] and fields["forest_potential"][index] != 0 and flat_cell(cell, size, map_data["vertex_levels"]) and chance < 0.65 * density_scale:
+				key = "stump"
+				family = "ground_detail"
+			elif terrain[index] == 4 and chance < 0.22 * density_scale:
+				result.append({"id": -800000 - result.size(), "position": Vector2(cell) + Vector2(0.5, 0.5), "asset_name": "graphic_503", "graphic_id": 503,
+					"source_frame": int(chance * 1000.0), "ambient": true, "feature_family": "shallows", "strategic_zone": _zone(map_data, index)})
+				continue
+			if key.is_empty(): continue
+			var jitter := Vector2(random_at(cell, seed ^ 0x998A) - 0.5, random_at(cell, seed ^ 0xAA1D) - 0.5) * 0.6
+			result.append({"id": -800000 - result.size(), "position": Vector2(cell) + Vector2(0.5, 0.5) + jitter, "asset_name": "aoe2_temperate:" + key,
+				"source_frame": int(chance * 10000.0) % (6 if key == "boulders" else 3), "ambient": true, "presentation_layer": "scenery",
+				"feature_family": family, "strategic_zone": _zone(map_data, index), "ecology_role": "rock_outcrop" if key == "boulders" else "forest_clearing"})
+	return result
+
+
+static func flat_cell(cell: Vector2i, size: Vector2i, levels: Array) -> bool:
+	var index := cell.y * (size.x + 1) + cell.x
+	return levels[index] == levels[index + 1] and levels[index] == levels[index + size.x + 1] and levels[index] == levels[index + size.x + 2]
+
+
+static func relax_heights(levels: Array[int], size: Vector2i, flat_cells: Dictionary = {}) -> void:
+	# A cell's four corners may differ by at most one level, including diagonals.
+	var width := size.x + 1
+	var flat_links: Dictionary = {}
+	for cell in flat_cells:
+		var i := int(cell.y) * width + int(cell.x)
+		var corners := PackedInt32Array([i, i + 1, i + width, i + width + 1])
+		for corner in corners:
+			if not flat_links.has(corner): flat_links[corner] = PackedInt32Array()
+			flat_links[corner].append_array(corners)
+	var queue := PackedInt32Array()
+	for i in range(levels.size()): queue.append(i)
+	var cursor := 0
+	while cursor < queue.size():
+		var index := queue[cursor]
+		cursor += 1
+		var x := index % width
+		var y := index / width
+		for next in flat_links.get(index, PackedInt32Array()):
+			if levels[next] > levels[index]:
+				levels[next] = levels[index]
+				queue.append(next)
+		for dy in [-1, 0, 1]:
+			for dx in [-1, 0, 1]:
+				if x + dx < 0 or y + dy < 0 or x + dx > size.x or y + dy > size.y: continue
+				var next: int = (y + dy) * width + x + dx
+				if levels[next] > levels[index] + 1:
+					levels[next] = levels[index] + 1
+					queue.append(next)
+
+
+static func coast_distances(size: Vector2i, terrain: Array[int]) -> PackedInt32Array:
+	var distances := PackedInt32Array()
+	distances.resize(terrain.size())
+	distances.fill(size.x + size.y)
+	var queue := PackedInt32Array()
+	for i in range(terrain.size()):
+		if int(terrain[i]) in WATER:
+			distances[i] = 0
+			queue.append(i)
+	var cursor := 0
+	while cursor < queue.size():
+		var index := queue[cursor]
+		cursor += 1
+		for next in Navigation.neighbors(index, size):
+			if distances[next] > distances[index] + 1:
+				distances[next] = distances[index] + 1
+				queue.append(next)
+	return distances
+
+
+static func noise_field(size: Vector2i, period: float, seed: int) -> PackedFloat32Array:
+	var grid_width := ceili(float(size.x) / period) + 2
+	var grid_height := ceili(float(size.y) / period) + 2
+	var grid := PackedFloat32Array()
+	grid.resize(grid_width * grid_height)
+	for y in range(grid_height):
+		for x in range(grid_width): grid[y * grid_width + x] = random_at(Vector2i(x, y), seed)
+	var result := PackedFloat32Array()
+	result.resize(size.x * size.y)
+	for y in range(size.y):
+		var gy := floori(float(y) / period)
+		var ty := fposmod(float(y), period) / period
+		ty = ty * ty * (3.0 - 2.0 * ty)
+		for x in range(size.x):
+			var gx := floori(float(x) / period)
+			var tx := fposmod(float(x), period) / period
+			tx = tx * tx * (3.0 - 2.0 * tx)
+			result[y * size.x + x] = lerpf(lerpf(grid[gy * grid_width + gx], grid[gy * grid_width + gx + 1], tx), lerpf(grid[(gy + 1) * grid_width + gx], grid[(gy + 1) * grid_width + gx + 1], tx), ty)
+	return result
+
+
+static func random_at(cell: Vector2i, seed: int) -> float:
+	var value := (cell.x * 374761393 + cell.y * 668265263 + seed * 69069) & 0x7fffffff
+	value = ((value ^ (value >> 13)) * 1274126177) & 0x7fffffff
+	return float(value ^ (value >> 16)) / 2147483647.0
+
+
+static func fingerprint(map_data: Dictionary) -> String:
+	var stable: Array = [VERSION, map_data.get("size"), map_data.get("seed"), map_data.get("terrain_ids"), map_data.get("vertex_levels"),
+		map_data.get("cliff_cells", []), map_data.get("resources", []), map_data.get("scenery", []), map_data.get("naval_start_zones", [])]
+	return JSON.stringify(Replay.new().encode_variant(stable)).sha256_text()
+
+
+static func _zone(map_data: Dictionary, index: int) -> String:
+	var names := ["blocked", "sanctuary", "territory", "contested", "frontier"]
+	return names[int(map_data["strategic_zones"]["zone_ids"][index])]
+
+
+static func paint_resource_grounds(map_data: Dictionary) -> void:
+	var size: Vector2i = map_data["size"]
+	var terrain: Array[int] = map_data["terrain_ids"]
+	var forest: PackedByteArray = map_data["forest_mask"]
+	for resource in map_data["resources"]:
+		if resource.get("kind", "") not in ["stone_mine", "gold_mine"]: continue
+		var cell := Vector2i(resource["position"])
+		for y in range(maxi(0, cell.y - 1), mini(size.y, cell.y + 2)):
+			for x in range(maxi(0, cell.x - 1), mini(size.x, cell.x + 2)):
+				var i := y * size.x + x
+				if terrain[i] in WATER or forest[i] != 0: continue
+				terrain[i] = 1000 if Vector2i(x, y) == cell else 1001

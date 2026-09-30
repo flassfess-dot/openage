@@ -53,8 +53,11 @@ func _initialize() -> void:
 				assert_true(owned_count >= player_count * 20, "%s has source-backed groups for every player" % context)
 				assert_true(neutral_count > 0, "%s has neutral resources beyond starts" % context)
 				assert_true(wildlife_count > 0, "%s has source-backed wildlife" % context)
+				var sources: Dictionary = map_data["ecology"]["tree_sources"]
+				var tree_count: int = sources["ror"] + sources["aoe2"]
+				assert_true(sources["ror"] > tree_count * 0.15 and sources["aoe2"] > tree_count * 0.15, "%s combines substantial tree populations from both games" % context)
 				var terrain_ids: Array = map_data.get("terrain_ids", [])
-				assert_true(terrain_ids.any(func(value): return int(value) in TerrainRules.SOURCE_FOREST_TERRAIN_IDS), "%s has source terrain clumps" % context)
+				assert_true(terrain_ids.any(func(value): return int(value) == 1003), "%s has material under actual forests" % context)
 				print("RoR map fairness checked %s" % context)
 	if failures.is_empty():
 		print("RoR DAT-backed random map fairness matrix passed")

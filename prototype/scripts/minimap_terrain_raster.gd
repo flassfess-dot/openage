@@ -51,6 +51,10 @@ static func build_fog(map_size: Vector2i, rectangle: Rect2, center: Vector2, sca
 
 static func color_for_terrain_id(terrain_id: int) -> Color:
 	match terrain_id:
+		1000: return Color("877447")
+		1001: return Color("7e804c")
+		1002: return Color("969253")
+		1003: return Color("52613a")
 		1, 4: return Color("275991")
 		22: return Color("193e75")
 		2: return Color("c8ae77")

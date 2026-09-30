@@ -1,5 +1,7 @@
 class_name RoRResourceCatalog
 
+const EnvironmentPack := preload("res://scripts/environment_pack.gd")
+
 const ShorelineTiles := preload("res://scripts/shoreline_tiles.gd")
 
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
@@ -17,6 +19,8 @@ const CORPSE_GRAPHIC_IDS := {"villager": 141, "clubman": 138, "archer": 135}
 const SPECIAL_GRAPHIC_IDS := {
 	"villager": {"work_food": 470, "work_wood": 467, "work_mine": 474, "carry_food": 681, "carry_wood": 93, "carry_stone": 94, "carry_gold": 91},
 }
+
+var environment_pack := EnvironmentPack.new()
 
 var terrain_textures := {}
 var terrain_all_textures := {}
@@ -258,6 +262,12 @@ func building_frame_info(building: Dictionary, animation_time: float = 0.0) -> D
 
 
 func resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
+	if environment_pack.enabled and resource.has("environment_asset"):
+		var presentation := environment_pack.decorate_resource(resource, String(resource["environment_asset"]), int(resource.get("environment_variant", 0)))
+		if not presentation.is_empty():
+			return environment_pack.frame_info(presentation, true)
+	if environment_pack.owns_asset(String(resource.get("source_graphic_asset_name", ""))):
+		return environment_pack.frame_info(resource, true)
 	var source_frame := source_resource_frame_info(resource, animation_time)
 	if not source_frame.is_empty():
 		return source_frame
@@ -334,7 +344,16 @@ func effect_frame_info(effect: Dictionary) -> Dictionary:
 	return effect_presentations.frame_info(effect)
 
 
+func enable_environment_pack() -> bool:
+	if not environment_pack.enable():
+		return false
+	environment_pack.prepare_legacy_terrain(terrain_textures)
+	return true
+
+
 func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Dictionary:
+	if environment_pack.owns_asset(String(item.get("asset_name", ""))):
+		return environment_pack.frame_info(item)
 	var graphic_id := int(item.get("graphic_id", -1))
 	var asset_name := String(item.get("asset_name", ""))
 	var ambient_actor := String(item.get("presentation_layer", "scenery")) == "ambient_actor"

@@ -683,6 +683,10 @@ function blitScaled(source, destination, destinationWidth, dx, dy, maxWidth, max
   return {width, height};
 }
 
+// Share the decoder without running the RoR command-line importer.
+module.exports = {parseDrs, layerDrs, parsePalettes, decodeSlp, writePng};
+
+if (require.main === module) {
 if (argv.includes("--self-test-slp")) {
 	runSlpSemanticSelfTest();
 	process.exit(0);
@@ -887,4 +891,6 @@ if (selectionPath) {
 
 if (!catalogArchive && !selectionPath) {
   console.log(`wrote source manifest to ${path.join(outputDir, "source-manifest.json")}`);
+}
+
 }

@@ -31,6 +31,11 @@ func _test_distance_banded_water_and_walkable_sandbars() -> void:
 	assert_true(TerrainRules.is_water_navigable(TerrainRules.logical_for_terrain_id(4)), "ships can traverse source shallows")
 	for shallow in shallow_cells:
 		assert_true(_connected_to_land(shallow, terrain, size), "every shallow component remains attached to the coast")
+	for anchor in summary["sandbar_anchors"]:
+		var lateral_neighbors := 0
+		for dy in [-1, 1]:
+			if terrain[(anchor.y + dy) * size.x + anchor.x] == 4: lateral_neighbors += 1
+		assert_true(lateral_neighbors == 2, "straight coastline creates broad rounded shoals instead of one-cell rays")
 
 
 func _test_deterministic_water_detail() -> void:

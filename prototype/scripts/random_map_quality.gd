@@ -1,6 +1,7 @@
 class_name RoRRandomMapQuality
 extends RefCounted
 
+const LandscapeNavigation := preload("res://scripts/random_map_navigation.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const RandomMapMetrics := preload("res://scripts/random_map_metrics.gd")
 
@@ -14,7 +15,7 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 	var players: Array = definition.get("players", [])
 	if terrain_ids.size() != size.x * size.y:
 		return {"valid": false, "errors": ["random_map_terrain_size_mismatch"], "metrics": {}}
-	if String(generator.get("type", "")) == "seeded_skirmish_v1":
+	if String(generator.get("type", "")) == "landscape_skirmish_v2":
 		var strategic_zones: Dictionary = map_data.get("strategic_zones", {})
 		for key in ["zone_ids", "nearest_start_indices", "nearest_start_distances", "second_start_distances", "coastal_land_mask"]:
 			if strategic_zones.get(key, []).size() != terrain_ids.size():
@@ -128,6 +129,13 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 		"cliff_cell_count": cliff_lookup.size(),
 		"narrows_gate_width": gate_width,
 	}
+	if String(generator.get("type", "")) == "landscape_skirmish_v2":
+		var navigation := LandscapeNavigation.inspect(definition, map_data)
+		errors.append_array(navigation["errors"])
+		metrics["final_navigation"] = navigation
+		var expected_hash := String(definition.get("map", {}).get("content_hash", ""))
+		if not expected_hash.is_empty() and expected_hash != String(map_data.get("content_hash", "")):
+			errors.append("random_map_content_hash_mismatch")
 	metrics.merge(RandomMapMetrics.measure(definition, map_data), true)
 	return {
 		"valid": errors.is_empty(),

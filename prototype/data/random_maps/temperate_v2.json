@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "id": "temperate_v2",
+  "environment_pack": "aoe2_temperate",
+  "materials": {
+    "meadow": 0,
+    "earth": 1000,
+    "grass_dirt": 1001,
+    "dry_grass": 1002,
+    "forest_grass": 1003,
+    "light_forest": 10
+  },
+  "profiles": {
+    "grasslands": {
+      "relief": 2,
+      "forest_threshold": 0.61,
+      "moisture_bias": 0.03,
+      "rock_threshold": 0.74
+    },
+    "highlands": {
+      "relief": 4,
+      "forest_threshold": 0.56,
+      "moisture_bias": -0.05,
+      "rock_threshold": 0.6
+    },
+    "hill_country": {
+      "relief": 3,
+      "forest_threshold": 0.57,
+      "moisture_bias": 0,
+      "rock_threshold": 0.63
+    },
+    "narrows": {
+      "relief": 2,
+      "forest_threshold": 0.59,
+      "moisture_bias": 0,
+      "rock_threshold": 0.66
+    },
+    "coastal": {
+      "relief": 2,
+      "forest_threshold": 0.59,
+      "moisture_bias": 0.08,
+      "rock_threshold": 0.72
+    },
+    "continental": {
+      "relief": 3,
+      "forest_threshold": 0.58,
+      "moisture_bias": 0.04,
+      "rock_threshold": 0.68
+    },
+    "mediterranean": {
+      "relief": 2,
+      "forest_threshold": 0.63,
+      "moisture_bias": -0.09,
+      "rock_threshold": 0.67
+    },
+    "islands": {
+      "relief": 2,
+      "forest_threshold": 0.58,
+      "moisture_bias": 0.12,
+      "rock_threshold": 0.73
+    },
+    "small_islands": {
+      "relief": 2,
+      "forest_threshold": 0.6,
+      "moisture_bias": 0.1,
+      "rock_threshold": 0.75
+    }
+  },
+  "notes": "Runtime ecology is independent of the immutable RoR DAT source profiles. Sand is confined to actual shore cells. No cracked-earth decals in this theme.",
+  "tree_palettes": {
+    "native_share_min": 0.25,
+    "native_share_max": 0.75,
+    "broadleaf": {
+      "native": [
+        {
+          "unit_id": 134,
+          "graphic_id": 601
+        },
+        {
+          "unit_id": 136,
+          "graphic_id": 603
+        },
+        {
+          "unit_id": 142,
+          "graphic_id": 609
+        },
+        {
+          "unit_id": 144,
+          "graphic_id": 611
+        },
+        {
+          "unit_id": 147,
+          "graphic_id": 614
+        }
+      ],
+      "imported": "oak",
+      "imported_variants": 3
+    },
+    "conifer": {
+      "native": [
+        {
+          "unit_id": 140,
+          "graphic_id": 607
+        },
+        {
+          "unit_id": 194,
+          "graphic_id": 623
+        },
+        {
+          "unit_id": 203,
+          "graphic_id": 655
+        }
+      ],
+      "imported": "pine",
+      "imported_variants": 5
+    },
+    "accents": {
+      "forest_chance": 0.006,
+      "minimum_spacing": 7,
+      "solitary_area_per_tree": 1800,
+      "variants": [
+        {
+          "unit_id": 146,
+          "graphic_id": 613,
+          "condition": "autumn"
+        },
+        {
+          "unit_id": 195,
+          "graphic_id": 627,
+          "condition": "autumn"
+        },
+        {
+          "unit_id": 366,
+          "graphic_id": 630,
+          "condition": "dry"
+        }
+      ]
+    }
+  }
+}

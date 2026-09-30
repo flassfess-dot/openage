@@ -1438,6 +1438,10 @@ func _unregister_forest_resource(resource: Dictionary) -> void:
 
 func _terrain_id_with_forest_resource(cell: Vector2i) -> int:
 	var source_terrain_id := int(map_terrain_ids.get(cell, TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell))))
+	if TerrainRules.is_environment_terrain_id(source_terrain_id):
+		# A tree must not replace the explicitly selected environment material.
+		# Its resource footprint already provides the movement obstruction.
+		return source_terrain_id
 	return source_terrain_id if TerrainRules.is_source_forest_terrain_id(source_terrain_id) else int(TerrainRules.TERRAIN_IDS["forest_floor"])
 
 

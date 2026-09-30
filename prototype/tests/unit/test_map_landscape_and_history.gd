@@ -13,7 +13,6 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
-	_verify_tree_palettes()
 	_verify_landscape()
 	_verify_bounded_histories()
 	if failures.is_empty():
@@ -25,43 +24,17 @@ func _initialize() -> void:
 	quit(1)
 
 
-func _verify_tree_palettes() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 1742
-	var palms: Array = MapGenerator._forest_palette(13, rng)
-	_check(palms.size() >= 5, "desert forests have several palm silhouettes")
-	for id_value in palms:
-		_check(MapGenerator.TREE_GRAPHICS.has(int(id_value)), "every palm has a source graphic")
-	for graphic_value in MapGenerator.TREE_GRAPHICS.values():
-		_check(FileAccess.file_exists("res://assets/generated/graphic_%d.png" % int(graphic_value)), "chosen tree graphic exists in the source asset import")
-	var broadleaf_clumps := 0
-	var mixed_clumps := 0
-	var pure_conifer_clumps := 0
-	for index in range(100):
-		var palette: Array = MapGenerator._forest_palette(10, rng)
-		var conifers := palette.filter(func(id_value): return int(id_value) in MapGenerator.CONIFER_TREES)
-		if conifers.is_empty():
-			broadleaf_clumps += 1
-		elif conifers.size() == palette.size():
-			pure_conifer_clumps += 1
-		else:
-			mixed_clumps += 1
-	_check(broadleaf_clumps > 0, "some green clumps remain pure broadleaf")
-	_check(mixed_clumps > 0, "green clumps mix broadleaf and conifer")
-	_check(pure_conifer_clumps < 12, "pure conifer clumps stay rare")
-
-
 func _verify_landscape() -> void:
 	var size := Vector2i(64, 64)
 	var starts: Array[Vector2] = [Vector2(25.5, 25.5), Vector2(49.5, 49.5)]
 	var profile := {"id": "coastal", "topology": "coastal", "coast_fraction": 0.21, "requires_naval_starts": false}
 	var generator: Dictionary = MapContract.build(profile, size, starts)
 	generator["source_profile"] = SourceProfile.get_profile("coastal")
-	var definition := {"map": {"size": size, "seed": 41721, "generator": generator}, "players": [{"start": starts[0]}, {"start": starts[1]}], "entities": []}
+	var definition := {"map": {"size": size, "seed": 41721, "generator": generator}, "players": [{"team": 1, "start": starts[0]}, {"team": 2, "start": starts[1]}], "entities": []}
 	var map_data: Dictionary = MapGenerator.generate(definition)
 	_check(map_data == MapGenerator.generate(definition), "landscape generation remains deterministic")
 	var tree_graphics: Dictionary = {}
-	var palm_graphics: Dictionary = {}
+	var environment_variants: Dictionary = {}
 	for resource_value in map_data["resources"]:
 		var resource: Dictionary = resource_value
 		if String(resource.get("kind", "")) != "tree":
@@ -69,10 +42,9 @@ func _verify_landscape() -> void:
 		var graphic_id := int(resource.get("source_graphic_id", -1))
 		if graphic_id > 0:
 			tree_graphics[graphic_id] = true
-			if int(resource.get("source_unit_id", -1)) in MapGenerator.PALM_TREES:
-				palm_graphics[graphic_id] = true
+			environment_variants["%s:%d" % [resource.get("environment_asset", ""), resource.get("environment_variant", 0)]] = true
 	_check(tree_graphics.size() >= 3, "one generated map uses several tree sprites")
-	_check(palm_graphics.size() >= 2, "palm groves vary within the map")
+	_check(environment_variants.size() >= 3, "temperate groves use several adapted silhouettes")
 	var elevated := 0
 	for level in map_data["vertex_levels"]:
 		if int(level) > 0:

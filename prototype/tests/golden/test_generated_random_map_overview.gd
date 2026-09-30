@@ -71,6 +71,8 @@ func _terrain_color(terrain_id: int) -> Color:
 		return Color(0.08, 0.23, 0.55) if terrain_id != 22 else Color(0.04, 0.12, 0.37)
 	if terrain_id == 2:
 		return Color(0.81, 0.72, 0.45)
+	if terrain_id in [1000, 1001, 1002, 1003]:
+		return [Color("877447"), Color("7e804c"), Color("969253"), Color("52613a")][terrain_id - 1000]
 	if terrain_id in TerrainRules.SOURCE_FOREST_TERRAIN_IDS:
 		return Color(0.1, 0.28, 0.09)
 	if terrain_id == 6:

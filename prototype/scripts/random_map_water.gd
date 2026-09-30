@@ -100,26 +100,38 @@ static func _paint_sandbars(terrain_ids: Array[int], size: Vector2i, distances: 
 		var outward := -land_direction
 		if outward == Vector2i.ZERO:
 			continue
-		var length := rng.randi_range(2, 4)
-		var painted := 0
-		for step in range(length):
-			var cell: Vector2i = candidate + outward * step
-			if not _in_bounds(cell, size):
-				break
-			var index := cell.y * size.x + cell.x
-			if int(terrain_ids[index]) not in TerrainRules.WATER_TERRAIN_IDS or int(distances[index]) > 3:
-				break
-			terrain_ids[index] = WALKABLE_SHALLOW_TERRAIN_ID
-			painted += 1
-			if step > 0 and rng.randf() < 0.38:
-				var side := Vector2i(-outward.y, outward.x) * (-1 if rng.randf() < 0.5 else 1)
-				var side_cell: Vector2i = cell + side
-				if _in_bounds(side_cell, size):
-					var side_index := side_cell.y * size.x + side_cell.x
-					if int(terrain_ids[side_index]) in TerrainRules.WATER_TERRAIN_IDS and int(distances[side_index]) <= 3:
-						terrain_ids[side_index] = WALKABLE_SHALLOW_TERRAIN_ID
-		if painted > 0:
-			anchors.append(candidate)
+		var length := rng.randf_range(1.8, 2.8)
+		var half_width := rng.randf_range(1.6, 2.6)
+		var side := Vector2i(-outward.y, outward.x)
+		var patch: Dictionary = {}
+		# Rounded, coast-attached shoals replace one-cell rays with random elbows.
+		for dy in range(-4, 5):
+			for dx in range(-4, 5):
+				var cell := candidate + Vector2i(dx, dy)
+				if not _in_bounds(cell, size): continue
+				var index := cell.y * size.x + cell.x
+				if int(terrain_ids[index]) not in TerrainRules.WATER_TERRAIN_IDS or int(distances[index]) > 3: continue
+				var offset := Vector2(dx, dy)
+				var depth := offset.dot(Vector2(outward))
+				var across := offset.dot(Vector2(side))
+				if depth < 0.0: continue
+				if pow((depth + 0.2) / length, 2.0) + pow(across / half_width, 2.0) <= 1.0: patch[cell] = true
+		# Only the part connected to the coast anchor is walkable. Nearby bays
+		# and channels can clip the ellipse without leaving detached fragments.
+		var queue: Array[Vector2i] = []
+		if patch.has(candidate): queue.append(candidate)
+		var cursor := 0
+		patch.erase(candidate)
+		while cursor < queue.size():
+			var cell := queue[cursor]
+			cursor += 1
+			terrain_ids[cell.y * size.x + cell.x] = WALKABLE_SHALLOW_TERRAIN_ID
+			for offset in ORTHOGONAL_DIRECTIONS:
+				var neighbor: Vector2i = cell + offset
+				if patch.has(neighbor):
+					patch.erase(neighbor)
+					queue.append(neighbor)
+		if not queue.is_empty(): anchors.append(candidate)
 	return anchors
 
 

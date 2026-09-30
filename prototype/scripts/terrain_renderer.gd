@@ -1,10 +1,14 @@
 class_name RoRTerrainRenderer
 
+const EnvironmentTerrain := preload("res://scripts/environment_terrain.gd")
+
 const Coordinates := preload("res://scripts/coordinates.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 
 
 static func tile_drawable(cell: Vector2i, terrain_id: int, terrain_provider: Callable, resource_catalog, terrain_elevation, zoom: float, view_offset: Vector2, map_seed: int) -> Dictionary:
+	if EnvironmentTerrain.affects(cell, terrain_provider, resource_catalog.environment_pack):
+		return EnvironmentTerrain.tile_drawable(cell, terrain_id, terrain_provider, resource_catalog, terrain_elevation, zoom, view_offset, map_seed)
 	var terrain_kind := TerrainRules.base_texture_kind(terrain_id, resource_catalog.terrain_catalog_data)
 	var source_terrain_id := int(TerrainRules.TERRAIN_IDS.get(terrain_kind, 0))
 	var terrain_record: Dictionary = resource_catalog.terrain_catalog_data.get("terrains", {}).get(str(source_terrain_id), {})

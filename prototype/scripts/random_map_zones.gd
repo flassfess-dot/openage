@@ -26,6 +26,8 @@ static func build(players: Array, size: Vector2i, terrain_ids: Array, cliff_cell
 	var nearest_owner: PackedInt32Array = distance_maps["nearest_start_indices"]
 	var nearest_distance: PackedInt32Array = distance_maps["nearest_start_distances"]
 	var second_distance: PackedInt32Array = distance_maps["second_start_distances"]
+	if bool(contract.get("alliance_aware", false)):
+		second_distance = _enemy_distances(players, size, walkable_mask, nearest_owner, second_distance)
 	var zone_ids := PackedInt32Array()
 	var coastal_mask := PackedByteArray()
 	zone_ids.resize(size.x * size.y)
@@ -236,3 +238,36 @@ static func _mask_has(mask: PackedByteArray, size: Vector2i, cell: Vector2i) -> 
 
 static func _in_bounds(cell: Vector2i, size: Vector2i) -> bool:
 	return cell.x >= 0 and cell.y >= 0 and cell.x < size.x and cell.y < size.y
+
+
+static func _enemy_distances(players: Array, size: Vector2i, walkable: PackedByteArray, nearest_owner: PackedInt32Array, fallback: PackedInt32Array) -> PackedInt32Array:
+	var alliances: Dictionary = {}
+	for player in players: alliances[int(player.get("alliance_id", player["team"]))] = true
+	if alliances.size() == players.size(): return fallback
+	var result := PackedInt32Array()
+	result.resize(walkable.size())
+	result.fill(-1)
+	for alliance in alliances:
+		var distances := PackedInt32Array()
+		distances.resize(walkable.size())
+		distances.fill(-1)
+		var queue := PackedInt32Array()
+		for player in players:
+			if int(player.get("alliance_id", player["team"])) == int(alliance): continue
+			var cell := Vector2i(player["start"])
+			var index := cell.y * size.x + cell.x
+			if walkable[index] != 0:
+				distances[index] = 0
+				queue.append(index)
+		var cursor := 0
+		while cursor < queue.size():
+			var index := queue[cursor]
+			cursor += 1
+			for next in _neighbor_indices(index % size.x, index / size.x, size):
+				if walkable[next] == 0 or distances[next] >= 0: continue
+				distances[next] = distances[index] + 1
+				queue.append(next)
+		for i in range(result.size()):
+			var owner := nearest_owner[i]
+			if owner >= 0 and int(players[owner].get("alliance_id", players[owner]["team"])) == int(alliance): result[i] = distances[i]
+	return result

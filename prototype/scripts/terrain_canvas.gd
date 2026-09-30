@@ -41,8 +41,9 @@ func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable,
 
 
 func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, next_terrain_revision: int) -> void:
-	var projection_changed := not is_equal_approx(view_zoom, zoom) or terrain_revision != next_terrain_revision
-	var view_changed := projection_changed or not view_offset.is_equal_approx(offset) or not viewport_size.is_equal_approx(next_viewport_size)
+	var zoom_changed := not is_equal_approx(view_zoom, zoom)
+	var projection_changed := (zoom_changed and not _uses_world_mesh()) or terrain_revision != next_terrain_revision
+	var view_changed := zoom_changed or projection_changed or not view_offset.is_equal_approx(offset) or not viewport_size.is_equal_approx(next_viewport_size)
 	if not view_changed:
 		return
 	view_zoom = zoom
@@ -68,7 +69,7 @@ func _draw() -> void:
 	if resource_catalog == null or simulation_world == null or not terrain_id_provider.is_valid() or not bounds_provider.is_valid():
 		return
 	if terrain_mesh != null and terrain_atlas != null:
-		draw_set_transform(PixelScaling.snap_screen(view_offset))
+		draw_set_transform(PixelScaling.snap_screen(view_offset), 0.0, Vector2.ONE * (view_zoom if _uses_world_mesh() else 1.0))
 		draw_mesh(terrain_mesh, terrain_atlas)
 		draw_set_transform(Vector2.ZERO)
 		return
@@ -86,7 +87,11 @@ func _draw_terrain_fallback() -> void:
 				continue
 			for underlay in drawable.get("underlays", []):
 				draw_texture_rect(underlay["texture"], Rect2(PixelScaling.snap_screen(underlay["position"]), underlay["size"]), false)
-			draw_texture_rect(drawable["texture"], Rect2(PixelScaling.snap_screen(drawable["position"]), drawable["size"]), false)
+			if drawable.has("mesh_layers"):
+				for layer in drawable["mesh_layers"]:
+					_draw_material_layer(layer)
+			else:
+				draw_texture_rect(drawable["texture"], Rect2(PixelScaling.snap_screen(drawable["position"]), drawable["size"]), false)
 			for layer_value in drawable["borders"]:
 				_draw_terrain_border(drawable["position"], layer_value)
 
@@ -101,6 +106,8 @@ func _build_terrain_atlas() -> void:
 	for frames_value in resource_catalog.terrain_all_textures.values():
 		for texture_value in frames_value:
 			_append_unique_texture(textures, seen, texture_value)
+	for texture in resource_catalog.environment_pack.terrain_textures():
+		_append_unique_texture(textures, seen, texture)
 	for frames_value in resource_catalog.terrain_border_textures.values():
 		for texture_value in frames_value:
 			_append_unique_texture(textures, seen, texture_value)
@@ -169,18 +176,25 @@ func _rebuild_terrain_mesh() -> void:
 	var vertices := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
+	var colors := PackedColorArray()
+	# Environment geometry stays in world projection; camera scaling is a draw transform.
+	var mesh_zoom := 1.0 if _uses_world_mesh() else view_zoom
 	var bounds := _expanded_bounds(bounds_provider.call(), MESH_OVERSCAN_CELLS)
 	terrain_mesh_bounds = bounds
 	for y in range(bounds.position.y, bounds.end.y):
 		for x in range(bounds.position.x, bounds.end.x):
 			var cell := Vector2i(x, y)
 			var terrain_id := int(terrain_id_provider.call(cell))
-			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_id_provider, resource_catalog, simulation_world.terrain_elevation, view_zoom, Vector2.ZERO, map_seed)
+			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_id_provider, resource_catalog, simulation_world.terrain_elevation, mesh_zoom, Vector2.ZERO, map_seed)
 			if drawable.is_empty():
 				continue
 			for underlay in drawable.get("underlays", []):
-				_append_texture_quad(vertices, uvs, indices, underlay["texture"], PixelScaling.snap_screen(underlay["position"]), underlay["size"])
-			_append_texture_quad(vertices, uvs, indices, drawable["texture"], PixelScaling.snap_screen(drawable["position"]), drawable["size"])
+				_append_texture_quad(vertices, uvs, indices, colors, underlay["texture"], PixelScaling.snap_screen(underlay["position"]), underlay["size"])
+			if drawable.has("mesh_layers"):
+				for layer in drawable["mesh_layers"]:
+					_append_material_layer(vertices, uvs, indices, colors, layer)
+			else:
+				_append_texture_quad(vertices, uvs, indices, colors, drawable["texture"], PixelScaling.snap_screen(drawable["position"]), drawable["size"])
 			for layer_value in drawable["borders"]:
 				var layer: Dictionary = layer_value
 				var texture: Texture2D = resource_catalog.get_terrain_border_texture(int(layer["border_id"]), int(layer["frame"]))
@@ -190,8 +204,8 @@ func _rebuild_terrain_mesh() -> void:
 				var hotspot := Vector2.ZERO
 				if metadata.has("hotspot"):
 					hotspot = Vector2(float(metadata["hotspot"][0]), float(metadata["hotspot"][1]))
-				var position := PixelScaling.snap_screen(Vector2(drawable["position"]) - hotspot * view_zoom)
-				_append_texture_quad(vertices, uvs, indices, texture, position, texture.get_size() * view_zoom)
+				var position := PixelScaling.snap_screen(Vector2(drawable["position"]) - hotspot * mesh_zoom)
+				_append_texture_quad(vertices, uvs, indices, colors, texture, position, texture.get_size() * mesh_zoom)
 	if vertices.is_empty():
 		return
 	var arrays: Array = []
@@ -199,8 +213,13 @@ func _rebuild_terrain_mesh() -> void:
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
+	arrays[Mesh.ARRAY_COLOR] = colors
 	terrain_mesh = ArrayMesh.new()
 	terrain_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+
+
+func _uses_world_mesh() -> bool:
+	return resource_catalog != null and resource_catalog.environment_pack.enabled
 
 
 func _expanded_bounds(bounds: Rect2i, margin: int) -> Rect2i:
@@ -218,7 +237,7 @@ func _bounds_contains(outer: Rect2i, inner: Rect2i) -> bool:
 	)
 
 
-func _append_texture_quad(vertices: PackedVector3Array, uvs: PackedVector2Array, indices: PackedInt32Array, texture: Texture2D, position: Vector2, size: Vector2) -> void:
+func _append_texture_quad(vertices: PackedVector3Array, uvs: PackedVector2Array, indices: PackedInt32Array, colors: PackedColorArray, texture: Texture2D, position: Vector2, size: Vector2) -> void:
 	var region: Rect2i = terrain_atlas_regions.get(_texture_key(texture), Rect2i())
 	if region.size == Vector2i.ZERO:
 		return
@@ -234,6 +253,7 @@ func _append_texture_quad(vertices: PackedVector3Array, uvs: PackedVector2Array,
 	uvs.append(uv_max)
 	uvs.append(Vector2(uv_min.x, uv_max.y))
 	indices.append_array(PackedInt32Array([first, first + 1, first + 2, first, first + 2, first + 3]))
+	colors.append_array(PackedColorArray([Color.WHITE, Color.WHITE, Color.WHITE, Color.WHITE]))
 
 
 func _draw_terrain_border(tile_origin: Vector2, layer: Dictionary) -> void:
@@ -248,3 +268,21 @@ func _draw_terrain_border(tile_origin: Vector2, layer: Dictionary) -> void:
 		hotspot = Vector2(float(metadata["hotspot"][0]), float(metadata["hotspot"][1]))
 	var position := PixelScaling.snap_screen(tile_origin - hotspot * view_zoom)
 	draw_texture_rect(texture, Rect2(position, texture.get_size() * view_zoom), false)
+
+
+func _append_material_layer(vertices: PackedVector3Array, uvs: PackedVector2Array, indices: PackedInt32Array, colors: PackedColorArray, layer: Dictionary) -> void:
+	var region: Rect2i = terrain_atlas_regions.get(_texture_key(layer["texture"]), Rect2i())
+	if region.size == Vector2i.ZERO:
+		return
+	var first := vertices.size()
+	for index in range(layer["points"].size()):
+		var point: Vector2 = layer["points"][index]
+		vertices.append(Vector3(point.x, point.y, 0.0))
+		uvs.append((Vector2(region.position) + layer["uvs"][index] * Vector2(region.size)) / terrain_atlas_size)
+		colors.append(layer["colors"][index])
+	for index in layer["indices"]:
+		indices.append(first + index)
+
+
+func _draw_material_layer(layer: Dictionary) -> void:
+	TerrainRenderer.EnvironmentTerrain.draw_layer(self, layer)

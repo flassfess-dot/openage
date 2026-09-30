@@ -225,6 +225,15 @@ func _ready() -> void:
 	var environment_items: Array = match_definition.get("presentation_environment", []).duplicate(true)
 	environment_items.append_array(match_definition.get("static_obstructions", []))
 	map_definition = map_definition_override.duplicate(true) if not map_definition_override.is_empty() else RandomMapGenerator.generate(match_definition)
+	if map_definition.has("generation_error"):
+		push_error(String(map_definition["generation_error"]))
+		return
+	var expected_map_hash := String(match_definition.get("map", {}).get("content_hash", ""))
+	if not expected_map_hash.is_empty() and expected_map_hash != String(map_definition.get("content_hash", "")):
+		push_error("Сохранённая карта не соответствует версии генератора")
+		return
+	if String(map_definition.get("environment_pack", "")) == "aoe2_temperate":
+		resource_catalog.enable_environment_pack()
 	environment_items.append_array(map_definition.get("scenery", []))
 	environment_presentation_field.configure(environment_items)
 	map_size = map_definition.get("size", MAP_SIZE)
@@ -2138,7 +2147,11 @@ func draw_terrain() -> void:
 				continue
 			for underlay in drawable.get("underlays", []):
 				draw_texture_rect(underlay["texture"], Rect2(PixelScaling.snap_screen(underlay["position"]), underlay["size"]), false)
-			draw_texture_rect(drawable["texture"], Rect2(PixelScaling.snap_screen(drawable["position"]), drawable["size"]), false)
+			if drawable.has("mesh_layers"):
+				for layer in drawable["mesh_layers"]:
+					TerrainRenderer.EnvironmentTerrain.draw_layer(self, layer)
+			else:
+				draw_texture_rect(drawable["texture"], Rect2(PixelScaling.snap_screen(drawable["position"]), drawable["size"]), false)
 			for layer in drawable["borders"]:
 				draw_terrain_border(drawable["position"], layer)
 

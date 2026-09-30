@@ -286,6 +286,10 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var resource: Dictionary = resource_value
 		signature = signature * 31 + int(resource.get("id", -1))
 		signature = signature * 31 + int(resource.get("depletion_stage", 0))
+		signature = signature * 31 + hash(String(resource.get("environment_asset", "")))
+		signature = signature * 31 + int(resource.get("environment_variant", 0))
+		signature = signature * 31 + hash(String(resource.get("source_graphic_asset_name", "")))
+		signature = signature * 31 + int(resource.get("source_frame", 0))
 		signature = signature * 31 + (1 if int(resource.get("amount", 0)) > 0 else 0)
 	signature = signature * 31 + hash(preview_ids)
 	if signature == cached_resource_signature and not cached_resource_drawables.is_empty():
@@ -333,6 +337,7 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 		var position: Vector2 = item.get("position", Vector2.ZERO)
 		signature = signature * 31 + int(item.get("id", -1))
 		signature = signature * 31 + int(item.get("graphic_id", -1))
+		signature = signature * 31 + hash(String(item.get("asset_name", "")))
 		signature = signature * 31 + hash(position)
 		signature = signature * 31 + int(item.get("source_frame", 0))
 		signature = signature * 31 + hash(String(item.get("presentation_layer", "scenery")))
