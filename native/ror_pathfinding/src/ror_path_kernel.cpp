@@ -22,6 +22,7 @@ constexpr int32_t DIRECTIONS[8][2] = {
 
 void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("configure", "width", "height", "revision", "walkable"), &RoRPathKernel::configure);
+    ClassDB::bind_method(D_METHOD("update_walkable", "revision", "indices", "values"), &RoRPathKernel::update_walkable);
     ClassDB::bind_method(D_METHOD("find_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_cell_path, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("find_smoothed_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_smoothed_cell_path, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("configure_movement_snapshot", "ids", "positions", "radii", "clearances", "priorities", "health"), &RoRPathKernel::configure_movement_snapshot);
@@ -154,6 +155,17 @@ Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target
         }
     }
     return Vector4(velocity.x, velocity.y, static_cast<double>(state), static_cast<double>(movement_candidates_.size()));
+}
+
+bool RoRPathKernel::update_walkable(int64_t revision, const PackedInt32Array &indices, const PackedByteArray &values) {
+    if (!is_configured() || revision < revision_ || indices.size() != values.size()) return false;
+    // Validate the entire patch before changing the authoritative mask.
+    for (int64_t i = 0; i < indices.size(); ++i) {
+        if (indices[i] < 0 || static_cast<size_t>(indices[i]) >= walkable_.size()) return false;
+    }
+    for (int64_t i = 0; i < indices.size(); ++i) walkable_[static_cast<size_t>(indices[i])] = values[i] != 0;
+    revision_ = revision;
+    return true;
 }
 
 void RoRPathKernel::configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable) {

@@ -406,6 +406,11 @@ func reset_game() -> void:
 	game_controller.start_recording(map_seed, false)
 	game_controller.set_command_result_limit(1024)
 	configure_ai_players()
+	# Full-map masks and surface connectivity are loading work, not work for
+	# the first AI decision or the first unit movement after the match opens.
+	simulation_world.pathfinder.prepare_native_kernels_for_units(simulation_world.get_units())
+	for ai in ai_players:
+		simulation_world.ai_navigation_knowledge.snapshot(simulation_world, simulation_world.get_fog_of_war(), int(ai.team))
 	game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
 	control_groups.clear()
 	player_control_state.clear()
@@ -462,6 +467,10 @@ func reset_game() -> void:
 	player_control_state.replace_or_add(bootstrap.get("selected_ids", []), false)
 
 	sync_world_state()
+	# The initial fog mask scans the whole map; prepare it while the match is
+	# loading, so the first visible frame only submits cached presentation.
+	cached_fog_slope_neighbor_terrain_revision = int(simulation_world.terrain_revision)
+	_sync_world_fog_texture(presentation_snapshot.get("fog", {}).get("cells", []), int(presentation_snapshot.get("fog_revision", -1)))
 	if scenario_overlay != null:
 		scenario_overlay.reset_presentation()
 		scenario_overlay.set_snapshot(presentation_snapshot)
@@ -1279,6 +1288,10 @@ func load_game_from_path(path: String) -> bool:
 	terrain_canvas.configure(map_size, map_seed, resource_catalog, simulation_world, Callable(self, "terrain_id_at_cell"), Callable(self, "visible_tile_bounds"))
 	_sync_terrain_canvas()
 	sync_world_state()
+	# The initial fog mask scans the whole map; prepare it while the match is
+	# loading, so the first visible frame only submits cached presentation.
+	cached_fog_slope_neighbor_terrain_revision = int(simulation_world.terrain_revision)
+	_sync_world_fog_texture(presentation_snapshot.get("fog", {}).get("cells", []), int(presentation_snapshot.get("fog_revision", -1)))
 	if scenario_overlay != null:
 		scenario_overlay.reset_presentation()
 		scenario_overlay.set_snapshot(presentation_snapshot)

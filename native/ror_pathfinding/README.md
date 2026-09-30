@@ -31,3 +31,33 @@ The script acquires the pinned official `godot-cpp` `10.0.0-stable` source
 when `.tools/godot-cpp` is absent and writes the local DLL to `prototype/bin`.
 Generated bindings, build objects and the DLL are ignored; source, the
 `.gdextension` descriptor and the deterministic fallback are tracked.
+
+The walkability mask accepts validated, atomic patches for the exact cells in
+`RoRNavigationGrid`'s bounded revision journal. An expired or incomplete journal
+still causes a full mask rebuild. Adding or removing a local obstacle therefore
+does not rescan all 160,000 cells of a supergiant map on the next path query.
+
+`RoRTerrainKernel` builds presentation geometry from detached numeric terrain,
+elevation and atlas samples. Its full-detail output matches the GDScript terrain
+reference (8x8 material blends, 16x16 coast contours). Camera changes display a
+4x4 preview immediately and refine it on `WorkerThreadPool`; scene resources and
+mesh upload remain on the main thread. Only the newest request may install its
+result. Reconfiguration and shutdown join outstanding work. The GDScript renderer
+remains the fallback when the extension is unavailable.
+
+Regression coverage:
+
+- `prototype/tests/unit/test_native_terrain_mesh.gd`: reference geometry, UVs,
+  lighting, shore blending, boundaries and slopes.
+- `prototype/tests/unit/test_async_terrain_mesh.gd`: superseded camera requests,
+  full-detail output, invalidation, reconfiguration and shutdown.
+- `prototype/tests/unit/test_incremental_navigation_masks.gd`: 400x400 local
+  updates, fallback rebuilding, route parity and forest surface invalidation.
+
+`prototype/tests/manual/benchmark_large_random_match.gd` reproduces the reported
+Mediterranean / two-player / supergiant camera freezes. It runs 700 simulation
+steps and clicks the minimap at steps 200, 400 and 600. Pass `--rendered` after
+`--` (and omit `--headless`) to include actual frame rendering, `--ticks=1400` for
+a longer run, and `--output=<path>` for the JSON report. Run packaged checks using
+the exported executable with its directory as the working directory and its updated `bin` DLL; loading only the PCK with
+a different executable can silently test the GDScript fallback instead.

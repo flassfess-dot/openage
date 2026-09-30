@@ -17,6 +17,7 @@ add_library(ror_pathfinding SHARED
     src/register_types.cpp
     src/ror_path_kernel.cpp
     src/ror_visibility_kernel.cpp
+    src/ror_terrain_kernel.cpp
 )
 
 target_include_directories(ror_pathfinding PRIVATE src)

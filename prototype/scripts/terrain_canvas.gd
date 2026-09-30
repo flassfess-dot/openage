@@ -1,6 +1,7 @@
 class_name RoRTerrainCanvas
 extends Node2D
 
+const NativeTerrainMesh := preload("res://scripts/native_terrain_mesh.gd")
 const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 const MESH_OVERSCAN_CELLS := 12
@@ -18,6 +19,17 @@ var terrain_revision := -1
 var terrain_atlas: Texture2D
 var terrain_atlas_size := Vector2.ZERO
 var terrain_atlas_regions: Dictionary = {}
+var last_mesh_build_metrics: Dictionary = {}
+var async_rebuilds := true
+var refinement_task_id := -1
+var refinement_job: Variant
+var refinement_bounds := Rect2i()
+var refinement_revision := -1
+var mesh_generation := 0
+var refinement_generation := -1
+var queued_refinement: Variant
+var native_enabled := true
+var native_kernel: Variant
 var terrain_mesh: ArrayMesh
 var terrain_mesh_bounds := Rect2i()
 
@@ -26,9 +38,12 @@ func _ready() -> void:
 	# Imported isometric tiles use transparent corners. Linear sampling across
 	# neighbouring atlas cells creates dark triangular fringes at shorelines.
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	set_process(false)
 
 
 func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable, visible_bounds_provider: Callable) -> void:
+	_finish_refinement()
+	queued_refinement = null
 	map_size = size
 	map_seed = seed
 	resource_catalog = catalog
@@ -52,7 +67,7 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 	terrain_revision = next_terrain_revision
 	var visible_bounds: Rect2i = bounds_provider.call() if bounds_provider.is_valid() else Rect2i()
 	if projection_changed or terrain_mesh == null or not _bounds_contains(terrain_mesh_bounds, visible_bounds):
-		_rebuild_terrain_mesh()
+		_rebuild_terrain_mesh(async_rebuilds)
 	queue_redraw()
 
 
@@ -168,11 +183,30 @@ func _next_power_of_two(value: int) -> int:
 	return result
 
 
-func _rebuild_terrain_mesh() -> void:
+func _rebuild_terrain_mesh(refine_async: bool = false) -> void:
+	mesh_generation += 1
+	queued_refinement = null
+	last_mesh_build_metrics = {}
 	terrain_mesh = null
 	terrain_mesh_bounds = Rect2i()
 	if terrain_atlas == null or resource_catalog == null or simulation_world == null or not terrain_id_provider.is_valid() or not bounds_provider.is_valid():
 		return
+	if native_enabled and _uses_world_mesh() and ClassDB.class_exists("RoRTerrainKernel"):
+		if native_kernel == null:
+			native_kernel = ClassDB.instantiate("RoRTerrainKernel")
+		var native_bounds := _expanded_bounds(bounds_provider.call(), MESH_OVERSCAN_CELLS)
+		var request := NativeTerrainMesh.capture(native_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, last_mesh_build_metrics)
+		var native_arrays := NativeTerrainMesh.build_request(native_kernel, request, 4 if refine_async else 16, last_mesh_build_metrics)
+		if not native_arrays.is_empty():
+			terrain_mesh_bounds = native_bounds
+			_install_native_arrays(native_arrays)
+			if refine_async:
+				var job := NativeTerrainMesh.new()
+				job.kernel = native_kernel
+				job.request = request
+				queued_refinement = {"job": job, "bounds": native_bounds, "revision": terrain_revision, "generation": mesh_generation}
+				_start_queued_refinement()
+			return
 	var vertices := PackedVector3Array()
 	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
@@ -286,3 +320,50 @@ func _append_material_layer(vertices: PackedVector3Array, uvs: PackedVector2Arra
 
 func _draw_material_layer(layer: Dictionary) -> void:
 	TerrainRenderer.EnvironmentTerrain.draw_layer(self, layer)
+
+
+func _install_native_arrays(arrays: Array) -> void:
+	var started := Time.get_ticks_usec()
+	terrain_mesh = ArrayMesh.new()
+	terrain_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	last_mesh_build_metrics["upload_us"] = Time.get_ticks_usec() - started
+	last_mesh_build_metrics["vertices"] = arrays[Mesh.ARRAY_VERTEX].size()
+
+
+func _start_queued_refinement() -> void:
+	if refinement_task_id >= 0 or queued_refinement == null: return
+	refinement_job = queued_refinement["job"]
+	refinement_bounds = queued_refinement["bounds"]
+	refinement_revision = int(queued_refinement["revision"])
+	refinement_generation = int(queued_refinement["generation"])
+	queued_refinement = null
+	refinement_task_id = WorkerThreadPool.add_task(Callable(refinement_job, "run"), false, "Terrain surface detail")
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	if refinement_task_id < 0 or not WorkerThreadPool.is_task_completed(refinement_task_id): return
+	WorkerThreadPool.wait_for_task_completion(refinement_task_id)
+	refinement_task_id = -1
+	# Rapid minimap clicks may supersede a request while it is being built.
+	# Never replace the new view with geometry captured for an older view.
+	if refinement_generation == mesh_generation and queued_refinement == null and refinement_bounds == terrain_mesh_bounds and refinement_revision == terrain_revision and not refinement_job.result.is_empty():
+		_install_native_arrays(refinement_job.result)
+		last_mesh_build_metrics["refinement_us"] = refinement_job.timings.get("native_us", 0)
+		queue_redraw()
+	refinement_job = null
+	_start_queued_refinement()
+	if refinement_task_id < 0: set_process(false)
+
+
+func _finish_refinement() -> void:
+	if refinement_task_id >= 0:
+		WorkerThreadPool.wait_for_task_completion(refinement_task_id)
+	refinement_task_id = -1
+	refinement_job = null
+	queued_refinement = null
+	set_process(false)
+
+
+func _exit_tree() -> void:
+	_finish_refinement()

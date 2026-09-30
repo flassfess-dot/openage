@@ -1112,8 +1112,12 @@ func terrain_id_at_cell(cell: Vector2i) -> int:
 func _register_forest_resource(resource: Dictionary) -> void:
 	var cell := Vector2i(floori(float(resource.get("pos", Vector2.ZERO).x)), floori(float(resource.get("pos", Vector2.ZERO).y)))
 	var previous := int(forest_resource_counts.get(cell, 0))
+	var previous_terrain := terrain_id_at_cell(cell)
 	forest_resource_counts[cell] = previous + 1
-	terrain_revision += 1
+	# Imported ground is independent of the standing tree. A resource change
+	# must not invalidate every terrain/fog mesh unless its surface changed.
+	if terrain_id_at_cell(cell) != previous_terrain:
+		terrain_revision += 1
 	if navigation_grid != null and previous == 0:
 		navigation_grid.set_terrain_id(cell, _terrain_id_with_forest_resource(cell))
 
@@ -1131,6 +1135,7 @@ func _unregister_forest_resource(resource: Dictionary) -> void:
 		return
 	var position: Vector2 = resource.get("pos", Vector2.ZERO)
 	var cell := Vector2i(floori(position.x), floori(position.y))
+	var previous_terrain := terrain_id_at_cell(cell)
 	var remaining := int(forest_resource_counts.get(cell, 0)) - 1
 	if remaining > 0:
 		forest_resource_counts[cell] = remaining
@@ -1138,7 +1143,8 @@ func _unregister_forest_resource(resource: Dictionary) -> void:
 		forest_resource_counts.erase(cell)
 		if navigation_grid != null:
 			navigation_grid.set_terrain_id(cell, int(map_terrain_ids.get(cell, TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell)))))
-	terrain_revision += 1
+	if terrain_id_at_cell(cell) != previous_terrain:
+		terrain_revision += 1
 
 
 func _terrain_id_with_forest_resource(cell: Vector2i) -> int:

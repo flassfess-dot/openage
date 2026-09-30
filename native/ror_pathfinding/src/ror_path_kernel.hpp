@@ -19,6 +19,7 @@ class RoRPathKernel : public RefCounted {
 
 public:
     void configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable);
+    bool update_walkable(int64_t revision, const PackedInt32Array &indices, const PackedByteArray &values);
     PackedInt32Array find_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
     PackedInt32Array find_smoothed_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
     void configure_movement_snapshot(

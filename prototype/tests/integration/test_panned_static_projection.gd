@@ -6,7 +6,7 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
-	test_panned_statics_track_camera()
+	await test_panned_statics_track_camera()
 	if failures.is_empty():
 		print("panned static projection tests passed")
 		quit(0)

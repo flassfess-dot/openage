@@ -1,5 +1,6 @@
 extends SceneTree
 
+const Decorations := preload("res://scripts/random_map_decorations.gd")
 const RandomMapMetrics := preload("res://scripts/random_map_metrics.gd")
 const RandomMapZones := preload("res://scripts/random_map_zones.gd")
 const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
@@ -27,13 +28,18 @@ func _test_inland_ecology_and_density() -> void:
 	assert_true(global_objects.all(func(entity): return String(entity.get("strategic_zone", "")) in ["territory", "frontier", "contested"]), "global groups retain a non-sanctuary strategic role")
 	var scenery: Array = map_data.get("scenery", [])
 	assert_true(scenery.size() >= 20, "standard inland map receives a visible ambient scenery budget")
-	assert_true(scenery.all(func(entity): return bool(entity.get("ambient", false)) and String(entity.get("strategic_zone", "")) != "sanctuary"), "ambient scenery stays outside start sanctuaries")
-	assert_true(scenery.any(func(entity): return String(entity.get("feature_family", "")) == "rock"), "ambient layer contains terrain-matched rocks")
-	assert_true(scenery.any(func(entity): return String(entity.get("feature_family", "")) == "ground_detail"), "ambient layer contains forest stumps and clearing detail")
-	var land_scenery: Array = scenery.filter(func(entity): return String(entity.get("feature_family", "")) != "shallows")
-	for first_index in range(land_scenery.size()):
-		for second_index in range(first_index + 1, land_scenery.size()):
-			assert_true(Vector2(land_scenery[first_index]["position"]).distance_to(Vector2(land_scenery[second_index]["position"])) + 0.0001 >= 2.0, "ecological details retain clearance after sub-cell jitter")
+	assert_true(scenery.all(func(entity): return bool(entity.get("ambient", false))), "decoration remains presentation-only")
+	assert_true(scenery.any(func(entity): return String(entity.get("decoration_key", "")).contains("rock") or entity.get("decoration_key") == "boulders"), "ambient layer contains terrain-matched rocks")
+	assert_true(scenery.any(func(entity): return entity.get("presentation_layer") == "decal"), "ambient layer includes actual flat ground detail")
+	var specs: Dictionary = {}
+	for spec in Decorations.palette(): specs[spec["key"]] = spec
+	for first_index in range(scenery.size()):
+		for second_index in range(first_index + 1, scenery.size()):
+			var left: Dictionary = scenery[first_index]
+			var right: Dictionary = scenery[second_index]
+			if left["presentation_layer"] != right["presentation_layer"]: continue
+			var distance := (float(specs[left["decoration_key"]]["placement"]["spacing"]) + float(specs[right["decoration_key"]]["placement"]["spacing"])) * 0.5
+			assert_true(Vector2(left["position"]).distance_to(right["position"]) + 0.0001 >= distance, "decorations retain palette-specific clearance after jitter")
 	var without_scenery := map_data.duplicate(true)
 	without_scenery["scenery"] = []
 	var dense_metrics := RandomMapMetrics.measure(definition, map_data)
@@ -57,7 +63,7 @@ func _test_coastal_predators() -> void:
 	assert_true(int(water_features.get("coastal_water_cells", 0)) > 0, "coastal map contains a light near-shore water band")
 	assert_true(int(water_features.get("deep_water_cells", 0)) > 0, "coastal map contains deep water away from land")
 	assert_true(int(water_features.get("walkable_shallow_cells", 0)) > 0, "coastal map contains walkable sandbars")
-	assert_true(map_data.get("scenery", []).any(func(entity): return String(entity.get("feature_family", "")) == "shallows" and int(entity.get("graphic_id", -1)) == 503), "walkable shallows receive varied original-game water detail")
+	assert_true(map_data.get("scenery", []).any(func(entity): return entity.get("decoration_key", "") == "ror_shallows"), "walkable shallows receive varied original-game water detail")
 
 
 func _near_published_coast(map_data: Dictionary, origin: Vector2i, radius: int) -> bool:

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$AoE2Path = 'D:\Games\Age of Empires II',
+    [string]$RoRPath = 'D:\Games\Age of Empires 1 - Rise of Rome',
     [switch]$Reimport,
     [switch]$Capture,
     [switch]$TestOnly
@@ -40,7 +41,7 @@ if (-not $taskNeedsImport) {
 }
 if ($taskNeedsImport) {
     if (-not (Test-Path -LiteralPath $taskNode)) { throw 'The project Node runtime is missing from .tools.' }
-    & $taskNode (Join-Path $PSScriptRoot 'ror_import\import_environment.js') --game $AoE2Path
+    & $taskNode (Join-Path $PSScriptRoot 'ror_import\import_environment.js') --game $AoE2Path --ror-game $RoRPath
     if ($LASTEXITCODE -ne 0) { throw 'AoE2 environment import failed.' }
 }
 

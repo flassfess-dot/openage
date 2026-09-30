@@ -60,8 +60,8 @@ func _test_assets() -> void:
 			check(not info.is_empty(), "object renders: %s/%d" % [key, variant])
 			var record: Dictionary = pack.manifest["objects"][key]["frames"][variant]
 			check(info["texture"].get_size() == Vector2(record["width"], record["height"]), "object dimensions")
-			check(Vector2(record["source_hotspot"][0], record["source_hotspot"][1]).distance_to(info["hotspot"] * 1.5) <= 1.1, "hotspot remains within one source pixel")
-	check(count == 17, "17 curated static variants")
+			check(Vector2(record["source_hotspot"][0], record["source_hotspot"][1]).distance_to(info["hotspot"] / float(record.get("scale", 2.0 / 3.0))) <= 1.1, "hotspot remains within one source pixel")
+	check(count == 129, "8 tree variants and 121 mixed decoration variants")
 	for id in pack.materials_by_id:
 		var image: Image = pack.material_texture(id).get_image()
 		check(image.get_size() == Vector2i(320, 320), "full 10x10 pattern at target density")

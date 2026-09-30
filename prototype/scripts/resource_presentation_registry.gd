@@ -1,6 +1,8 @@
 class_name RoRResourcePresentationRegistry
 extends RefCounted
 
+const ANIMATED_MARINE_KINDS := ["deep_fish", "shore_fish", "whale"]
+
 var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
 var graphics_catalog: Dictionary = {}
@@ -87,6 +89,9 @@ func frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary
 		if not bool(metadata.get("visible_when_depleted", false)):
 			return {}
 		asset_name = String(resource.get("source_depleted_asset_name", metadata.get("depleted_asset_name", asset_name)))
+	# A stale optional source alias must not hide an otherwise supported resource.
+	if not has_frame_records(asset_name):
+		asset_name = String(metadata.get("depleted_asset_name", "")) if int(resource.get("amount", 0)) <= 0 else String(metadata.get("asset_name", ""))
 	if asset_name.is_empty():
 		return {}
 	_load_asset(asset_name)
@@ -94,7 +99,7 @@ func frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary
 	if frames.is_empty():
 		return {}
 	var frame_index := posmod(int(resource.get("id", 0)), frames.size())
-	if bool(metadata.get("animated", false)) or kind in ["deep_fish", "shore_fish"]:
+	if bool(metadata.get("animated", false)) or kind in ANIMATED_MARINE_KINDS:
 		frame_index = _animated_frame(resource, int(resource.get("id", 0)), animation_time, frames.size())
 	var texture: Texture2D = frames[frame_index]
 	var frame_metadata: Dictionary = metadata_by_asset_frame.get(_key(asset_name, frame_index), {})
@@ -117,7 +122,11 @@ func _animated_frame(resource: Dictionary, entity_id: int, animation_time: float
 	var source: Dictionary = object_catalog.get("objects", {}).get("0:%d" % source_unit_id, {})
 	var graphic_id := int(resource.get("source_graphic_id", source.get("graphics", {}).get("idle", -1)))
 	var graphic: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
-	if kind in ["deep_fish", "shore_fish"]:
+	return animation_frame(resource, entity_id, animation_time, frame_count, graphic)
+
+
+static func animation_frame(resource: Dictionary, entity_id: int, animation_time: float, frame_count: int, graphic: Dictionary) -> int:
+	if String(resource.get("kind", "")) in ANIMATED_MARINE_KINDS:
 		var frames_per_angle := maxi(1, int(graphic.get("frames_per_angle", frame_count)))
 		var angle_count := maxi(1, mini(int(graphic.get("angle_count", 1)), floori(float(frame_count) / float(frames_per_angle))))
 		var direction := posmod(entity_id, angle_count)

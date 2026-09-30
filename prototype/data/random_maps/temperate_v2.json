@@ -66,7 +66,7 @@
       "rock_threshold": 0.75
     }
   },
-  "notes": "Runtime ecology is independent of the immutable RoR DAT source profiles. Sand is confined to actual shore cells. No cracked-earth decals in this theme.",
+  "notes": "Runtime ecology is independent of immutable RoR DAT profiles. Sand stays at shores. Dry-ground decals require exposed dry soil; vegetation, rocks and trails use the mixed environment placement catalog.",
   "tree_palettes": {
     "native_share_min": 0.25,
     "native_share_max": 0.75,

@@ -3,6 +3,15 @@ extends Node2D
 const Catalog := preload("res://scripts/resource_catalog.gd")
 const TerrainCanvas := preload("res://scripts/terrain_canvas.gd")
 const Elevation := preload("res://scripts/terrain_elevation.gd")
+const RenderWorld := preload("res://scripts/render_world.gd")
+
+# Share the game layer ordering: flat artwork must remain below actors/trees.
+static func object_less(a: Dictionary, b: Dictionary) -> bool:
+	var left := RenderWorld.environment_layer(a)
+	var right := RenderWorld.environment_layer(b)
+	if left != right: return left < right
+	return a["position"].x + a["position"].y < b["position"].x + b["position"].y
+
 const Coordinates := preload("res://scripts/coordinates.gd")
 
 class ObjectsLayer extends Node2D:
@@ -11,12 +20,14 @@ class ObjectsLayer extends Node2D:
 		if preview == null:
 			return
 		var items: Array = preview.objects.duplicate()
-		items.sort_custom(func(a, b): return a["position"].x + a["position"].y < b["position"].x + b["position"].y)
+		items.sort_custom(preview.object_less)
 		for item in items:
 			if not preview.show_pack and not bool(item.get("reference", false)):
 				continue
 			var info: Dictionary = item.get("frame_info", {})
-			if info.is_empty():
+			if item.has("animated_resource"):
+				info = preview.catalog.resource_frame_info(item["animated_resource"], preview.animation_time)
+			elif info.is_empty():
 				info = preview.catalog.environment_frame_info(item)
 			if info.is_empty():
 				continue
@@ -53,20 +64,37 @@ var view_offset := Vector2(720, 150)
 var show_pack := true
 var show_grid := false
 var view_mode := 0
+var decoration_choice: OptionButton
+var decoration_keys: Array[String] = []
 var label_style := StyleBoxFlat.new()
 var status: Label
 var subtitle: Label
 var revision := 0
+var animation_time := 0.0
+var has_animated_objects := false
+var animation_redraw_elapsed := 0.0
+
+
+func _process(delta: float) -> void:
+	animation_time += delta
+	animation_redraw_elapsed += delta
+	if has_animated_objects and animation_redraw_elapsed >= 0.05:
+		animation_redraw_elapsed = 0.0
+		object_layer.queue_redraw()
 
 
 func _ready() -> void:
-	get_window().title = "Rise of Rome — окружение AoE2"
+	get_window().title = "Rise of Rome — окружение RoR и AoE2"
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	catalog.load()
 	_build_ui()
 	if not catalog.enable_environment_pack():
 		status.text = "Набор недоступен. Запустите tools/preview-environment.ps1 -Reimport"
 		return
+	for spec in catalog.environment_pack.definition["objects"]:
+		if not spec.has("placement"): continue
+		decoration_keys.append(spec["key"])
+		decoration_choice.add_item(spec["title"])
 	add_child(terrain)
 	add_child(object_layer)
 	object_layer.preview = self
@@ -78,7 +106,7 @@ func _ready() -> void:
 	label_style.corner_radius_bottom_right = 3
 	get_viewport().size_changed.connect(_fit_view)
 	set_mode(0)
-	print("AoE2 environment preview ready: 4 materials, 17 object variants")
+	print("Mixed environment preview ready: 4 materials, 121 decoration variants")
 
 
 func _build_ui() -> void:
@@ -110,13 +138,16 @@ func _build_ui() -> void:
 	controls.position = Vector2(24, 66)
 	controls.add_theme_constant_override("separation", 8)
 	header.add_child(controls)
-	for index in range(3):
+	for index in range(4):
 		var button := Button.new()
-		button.text = ["Ландшафт", "Все объекты", "Покрытия и склоны"][index]
+		button.text = ["Ландшафт", "Деревья и камни", "Покрытия", "Декали и детали"][index]
 		button.pressed.connect(set_mode.bind(index))
 		controls.add_child(button)
+	decoration_choice = OptionButton.new()
+	decoration_choice.item_selected.connect(func(_index): set_mode(3))
+	controls.add_child(decoration_choice)
 	var toggle := CheckButton.new()
-	toggle.text = "Набор AoE2"
+	toggle.text = "Окружение"
 	toggle.button_pressed = true
 	toggle.toggled.connect(func(on: bool): show_pack = on; _refresh())
 	controls.add_child(toggle)
@@ -140,18 +171,21 @@ func _build_ui() -> void:
 
 func set_mode(mode: int) -> void:
 	view_mode = mode
+	if decoration_choice != null: decoration_choice.visible = mode == 3
 	cells.clear()
 	objects.clear()
 	markers.clear()
-	map_size = Vector2i(24, 24) if mode == 0 else Vector2i(26, 22)
+	map_size = Vector2i(42, 28) if mode == 3 else Vector2i(24, 24) if mode == 0 else Vector2i(26, 22)
 	elevation = Elevation.new(map_size)
 	if mode == 0:
 		_landscape()
 	elif mode == 1:
 		_gallery()
-	else:
+	elif mode == 2:
 		_surfaces()
-	subtitle.text = ["Лесная опушка, вытоптанная земля и сухой склон. Здание и жители — исходные RoR.", "Все 17 вариантов. Подписи показывают отобранные семейства; справа — исходные объекты RoR.", "Четыре материала, переходы с травой RoR и рельеф с перепадом в один уровень."][mode]
+	else:
+		_decoration_gallery()
+	subtitle.text = ["Лесная опушка, вытоптанная земля и сухой склон. Здание и жители — исходные RoR.", "Деревья, камни и пни; справа — исходные объекты RoR.", "Четыре материала, переходы с травой RoR и рельеф с перепадом в один уровень.", "Все варианты выбранного семейства на подходящем грунте."][mode]
 	_fit_view()
 
 
@@ -271,7 +305,7 @@ func _refresh(reconfigure: bool = true) -> void:
 	else:
 		terrain.set_view_state(zoom, view_offset, get_viewport_rect().size, revision)
 	object_layer.queue_redraw()
-	status.text = "4 покрытия  /  17 вариантов объектов     •     Колесо — масштаб   ·   Средняя кнопка — перемещение   ·   1 / 2 / 3 — сцены     •     %d%%" % roundi(zoom * 100)
+	status.text = "4 покрытия  /  Смешанное окружение RoR и AoE2     •     Колесо — масштаб   ·   Средняя кнопка — перемещение   ·   1 / 2 / 3 / 4 — сцены     •     %d%%" % roundi(zoom * 100)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -285,7 +319,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		terrain.set_view_state(zoom, view_offset, get_viewport_rect().size, revision)
 		object_layer.queue_redraw()
 	elif event is InputEventKey and event.pressed:
-		if event.keycode in [KEY_1, KEY_2, KEY_3]:
+		if event.keycode in [KEY_1, KEY_2, KEY_3, KEY_4]:
 			set_mode(event.keycode - KEY_1)
 		elif event.keycode == KEY_ESCAPE:
 			get_tree().quit()
+
+
+func _decoration_gallery() -> void:
+	if decoration_keys.is_empty(): return
+	var key: String = decoration_keys[maxi(0, decoration_choice.selected)]
+	var spec: Dictionary = catalog.environment_pack.object_definition(key)
+	var count: int = catalog.environment_pack.object_variant_count(key)
+	for y in range(map_size.y):
+		for x in range(map_size.x): cells[Vector2i(x, y)] = int(spec["placement"]["materials"][0])
+	for i in range(count):
+		var position := Vector2(7 + (i % 5) * 6, 7 + (i / 5) * 6)
+		_add(key, position, i)
+		markers.append({"position": position + Vector2(1.5, 1.5), "text": "%d" % (i + 1)})

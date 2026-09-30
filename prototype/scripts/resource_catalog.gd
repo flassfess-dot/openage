@@ -292,6 +292,8 @@ func resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> D
 
 func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
 	var depleted := int(resource.get("amount", 0)) <= 0
+	if depleted and String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
+		return {}
 	var graphic_field := "source_depleted_graphic_id" if depleted else "source_graphic_id"
 	var asset_field := "source_depleted_asset_name" if depleted else "source_graphic_asset_name"
 	var graphic_id := int(resource.get(graphic_field, -1))
@@ -307,15 +309,8 @@ func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.
 	var frame_index := frames.size() - 1 if depleted else posmod(int(resource.get("source_frame", int(resource.get("id", 0)))), frames.size())
 	if not depleted and int(resource.get("source_frame", -1)) < 0:
 		frame_index = posmod(int(resource.get("id", 0)), frames.size())
-	if not depleted and String(resource.get("kind", "")) in ["deep_fish", "shore_fish"]:
-		var frames_per_angle := maxi(1, int(spec.get("frames_per_angle", frames.size())))
-		var angle_count := maxi(1, mini(int(spec.get("angle_count", 1)), floori(float(frames.size()) / float(frames_per_angle))))
-		var direction := posmod(int(resource.get("id", 0)), angle_count)
-		var frame_rate := maxf(0.001, float(spec.get("frame_rate", 0.1)))
-		var animation_duration := float(frames_per_angle) * frame_rate
-		var cycle_duration := animation_duration + maxf(0.0, float(spec.get("replay_delay", 0.0)))
-		var phase := fmod(maxf(0.0, animation_time) + float(posmod(int(resource.get("id", 0)) * 1618, 1000)) / 1000.0 * cycle_duration, cycle_duration)
-		frame_index = direction * frames_per_angle + clampi(floori(minf(phase, animation_duration - 0.0001) / frame_rate), 0, frames_per_angle - 1)
+	if not depleted and String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
+		frame_index = ResourcePresentationRegistry.animation_frame(resource, int(resource.get("id", 0)), animation_time, frames.size(), spec)
 	var texture: Texture2D = frames[frame_index]
 	if texture == null:
 		return {}

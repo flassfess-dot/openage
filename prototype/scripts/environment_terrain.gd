@@ -95,7 +95,7 @@ static func tile_drawable(cell: Vector2i, id: int, provider: Callable, catalog, 
 			var dx := lerpf(corners[1] - corners[0], corners[2] - corners[3], uv.y)
 			var dy := lerpf(corners[3] - corners[0], corners[2] - corners[1], uv.x)
 			lighting.append(clampf(1.0 - dx * 0.11 - dy * 0.06, 0.8, 1.16))
-	ids.sort_custom(func(a, b): return _priority(a, pack) < _priority(b, pack))
+	ids.sort_custom(func(a, b): return int(a) < int(b) if _priority(a, pack) == _priority(b, pack) else _priority(a, pack) < _priority(b, pack))
 	var indices := PackedInt32Array()
 	for y in range(subdivisions):
 		for x in range(subdivisions):

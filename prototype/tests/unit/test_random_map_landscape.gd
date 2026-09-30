@@ -27,7 +27,10 @@ func _initialize() -> void:
 	var round_trip: Dictionary = codec.decode_variant(JSON.parse_string(JSON.stringify(codec.encode_variant(definition))))
 	check(Generator.generate(round_trip)["content_hash"] == data["content_hash"], "serialized definition regenerates identical content")
 	check(not data["terrain_ids"].has(6), "temperate inland maps contain no desert patches")
-	check(not data["scenery"].any(func(item): return int(item.get("graphic_id", -1)) in [533, 534, 535, 536, 537]), "no cracked-desert decals on grass")
+	for item in data["scenery"]:
+		if item.get("decoration_key", "") != "ror_cracks": continue
+		var at := Vector2i(item["position"])
+		check(data["terrain_ids"][at.y * size.x + at.x] in [1000, 6], "cracks require exposed soil, never grass")
 	var trees := 0
 	for resource in data["resources"]:
 		if String(resource.get("kind", "")) != "tree": continue

@@ -326,6 +326,21 @@ func _native_kernel_for(movement_domain: String, restriction_id: int):
 	if int(kernel.get_revision()) == int(grid.revision) and bool(kernel.is_configured()):
 		return kernel
 	var started := Time.get_ticks_usec() if performance_probe != null else 0
+	if bool(kernel.is_configured()) and kernel.has_method("update_walkable"):
+		var changed: Variant = grid.changed_cells_since(int(kernel.get_revision()))
+		if changed != null:
+			var indices := PackedInt32Array()
+			var values := PackedByteArray()
+			for cell_value in changed:
+				var cell: Vector2i = cell_value
+				indices.append(cell.y * grid.size.x + cell.x)
+				values.append(1 if grid.is_walkable_for(cell, movement_domain, restriction_id) else 0)
+			if bool(kernel.update_walkable(grid.revision, indices, values)):
+				if performance_probe != null:
+					performance_probe.increment("navigation.native_mask_updates")
+					performance_probe.increment("navigation.native_mask_updated_cells", indices.size())
+					performance_probe.observe_microseconds("navigation.native_mask_update", Time.get_ticks_usec() - started)
+				return kernel
 	var mask := PackedByteArray()
 	mask.resize(grid.size.x * grid.size.y)
 	var index := 0

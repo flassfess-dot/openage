@@ -2,6 +2,7 @@ class_name RoRRandomMapLandscape
 extends RefCounted
 
 const Replay := preload("res://scripts/replay_system.gd")
+const Decorations := preload("res://scripts/random_map_decorations.gd")
 const Navigation := preload("res://scripts/random_map_navigation.gd")
 const THEME_PATH := "res://data/random_maps/temperate_v2.json"
 const VERSION := 2
@@ -249,41 +250,8 @@ static func _clear_neighborhood(cell: Vector2i, occupied: Dictionary, radius: in
 	return true
 
 
-static func scenery(map_data: Dictionary, fields: Dictionary, reserved: Dictionary, seed: int, density_scale: float = 1.0) -> Array:
-	var size: Vector2i = map_data["size"]
-	var terrain: Array[int] = map_data["terrain_ids"]
-	var blocked := reserved.duplicate()
-	for resource in map_data["resources"]:
-		var cell := Vector2i(resource["position"])
-		var clearance := 0 if resource.get("kind", "") == "tree" else 1
-		for y in range(cell.y - clearance, cell.y + clearance + 1):
-			for x in range(cell.x - clearance, cell.x + clearance + 1): blocked[Vector2i(x, y)] = true
-	var result: Array = []
-	# Fixed 3-cell buckets bound work and spacing, preserving whole empty meadows.
-	for by in range(1, size.y - 1, 3):
-		for bx in range(1, size.x - 1, 3):
-			var cell := Vector2i(bx, by)
-			var index := by * size.x + bx
-			if blocked.has(cell) or _zone(map_data, index) in ["sanctuary", "blocked"]: continue
-			var key := ""
-			var family := ""
-			var chance := random_at(cell, seed ^ 0x652DA)
-			if terrain[index] in [1000, 1001, 1002] and float(fields["geology"][index]) > float(fields["recipe"]["rock_threshold"]) - 0.10 and chance < 0.72 * density_scale:
-				key = "boulders"
-				family = "rock"
-			elif terrain[index] in [0, 10, 1000, 1001, 1003] and fields["forest_potential"][index] != 0 and flat_cell(cell, size, map_data["vertex_levels"]) and chance < 0.65 * density_scale:
-				key = "stump"
-				family = "ground_detail"
-			elif terrain[index] == 4 and chance < 0.22 * density_scale:
-				result.append({"id": -800000 - result.size(), "position": Vector2(cell) + Vector2(0.5, 0.5), "asset_name": "graphic_503", "graphic_id": 503,
-					"source_frame": int(chance * 1000.0), "ambient": true, "feature_family": "shallows", "strategic_zone": _zone(map_data, index)})
-				continue
-			if key.is_empty(): continue
-			var jitter := Vector2(random_at(cell, seed ^ 0x998A) - 0.5, random_at(cell, seed ^ 0xAA1D) - 0.5) * 0.6
-			result.append({"id": -800000 - result.size(), "position": Vector2(cell) + Vector2(0.5, 0.5) + jitter, "asset_name": "aoe2_temperate:" + key,
-				"source_frame": int(chance * 10000.0) % (6 if key == "boulders" else 3), "ambient": true, "presentation_layer": "scenery",
-				"feature_family": family, "strategic_zone": _zone(map_data, index), "ecology_role": "rock_outcrop" if key == "boulders" else "forest_clearing"})
-	return result
+static func scenery(map_data: Dictionary, fields: Dictionary, reserved: Dictionary, seed: int, density_scale: float = 1.0, foundations: Dictionary = {}) -> Array:
+	return Decorations.generate(map_data, fields, reserved, seed, density_scale, foundations)
 
 
 static func flat_cell(cell: Vector2i, size: Vector2i, levels: Array) -> bool:

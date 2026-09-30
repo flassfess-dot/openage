@@ -1,5 +1,6 @@
 class_name RoRRenderWorld
 
+const ResourcePresentationRegistry := preload("res://scripts/resource_presentation_registry.gd")
 const RenderItem := preload("res://scripts/render_item.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
 const AMBIENT_TRAVEL_TICKS := 160
@@ -317,7 +318,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 			var resource_id := int(drawable.get("stable_id", -1))
 			if current_by_id.has(resource_id):
 				drawable["data"] = current_by_id[resource_id]
-				if String(current_by_id[resource_id].get("kind", "")) in ["deep_fish", "shore_fish"]:
+				if String(current_by_id[resource_id].get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
 					var frame_info := _frame_info(frame_info_provider, "resource", current_by_id[resource_id])
 					drawable["frame_info"] = frame_info
 					drawable["frame"] = int(frame_info.get("frame_index", 0))

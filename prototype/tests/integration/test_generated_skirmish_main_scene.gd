@@ -7,6 +7,10 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
+	call_deferred("_run")
+
+
+func _run() -> void:
 	var settings := SkirmishSettings.default_settings()
 	settings["map_size_id"] = "compact"
 	settings["starting_age_id"] = "tool"
@@ -23,6 +27,8 @@ func _initialize() -> void:
 	game.match_definition_override = built["definition"].duplicate(true)
 	game.map_definition_override = built["map_data"].duplicate(true)
 	root.add_child(game)
+	assert_true(game.cached_world_fog_texture != null, "fog texture is prepared before the first visible frame")
+	assert_equal(game.cached_fog_slope_neighbor_terrain_revision, game.simulation_world.terrain_revision, "first draw retains the prepared fog mask")
 	await process_frame
 	await process_frame
 	assert_equal(game.match_path, built["identity"], "generated identity becomes the save compatibility key")

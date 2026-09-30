@@ -113,39 +113,65 @@ static func _naval_resource_clusters(zones: Array, templates: Array) -> Array:
 	return result
 
 
-static func _neutral_fish_clusters(size: Vector2i, terrain_ids: Array[int], seed: int) -> Array:
-	var open_cells: Array[Vector2i] = []
-	var shore_cells: Array[Vector2i] = []
+static func _neutral_fish_clusters(size: Vector2i, terrain_ids: Array[int], seed: int, blocked_cells: Dictionary = {}, existing_resources: Array = []) -> Array:
+	# RoR places shore fish on coastal water and whales in deep water. Sample
+	# each habitat separately, with spaced schools as in AoE2 random maps.
+	if not terrain_ids.has(1) and not terrain_ids.has(22): return []
+	var occupied := blocked_cells.duplicate()
+	var anchors: Array[Vector2i] = []
+	for resource in existing_resources:
+		var cell := Vector2i(resource["position"])
+		occupied[cell] = true
+		if resource.get("placement_domain", "land") in ["water", "shore_water"]: anchors.append(cell)
+	var habitats := PackedInt32Array()
+	habitats.resize(size.x * size.y)
+	habitats.fill(-1)
+	var distances := RandomMapWater.water_distance_from_land(terrain_ids, size)
+	var shore_count := 0
+	var open_count := 0
+	var deep_count := 0
 	for y in range(2, size.y - 2):
 		for x in range(2, size.x - 2):
-			var terrain_id := int(terrain_ids[y * size.x + x])
-			if terrain_id in TerrainRules.OPEN_WATER_TERRAIN_IDS:
-				var coastal := false
-				for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-					var neighbor: Vector2i = Vector2i(x, y) + Vector2i(offset)
-					if int(terrain_ids[neighbor.y * size.x + neighbor.x]) not in TerrainRules.OPEN_WATER_TERRAIN_IDS:
-						coastal = true
-						break
-				if coastal:
-					shore_cells.append(Vector2i(x, y))
-				else:
-					open_cells.append(Vector2i(x, y))
-			elif terrain_id == 4:
-				shore_cells.append(Vector2i(x, y))
-	var school_count := mini(120, maxi(1, ceili(float(open_cells.size()) / 145.0))) if not open_cells.is_empty() else 0
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed ^ 0x46A451
+			var cell := Vector2i(x, y)
+			var index := y * size.x + x
+			if terrain_ids[index] not in TerrainRules.OPEN_WATER_TERRAIN_IDS: continue
+			if terrain_ids[index] == 1 and _shore_fish_approach(cell, size, terrain_ids, occupied) is Vector2i:
+				habitats[index] = 0
+				shore_count += 1
+			elif _cell_matches_domain_with_clearance(cell, size, terrain_ids, "water", 2):
+				# Leave room for the tall source whale/spout sprite at map edges.
+				var whale_habitat := terrain_ids[index] == 22 and distances[index] >= 5 and x >= 5 and y >= 5 and x < size.x - 5 and y < size.y - 5
+				habitats[index] = 2 if whale_habitat else 1
+				open_count += 1
+				if habitats[index] == 2: deep_count += 1
+	var zones := {"zone_ids": habitats}
+	var specs := [
+		{"kind": "whale", "habitats": [2], "count": mini(64, ceili(float(deep_count) / 550.0)) if deep_count >= 64 else 0, "spacing": 10.0},
+		{"kind": "shore_fish", "habitats": [0], "count": mini(160, ceili(float(shore_count) / 8.0)), "spacing": 3.0},
+		{"kind": "deep_fish", "habitats": [1, 2], "count": mini(360, ceili(float(open_count) / 65.0)), "spacing": 4.0},
+	]
 	var result: Array = []
-	for index in range(school_count):
-		var cell := open_cells[rng.randi_range(0, open_cells.size() - 1)]
-		var center := Vector2(cell) + Vector2(0.5, 0.5)
-		result.append({"kind": "deep_fish", "placement_domain": "water", "minimum_domain_clearance_cells": 2, "center": [center.x, center.y], "count": rng.randi_range(2, 3), "radius": 1.5, "amount": 200})
-	var shore_school_count := mini(90, maxi(1, ceili(float(shore_cells.size()) / 70.0))) if not shore_cells.is_empty() else 0
-	for index in range(shore_school_count):
-		var cell := shore_cells[rng.randi_range(0, shore_cells.size() - 1)]
-		var center := Vector2(cell) + Vector2(0.5, 0.5)
-		result.append({"kind": "shore_fish", "placement_domain": "water", "center": [center.x, center.y], "guarantee_origin": [center.x, center.y], "placement_radius": 3.0, "count": rng.randi_range(1, 2), "radius": 1.0, "amount": 100})
+	for index in range(specs.size()):
+		var spec: Dictionary = specs[index]
+		var cells := RandomMapSampler.sample_zone_cells(zones, size, spec["habitats"], int(spec["count"]), float(spec["spacing"]), seed ^ (7919 * (index + 1)), occupied, anchors)
+		for cell in cells:
+			var center := Vector2(cell) + Vector2(0.5, 0.5)
+			# Keep the selected habitat: a failed placement must not migrate to
+			# unrelated water elsewhere or consume a reserved dock foundation.
+			result.append({"kind": spec["kind"], "placement_domain": "shore_water" if spec["kind"] == "shore_fish" else "water",
+				"center": [center.x, center.y], "guarantee_origin": [center.x, center.y], "placement_radius": 0.1,
+				"count": 1, "radius": 0.0, "amount": 250})
+			occupied[cell] = true
+			anchors.append(cell)
 	return result
+
+
+static func _shore_fish_approach(cell: Vector2i, size: Vector2i, terrain_ids: Array[int], occupied: Dictionary) -> Variant:
+	for offset in RandomMapWater.ORTHOGONAL_DIRECTIONS:
+		var neighbor: Vector2i = cell + offset
+		if not occupied.has(neighbor) and _cell_matches_domain(neighbor, size, terrain_ids, "land") and TerrainRules.is_land_walkable(TerrainRules.logical_for_terrain_id(terrain_ids[neighbor.y * size.x + neighbor.x])):
+			return neighbor
+	return null
 
 
 static func _clear_start_corridors(terrain_ids: Array[int], size: Vector2i, starts: Array[Vector2], source_profile: Dictionary, topology: String) -> Dictionary:
@@ -663,18 +689,22 @@ static func _generate_resource_clusters(clusters: Array, size: Vector2i, seed: i
 			var bearing := rng.randf_range(0.0, TAU)
 			center = owner_start + Vector2(cos(bearing), sin(bearing)) * rng.randf_range(minimum_distance, maximum_distance)
 		var count := maxi(0, int(cluster.get("count", 0)))
-		if String(cluster.get("kind", "")) in ["deep_fish", "shore_fish"] and count > 0:
+		if String(cluster.get("kind", "")) in ["deep_fish", "shore_fish", "whale"] and count > 0:
 			# Every generated object is already one selectable large school. Keep
 			# the declared cluster count so oceans retain their intended ecology.
 			cluster = cluster.duplicate(true)
 			if String(cluster.get("kind", "")) == "deep_fish":
 				cluster["source_unit_id"] = 53
 				cluster["source_graphic_id"] = 316
-				cluster["source_graphic_asset_name"] = "graphic_316"
-			else:
+				cluster["source_graphic_asset_name"] = "deep_fish"
+			elif String(cluster.get("kind", "")) == "shore_fish":
 				cluster["source_unit_id"] = 263
 				cluster["source_graphic_id"] = 319
-				cluster["source_graphic_asset_name"] = "graphic_319"
+				cluster["source_graphic_asset_name"] = "shore_fish"
+			else:
+				cluster["source_unit_id"] = 370
+				cluster["source_graphic_id"] = 321
+				cluster["source_graphic_asset_name"] = "whale"
 		var radius := maxf(0.0, float(cluster.get("radius", 0.0)))
 		for index in range(count):
 			var angle := TAU * float(index) / maxf(1.0, float(count)) + rng.randf_range(-0.3, 0.3)
@@ -923,9 +953,19 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	var clusters: Array = generator.get("resource_clusters", []).duplicate(true)
 	clusters.append_array(_neutral_source_resource_clusters(size, terrain, starts, generator.get("source_profile", {}), zones, seed ^ 0x673CA))
 	clusters.append_array(_naval_resource_clusters(naval_zones, generator.get("naval_resource_clusters", [])))
-	if bool(generator.get("requires_naval_starts", false)): clusters.append_array(_neutral_fish_clusters(size, terrain, seed ^ 0x26731))
 	var components := _land_component_lookup(size, terrain, cliffs)
 	result["resources"] = _generate_resource_clusters(clusters, size, seed ^ 0x53AB19, terrain, reserved, components)
+	# Marine ecology depends on available water, not on the starting-dock flag.
+	# Use a separate random stream so changes at sea do not reroll land resources.
+	var marine_clusters := _neutral_fish_clusters(size, terrain, seed ^ 0x26731, reserved, result["resources"])
+	var occupied := reserved.duplicate()
+	for resource in result["resources"]: occupied[Vector2i(resource["position"])] = true
+	var marine_resources := _generate_resource_clusters(marine_clusters, size, seed ^ 0x693D2, terrain, occupied)
+	result["resources"].append_array(marine_resources)
+	for resource in marine_resources:
+		if resource["kind"] != "shore_fish": continue
+		var approach: Variant = _shore_fish_approach(Vector2i(resource["position"]), size, terrain, occupied)
+		if approach is Vector2i: reserved[approach] = true
 	LandscapeNavigation.protect_economy(definition, result, reserved)
 	var grove_cells: Dictionary = {}
 	for resource in result["resources"]:
@@ -938,13 +978,18 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	Landscape.paint_resource_grounds(result)
 	checkpoint = _landscape_checkpoint(diagnostics, "forests", checkpoint)
 	_report_progress(progress, 0.91, "Размещение камней и лесных деталей")
-	result["scenery"] = Landscape.scenery(result, fields, reserved, seed ^ 0x665ACA, float(generator.get("decoration_density", 1.0)))
+	result["scenery"] = Landscape.scenery(result, fields, reserved, seed ^ 0x665ACA, float(generator.get("decoration_density", 1.0)), _starting_entity_exclusion_cells(definition, size))
 	var tree_sources := {"ror": 0, "aoe2": 0}
 	for resource in result["resources"]:
 		if resource.get("kind", "") != "tree": continue
 		var source := "aoe2" if resource.has("environment_asset") else "ror"
 		tree_sources[source] += 1
 	result["ecology"] = {"forest_cells": result["forest_mask"].count(1), "tree_sources": tree_sources, "reserved_route_cells": reserved.size(), "material_policy": "temperate_connected_v2"}
+	var marine_counts := {"shore_fish": 0, "deep_fish": 0, "whale": 0}
+	for resource in result["resources"]:
+		var kind := String(resource.get("kind", ""))
+		if marine_counts.has(kind): marine_counts[kind] += 1
+	result["marine_resources"] = marine_counts
 	result["content_hash"] = Landscape.fingerprint(result)
 	_landscape_checkpoint(diagnostics, "scenery_and_hash", checkpoint)
 	diagnostics["total_ms"] = float(Time.get_ticks_usec() - started) / 1000.0

@@ -5,12 +5,17 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const {parseDrs, layerDrs, parsePalettes, decodeSlp, writePng} = require('./import_assets.js');
-const VERSION = 'aoe2-environment-1';
+const VERSION = 'mixed-environment-2';
 const ROOT = path.resolve(__dirname, '../..');
 function option(name, fallback) { const i=process.argv.indexOf(name); return i<0?fallback:process.argv[i+1]; }
 function json(file) { return JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'')); }
 function hash(data) { return crypto.createHash('sha256').update(data).digest('hex'); }
 function grade(rgb, spec) {
+  // Some legacy AoC trail decorations contain saturated blue foliage. Correct
+  // only those explicitly tagged source sprites; water artwork is untouched.
+  if(spec.blue_foliage && rgb[2]>rgb[1]*1.35 && rgb[2]>rgb[0]*1.4) {
+    const v=rgb[2]; rgb=[v*0.36,v*0.57,v*0.19];
+  }
   const l=rgb[0]*0.299+rgb[1]*0.587+rgb[2]*0.114;
   return rgb.map((v,k)=>Math.max(0,Math.min(255,Math.round((l+(v-l)*spec.saturation)*spec.gain[k]))));
 }
@@ -58,11 +63,37 @@ function flattenTerrain(frames,spec) {
   }
   return {width,height,rgba};
 }
-function importPack(game,output,definitionPath) {
+function groundMask(d) {
+  const cells=new Map();
+  for(let y=0;y<d.height;y++)for(let x=0;x<d.width;x++){
+    if(d.rgba[(y*d.width+x)*4+3]<16)continue;
+    const dx=x-d.hotspot[0],dy=y-d.hotspot[1];
+    const a=Math.floor((dx/64+dy/32)*2),b=Math.floor((dy/32-dx/64)*2);
+    cells.set(a+','+b,[a||0,b||0]);
+  }
+  return [...cells.values()].sort((a,b)=>a[1]-b[1]||a[0]-b[0]);
+}
+function groundBounds(d) {
+  const bounds=[Infinity,Infinity,-Infinity,-Infinity];
+  for(let y=0;y<d.height;y++)for(let x=0;x<d.width;x++){
+    if(d.rgba[(y*d.width+x)*4+3]<16)continue;
+    const dx=x-d.hotspot[0],dy=y-d.hotspot[1];
+    const wx=dx/64+dy/32,wy=dy/32-dx/64;
+    bounds[0]=Math.min(bounds[0],wx);bounds[1]=Math.min(bounds[1],wy);
+    bounds[2]=Math.max(bounds[2],wx);bounds[3]=Math.max(bounds[3],wy);
+  }
+  return bounds.map((v,i)=> ((i<2?Math.floor(v*32):Math.ceil(v*32))/32)||0);
+}
+function importPack(game,output,definitionPath,rorGame='D:/Games/Age of Empires 1 - Rise of Rome') {
   const definition=json(definitionPath), dataDir=path.join(game,'Data');
   const paths={terrain:path.join(dataDir,'terrain.drs'),graphics:path.join(dataDir,'graphics.drs'),palette:path.join(dataDir,'interfac.drs')};
   for(const file of Object.values(paths))if(!fs.existsSync(file))throw Error('Missing classic AoE2 archive: '+file);
   const terrain=parseDrs(paths.terrain),graphics=parseDrs(paths.graphics),palettes=parsePalettes(layerDrs([paths.palette]));
+  const rorPaths={graphics:path.join(rorGame,'data/graphics.drs'),expansion:path.join(rorGame,'data2/graphics.drs'),palette:path.join(rorGame,'data/Interfac.drs')};
+  const needsRor=definition.objects.some(spec=>spec.source_game==='ror');
+  const rorGraphics=needsRor?layerDrs([rorPaths.expansion,rorPaths.graphics]):null;
+  const rorPalettes=needsRor?parsePalettes(layerDrs([rorPaths.palette])):null;
+  if(needsRor)for(const [key,value] of Object.entries(rorPaths))paths['ror_'+key]=value;
   const manifest={format_version:1,pack_id:definition.id,importer:VERSION,definition_sha256:hash(fs.readFileSync(definitionPath)),source_sha256:Object.fromEntries(Object.entries(paths).map(([key,file])=>[key,hash(fs.readFileSync(file))])),tile_pitch:definition.tile_pitch,materials:{},objects:{}};
   fs.mkdirSync(output,{recursive:true});
   function save(file,d){writePng(path.join(output,file),d.width,d.height,d.rgba);return {file,width:d.width,height:d.height,sha256:hash(fs.readFileSync(path.join(output,file)))};}
@@ -74,26 +105,32 @@ function importPack(game,output,definitionPath) {
     manifest.materials[spec.key]={...save(spec.key+'.png',atlas),source_slp:spec.slp,source_frames:100,pattern_cells:[10,10],texels_per_cell:32,frame_order:'column_bottom_to_top'};
   }
   for(const spec of definition.objects){
-    const slp=graphics.get('slp',spec.slp);if(!slp)throw Error('Missing object '+spec.slp);
+    const archive=spec.source_game==='ror'?rorGraphics:graphics;
+    const sourcePalettes=spec.source_game==='ror'?rorPalettes:palettes;
+    const scale=spec.scale??(spec.source_game==='ror'?1:definition.object_scale);
     const frames=[];
-    for(const frame of spec.frames){
-      const d=decodeSlp(slp,palettes,frame);
-      if(d.semanticPixels.player_color!==0)throw Error('Player-colour sprite is not static environment art');
-      const resized=resizeSprite(d,definition.object_scale,spec);
-      frames.push({...save(spec.key+'_'+String(frames.length).padStart(2,'0')+'.png',resized),hotspot:resized.hotspot,source_frame:frame,source_hotspot:[d.hotspotX,d.hotspotY],source_size:[d.width,d.height],source_shadow_pixels:d.semanticPixels.shadow});
+    for(let index=0;index<spec.frames.length;index++){
+      const frame=spec.frames[index],slpId=spec.slps?.[index]??spec.slp;
+      const slp=archive.get('slp',slpId);if(!slp)throw Error('Missing object '+spec.key+'/'+slpId);
+      const d=decodeSlp(slp,sourcePalettes,frame,spec.neutral_player_color?0:1);
+      if(d.semanticPixels.player_color!==0 && !spec.neutral_player_color)throw Error('Player-colour sprite is not static environment art: '+spec.key);
+      const resized=resizeSprite(d,scale,spec),bounds=groundBounds(resized);
+      if(spec.ground_masks && JSON.stringify(spec.ground_masks[index])!==JSON.stringify(groundMask(resized)))throw Error("Route mask differs from source: "+spec.key);
+      if(spec.placement && JSON.stringify(spec.ground_bounds?.[index])!==JSON.stringify(bounds))throw Error('Placement geometry differs from source: '+spec.key+'/'+index);
+      frames.push({...save(spec.key+'_'+String(frames.length).padStart(2,'0')+'.png',resized),hotspot:resized.hotspot,source_frame:frame,source_slp:slpId,source_hotspot:[d.hotspotX,d.hotspotY],source_size:[d.width,d.height],source_shadow_pixels:d.semanticPixels.shadow,scale,ground_bounds:bounds});
     }
-    manifest.objects[spec.key]={source_slp:spec.slp,frames};
+    manifest.objects[spec.key]={source_game:spec.source_game??'aoe2',source_slp:spec.slp??null,frames};
   }
   fs.writeFileSync(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   return manifest;
 }
-module.exports={resizeSprite,flattenTerrain,importPack,grade};
+module.exports={resizeSprite,flattenTerrain,importPack,grade,groundBounds,groundMask};
 if(require.main===module){
   try{
     const definition=option('--definition',path.join(ROOT,'prototype/data/environment/aoe2_temperate.json'));
     const game=option('--game','D:/Games/Age of Empires II');
     const output=option('--output',path.join(ROOT,'prototype/assets/generated/environment/aoe2_temperate'));
-    const m=importPack(game,output,definition);
+    const m=importPack(game,output,definition,option('--ror-game','D:/Games/Age of Empires 1 - Rise of Rome'));
     console.log(`Imported ${Object.keys(m.materials).length} materials and ${Object.values(m.objects).reduce((n,v)=>n+v.frames.length,0)} object variants into ${output}`);
   }catch(error){console.error(error.message);process.exitCode=1;}
 }

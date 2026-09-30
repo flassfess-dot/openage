@@ -81,6 +81,8 @@ func generate_map() -> void:
 	map_size = data["size"]
 	cells.clear()
 	objects.clear()
+	has_animated_objects = false
+	animation_time = 0.0
 	markers.clear()
 	elevation = Elevation.new(map_size)
 	for y in range(map_size.y + 1):
@@ -88,10 +90,13 @@ func generate_map() -> void:
 	for y in range(map_size.y):
 		for x in range(map_size.x): cells[Vector2i(x, y)] = int(data["terrain_ids"][y * map_size.x + x])
 	objects.append_array(data["scenery"])
-	for resource in data["resources"]:
+	for resource_index in range(data["resources"].size()):
+		var resource: Dictionary = data["resources"][resource_index]
+		var presentation: Dictionary = resource.duplicate(true)
+		presentation["id"] = resource_index + 1
 		var info: Dictionary = {}
 		if resource.get("category", "resource") == "resource":
-			info = catalog.resource_frame_info(resource)
+			info = catalog.resource_frame_info(presentation, animation_time)
 		else:
 			var unit: Dictionary = resource.duplicate(true)
 			unit["id"] = objects.size() + 1
@@ -100,7 +105,12 @@ func generate_map() -> void:
 			unit["texture_key"] = resource["kind"]
 			unit["direction"] = Vector2.DOWN
 			info = catalog.unit_frame_info(unit, "idle", 0.0)
-		if not info.is_empty(): objects.append({"position": resource["position"], "reference": true, "frame_info": info})
+		if not info.is_empty():
+			var item := {"position": resource["position"], "reference": true, "frame_info": info}
+			if String(resource.get("kind", "")) in Catalog.ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
+				item["animated_resource"] = presentation
+				has_animated_objects = true
+			objects.append(item)
 	for player in generated["definition"]["players"]:
 		var at := Vector2(player["start"])
 		var town := {"kind": "town_center", "team": int(player["team"]), "state": "complete", "hp": 600.0, "max_hp": 600.0, "components": {"ownership": {"civilization_id": int(player["civilization_id"])}}}
@@ -135,7 +145,8 @@ func _refresh(reconfigure: bool = true) -> void:
 		terrain.set_view_state(zoom, view_offset, get_viewport_rect().size, revision)
 	object_layer.queue_redraw()
 	var sources: Dictionary = generated["map_data"]["ecology"]["tree_sources"]
-	status.text = "%d × %d · 4 игрока · Деревья RoR: %d · AoE2: %d · %d природных деталей · Масштаб %d%%" % [map_size.x, map_size.y, sources["ror"], sources["aoe2"], generated["map_data"]["scenery"].size(), roundi(zoom * 100)]
+	var marine: Dictionary = generated["map_data"].get("marine_resources", {})
+	status.text = "%d × %d · 4 игрока · Деревья RoR/AoE2: %d/%d · Рыба у берега/в море: %d/%d · Киты: %d · Декали %d · Масштаб %d%%" % [map_size.x, map_size.y, sources["ror"], sources["aoe2"], marine.get("shore_fish", 0), marine.get("deep_fish", 0), marine.get("whale", 0), data_decals(), roundi(zoom * 100)]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
@@ -148,3 +159,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		_refresh(false)
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		get_tree().quit()
+
+func data_decals() -> int:
+	return int(generated.get("map_data", {}).get("decoration_summary", {}).get("decals", 0))

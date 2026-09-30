@@ -125,7 +125,7 @@ func frame_info(item: Dictionary, resource: bool = false) -> Dictionary:
 		"asset_name": PREFIX + key,
 		"frame_index": index,
 		"mirrored": false,
-		"graphic_layer": 20,
+		"graphic_layer": 0 if objects_by_key[key].get("role", "") == "decal" else 20,
 	}
 
 
@@ -146,7 +146,7 @@ func scenery(key: String, position: Vector2, id: int, variant: int = 0) -> Dicti
 	if not objects_by_key.has(key):
 		return {}
 	return {"id": id, "asset_name": PREFIX + key, "position": position,
-		"source_frame": posmod(variant, object_variant_count(key)), "presentation_layer": "scenery"}
+		"source_frame": posmod(variant, object_variant_count(key)), "presentation_layer": "decal" if objects_by_key[key].get("role", "") == "decal" else "scenery"}
 
 
 func prepare_legacy_terrain(frames_by_kind: Dictionary) -> void:
