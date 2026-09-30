@@ -11,16 +11,18 @@ const AGGRESSIVE_SCAN_INTERVAL_TICKS := 4
 const GUARDED_SCAN_INTERVAL_TICKS := 2
 const ACTIVE_TARGET_VALIDATION_INTERVAL_TICKS := 2
 # Cached entries are live entity dictionaries, so movement, health, tasks and
-# ownership remain current without rebuilding both global combat lists. Entity
-# count changes still refresh immediately; this slower safety refresh covers
-# rare in-place capability changes such as a completed combat building.
-const ROSTER_REFRESH_INTERVAL_TICKS := 20
+# ownership remain current without rebuilding both global combat lists. The
+# world revision handles supported membership changes immediately. This much
+# slower fallback retains compatibility with callers that mutate public entity
+# dictionaries directly.
+const ROSTER_COMPATIBILITY_REFRESH_INTERVAL_TICKS := 200
 const CANDIDATE_INDEX_REFRESH_INTERVAL_TICKS := 2
 
 var cached_attackers: Array = []
 var cached_targets: Array = []
 var cached_entity_count := -1
 var cached_roster_tick := -1
+var cached_roster_revision := -1
 var cached_candidate_index: Dictionary = {}
 var cached_candidate_index_tick := -1
 
@@ -30,6 +32,7 @@ func reset() -> void:
 	cached_targets.clear()
 	cached_entity_count = -1
 	cached_roster_tick = -1
+	cached_roster_revision = -1
 	cached_candidate_index.clear()
 	cached_candidate_index_tick = -1
 
@@ -39,8 +42,8 @@ func collect_commands(world, tick: int) -> Array:
 		return []
 	var probe: Variant = world.tick_pipeline.performance_probe
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
-	var rosters := _combat_rosters(world, tick)
-	var units: Array = rosters["attackers"]
+	_refresh_combat_rosters(world, tick)
+	var units: Array = cached_attackers
 	var due_units: Array = []
 	for unit_value in units:
 		var unit: Dictionary = unit_value
@@ -78,13 +81,13 @@ func collect_commands(world, tick: int) -> Array:
 		if probe != null:
 			probe.observe_microseconds("controller.autonomy.validation", validation_microseconds)
 		return []
-	# get_combat_attackers() already guarantees stable entity-ID order. The
+	# The retained attacker roster already has stable entity-ID order. The
 	# candidate index does not need a global order because final target ranking
 	# includes entity ID, so avoid sorting that temporary projection.
 	var attacker_metadata := _attacker_metadata(units)
 	var assigned: Dictionary = attacker_metadata["assigned"]
 	var retaliation_allies: Dictionary = attacker_metadata["retaliation"]
-	var candidate_index := _candidate_index(rosters["targets"], tick)
+	var candidate_index := _candidate_index(cached_targets, tick)
 	if probe != null:
 		probe.observe_microseconds("controller.autonomy.index", Time.get_ticks_usec() - stage_started)
 	var commands: Array = []
@@ -150,20 +153,32 @@ func collect_commands(world, tick: int) -> Array:
 	return commands
 
 
-func _combat_rosters(world, tick: int) -> Dictionary:
+func tracked_attackers() -> Array:
+	# Read-only live-reference view for adjacent controller bookkeeping. The
+	# roster is refreshed at the start of collect_commands on every fixed tick.
+	return cached_attackers
+
+
+func _refresh_combat_rosters(world, tick: int) -> void:
 	var entity_count: int = int(world.get_units().size()) + int(world.get_buildings().size())
+	var roster_revision := int(world.combat_roster_revision)
 	var refresh: bool = (
 		cached_roster_tick < 0
 		or tick < cached_roster_tick
-		or tick - cached_roster_tick >= ROSTER_REFRESH_INTERVAL_TICKS
+		or tick - cached_roster_tick >= ROSTER_COMPATIBILITY_REFRESH_INTERVAL_TICKS
 		or entity_count != cached_entity_count
+		or roster_revision != cached_roster_revision
 	)
 	if refresh:
 		cached_attackers = _combat_observers(world)
 		cached_targets = world.get_combat_targets(false)
 		cached_entity_count = entity_count
 		cached_roster_tick = tick
-	return {"attackers": cached_attackers, "targets": cached_targets}
+		cached_roster_revision = roster_revision
+		# A roster refresh can replace targets without waiting for the spatial
+		# candidate index's normal movement cadence.
+		cached_candidate_index.clear()
+		cached_candidate_index_tick = -1
 
 
 func _combat_observers(world) -> Array:
@@ -225,7 +240,9 @@ func _target_remains_valid(world, unit: Dictionary, target: Variant) -> bool:
 
 
 func _assistance_target_id(world, unit: Dictionary, retaliation_index: Dictionary) -> int:
-	var allies: Array = []
+	var best_target_id := -1
+	var best_ally_id := 2147483647
+	var best_distance_squared := INF
 	var unit_team := int(unit.get("team", 0))
 	var unit_position := Vector2(unit.get("pos", Vector2.ZERO))
 	var assist_range := float(unit.get("acquisition_range", 0.0))
@@ -244,13 +261,14 @@ func _assistance_target_id(world, unit: Dictionary, retaliation_index: Dictionar
 					continue
 				if world.find_combat_target(retaliation_target_id) == null:
 					continue
-				allies.append({"ally_id": int(ally.get("id", -1)), "target_id": retaliation_target_id, "distance_squared": unit_position.distance_squared_to(Vector2(ally.get("pos", Vector2.ZERO)))})
-	allies.sort_custom(func(left, right):
-		if not is_equal_approx(float(left["distance_squared"]), float(right["distance_squared"])):
-			return float(left["distance_squared"]) < float(right["distance_squared"])
-		return int(left["ally_id"]) < int(right["ally_id"])
-	)
-	return -1 if allies.is_empty() else int(allies[0]["target_id"])
+				var ally_id := int(ally.get("id", -1))
+				var distance_squared := unit_position.distance_squared_to(Vector2(ally.get("pos", Vector2.ZERO)))
+				var same_distance := is_equal_approx(distance_squared, best_distance_squared)
+				if (not same_distance and distance_squared < best_distance_squared) or (same_distance and ally_id < best_ally_id):
+					best_target_id = retaliation_target_id
+					best_ally_id = ally_id
+					best_distance_squared = distance_squared
+	return best_target_id
 
 
 func _attacker_metadata(units: Array) -> Dictionary:

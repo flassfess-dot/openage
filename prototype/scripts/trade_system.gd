@@ -232,15 +232,21 @@ func _valid_dock(dock: Variant, source_id: int) -> bool:
 
 func _nearest_home_dock(team: int, target: Dictionary, trade: Dictionary) -> Variant:
 	var source_id := int(trade.get("target_building_source_id", -1))
-	var candidates: Array = world.buildings.filter(func(building): return int(building.get("team", 0)) == team and _valid_dock(building, source_id))
-	if candidates.is_empty():
-		return null
-	candidates.sort_custom(func(left, right):
-		var left_distance := Vector2(left.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(target.get("pos", Vector2.ZERO)))
-		var right_distance := Vector2(right.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(target.get("pos", Vector2.ZERO)))
-		return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and int(left.get("id", -1)) < int(right.get("id", -1)))
-	)
-	return candidates[0]
+	var target_position := Vector2(target.get("pos", Vector2.ZERO))
+	var selected: Variant = null
+	var selected_distance := INF
+	var selected_id := 2147483647
+	for building_value in world.get_buildings():
+		var building: Dictionary = building_value
+		if int(building.get("team", 0)) != team or not _valid_dock(building, source_id):
+			continue
+		var distance := Vector2(building.get("pos", Vector2.ZERO)).distance_squared_to(target_position)
+		var building_id := int(building.get("id", -1))
+		if distance < selected_distance or (is_equal_approx(distance, selected_distance) and building_id < selected_id):
+			selected = building
+			selected_distance = distance
+			selected_id = building_id
+	return selected
 
 
 func _resolve_home_dock(trader: Dictionary, target: Dictionary) -> Variant:

@@ -59,6 +59,39 @@ func configure(runtime_data: Dictionary, localization_catalog, object_data: Dict
 
 func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: String, locale: String = "ru") -> Dictionary:
 	var selected := _selected_entities(snapshot, selected_ids)
+	return _build_from_selected(snapshot, selected, formation_name, locale)
+
+
+func build_update(snapshot: Dictionary, selected_ids: Array[int], formation_name: String, previous_signature: Variant = null, locale: String = "ru") -> Dictionary:
+	var selected := _selected_entities(snapshot, selected_ids)
+	var signature := _input_signature(snapshot, selected, formation_name, locale)
+	if previous_signature != null and int(previous_signature) == signature:
+		return {"changed": false, "signature": signature}
+	return {
+		"changed": true,
+		"signature": signature,
+		"model": _build_from_selected(snapshot, selected, formation_name, locale),
+	}
+
+
+func refresh_dynamic_model(model: Dictionary, snapshot: Dictionary, selected_ids: Array[int]) -> void:
+	model["tick"] = int(snapshot.get("tick", 0))
+	model["status_indicators"] = status_indicators(snapshot, model)
+	var selected := _selected_entities(snapshot, selected_ids)
+	if selected.size() != 1 or _category(selected[0]) != "building":
+		return
+	var source_queue: Array = selected[0].get("production_queue", [])
+	var model_queue: Array = model.get("queue", [])
+	if source_queue.size() != model_queue.size():
+		return
+	for index in range(source_queue.size()):
+		var order: Dictionary = source_queue[index]
+		var model_order: Dictionary = model_queue[index]
+		var duration := maxf(0.05, float(order.get("duration", 0.05)))
+		model_order["progress"] = clampf(float(order.get("progress", 0.0)) / duration, 0.0, 1.0)
+
+
+func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name: String, locale: String) -> Dictionary:
 	var player_state: Dictionary = snapshot.get("player_state", {})
 	var spectator := String(player_state.get("status", "active")) in ["resigned", "defeated"]
 	var disabled_reason := "battle_over" if bool(snapshot.get("battle_over", false)) else "player_not_active" if spectator else ""
@@ -278,6 +311,93 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 	return model
 
 
+func _input_signature(snapshot: Dictionary, selected: Array, formation_name: String, locale: String) -> int:
+	var player_state: Dictionary = snapshot.get("player_state", {})
+	var values: Array = [
+		formation_name,
+		locale,
+		int(snapshot.get("observer_team", player_state.get("team", 0))),
+		bool(snapshot.get("battle_over", false)),
+		hash(snapshot.get("match_result", {})),
+		int(player_state.get("wood", 0)),
+		int(player_state.get("food", 0)),
+		int(player_state.get("gold", 0)),
+		int(player_state.get("stone", 0)),
+		int(player_state.get("population", 0)),
+		int(player_state.get("population_points", int(player_state.get("population", 0)) * 2)),
+		int(player_state.get("population_reserved", 0)),
+		int(player_state.get("population_cap", 0)),
+		int(player_state.get("kills", 0)),
+		int(player_state.get("age", 0)),
+		String(player_state.get("status", "active")),
+		int(player_state.get("blocked_population_queues", 0)),
+	]
+	for entity_value in selected:
+		values.append(_entity_input_signature(entity_value))
+	return hash(values)
+
+
+func _entity_input_signature(entity: Dictionary) -> int:
+	var components: Dictionary = entity.get("components", {})
+	var combat: Dictionary = components.get("combat", {})
+	var conversion: Dictionary = components.get("conversion", {})
+	var trade: Dictionary = components.get("trade", {})
+	var ownership: Dictionary = components.get("ownership", {})
+	var worker: Dictionary = components.get("worker", {})
+	return hash([
+		int(entity.get("id", -1)),
+		String(entity.get("kind", "")),
+		_category(entity),
+		float(entity.get("hp", 0.0)),
+		float(entity.get("max_hp", 0.0)),
+		float(entity.get("attack_damage", 0.0)),
+		String(entity.get("task", "")),
+		String(entity.get("state", "")),
+		String(entity.get("stance", "")),
+		float(entity.get("carried_amount", 0.0)),
+		float(entity.get("carry_capacity", 0.0)),
+		int(entity.get("carried_resource_type_id", -1)),
+		bool(entity.get("harvestable", false)),
+		int(entity.get("amount", 0)),
+		int(entity.get("max_amount", 0)),
+		String(entity.get("resource_state", "")),
+		bool(entity.get("combat_enabled", false)),
+		hash(combat.get("attacks", [])),
+		hash(combat.get("armors", [])),
+		float(combat.get("base_armor", 0.0)),
+		int(combat.get("projectile_id", -1)),
+		float(combat.get("blast_range", 0.0)),
+		bool(conversion.get("enabled", false)),
+		float(conversion.get("faith", 0.0)),
+		float(conversion.get("max_faith", 100.0)),
+		bool(trade.get("enabled", false)),
+		String(trade.get("stage", "idle")),
+		int(trade.get("selected_input_resource_type_id", -1)),
+		int(trade.get("cargo_gold", 0)),
+		int(ownership.get("civilization_id", runtime_catalog.get("default_civilization_id", 13))),
+		bool(worker.get("enabled", false)),
+		hash(entity.get("behavior_tags", [])),
+		hash(entity.get("command_options", {})),
+		_production_queue_signature(entity.get("production_queue", [])),
+	])
+
+
+func _production_queue_signature(queue: Array) -> int:
+	var values: Array = []
+	for order_value in queue:
+		var order: Dictionary = order_value
+		values.append([
+			int(order.get("id", -1)),
+			String(order.get("order_type", "unit")),
+			String(order.get("kind", "")),
+			int(order.get("technology_id", -1)),
+			String(order.get("status", "queued")),
+			float(order.get("duration", 0.05)),
+			int(order.get("population_cost", 0)),
+		])
+	return hash(values)
+
+
 static func status_indicators(snapshot: Dictionary, model: Dictionary) -> Dictionary:
 	var population: Dictionary = model.get("population", {})
 	var player_state: Dictionary = snapshot.get("player_state", {})
@@ -302,14 +422,31 @@ func _selected_entities(snapshot: Dictionary, selected_ids: Array[int]) -> Array
 		requested[int(entity_id)] = true
 	var player_team := int(snapshot.get("observer_team", snapshot.get("player_state", {}).get("team", 0)))
 	var result: Array = []
-	for collection_name in ["units", "buildings", "resources"]:
-		for entity_value in snapshot.get(collection_name, []):
-			var entity: Dictionary = entity_value
-			if requested.has(int(entity.get("id", -1))) and (collection_name == "resources" or int(entity.get("team", 0)) == player_team) and (collection_name == "resources" or float(entity.get("hp", 0.0)) > 0.0):
-				# The view model only reads the detached presentation snapshot. A
-				# second deep copy duplicated combat tables and production queues on
-				# every fixed tick without providing additional isolation.
-				result.append(entity)
+	var has_control_projection := snapshot.has("control_units") and snapshot.has("control_buildings") and snapshot.has("control_resources")
+	var collection_sets: Array = []
+	if has_control_projection:
+		collection_sets.append(["control_units", "control_buildings", "control_resources"])
+	# A snapshot may expose empty control arrays when it was created without an
+	# always-include selection. Fall back only for IDs missing from the compact
+	# projection, preserving the fast path used by the live HUD.
+	collection_sets.append(["units", "buildings", "resources"])
+	var found: Dictionary = {}
+	for collection_names_value in collection_sets:
+		var collection_names: Array = collection_names_value
+		for collection_name_value in collection_names:
+			var collection_name := String(collection_name_value)
+			var is_resource_collection: bool = collection_name in ["resources", "control_resources"]
+			for entity_value in snapshot.get(collection_name, []):
+				var entity: Dictionary = entity_value
+				var entity_id := int(entity.get("id", -1))
+				if requested.has(entity_id) and not found.has(entity_id) and (is_resource_collection or int(entity.get("team", 0)) == player_team) and (is_resource_collection or float(entity.get("hp", 0.0)) > 0.0):
+					# The view model only reads the detached presentation snapshot. A
+					# second deep copy duplicated combat tables and production queues on
+					# every fixed tick without providing additional isolation.
+					result.append(entity)
+					found[entity_id] = true
+		if found.size() >= requested.size():
+			break
 	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	return result
 

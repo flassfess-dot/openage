@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://yn3r17unjgcy"
-path="res://.godot/imported/04-movement.png-ac9fca0bbcf5aeb2a040376cd66cb2fd.ctex"
+uid="uid://c7rg6q4p8owx7"
+path="res://.godot/imported/random-map.png-fb40fab83077ace26381f1d11df3620e.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://04-movement.png"
-dest_files=["res://.godot/imported/04-movement.png-ac9fca0bbcf5aeb2a040376cd66cb2fd.ctex"]
+source_file="res://assets/menu/random-map.png"
+dest_files=["res://.godot/imported/random-map.png-fb40fab83077ace26381f1d11df3620e.ctex"]
 
 [params]
 

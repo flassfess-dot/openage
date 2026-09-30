@@ -94,6 +94,42 @@ func has_graphic(graphic_id: int, player: int = 1) -> bool:
 	return not _frame_records(graphic_id, _player_asset_id(player)).is_empty()
 
 
+func prewarm_buildings(buildings: Array) -> void:
+	var requested: Dictionary = {}
+	for building_value in buildings:
+		var building: Dictionary = building_value
+		var player := _player_asset_id(int(building.get("team", 1)))
+		var source := _source_record(building)
+		var graphics: Dictionary = source.get("graphics", {})
+		for graphic_name in ["idle", "move", "attack", "death", "construction"]:
+			var graphic_id := int(graphics.get(graphic_name, -1))
+			if graphic_id >= 0:
+				requested[Vector2i(graphic_id, player)] = true
+		for damage_value in graphics.get("damage", []):
+			var damage: Dictionary = damage_value
+			var damage_graphic_id := int(damage.get("graphic_id", -1))
+			if damage_graphic_id >= 0:
+				requested[Vector2i(damage_graphic_id, player)] = true
+		var runtime: Dictionary = runtime_catalog.get("archetypes", {}).get(String(building.get("kind", "")), {}).get("runtime", {})
+		var depleted_graphic_id := int(runtime.get("depleted_graphic_id", -1))
+		if depleted_graphic_id >= 0:
+			requested[Vector2i(depleted_graphic_id, player)] = true
+	var ordered_keys: Array = requested.keys()
+	ordered_keys.sort_custom(func(left, right):
+		var left_key := Vector2i(left)
+		var right_key := Vector2i(right)
+		return left_key.x < right_key.x or (left_key.x == right_key.x and left_key.y < right_key.y)
+	)
+	for key_value in ordered_keys:
+		var key: Vector2i = key_value
+		_ensure_loaded(key.x, key.y)
+		# Composite overlays have independent graphics and otherwise remain a
+		# hidden first-frame cost even when the base building is already resident.
+		var logical_angle_count := maxi(1, int(graphics_catalog.get("graphics", {}).get(String.num_int64(key.x), {}).get("angle_count", 1)))
+		for logical_facing in range(logical_angle_count):
+			_composite_parts(key.x, key.y, logical_facing, 0.0)
+
+
 func imported_frame_count(graphic_id: int, player: int = 1) -> int:
 	return _frame_records(graphic_id, _player_asset_id(player)).size()
 

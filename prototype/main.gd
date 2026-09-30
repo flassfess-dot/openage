@@ -37,6 +37,7 @@ const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 const LockstepSession := preload("res://scripts/lockstep_session.gd")
 const LockstepTcpRelay := preload("res://scripts/lockstep_tcp_relay.gd")
 const AiPlayer := preload("res://scripts/ai_player.gd")
+const AiObservationStore := preload("res://scripts/ai_observation_store.gd")
 const SpriteGeometry := preload("res://scripts/sprite_geometry.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const FacingConvention := preload("res://scripts/facing_convention.gd")
@@ -84,6 +85,7 @@ var match_definition: Dictionary = {}
 var map_definition_override: Dictionary = {}
 var map_definition: Dictionary = {}
 var ai_players: Array = []
+var ai_observation_store := AiObservationStore.new()
 var input_adapter := InputAdapter.new()
 var picking_service := PickingService.new()
 var selection_preview_ids: Array[int] = []
@@ -162,6 +164,7 @@ var modal_restore_paused := false
 var last_save_error := ""
 var hud_view_model := HudViewModel.new()
 var hud_model: Dictionary = {}
+var cached_hud_signature: Variant = null
 var scenario_overlay: ScenarioOverlay
 var terrain_canvas: TerrainCanvas
 var cached_fog_revision: int = -1
@@ -181,6 +184,7 @@ var cached_minimap_terrain_texture: ImageTexture
 var cached_minimap_terrain_revision: int = -1
 var cached_minimap_terrain_rectangle := Rect2()
 var cached_minimap_fog_texture: ImageTexture
+var cached_minimap_fog_image: Image
 var cached_minimap_exploration_revision: int = -1
 var cached_minimap_fog_rectangle := Rect2()
 var cached_minimap_mesh_tick: int = -1
@@ -397,6 +401,7 @@ func reset_game() -> void:
 	if simulation_world == null:
 		return
 	var bootstrap: Dictionary = MatchBootstrap.apply(simulation_world, match_definition, map_definition)
+	resource_catalog.prewarm_match_entities(simulation_world.get_units(), simulation_world.get_buildings())
 	game_controller.reset_timing()
 	game_controller.start_recording(map_seed, false)
 	game_controller.set_command_result_limit(1024)
@@ -427,6 +432,7 @@ func reset_game() -> void:
 	cached_minimap_terrain_revision = -1
 	cached_minimap_terrain_rectangle = Rect2()
 	cached_minimap_fog_texture = null
+	cached_minimap_fog_image = null
 	cached_minimap_exploration_revision = -1
 	cached_minimap_fog_rectangle = Rect2()
 	cached_minimap_mesh_tick = -1
@@ -436,6 +442,7 @@ func reset_game() -> void:
 	cached_minimap_resource_pixels.clear()
 	cached_overview_tick = -1
 	cached_overview_resource_revision = -1
+	cached_hud_signature = null
 	cached_environment_bounds = Rect2i()
 	cached_environment_items.clear()
 	if render_world != null:
@@ -720,6 +727,7 @@ func _submit_network_chat(raw_text: String) -> void:
 
 
 func configure_ai_players() -> void:
+	ai_observation_store.clear()
 	ai_players = _new_ai_players()
 	_configure_runtime_ai_cadence(ai_players)
 
@@ -773,7 +781,7 @@ func queue_ai_commands(next_tick: int = -1) -> bool:
 		if probe != null:
 			snapshot_options["performance_probe"] = probe
 			snapshot_options["performance_prefix"] = "presentation.ai.snapshot"
-		var knowledge := SimulationSnapshot.presentation(simulation_world, game_controller.tick_index, int(ai.team), snapshot_options)
+		var knowledge := ai_observation_store.observe(simulation_world, game_controller.tick_index, int(ai.team), snapshot_options)
 		if probe != null:
 			probe.observe_microseconds("presentation.ai.snapshot", Time.get_ticks_usec() - stage_started)
 			stage_started = Time.get_ticks_usec()
@@ -1220,7 +1228,9 @@ func load_game_from_path(path: String) -> bool:
 
 	simulation_world = restored_world
 	game_controller = restored_controller
+	ai_observation_store.clear()
 	ai_players = restored_ai_players
+	resource_catalog.prewarm_match_entities(simulation_world.get_units(), simulation_world.get_buildings())
 	game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
 	var saved_controller: Dictionary = archive.get("controller_state", {})
 	game_controller.set_speed_multiplier(float(saved_controller.get("speed", 1.5)))
@@ -1257,10 +1267,12 @@ func load_game_from_path(path: String) -> bool:
 	cached_world_fog_texture_data.resize(0)
 	cached_world_fog_texture_revision = -1
 	cached_minimap_fog_texture = null
+	cached_minimap_fog_image = null
 	cached_minimap_exploration_revision = -1
 	cached_minimap_fog_rectangle = Rect2()
 	cached_overview_tick = -1
 	cached_overview_resource_revision = -1
+	cached_hud_signature = null
 	pending_build_kind = ""
 	pending_target_command = ""
 	local_spectator = false
@@ -1916,7 +1928,18 @@ func set_trade_resource_from_hud(resource_type_id: int) -> void:
 func refresh_hud_model() -> void:
 	if hud_view_model == null or presentation_snapshot.is_empty():
 		return
-	hud_model = hud_view_model.build(presentation_snapshot, player_control_state.selected_ids(), formation, "ru")
+	var update: Dictionary = hud_view_model.build_update(presentation_snapshot, player_control_state.selected_ids(), formation, cached_hud_signature, "ru")
+	cached_hud_signature = update.get("signature")
+	if not bool(update.get("changed", false)):
+		# Tick, clock/blink and active queue progress are intentionally excluded
+		# from the structural signature. Keep their public model values current
+		# without rebuilding commands or deep-copying them into controls.
+		hud_view_model.refresh_dynamic_model(hud_model, presentation_snapshot, player_control_state.selected_ids())
+		var probe: Variant = game_controller.performance_probe if game_controller != null else null
+		if probe != null:
+			probe.increment("presentation.hud.skipped")
+		return
+	hud_model = update.get("model", {})
 	if hud_controls != null:
 		hud_controls.set_view_model(hud_model)
 
@@ -2908,6 +2931,10 @@ func draw_minimap(rectangle: Rect2) -> void:
 	var exploration_revision := int(presentation_snapshot.get("fog_exploration_revision", presentation_snapshot.get("fog_revision", -1)))
 	if cached_minimap_fog_texture == null or cached_minimap_exploration_revision != exploration_revision or cached_minimap_fog_rectangle != rectangle:
 		var fog_image := MinimapTerrainRaster.build_fog(map_size, rectangle, center, scale, presentation_snapshot.get("fog", {}).get("cells", []))
+		# Retain the bounded CPU raster as the authoritative upload payload. This
+		# also makes headless verification independent of renderer-specific texture
+		# readback behavior while the live view continues reusing one GPU texture.
+		cached_minimap_fog_image = fog_image
 		if cached_minimap_fog_texture == null or cached_minimap_fog_rectangle != rectangle:
 			cached_minimap_fog_texture = ImageTexture.create_from_image(fog_image)
 		else:

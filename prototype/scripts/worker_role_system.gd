@@ -63,6 +63,7 @@ func apply(worker: Dictionary, profile: Dictionary, combat_role: bool = false) -
 
 
 func clear(worker: Dictionary) -> void:
+	var previous_combat_enabled := bool(worker.get("combat_enabled", false))
 	if worker.has("_worker_base_combat"):
 		var backup: Dictionary = worker["_worker_base_combat"]
 		for field in ["attack_damage", "attack_period", "attack_range_min", "attack_range", "blast_range", "projectile_id", "combat_enabled", "stance", "acquisition_range", "chase_range"]:
@@ -85,6 +86,8 @@ func clear(worker: Dictionary) -> void:
 	var identity: Dictionary = worker.get("components", {}).get("identity", {})
 	identity.erase("task_source_unit_id")
 	identity.erase("task_source_key")
+	if bool(worker.get("combat_enabled", false)) != previous_combat_enabled and world != null:
+		world.mark_combat_roster_dirty()
 
 
 func presentation_state(unit: Dictionary, default_state: String) -> String:
@@ -167,6 +170,7 @@ func _apply_effect_operator(current: float, effect_type: int, value: float) -> f
 func _apply_combat_source(worker: Dictionary, source: Dictionary) -> void:
 	if source.is_empty():
 		return
+	var previous_combat_enabled := bool(worker.get("combat_enabled", false))
 	var component: Dictionary = worker.get("components", {}).get("combat", {})
 	worker["_worker_base_combat"] = {
 		"attack_damage": worker.get("attack_damage", 0.0),
@@ -201,3 +205,5 @@ func _apply_combat_source(worker: Dictionary, source: Dictionary) -> void:
 	component["projectile_id"] = worker["projectile_id"]
 	component["frame_delay"] = int(source_combat.get("frame_delay", 0))
 	component["weapon_offset"] = source_combat.get("weapon_offset", [0.0, 0.0, 0.0]).duplicate()
+	if bool(worker.get("combat_enabled", false)) != previous_combat_enabled and world != null:
+		world.mark_combat_roster_dirty()

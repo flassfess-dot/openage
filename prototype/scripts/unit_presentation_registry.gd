@@ -3,6 +3,7 @@ extends RefCounted
 
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
 const DamageSelector := preload("res://scripts/presentation_damage_selector.gd")
+const AnimationController := preload("res://scripts/animation_controller.gd")
 
 var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
@@ -88,6 +89,78 @@ func animation_frames(texture_key: String, state: String) -> Array:
 	return textures.get(texture_key, {}).get(state, [])
 
 
+func prewarm_units(units: Array) -> void:
+	# Loading is deliberately performed during match setup. A unit's first move,
+	# attack, work or death must not synchronously decode a new clip in the middle
+	# of a live presentation frame.
+	var requested_states_by_key: Dictionary = {}
+	var requested_effect_graphics: Dictionary = {}
+	for unit_value in units:
+		var unit: Dictionary = unit_value
+		var texture_key := texture_key_for_unit(unit)
+		if texture_key.is_empty():
+			continue
+		var requested: Dictionary = requested_states_by_key.get(texture_key, {})
+		for state in ["idle", "move", "death"]:
+			requested[state] = true
+		requested[AnimationController.clip_for_state(String(unit.get("anim_state", AnimationController.IDLE)))] = true
+		var components: Dictionary = unit.get("components", {})
+		if bool(unit.get("combat_enabled", false)) or float(unit.get("attack_damage", 0.0)) > 0.0:
+			requested["attack"] = true
+		if bool(components.get("worker", {}).get("enabled", false)):
+			# Worker roles select source-specific states only after an order is
+			# assigned (farmer_work, carry_wood, hunter_attack, ...). Prewarm the
+			# states declared by the current worker definition; loading remains
+			# limited to worker types that actually exist in this match.
+			var state_specs: Dictionary = definitions.get(texture_key, {}).get("state_specs", {})
+			for state_value in state_specs:
+				requested[String(state_value)] = true
+		if bool(components.get("conversion", {}).get("enabled", false)):
+			requested["convert"] = true
+		if bool(components.get("healing", {}).get("enabled", false)):
+			requested["heal"] = true
+		requested_states_by_key[texture_key] = requested
+		if effect_presentations != null:
+			var source := _source_record(archetype_for_unit(String(unit.get("kind", ""))), int(unit.get("source_unit_id", -1)), unit)
+			for damage_value in source.get("graphics", {}).get("damage", []):
+				var damage: Dictionary = damage_value
+				var damage_graphic_id := int(damage.get("graphic_id", -1))
+				if damage_graphic_id >= 0:
+					requested_effect_graphics[Vector2i(damage_graphic_id, int(unit.get("team", 1)))] = true
+			var impact_graphic_id := int(components.get("combat", {}).get("impact_effect_graphic_id", -1))
+			if impact_graphic_id >= 0:
+				requested_effect_graphics[Vector2i(impact_graphic_id, int(unit.get("team", 1)))] = true
+	var ordered_keys: Array = requested_states_by_key.keys()
+	ordered_keys.sort()
+	for texture_key_value in ordered_keys:
+		var texture_key := String(texture_key_value)
+		var states: Array = requested_states_by_key[texture_key].keys()
+		states.sort()
+		for state_value in states:
+			ensure_loaded(texture_key, String(state_value))
+	var effect_keys: Array = requested_effect_graphics.keys()
+	effect_keys.sort_custom(func(left, right):
+		var left_key := Vector2i(left)
+		var right_key := Vector2i(right)
+		return left_key.x < right_key.x or (left_key.x == right_key.x and left_key.y < right_key.y)
+	)
+	for key_value in effect_keys:
+		var key := Vector2i(key_value)
+		effect_presentations.frame_info_for(key.x, key.y, 0.0)
+
+
+func texture_key_for_unit(unit: Dictionary) -> String:
+	var alias := String(unit.get("kind", ""))
+	var owner_team := int(unit.get("team", 1))
+	var prefix := alias if owner_team == 1 else "enemy_%s" % alias
+	var neutral_prefix := "neutral_%s" % alias
+	if owner_team <= 0 and definitions.has(neutral_prefix):
+		prefix = neutral_prefix
+	var source_id := int(unit.get("source_unit_id", -1))
+	var variant_key := "%s#%d" % [prefix, source_id]
+	return variant_key if definitions.has(variant_key) else prefix
+
+
 func ensure_loaded(texture_key: String, requested_state: String = "") -> void:
 	var attempted: Dictionary = loaded_states.get(texture_key, {})
 	if not requested_state.is_empty() and attempted.has(requested_state):
@@ -122,14 +195,8 @@ func ensure_loaded(texture_key: String, requested_state: String = "") -> void:
 
 func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -> Dictionary:
 	var alias := String(unit.get("kind", ""))
-	var owner_team := int(unit.get("team", 1))
-	var prefix := alias if owner_team == 1 else "enemy_%s" % alias
-	var neutral_prefix := "neutral_%s" % alias
-	if owner_team <= 0 and definitions.has(neutral_prefix):
-		prefix = neutral_prefix
 	var source_id := int(unit.get("source_unit_id", -1))
-	var variant_key := "%s#%d" % [prefix, source_id]
-	var texture_key := variant_key if definitions.has(variant_key) else prefix
+	var texture_key := texture_key_for_unit(unit)
 	ensure_loaded(texture_key, state)
 	if not textures.get(texture_key, {}).has(state):
 		ensure_loaded(texture_key, "idle")

@@ -41,23 +41,24 @@ func _initialize() -> void:
 	assert_true(game.cached_minimap_mesh == original_mesh, "fog changes do not rebuild the static overview mesh")
 	assert_true(game.cached_minimap_terrain_texture == original_terrain, "fog changes do not invalidate minimap terrain")
 	assert_true(game.cached_minimap_fog_texture == original_fog, "fog revisions update the existing overlay texture")
-	assert_true(game.cached_minimap_fog_texture.get_image().get_pixelv(sample).a > 0.99, "unknown map cells are black on the minimap")
+	var unknown_alpha: float = game.cached_minimap_fog_image.get_pixelv(sample).a
+	assert_true(unknown_alpha > 0.99, "unknown map cells are black on the minimap (alpha=%.3f cached_revision=%d requested_revision=%d)" % [unknown_alpha, int(game.cached_minimap_exploration_revision), int(game.presentation_snapshot.get("fog_exploration_revision", -1))])
 	fog.fill(FogOfWar.EXPLORED)
 	game.presentation_snapshot["fog"] = {"cells": fog}
 	game.presentation_snapshot["fog_revision"] = int(game.presentation_snapshot["fog_revision"]) + 1
 	game.presentation_snapshot["fog_exploration_revision"] = int(game.presentation_snapshot["fog_exploration_revision"]) + 1
 	game.queue_redraw()
 	await process_frame
-	var explored_alpha := game.cached_minimap_fog_texture.get_image().get_pixelv(sample).a
+	var explored_alpha: float = game.cached_minimap_fog_image.get_pixelv(sample).a
 	assert_true(explored_alpha > 0.5 and explored_alpha < 0.7, "explored map cells remain dimmed")
-	var exploration_revision := game.cached_minimap_exploration_revision
+	var exploration_revision: int = game.cached_minimap_exploration_revision
 	fog.fill(FogOfWar.VISIBLE)
 	game.presentation_snapshot["fog"] = {"cells": fog}
 	game.presentation_snapshot["fog_revision"] = int(game.presentation_snapshot["fog_revision"]) + 1
 	game.queue_redraw()
 	await process_frame
 	assert_true(game.cached_minimap_exploration_revision == exploration_revision, "visibility-only changes do not rebuild the minimap overlay")
-	assert_true(absf(game.cached_minimap_fog_texture.get_image().get_pixelv(sample).a - explored_alpha) < 0.01, "visible and explored cells look the same on the minimap")
+	assert_true(absf(game.cached_minimap_fog_image.get_pixelv(sample).a - explored_alpha) < 0.01, "visible and explored cells look the same on the minimap")
 	game.free()
 	if failures.is_empty():
 		print("Minimap fog rendering passed")

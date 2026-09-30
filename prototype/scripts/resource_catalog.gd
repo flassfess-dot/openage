@@ -113,6 +113,22 @@ func load() -> void:
 	projectile_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records, graphics_frame_records)
 	interface_icons.configure(asset_records, interface_frame_records)
 
+
+func prewarm_match_entities(units: Array, buildings: Array) -> void:
+	unit_presentations.prewarm_units(units)
+	building_presentations.prewarm_buildings(buildings)
+	var projectile_source_ids: Dictionary = {}
+	for unit_value in units:
+		var unit: Dictionary = unit_value
+		var source_unit_id := int(unit.get("projectile_id", -1))
+		if source_unit_id >= 0:
+			projectile_source_ids[source_unit_id] = true
+	var ordered_projectile_ids: Array = projectile_source_ids.keys()
+	ordered_projectile_ids.sort()
+	for source_unit_id_value in ordered_projectile_ids:
+		projectile_presentations.ensure_loaded(int(source_unit_id_value))
+
+
 func read_json(path: String):
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:

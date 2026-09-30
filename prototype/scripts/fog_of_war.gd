@@ -283,6 +283,10 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 		_collect_sources(units, 0, current_sources, movement_bucket_count, movement_bucket_index)
 		_collect_sources(buildings, 1, current_sources, movement_bucket_count, movement_bucket_index)
 	else:
+		# Cached sources retain a live entity reference, so lifecycle and ownership
+		# changes can retire their old visibility immediately without a full roster
+		# scan or a four-bucket delay.
+		_retire_invalid_sources(removed_sources)
 		if full_roster_scan:
 			source_scan_generation += 1
 		_collect_source_deltas(units, 0, movement_bucket_count, movement_bucket_index, added_sources, previous_replacements, current_replacements)
@@ -404,6 +408,7 @@ func _collect_sources(entities: Array, category_id: int, result: Dictionary, mov
 			"center": center,
 			"radius": sight_radius,
 			"cells": cells,
+			"entity": entity,
 			"source_revision": int(previous.get("source_revision", 0)) + 1 if previous != null else 1,
 		}
 
@@ -464,6 +469,7 @@ func _collect_source_deltas(
 			"center": center,
 			"radius": sight_radius,
 			"cells": cells,
+			"entity": entity,
 			"source_revision": int(previous.get("source_revision", 0)) + 1 if previous != null else 1,
 		}
 		if source_key >= source_seen_generations.size():
@@ -475,6 +481,26 @@ func _collect_source_deltas(
 		else:
 			previous_replacements.append(previous)
 			current_replacements.append(current)
+
+
+func _retire_invalid_sources(removed_sources: Array[Dictionary]) -> void:
+	for source_key in vision_sources.keys():
+		var source: Dictionary = vision_sources[source_key]
+		var entity_value: Variant = source.get("entity")
+		if not entity_value is Dictionary:
+			continue
+		var entity: Dictionary = entity_value
+		var vision: Dictionary = entity.get("components", {}).get("vision", {})
+		var remains_valid := (
+			float(entity.get("hp", 0.0)) > 0.0
+			and int(entity.get("team", 0)) == int(source.get("team", -1))
+			and bool(vision.get("enabled", false))
+			and float(vision.get("range", 0.0)) > 0.0
+		)
+		if remains_valid:
+			continue
+		removed_sources.append(source)
+		vision_sources.erase(source_key)
 
 
 func _vision_cells(center: Vector2, radius: float) -> PackedInt32Array:

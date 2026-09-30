@@ -37,14 +37,22 @@ function Write-Status {
 }
 
 function Assert-ApplicationNotRunning {
-    $running = @(Get-CimInstance Win32_Process -Filter "Name = 'Rise of Rome Prototype.exe'" | Where-Object {
-        $_.ExecutablePath -eq $application
-    })
+    # WMI/CIM process inspection is denied in some managed Windows sessions.
+    # The packaged executable has a unique process name, so the ordinary
+    # process API provides the same overwrite guard without elevated access.
+    $running = @(Get-Process -Name "Rise of Rome Prototype" -ErrorAction SilentlyContinue)
     if ($running.Count -eq 0) {
         return
     }
     $processDetails = ($running | ForEach-Object {
-        "PID {0}: {1}" -f $_.ProcessId, $_.CommandLine
+        $processPath = ""
+        try {
+            $processPath = [string]$_.Path
+        }
+        catch {
+            $processPath = "path unavailable"
+        }
+        "PID {0}: {1}" -f $_.Id, $processPath
     }) -join "; "
     throw "A process is using the packaged executable: $processDetails. Close the visible game or stop the headless test, then run the full build again."
 }
@@ -154,6 +162,10 @@ try {
         "interface_panel_1.png",
         "interface_panel_2.png",
         "interface_panel_3.png",
+        "interface\interface_50103.png",
+        "interface\interface_50109.png",
+        "interface\interface_50115.png",
+        "interface\interface_50145.png",
         "hud_shell_640_4_00.png",
         "hud_shell_640_4_01.png",
         "hud_shell_800_4_00.png",

@@ -6,7 +6,7 @@ const Commands := preload("res://scripts/commands.gd")
 const PREDATOR_SCAN_INTERVAL_TICKS := 20
 const GAZELLE_FLEE_SCAN_INTERVAL_TICKS := 20
 const COAST_RETURN_INTERVAL_TICKS := 10
-const ROSTER_REFRESH_INTERVAL_TICKS := 40
+const ROSTER_COMPATIBILITY_REFRESH_INTERVAL_TICKS := 200
 const GAZELLE_FLEE_RANGE := 2.0
 const GAZELLE_FLEE_DISTANCE := 3.0
 const COAST_HOME_SEARCH_RADIUS_CELLS := 16
@@ -19,6 +19,7 @@ const HASH_MODULUS := 2_147_483_647
 var cached_wildlife: Array = []
 var cached_unit_count := -1
 var cached_roster_tick := -1
+var cached_world_roster_revision := -1
 var coastal_homes: Dictionary = {}
 
 
@@ -26,6 +27,7 @@ func reset() -> void:
 	cached_wildlife.clear()
 	cached_unit_count = -1
 	cached_roster_tick = -1
+	cached_world_roster_revision = -1
 	coastal_homes.clear()
 
 
@@ -85,7 +87,9 @@ func _gazelle_flee_command(world, gazelle: Dictionary, tick: int):
 	if not _decision_due(tick, gazelle_id, GAZELLE_FLEE_SCAN_INTERVAL_TICKS, 53):
 		return null
 	var position := Vector2(gazelle.get("pos", Vector2.ZERO))
-	var threats: Array = []
+	var nearest_threat: Variant = null
+	var nearest_distance_squared := INF
+	var nearest_id := 2147483647
 	for candidate_value in world.query_units_near(position, GAZELLE_FLEE_RANGE):
 		var candidate: Dictionary = candidate_value
 		if int(candidate.get("id", -1)) == gazelle_id or float(candidate.get("hp", 0.0)) <= 0.0:
@@ -94,17 +98,16 @@ func _gazelle_flee_command(world, gazelle: Dictionary, tick: int):
 			continue
 		if int(candidate.get("team", 0)) <= 0 and String(candidate.get("kind", "")) != "lion":
 			continue
-		threats.append(candidate)
-	if threats.is_empty():
+		var distance_squared := position.distance_squared_to(Vector2(candidate.get("pos", Vector2.ZERO)))
+		var candidate_id := int(candidate.get("id", -1))
+		var same_distance := is_equal_approx(distance_squared, nearest_distance_squared)
+		if (not same_distance and distance_squared < nearest_distance_squared) or (same_distance and candidate_id < nearest_id):
+			nearest_threat = candidate
+			nearest_distance_squared = distance_squared
+			nearest_id = candidate_id
+	if nearest_threat == null:
 		return null
-	threats.sort_custom(func(left, right):
-		var left_distance := position.distance_squared_to(Vector2(left.get("pos", Vector2.ZERO)))
-		var right_distance := position.distance_squared_to(Vector2(right.get("pos", Vector2.ZERO)))
-		if not is_equal_approx(left_distance, right_distance):
-			return left_distance < right_distance
-		return int(left.get("id", -1)) < int(right.get("id", -1))
-	)
-	var away := position - Vector2(threats[0].get("pos", Vector2.ZERO))
+	var away := position - Vector2(nearest_threat.get("pos", Vector2.ZERO))
 	if away.length_squared() <= 0.0001:
 		var direction_index := _deterministic_roll(gazelle_id, tick, 67, DIRECTION_COUNT)
 		away = Vector2.RIGHT.rotated(TAU * float(direction_index) / float(DIRECTION_COUNT))
@@ -271,11 +274,13 @@ static func _is_coastal_predator(animal: Dictionary) -> bool:
 
 func _wildlife_roster(world, tick: int) -> Array:
 	var source: Array = world.get_units()
+	var world_roster_revision := int(world.combat_roster_revision)
 	if (
 		cached_roster_tick < 0
 		or tick < cached_roster_tick
-		or tick - cached_roster_tick >= ROSTER_REFRESH_INTERVAL_TICKS
+		or tick - cached_roster_tick >= ROSTER_COMPATIBILITY_REFRESH_INTERVAL_TICKS
 		or source.size() != cached_unit_count
+		or world_roster_revision != cached_world_roster_revision
 	):
 		cached_wildlife = source.filter(func(unit):
 			return int(unit.get("team", -1)) == 0 \
@@ -293,4 +298,5 @@ func _wildlife_roster(world, tick: int) -> Array:
 				coastal_homes.erase(entity_id)
 		cached_unit_count = source.size()
 		cached_roster_tick = tick
+		cached_world_roster_revision = world_roster_revision
 	return cached_wildlife

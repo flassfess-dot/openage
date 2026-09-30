@@ -419,11 +419,16 @@ func _emit_command_task_changes(command, previous_tasks: Dictionary) -> void:
 
 
 func _all_unit_task_states() -> Array:
-	# get_combat_attackers() already guarantees stable entity-ID order. Keep the
-	# entity reference beside its task instead of building a Dictionary, sorting
-	# its keys and resolving every entity a second time after the world tick.
+	# Combat awareness has already refreshed this stable live-reference roster
+	# for the current fixed tick. Reuse it instead of scanning and sorting every
+	# unit and building again solely for task-change bookkeeping.
 	var result: Array = []
-	for unit in simulation_world.get_combat_attackers():
+	for unit_value in combat_awareness.tracked_attackers():
+		var unit: Dictionary = unit_value
+		if float(unit.get("hp", 0.0)) <= 0.0:
+			continue
+		if simulation_world.entity_is_static(unit) and String(unit.get("state", "complete")) != "complete":
+			continue
 		result.append(unit)
 		result.append(String(unit.get("task", "idle")))
 	return result

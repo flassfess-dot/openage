@@ -18,7 +18,7 @@ if (-not (Test-Path -LiteralPath $application) -or -not (Test-Path -LiteralPath 
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
-    $OutputRoot = Join-Path $repositoryRoot "prototype\qa\live-packaged-probe"
+    $OutputRoot = Join-Path $repositoryRoot "dist\qa\live-packaged-probe"
 }
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $report = Join-Path $OutputRoot "report.json"
@@ -46,6 +46,7 @@ $process = Start-Process `
     -FilePath $application `
     -WorkingDirectory $distributionRoot `
     -ArgumentList $quotedArguments `
+    -WindowStyle Hidden `
     -Wait `
     -PassThru
 if ($process.ExitCode -ne 0) {
@@ -66,4 +67,3 @@ foreach ($stageName in @("idle", "movement", "pan")) {
         ([double]$stage.frame_wall_microseconds.max / 1000.0),
         $stage.draw_calls.p95)
 }
-

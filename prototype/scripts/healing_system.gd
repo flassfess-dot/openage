@@ -1,7 +1,9 @@
 class_name RoRHealingSystem
 extends RefCounted
 
+const AnimationController := preload("res://scripts/animation_controller.gd")
 const CombatRules := preload("res://scripts/combat_rules.gd")
+const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 
 var world_ref: WeakRef
 var world:
@@ -19,6 +21,69 @@ func component(entity: Dictionary) -> Dictionary:
 
 func is_healer(entity: Dictionary) -> bool:
 	return bool(component(entity).get("enabled", false))
+
+
+func assign_command(selected: Array, target_id: int) -> String:
+	var target: Variant = world.find_unit(target_id)
+	if target == null or float(target.get("hp", 0.0)) <= 0.0:
+		return "invalid_healing_target"
+	var resolved_count := 0
+	var last_rejection := "no_eligible_healers"
+	for unit in selected:
+		if not is_healer(unit):
+			continue
+		var rejection := validate_target(unit, target)
+		if not rejection.is_empty():
+			last_rejection = rejection
+			continue
+		world.conversion_system.cancel(unit, "new_healing")
+		cancel(unit, "new_healing")
+		world.release_resource_approach_slot(unit)
+		world.release_building_approach_slot(unit)
+		unit["resource_id"] = -1
+		unit["gather_stage"] = "none"
+		unit["target_building_id"] = -1
+		unit["target_id"] = target_id
+		unit["task"] = "heal"
+		unit["retaliation_target_id"] = -1
+		world.clear_combat_intent(unit)
+		var target_direction: Vector2 = Vector2(target["pos"]) - Vector2(unit["pos"])
+		if target_direction.length_squared() > 0.0001:
+			unit["action_facing"] = world.facing_for_vector(target_direction)
+		OrderPipeline.begin(unit, "heal", target_id, target["pos"], true)
+		rejection = begin(unit, target)
+		if not rejection.is_empty():
+			last_rejection = rejection
+			world.halt_unit(unit, rejection)
+			continue
+		if is_in_range(unit, target):
+			OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
+			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
+			OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+			resolved_count += 1
+		elif world.assign_unit_destination(unit, target["pos"], false):
+			resolved_count += 1
+		else:
+			last_rejection = "target_unreachable"
+			finish_healing(unit, last_rejection)
+	return "" if resolved_count > 0 else last_rejection
+
+
+func finish_healing(healer: Dictionary, reason: String, completed: bool = false) -> void:
+	if completed:
+		complete(healer, reason)
+	else:
+		cancel(healer, reason)
+	world.release_unit_destination(healer)
+	healer["target_id"] = -1
+	healer["task"] = "idle"
+	healer["diagnostic_reason"] = "healing_complete:%s" % reason
+	OrderPipeline.complete(healer, reason)
+	world.restore_formation_facing(healer)
+	if completed and float(healer.get("hp", 0.0)) > 0.0 and OrderPipeline.queued(healer).is_empty():
+		var next_target: Variant = next_chain_target(healer)
+		if next_target != null:
+			assign_command([healer], int(next_target.get("id", -1)))
 
 
 func validate_target(healer: Dictionary, target: Variant) -> String:
@@ -56,6 +121,34 @@ func rate_for(healer: Dictionary) -> float:
 	return rate * maxf(0.0, float(healing.get("rate_multiplier", 1.0)))
 
 
+func advance_unit_order(healer: Dictionary, delta: float, result: Dictionary) -> void:
+	result["moving"] = false
+	result["animation_state"] = AnimationController.IDLE
+	result["attack_target"] = null
+	var target = world.find_unit(int(healer.get("target_id", -1)))
+	var rejection := validate_target(healer, target)
+	if rejection == "target_fully_healed":
+		finish_healing(healer, "healing_complete", true)
+	elif not rejection.is_empty():
+		finish_healing(healer, rejection)
+	elif not world.is_entity_visible_to(int(healer.get("team", 0)), target):
+		finish_healing(healer, "target_lost")
+	elif not is_in_range(healer, target):
+		world.ensure_navigation_destination(healer, Vector2(target.get("pos", healer.get("pos", Vector2.ZERO))))
+		result["moving"] = world.move_unit(healer, delta)
+	else:
+		world.release_unit_destination(healer)
+		OrderPipeline.transition(healer, OrderPipeline.FACE_TARGET)
+		world.face_unit_toward(healer, Vector2(target.get("pos", healer.get("pos", Vector2.ZERO))))
+		OrderPipeline.transition(healer, OrderPipeline.PERFORM_ACTION)
+		result["animation_state"] = AnimationController.HEAL
+		var healing_result := advance_healing(healer, target, delta)
+		if healing_result == "complete":
+			finish_healing(healer, "healing_complete", true)
+		elif healing_result != "pending":
+			finish_healing(healer, healing_result)
+
+
 func next_chain_target(healer: Dictionary) -> Variant:
 	var healing := component(healer)
 	if not bool(healing.get("auto_chain_enabled", true)):
@@ -63,20 +156,20 @@ func next_chain_target(healer: Dictionary) -> Variant:
 	var radius := maxf(0.0, float(healing.get("auto_chain_radius", range_for(healer))))
 	if radius <= 0.0:
 		return null
-	var eligible: Array = []
+	var healer_position := Vector2(healer.get("pos", Vector2.ZERO))
+	var best_target: Variant = null
+	var best_distance_squared := INF
 	for candidate_value in world.query_units_near(Vector2(healer.get("pos", Vector2.ZERO)), radius):
 		var candidate: Dictionary = candidate_value
 		if not validate_target(healer, candidate).is_empty():
 			continue
 		if not world.is_entity_visible_to(int(healer.get("team", 0)), candidate):
 			continue
-		eligible.append(candidate)
-	eligible.sort_custom(func(left, right):
-		var left_distance: float = Vector2(healer["pos"]).distance_squared_to(Vector2(left["pos"]))
-		var right_distance: float = Vector2(healer["pos"]).distance_squared_to(Vector2(right["pos"]))
-		return left_distance < right_distance if not is_equal_approx(left_distance, right_distance) else int(left["id"]) < int(right["id"])
-	)
-	return eligible[0] if not eligible.is_empty() else null
+		var distance_squared := healer_position.distance_squared_to(Vector2(candidate.get("pos", Vector2.ZERO)))
+		if best_target == null or distance_squared < best_distance_squared or (is_equal_approx(distance_squared, best_distance_squared) and int(candidate.get("id", -1)) < int(best_target.get("id", -1))):
+			best_target = candidate
+			best_distance_squared = distance_squared
+	return best_target
 
 
 func begin(healer: Dictionary, target: Dictionary) -> String:

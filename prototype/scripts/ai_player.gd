@@ -314,23 +314,25 @@ func presentation_options() -> Dictionary:
 			"preferred_build_sites": preferred_build_sites,
 			"strict_preferred_build_site_kinds": strict_preferred_build_site_kinds,
 		}
-	if profile in ["skirmish_policy_v1", "skirmish"]:
-		return {
-			"compact_entities": true,
-			"include_navigation": true,
-			"include_build_sites": false,
-			"include_fog_cells": false,
-			"include_projectiles": false,
-			"include_scenario": false,
-			"include_worker_command_options": false,
-			"requested_build_site_kinds": economic_policy.get("construction_priorities", []).duplicate(),
-			"build_site_filter": Callable(self, "_construction_site_kinds"),
-			"planning_technology_ids": economic_policy.get("age_advance_technology_ids", []).duplicate(),
-			"maximum_build_sites_per_kind": 12,
-			"build_site_search_radius": 12,
-			"minimum_structure_gap": float(economic_policy.get("minimum_structure_gap", 0.0)),
-		}
-	return {}
+	# collect_commands intentionally routes every non-campaign profile through
+	# the skirmish planners. Keep their observation contract equally explicit so
+	# imported or future fallback profile names never regress to the expensive
+	# presentation defaults.
+	return {
+		"compact_entities": true,
+		"include_navigation": true,
+		"include_build_sites": false,
+		"include_fog_cells": false,
+		"include_projectiles": false,
+		"include_scenario": false,
+		"include_worker_command_options": false,
+		"requested_build_site_kinds": economic_policy.get("construction_priorities", []).duplicate(),
+		"build_site_filter": Callable(self, "_construction_site_kinds"),
+		"planning_technology_ids": economic_policy.get("age_advance_technology_ids", []).duplicate(),
+		"maximum_build_sites_per_kind": 12,
+		"build_site_search_radius": 12,
+		"minimum_structure_gap": float(economic_policy.get("minimum_structure_gap", 0.0)),
+	}
 
 
 func _construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary) -> Array:

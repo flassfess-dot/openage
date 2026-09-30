@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ce28eb0oxs3gs"
-path="res://.godot/imported/05-pan.png-84c393ad45320ab88ae906f223432f2c.ctex"
+uid="uid://r72e4i6v1ell"
+path="res://.godot/imported/single-player.png-442eb1e00d4290b62b40775570fc80ca.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://05-pan.png"
-dest_files=["res://.godot/imported/05-pan.png-84c393ad45320ab88ae906f223432f2c.ctex"]
+source_file="res://assets/menu/single-player.png"
+dest_files=["res://.godot/imported/single-player.png-442eb1e00d4290b62b40775570fc80ca.ctex"]
 
 [params]
 

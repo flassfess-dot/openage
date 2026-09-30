@@ -35,6 +35,8 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	var stage_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var drawables: Array = []
 	var alpha := clampf(interpolation_alpha, 0.0, 1.0)
+	var preview_id_lookup: Variant = _id_lookup(preview_ids)
+	var selected_id_lookup: Variant = _id_lookup(selected_ids)
 	var from_snapshot := world_source is Dictionary
 	var presentation_tick := float(world_source.get("tick", 0)) if from_snapshot else 0.0
 	var source_buildings: Array = world_source.get("buildings", []) if from_snapshot else world_source.get_buildings()
@@ -87,7 +89,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			building_part_index += 1
 			var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + (100 if is_interior_resource else 0) + building_part_index
 			drawables.append(RenderItem.create("building_part", RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order))
-		if selected_ids.has(building_id) or preview_ids.has(building_id):
+		if selected_id_lookup.has(building_id) or preview_id_lookup.has(building_id):
 			drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, building_screen, building_id, building, building_info, building_elevation, RenderItem.color_for_team(int(building.get("team", 0))), 1.0, 1))
 	_observe_stage("buildings", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
@@ -100,7 +102,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				var resource_screen: Vector2 = world_to_screen.call(resource_position)
 				var resource_info := _frame_info(frame_info_provider, "resource", resource)
 				drawables.append(RenderItem.create("resource", RenderItem.Layer.UNIT_BUILDING, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0))))
-				if preview_ids.has(int(resource["id"])):
+				if preview_id_lookup.has(int(resource["id"])):
 					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0)), Color("d6bc63"), 1.0, 1))
 	for objective in source_objectives:
 		if not bool(objective.get("active", true)) or bool(objective.get("logical_only", false)):
@@ -172,9 +174,10 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				var unit_part_item := RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order)
 				unit_part_item["screen_y"] = unit_sort_screen.y
 				drawables.append(unit_part_item)
-			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or preview_ids.has(stable_id)):
+			var highlighted: bool = selected_id_lookup.has(stable_id) or bool(unit.get("selected", false)) or preview_id_lookup.has(stable_id)
+			if death_phase == "alive" and highlighted:
 				drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
-			if death_phase == "alive" and (selected_ids.has(stable_id) or bool(unit.get("selected", false)) or preview_ids.has(stable_id)):
+			if death_phase == "alive" and highlighted:
 				drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
 	_observe_stage("units", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
@@ -212,6 +215,18 @@ static func _sort_drawables_by_layer(drawables: Array) -> Array:
 		for drawable in bucket:
 			result[result_index] = drawable
 			result_index += 1
+	return result
+
+
+static func _id_lookup(entity_ids: Array[int]) -> Variant:
+	# Linear membership is cheaper for the common empty/small selection and
+	# avoids allocating two lookup dictionaries every rendered frame. Large
+	# selections switch to O(1) membership for the entity traversal below.
+	if entity_ids.size() <= 8:
+		return entity_ids
+	var result: Dictionary = {}
+	for entity_id in entity_ids:
+		result[entity_id] = true
 	return result
 
 
@@ -310,6 +325,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		return cached_resource_drawables
 	cached_resource_signature = signature
 	cached_resource_drawables = []
+	var preview_id_lookup: Variant = _id_lookup(preview_ids)
 	for resource_value in resources:
 		var resource: Dictionary = resource_value
 		if int(resource.get("amount", 0)) <= 0 and not bool(resource.get("visible_when_depleted", false)):
@@ -320,7 +336,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var resource_screen: Vector2 = world_to_screen.call(position)
 		var elevation := float(resource.get("elevation", 0.0))
 		cached_resource_drawables.append(RenderItem.create("resource", RenderItem.Layer.UNIT_BUILDING, position, resource_screen, resource_id, resource, resource_info, elevation))
-		if preview_ids.has(resource_id):
+		if preview_id_lookup.has(resource_id):
 			cached_resource_drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, resource_screen, resource_id, resource, resource_info, elevation, Color("d6bc63"), 1.0, 1))
 	cached_resource_drawables.sort_custom(RenderItem.less)
 	return cached_resource_drawables

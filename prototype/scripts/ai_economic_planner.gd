@@ -69,22 +69,17 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 	if not active_foundations.is_empty() and not land_workers.is_empty() and int(active_foundations[0].get("builder_count", 0)) == 0 and not foundation_has_assigned_worker:
 		var foundation: Dictionary = active_foundations[0]
 		var reachable_builder_ids: Array = foundation.get("reachable_builder_ids", [])
-		var builder_candidates: Array = land_workers.filter(func(worker): return not reserved_unit_ids.has(int(worker.get("id", -1))) and (not foundation.has("reachable_builder_ids") or int(worker.get("id", -1)) in reachable_builder_ids))
-		builder_candidates.sort_custom(func(left, right):
-			var left_stuck := 1 if String(left.get("diagnostic_reason", "")).begins_with("stuck_") else 0
-			var right_stuck := 1 if String(right.get("diagnostic_reason", "")).begins_with("stuck_") else 0
-			if left_stuck != right_stuck:
-				return left_stuck < right_stuck
-			var left_idle := 0 if String(left.get("task", "idle")) == "idle" else 1
-			var right_idle := 0 if String(right.get("task", "idle")) == "idle" else 1
-			if left_idle != right_idle:
-				return left_idle < right_idle
-			var left_distance := Vector2(left.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(foundation.get("pos", Vector2.ZERO)))
-			var right_distance := Vector2(right.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(foundation.get("pos", Vector2.ZERO)))
-			return left_distance < right_distance if not is_equal_approx(left_distance, right_distance) else int(left.get("id", -1)) < int(right.get("id", -1))
-		)
-		if not builder_candidates.is_empty():
-			var builder: Dictionary = builder_candidates[0]
+		var reachable_builder_lookup := _id_lookup(reachable_builder_ids)
+		var best_builder: Dictionary = {}
+		for worker_value in land_workers:
+			var worker: Dictionary = worker_value
+			var worker_id := int(worker.get("id", -1))
+			if reserved_unit_ids.has(worker_id) or (foundation.has("reachable_builder_ids") and not reachable_builder_lookup.has(worker_id)):
+				continue
+			if best_builder.is_empty() or _foundation_builder_precedes(worker, best_builder, foundation):
+				best_builder = worker
+		if not best_builder.is_empty():
+			var builder: Dictionary = best_builder
 			var builder_id := int(builder.get("id", -1))
 			commands.append(Commands.BuildCommand.new(tick, [builder_id], String(foundation.get("kind", "")), Vector2(foundation.get("pos", Vector2.ZERO))))
 			committed_workers[builder_id] = true
@@ -110,7 +105,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 		if kind == "house" and not _needs_housing(snapshot.get("player_state", {}), int(policy.get("housing_buffer", 0)), blocked_population, queued_population_points):
 			continue
 		var sites: Array = snapshot.get("build_sites", {}).get(kind, [])
-		var candidates: Array = []
+		var best_candidate: Dictionary = {}
 		var allow_gap_fallback: bool = kind in policy.get("structure_gap_fallback_kinds", [])
 		for worker_value in construction_workers:
 			var worker: Dictionary = worker_value
@@ -124,24 +119,11 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 				var preserves_gap := _site_preserves_structure_gap(site, kind, worker, own_structures, float(policy.get("minimum_structure_gap", 0.0)))
 				if not preserves_gap and not allow_gap_fallback:
 					continue
-				candidates.append({"worker": worker, "site": site, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(site), "preserves_gap": preserves_gap})
-		candidates.sort_custom(func(left, right):
-			if bool(left["preserves_gap"]) != bool(right["preserves_gap"]):
-				return bool(left["preserves_gap"])
-			var left_idle := 0 if String(left["worker"].get("task", "idle")) == "idle" else 1
-			var right_idle := 0 if String(right["worker"].get("task", "idle")) == "idle" else 1
-			if left_idle != right_idle:
-				return left_idle < right_idle
-			var left_failure := _navigation_failure_rank(left["worker"])
-			var right_failure := _navigation_failure_rank(right["worker"])
-			if left_failure != right_failure:
-				return left_failure < right_failure
-			if not is_equal_approx(float(left["distance"]), float(right["distance"])):
-				return float(left["distance"]) < float(right["distance"])
-			return int(left["worker"].get("id", -1)) < int(right["worker"].get("id", -1))
-		)
-		if not candidates.is_empty():
-			var candidate: Dictionary = candidates[0]
+				var candidate := {"worker": worker, "site": site, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(site), "preserves_gap": preserves_gap}
+				if best_candidate.is_empty() or _build_site_candidate_precedes(candidate, best_candidate):
+					best_candidate = candidate
+		if not best_candidate.is_empty():
+			var candidate: Dictionary = best_candidate
 			var worker_id := int(candidate["worker"].get("id", -1))
 			commands.append(Commands.BuildCommand.new(tick, [worker_id], kind, candidate["site"]))
 			committed_workers[worker_id] = true
@@ -160,7 +142,6 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 		if not age_resources.is_empty():
 			resources = age_resources
 	if not resources.is_empty():
-		var pairs: Array = []
 		var stockpile: Dictionary = snapshot.get("player_state", {})
 		var desired_stock := {0: 600 if int(stockpile.get("age", 100)) <= 100 else 450, 1: 350, 2: 150, 3: 150}
 		for resource_type_value in age_intent.get("cost", {}).keys():
@@ -190,6 +171,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 				if current_resource.is_empty() or int(current_resource.get("resource_type_id", -1)) == critical_type:
 					continue
 				candidate_workers.append(active_worker)
+		var best_assignment_by_domain: Dictionary = {}
 		for worker_value in candidate_workers:
 			var worker: Dictionary = worker_value
 			if committed_workers.has(int(worker.get("id", -1))):
@@ -207,31 +189,16 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 				if active_gatherer and resource_type != critical_type:
 					continue
 				var shortage := int(shortages.get(resource_type, 0))
-				pairs.append({"worker": worker, "resource": resource, "shortage": shortage, "active_gatherer": active_gatherer, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO)))})
-		pairs.sort_custom(func(left, right):
-			if int(left["shortage"]) != int(right["shortage"]):
-				return int(left["shortage"]) > int(right["shortage"])
-			if bool(left["active_gatherer"]) != bool(right["active_gatherer"]):
-				return not bool(left["active_gatherer"])
-			var left_failure := _navigation_failure_rank(left["worker"])
-			var right_failure := _navigation_failure_rank(right["worker"])
-			if left_failure != right_failure:
-				return left_failure < right_failure
-			if not is_equal_approx(float(left["distance"]), float(right["distance"])):
-				return float(left["distance"]) < float(right["distance"])
-			if int(left["worker"].get("id", -1)) != int(right["worker"].get("id", -1)):
-				return int(left["worker"].get("id", -1)) < int(right["worker"].get("id", -1))
-			return int(left["resource"].get("id", -1)) < int(right["resource"].get("id", -1))
-		)
-		if not pairs.is_empty():
-			var assigned_domains: Dictionary = {}
-			for assignment_value in pairs:
-				var assignment: Dictionary = assignment_value
-				var worker_domain := String(assignment["worker"].get("movement_domain", "land"))
-				if assigned_domains.has(worker_domain):
-					continue
-				commands.append(Commands.GatherCommand.new(tick, [int(assignment["worker"].get("id", -1))], int(assignment["resource"].get("id", -1))))
-				assigned_domains[worker_domain] = true
+				var assignment := {"worker": worker, "resource": resource, "shortage": shortage, "active_gatherer": active_gatherer, "distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO)))}
+				var worker_domain := String(worker.get("movement_domain", "land"))
+				var current_assignment: Dictionary = best_assignment_by_domain.get(worker_domain, {})
+				if current_assignment.is_empty() or _gather_assignment_precedes(assignment, current_assignment):
+					best_assignment_by_domain[worker_domain] = assignment
+		var assignments: Array = best_assignment_by_domain.values()
+		assignments.sort_custom(_gather_assignment_precedes)
+		for assignment_value in assignments:
+			var assignment: Dictionary = assignment_value
+			commands.append(Commands.GatherCommand.new(tick, [int(assignment["worker"].get("id", -1))], int(assignment["resource"].get("id", -1))))
 
 	for building_value in own_buildings:
 		var building: Dictionary = building_value
@@ -302,6 +269,60 @@ static func _cost_avoids_reserved_resources(option_cost: Dictionary, age_cost: D
 static func _navigation_failure_rank(entity: Dictionary) -> int:
 	var reason := String(entity.get("diagnostic_reason", ""))
 	return 1 if reason in ["no_path", "local_blocked"] or reason.begins_with("stuck_") else 0
+
+
+static func _gather_assignment_precedes(left: Dictionary, right: Dictionary) -> bool:
+	if int(left["shortage"]) != int(right["shortage"]):
+		return int(left["shortage"]) > int(right["shortage"])
+	if bool(left["active_gatherer"]) != bool(right["active_gatherer"]):
+		return not bool(left["active_gatherer"])
+	var left_failure := _navigation_failure_rank(left["worker"])
+	var right_failure := _navigation_failure_rank(right["worker"])
+	if left_failure != right_failure:
+		return left_failure < right_failure
+	if not is_equal_approx(float(left["distance"]), float(right["distance"])):
+		return float(left["distance"]) < float(right["distance"])
+	if int(left["worker"].get("id", -1)) != int(right["worker"].get("id", -1)):
+		return int(left["worker"].get("id", -1)) < int(right["worker"].get("id", -1))
+	return int(left["resource"].get("id", -1)) < int(right["resource"].get("id", -1))
+
+
+static func _build_site_candidate_precedes(left: Dictionary, right: Dictionary) -> bool:
+	if bool(left["preserves_gap"]) != bool(right["preserves_gap"]):
+		return bool(left["preserves_gap"])
+	var left_idle := 0 if String(left["worker"].get("task", "idle")) == "idle" else 1
+	var right_idle := 0 if String(right["worker"].get("task", "idle")) == "idle" else 1
+	if left_idle != right_idle:
+		return left_idle < right_idle
+	var left_failure := _navigation_failure_rank(left["worker"])
+	var right_failure := _navigation_failure_rank(right["worker"])
+	if left_failure != right_failure:
+		return left_failure < right_failure
+	if not is_equal_approx(float(left["distance"]), float(right["distance"])):
+		return float(left["distance"]) < float(right["distance"])
+	return int(left["worker"].get("id", -1)) < int(right["worker"].get("id", -1))
+
+
+static func _foundation_builder_precedes(left: Dictionary, right: Dictionary, foundation: Dictionary) -> bool:
+	var left_stuck := 1 if String(left.get("diagnostic_reason", "")).begins_with("stuck_") else 0
+	var right_stuck := 1 if String(right.get("diagnostic_reason", "")).begins_with("stuck_") else 0
+	if left_stuck != right_stuck:
+		return left_stuck < right_stuck
+	var left_idle := 0 if String(left.get("task", "idle")) == "idle" else 1
+	var right_idle := 0 if String(right.get("task", "idle")) == "idle" else 1
+	if left_idle != right_idle:
+		return left_idle < right_idle
+	var foundation_position := Vector2(foundation.get("pos", Vector2.ZERO))
+	var left_distance := Vector2(left.get("pos", Vector2.ZERO)).distance_squared_to(foundation_position)
+	var right_distance := Vector2(right.get("pos", Vector2.ZERO)).distance_squared_to(foundation_position)
+	return left_distance < right_distance if not is_equal_approx(left_distance, right_distance) else int(left.get("id", -1)) < int(right.get("id", -1))
+
+
+static func _id_lookup(entity_ids: Array) -> Dictionary:
+	var result: Dictionary = {}
+	for entity_id_value in entity_ids:
+		result[int(entity_id_value)] = true
+	return result
 
 
 static func _age_advance_intent(buildings: Array, player_state: Dictionary, policy: Dictionary, worker_count: int, tick: int) -> Dictionary:

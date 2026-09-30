@@ -17,6 +17,33 @@ static func canonical(world, tick: int, controller = null) -> Dictionary:
 	return snapshot
 
 
+# Shared legal-projection contract. Presentation and retained AI observations
+# use the same field-level privacy rules without making either system depend on
+# the other's lifecycle or caches.
+static func compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Dictionary:
+	return _compact_ai_entity(entity, observer_team)
+
+
+static func compact_render_entity(entity: Dictionary) -> Dictionary:
+	return _compact_render_entity(entity)
+
+
+static func requested_production_options(world, building: Dictionary, team: int, requests: Array) -> Dictionary:
+	return _requested_production_options(world, building, team, requests)
+
+
+static func append_planning_research_options(world, projected: Dictionary, source: Dictionary, team: int, technology_ids: Array) -> void:
+	_append_planning_research_options(world, projected, source, team, technology_ids)
+
+
+static func presentation_player_state(world, observer_team: int) -> Dictionary:
+	return _presentation_player_state(world, observer_team)
+
+
+static func presentation_fog(fog, observer_team: int) -> Dictionary:
+	return _presentation_fog(fog, observer_team)
+
+
 static func presentation(world, tick: int, observer_team: int = 0, options: Dictionary = {}) -> Dictionary:
 	var snapshot_probe: Variant = options.get("performance_probe")
 	var snapshot_prefix := String(options.get("performance_prefix", "presentation.snapshot"))
@@ -84,6 +111,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".setup", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
 	var units: Array = []
+	var control_units: Array = []
 	var overview_units: Array = []
 	var unit_control_projection_microseconds := 0
 	var unit_render_projection_microseconds := 0
@@ -167,6 +195,8 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				if snapshot_probe != null:
 					unit_worker_options_microseconds += Time.get_ticks_usec() - worker_options_started
 			units.append(presentation_unit)
+			if always_include_entity_lookup.has(unit_id):
+				control_units.append(presentation_unit)
 	if snapshot_probe != null:
 		unit_detail_loop_microseconds = Time.get_ticks_usec() - unit_substage_started
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".units", Time.get_ticks_usec() - snapshot_stage_started)
@@ -178,6 +208,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.render_projection", unit_render_projection_microseconds)
 		snapshot_stage_started = Time.get_ticks_usec()
 	var resources: Array = []
+	var control_resources: Array = []
 	var overview_resources: Array = []
 	var resources_are_preordered: bool = observer_team > 0 and world.has_method("get_known_resources")
 	var resources_use_shared_ai_projection: bool = (
@@ -202,16 +233,20 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 			overview_resources.append(resource_value if borrow_overview_entities else _overview_entity(resource_value))
 	for resource in known_resources:
 		var resource_id := int(resource.get("id", -1))
+		var presentation_resource: Dictionary
 		if resources_use_shared_ai_projection or (compact_render_entities and borrow_visible_render_entities and not always_include_entity_lookup.has(resource_id)):
-			resources.append(resource)
+			presentation_resource = resource
 		else:
-			resources.append(_presentation_entity(
+			presentation_resource = _presentation_entity(
 					resource,
 					observer_team,
 					compact_entities,
 					compact_render_entities and not always_include_entity_lookup.has(resource_id),
 					compact_render_projector
-				))
+				)
+		resources.append(presentation_resource)
+		if always_include_entity_lookup.has(resource_id):
+			control_resources.append(presentation_resource)
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".resources", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
@@ -225,6 +260,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".objectives", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
 	var buildings: Array = []
+	var control_buildings: Array = []
 	var overview_buildings: Array = []
 	var remembered_buildings: Dictionary = world.last_known_buildings_by_player.get(observer_team, {}) if observer_team > 0 else {}
 	var live_building_ids: Dictionary = {}
@@ -296,6 +332,8 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				if not planning_technology_ids.is_empty():
 					_append_planning_research_options(world, presentation_building, building, observer_team, planning_technology_ids)
 			buildings.append(presentation_building)
+			if always_include_entity_lookup.has(building_id):
+				control_buildings.append(presentation_building)
 	if observer_team > 0:
 		var missing_ids: Array = remembered_buildings.keys()
 		missing_ids.sort()
@@ -393,9 +431,12 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		"observer_team": observer_team,
 		"map_size": world.map_size,
 		"units": sorted_units,
+		"control_units": control_units,
 		"resources": sorted_resources,
+		"control_resources": control_resources,
 		"objectives": sorted_objectives,
 		"buildings": sorted_buildings,
+		"control_buildings": control_buildings,
 		"projectiles": sorted_projectiles,
 		"overview": {
 			"units": sorted_overview_units,
@@ -769,9 +810,18 @@ static func _append_planning_research_options(world, presentation_building: Dict
 
 
 static func _sort_entity_copies(source: Array) -> Array:
-	var result: Array = source.duplicate()
-	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
-	return result
+	var last_id := -9223372036854775807
+	for entity_value in source:
+		var entity_id := int(entity_value.get("id", -1))
+		if entity_id < last_id:
+			var sorted: Array = source.duplicate()
+			sorted.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+			return sorted
+		last_id = entity_id
+	# These arrays are local snapshot projections. Returning their existing
+	# container is safe and avoids an allocation when the authoritative stores
+	# have already supplied stable ID order.
+	return source
 
 
 static func _presentation_fog(fog, observer_team: int) -> Dictionary:

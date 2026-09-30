@@ -1,6 +1,7 @@
 class_name RoRConversionSystem
 extends RefCounted
 
+const AnimationController := preload("res://scripts/animation_controller.gd")
 const CombatRules := preload("res://scripts/combat_rules.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 
@@ -25,6 +26,87 @@ func component(entity: Dictionary) -> Dictionary:
 
 func is_converter(entity: Dictionary) -> bool:
 	return bool(component(entity).get("enabled", false))
+
+
+func assign_command(selected: Array, target_id: int) -> String:
+	var target: Variant = world.find_combat_target(target_id)
+	if target == null or float(target.get("hp", 0.0)) <= 0.0:
+		return "invalid_target"
+	var resolved_count := 0
+	var last_rejection := "no_eligible_converters"
+	for unit in selected:
+		if not is_converter(unit):
+			continue
+		var rejection := validate_target(unit, target)
+		if not rejection.is_empty():
+			last_rejection = rejection
+			continue
+		cancel(unit, "new_conversion")
+		world.healing_system.cancel(unit, "new_conversion")
+		world.release_resource_approach_slot(unit)
+		world.release_building_approach_slot(unit)
+		unit["resource_id"] = -1
+		unit["gather_stage"] = "none"
+		unit["target_building_id"] = int(target_id) if world.find_building(target_id) != null else -1
+		unit["target_id"] = target_id
+		unit["task"] = "convert"
+		unit["retaliation_target_id"] = -1
+		world.clear_combat_intent(unit)
+		var target_direction: Vector2 = Vector2(target["pos"]) - Vector2(unit["pos"])
+		if target_direction.length_squared() > 0.0001:
+			unit["action_facing"] = world.facing_for_vector(target_direction)
+		OrderPipeline.begin(unit, "convert", target_id, target["pos"], true)
+		rejection = begin(unit, target)
+		if not rejection.is_empty():
+			last_rejection = rejection
+			world.halt_unit(unit, rejection)
+			continue
+		if is_in_range(unit, target):
+			OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
+			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
+			OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+			resolved_count += 1
+		else:
+			var destination: Variant = conversion_destination(unit, target)
+			if destination != null and world.assign_unit_destination(unit, destination, false):
+				resolved_count += 1
+			else:
+				last_rejection = "target_unreachable"
+				finish_conversion(unit, last_rejection)
+	return "" if resolved_count > 0 else last_rejection
+
+
+func conversion_destination(converter: Dictionary, target: Dictionary) -> Variant:
+	if world.find_building(int(target.get("id", -1))) != null:
+		converter["target_building_id"] = int(target.get("id", -1))
+		return world.reserve_building_approach_slot(converter, target)
+	return Vector2(target.get("pos", converter.get("pos", Vector2.ZERO)))
+
+
+func finish_conversion(converter: Dictionary, reason: String) -> void:
+	cancel(converter, reason)
+	world.release_building_approach_slot(converter)
+	world.release_unit_destination(converter)
+	converter["target_id"] = -1
+	converter["target_building_id"] = -1
+	converter["task"] = "idle"
+	converter["diagnostic_reason"] = "conversion_complete:%s" % reason
+	OrderPipeline.complete(converter, reason)
+	world.restore_formation_facing(converter)
+
+
+func apply_martyrdom(selected: Array) -> String:
+	var completed := 0
+	var last_rejection := "no_eligible_martyr"
+	for unit in selected:
+		if not is_converter(unit):
+			continue
+		var rejection := perform_martyrdom(unit)
+		if rejection.is_empty():
+			completed += 1
+		else:
+			last_rejection = rejection
+	return "" if completed > 0 else last_rejection
 
 
 func validate_target(converter: Dictionary, target: Variant, require_faith: bool = true) -> String:
@@ -87,12 +169,48 @@ func advance_faith(converter: Dictionary, delta: float) -> void:
 	if not is_converter(converter):
 		return
 	var conversion := component(converter)
-	var rate := recharge_rate_for(converter)
-	conversion["recharge_rate"] = rate
+	var rate: float
+	if conversion.has("recharge_rate"):
+		rate = maxf(0.0, float(conversion["recharge_rate"]))
+	else:
+		# Compatibility for older save records. Current entities are initialized
+		# and refreshed at technology-change boundaries by SimulationWorld.
+		rate = recharge_rate_for(converter)
+		conversion["recharge_rate"] = rate
 	if bool(conversion.get("active", false)):
 		return
 	var maximum := float(conversion.get("max_faith", 100.0))
 	conversion["faith"] = minf(maximum, float(conversion.get("faith", 0.0)) + maxf(0.0, delta) * rate)
+
+
+func advance_unit_order(converter: Dictionary, delta: float, result: Dictionary) -> void:
+	result["moving"] = false
+	result["animation_state"] = AnimationController.IDLE
+	result["attack_target"] = null
+	var target = world.find_combat_target(int(converter.get("target_id", -1)))
+	var rejection := validate_target(converter, target, false)
+	if not rejection.is_empty():
+		finish_conversion(converter, rejection)
+	elif not world.is_entity_visible_to(int(converter.get("team", 0)), target):
+		finish_conversion(converter, "target_lost")
+	elif not is_in_range(converter, target):
+		var destination: Variant = conversion_destination(converter, target)
+		if destination == null:
+			finish_conversion(converter, "target_unreachable")
+		else:
+			world.ensure_navigation_destination(converter, destination)
+			result["moving"] = world.move_unit(converter, delta)
+	else:
+		world.release_unit_destination(converter)
+		OrderPipeline.transition(converter, OrderPipeline.FACE_TARGET)
+		world.face_unit_toward(converter, Vector2(target.get("pos", converter.get("pos", Vector2.ZERO))))
+		OrderPipeline.transition(converter, OrderPipeline.PERFORM_ACTION)
+		result["animation_state"] = AnimationController.CONVERT
+		var conversion_result := advance_conversion(converter, target, delta)
+		if conversion_result == "success":
+			finish_conversion(converter, "conversion_succeeded")
+		elif conversion_result != "pending":
+			finish_conversion(converter, conversion_result)
 
 
 func begin(converter: Dictionary, target: Dictionary) -> String:

@@ -159,21 +159,24 @@ func score_winner(rule: Dictionary, teams: Array, context: Dictionary) -> int:
 	var scores: Dictionary = context.get("scores", {})
 	var limit := int(rule.get("score_limit", 0))
 	var time_limit := float(rule.get("time_limit_seconds", 0.0))
-	var eligible: Array[int] = []
+	var limit_reached := false
 	for team_value in teams:
 		var team := int(team_value)
 		if limit > 0 and int(scores.get(team, 0)) >= limit:
-			eligible.append(team)
-	if eligible.is_empty() and time_limit > 0.0 and elapsed_seconds + 0.000001 >= time_limit:
-		eligible.assign(teams)
-	if eligible.is_empty():
+			limit_reached = true
+	if not limit_reached and not (time_limit > 0.0 and elapsed_seconds + 0.000001 >= time_limit):
 		return -1
-	eligible.sort_custom(func(left, right):
-		var left_score := int(scores.get(left, 0))
-		var right_score := int(scores.get(right, 0))
-		return left_score > right_score or (left_score == right_score and left < right)
-	)
-	return eligible[0]
+	var winner := -1
+	var winner_score := -2147483648
+	for team_value in teams:
+		var team := int(team_value)
+		if limit_reached and int(scores.get(team, 0)) < limit:
+			continue
+		var score := int(scores.get(team, 0))
+		if winner < 0 or score > winner_score or (score == winner_score and team < winner):
+			winner = team
+			winner_score = score
+	return winner
 
 
 func scenario_winner(rule: Dictionary, teams: Array, context: Dictionary) -> int:

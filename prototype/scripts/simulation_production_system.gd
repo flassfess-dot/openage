@@ -115,13 +115,18 @@ func train_unit(team: int, kind: String, near: Vector2) -> bool:
 
 
 func production_building_for(team: int, kind: String = "") -> Variant:
-	var candidates: Array = world.get_buildings().filter(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "complete")) == "complete")
-	if not kind.is_empty():
-		candidates = candidates.filter(func(building): return _production_target_failure(building, team, kind) == "")
-	if candidates.is_empty():
-		return null
-	candidates.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
-	return candidates[0]
+	var selected: Variant = null
+	var selected_id := 2147483647
+	for building_value in world.get_buildings():
+		var building: Dictionary = building_value
+		var building_id := int(building.get("id", -1))
+		if int(building.get("team", 0)) != team or float(building.get("hp", 0.0)) <= 0.0 or String(building.get("state", "complete")) != "complete" or building_id >= selected_id:
+			continue
+		if not kind.is_empty() and _production_target_failure(building, team, kind) != "":
+			continue
+		selected = building
+		selected_id = building_id
+	return selected
 
 
 func enqueue_unit(building_id: int, team: int, kind: String, enforce_runtime_rules: bool = true) -> Variant:

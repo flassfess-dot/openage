@@ -67,6 +67,11 @@ func best_combat_target(world, observer: Dictionary, candidates: Array, assigned
 	var best: Variant = _best_combat_target_pass(world, observer, candidates, assigned_attackers, query_range, stance, allowed_target_id, hostility_prevalidated, false)
 	if best == null:
 		return null
+	# Static combatants cannot produce a movement route. Their acquisition range
+	# and stance already bound the candidate; execution decides whether the
+	# current weapon range permits an immediate shot.
+	if world.entity_is_static(observer):
+		return best
 	if world.can_unit_reach_entity(observer, best):
 		return best
 	return _best_combat_target_pass(world, observer, candidates, assigned_attackers, query_range, stance, allowed_target_id, hostility_prevalidated, true)

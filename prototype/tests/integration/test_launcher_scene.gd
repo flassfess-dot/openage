@@ -10,61 +10,70 @@ func _initialize() -> void:
 	var launcher = scene.instantiate()
 	root.add_child(launcher)
 	await process_frame
-	assert_equal(launcher.match_selector.item_count, 11, "launcher lists the prototype, nine frozen campaign verticals, and custom skirmish")
-	assert_true(not launcher.match_selector.is_item_disabled(0), "prototype match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(1), "first imported campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(2), "Pyrrhus campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(3), "Syracuse campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(4), "Metaurus campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(5), "Zama campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(6), "Mithridates campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(7), "Sicily campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(8), "Mylae campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(9), "Tunes campaign match is available")
-	assert_true(not launcher.match_selector.is_item_disabled(10), "custom skirmish is available without a prebuilt match file")
-	launcher.match_selector.select(1)
-	launcher._refresh_selection(1)
+
+	assert_equal(launcher.current_screen, "main", "launcher starts at the original-style main menu")
+	assert_true(not launcher.screen_buttons["single_player"].disabled, "single-player workflow is enabled")
+	assert_true(launcher.screen_buttons["multiplayer"].disabled, "unfinished multiplayer workflow is visibly disabled")
+	assert_true(launcher.screen_buttons["scenario_editor"].disabled, "unfinished scenario editor is visibly disabled")
+	assert_true(launcher.screen_buttons["help"].disabled, "unfinished help workflow is visibly disabled")
+
+	# Exercise the real signal path: screen replacement must not destroy the
+	# button while its pressed signal is still being emitted.
+	launcher.screen_buttons["single_player"].pressed.emit()
+	await process_frame
+	assert_equal(launcher.current_screen, "single_player", "single-player menu is a separate workflow step")
+	assert_true(not launcher.screen_buttons["campaigns"].disabled, "campaign workflow is enabled")
+	assert_true(not launcher.screen_buttons["random_map"].disabled, "random-map workflow is enabled")
+	assert_true(launcher.screen_buttons["saved_game"].disabled, "unfinished saved-game workflow is disabled")
+	assert_true(launcher.screen_buttons["scenario"].disabled, "unfinished scenario workflow is disabled")
+
+	launcher._show_campaign_menu()
+	assert_equal(launcher.campaign_selector.item_count, 10, "campaign screen lists the tutorial and nine campaign missions")
+	launcher.campaign_selector.select(1)
+	launcher._refresh_campaign_selection(1)
 	assert_true(launcher.description_label.text.contains("Первая миссия"), "campaign selection exposes its launch description")
-	assert_true(not launcher.start_button.disabled, "campaign can be launched through the ordinary UI")
-	launcher.match_selector.select(2)
-	launcher._refresh_selection(2)
-	assert_true(launcher.description_label.text.contains("Вторая миссия"), "Pyrrhus selection exposes its launch description")
-	assert_true(not launcher.start_button.disabled, "Pyrrhus can be launched through the ordinary UI")
-	launcher.match_selector.select(3)
-	launcher._refresh_selection(3)
-	assert_true(launcher.description_label.text.contains("Третья миссия"), "Syracuse selection exposes its launch description")
-	assert_true(not launcher.start_button.disabled, "Syracuse can be launched through the ordinary UI")
-	launcher.match_selector.select(4)
-	launcher._refresh_selection(4)
-	assert_true(launcher.description_label.text.contains("Четвёртая миссия"), "Metaurus selection exposes its launch description")
-	assert_true(not launcher.start_button.disabled, "Metaurus can be launched through the ordinary UI")
-	launcher.match_selector.select(5)
-	launcher._refresh_selection(5)
-	assert_true(launcher.description_label.text.contains("Пятая миссия"), "Zama selection exposes its launch description")
-	assert_true(not launcher.start_button.disabled, "Zama can be launched through the ordinary UI")
-	launcher.match_selector.select(6)
-	launcher._refresh_selection(6)
-	assert_true(launcher.description_label.text.contains("Шестая миссия"), "Mithridates selection exposes its launch description")
-	assert_true(not launcher.start_button.disabled, "Mithridates can be launched through the ordinary UI")
-	launcher.match_selector.select(8)
-	launcher._refresh_selection(8)
-	assert_true(launcher.description_label.text.contains("артефактов"), "Mylae selection exposes its artifact objective")
-	assert_true(not launcher.start_button.disabled, "Mylae can be launched through the ordinary UI")
-	launcher.match_selector.select(10)
-	launcher._refresh_selection(10)
-	assert_true(launcher.settings_panel.visible, "custom skirmish exposes declarative settings")
+	assert_true(not launcher.start_button.disabled, "available campaign can be launched")
+
+	launcher._show_random_map_menu()
+	assert_equal(launcher.current_screen, "random_map", "random map has its own original-style setup screen")
 	assert_equal(launcher.player_controls.size(), 8, "all eight player slots are configurable")
-	assert_true(launcher.setting_controls.has("ai_difficulty_id"), "custom skirmish exposes the policy-owned AI difficulty selector")
+	assert_true(launcher.setting_controls.has("ai_difficulty_id"), "AI difficulty is configurable")
+	assert_true(launcher.setting_controls.has("population_limit"), "population limit is configurable")
+
 	var size_selector: OptionButton = launcher.setting_controls["map_size_id"]
-	assert_true(range(size_selector.item_count).any(func(index): return String(size_selector.get_item_metadata(index)) == "supergiant" and size_selector.get_item_text(index) == "Сверхгигантская"), "new 400x400 size appears in the launcher")
-	var generated = SkirmishSettings.build(launcher._settings_from_controls())
-	assert_true(bool(generated.get("valid", false)), "launcher defaults produce a valid generated match")
-	assert_equal(String(generated.get("definition", {}).get("players", [])[1].get("ai", {}).get("difficulty_id", "")), "standard", "launcher difficulty reaches the generated AI player")
-	assert_true(launcher.setting_controls.has("network_mode") and launcher.setting_controls.has("network_invite"), "launcher exposes LAN host and join controls")
-	launcher._prepare_network_invite()
-	assert_true(String(launcher.setting_controls["network_invite"].text).begins_with("ROR1-"), "host can copy a complete lobby invitation")
+	assert_true(_has_option(size_selector, "supergiant", "Сверхгигантская"), "400x400 supergiant size appears in the launcher")
+	var population_selector: OptionButton = launcher.setting_controls["population_limit"]
+	assert_true(_has_option(population_selector, 500, "500"), "population limit 500 appears in the launcher")
+	assert_equal(size_selector.get_item_metadata(size_selector.selected), "supergiant", "supergiant is the visible default map size")
+	assert_equal(population_selector.get_item_metadata(population_selector.selected), 500, "population limit 500 is the visible default")
+	assert_equal(launcher._background_image.stretch_mode, TextureRect.STRETCH_KEEP_ASPECT_COVERED, "menu art covers the complete window")
+	assert_equal(launcher._background_image.get_parent(), launcher, "menu art is independent of the 4:3 UI canvas")
+	var first_civilization: OptionButton = launcher.player_controls[0]["civilization_id"]
+	assert_true(_has_option(first_civilization, 0, "Случайная"), "random civilization appears in every player slot")
+	assert_equal(first_civilization.get_item_metadata(first_civilization.selected), 0, "random civilization is the visible default")
+
+	launcher._select_metadata(size_selector, "supergiant")
+	launcher._select_metadata(population_selector, 500)
+	var normalized := SkirmishSettings.normalize(launcher._settings_from_controls())
+	assert_true(bool(normalized.get("valid", false)), "launcher settings satisfy the skirmish contract")
+	assert_equal(normalized["settings"]["map_size_id"], "supergiant", "supergiant choice reaches generation settings")
+	assert_equal(normalized["settings"]["population_limit"], 500, "population 500 reaches generation settings")
+	assert_equal(normalized["settings"]["players"][0]["civilization_id"], 0, "random civilization reaches generation settings")
+
+	launcher._show_loading_screen("СОЗДАНИЕ СЛУЧАЙНОЙ КАРТЫ", "Подготовка генератора")
+	assert_equal(launcher.current_screen, "loading", "map generation has a dedicated loading screen")
+	assert_true(launcher.generation_progress_bar != null, "loading screen exposes progress")
+	assert_equal(launcher.generation_progress_bar.max_value, 100.0, "generation progress has a complete range")
+
 	launcher.free()
-	_finish("E5-002 launcher scene tests passed")
+	_finish("Launcher workflow tests passed")
+
+
+func _has_option(option: OptionButton, metadata: Variant, title: String) -> bool:
+	for index in range(option.item_count):
+		if option.get_item_metadata(index) == metadata and option.get_item_text(index) == title:
+			return true
+	return false
 
 
 func assert_true(value: bool, context: String) -> void:

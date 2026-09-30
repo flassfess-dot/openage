@@ -8,17 +8,18 @@ static func choose_goal(snapshot: Dictionary, team: int, decision_index: int) ->
 	var player_state: Dictionary = snapshot.get("player_state", {})
 	var allies: Array = player_state.get("allies", [team])
 	var relations: Dictionary = player_state.get("relations", {})
-	var targets: Array = []
+	var target: Dictionary = {}
+	var target_id := 2147483647
 	for category in ["units", "buildings"]:
 		for entity_value in snapshot.get(category, []):
 			var entity: Dictionary = entity_value
 			var owner := int(entity.get("team", 0))
 			var relation := String(relations.get(owner, "ally" if allies.has(owner) else "enemy"))
-			if owner > 0 and owner != team and relation == "enemy" and float(entity.get("hp", 0.0)) > 0.0 and not bool(entity.get("last_known", false)):
-				targets.append(entity)
-	if not targets.is_empty():
-		targets.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
-		var target: Dictionary = targets[0]
+			var entity_id := int(entity.get("id", -1))
+			if owner > 0 and owner != team and relation == "enemy" and float(entity.get("hp", 0.0)) > 0.0 and not bool(entity.get("last_known", false)) and entity_id < target_id:
+				target = entity
+				target_id = entity_id
+	if not target.is_empty():
 		var target_domains: Array = target.get("target_domains", [])
 		if target_domains.is_empty():
 			var fallback_domain := String(target.get("movement_domain", "land"))

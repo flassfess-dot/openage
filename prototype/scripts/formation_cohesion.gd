@@ -42,7 +42,7 @@ static func update(units: Array) -> void:
 
 static func update_active_groups(
 	group_records: Dictionary,
-	find_unit: Callable,
+	units_by_id: Dictionary,
 	has_external_unit_in_bounds: Callable,
 	maximum_unit_radius: float,
 	maximum_unit_clearance: float
@@ -59,7 +59,7 @@ static func update_active_groups(
 		var group = group_records[group_id_value]
 		var members: Array = []
 		for member_id_value in group.member_ids:
-			var unit = find_unit.call(int(member_id_value))
+			var unit = units_by_id.get(int(member_id_value))
 			if unit == null or float(unit.get("hp", 0.0)) <= 0.0:
 				continue
 			if int(unit.get("formation_group_id", -1)) != group_id:

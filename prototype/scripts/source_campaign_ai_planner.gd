@@ -4,6 +4,7 @@ extends RefCounted
 const Commands := preload("res://scripts/commands.gd")
 const AttackGroup := preload("res://scripts/source_ai_attack_group.gd")
 const AssignmentGroup := preload("res://scripts/source_ai_assignment_group.gd")
+const ResourceSpatialIndex := preload("res://scripts/ai_resource_spatial_index.gd")
 const TICKS_PER_SECOND := 20
 const ESCORT_FOLLOW_DISTANCE := 3.0
 const ESCORT_THREAT_DISTANCE := 6.0
@@ -894,7 +895,9 @@ static func _assignment_members_settled(member_ids: Array[int], units_by_id: Dic
 
 static func _defence_enemy(snapshot: Dictionary, team: int, anchor: Vector2, radius: float, domain: String) -> Dictionary:
 	var allies: Array = snapshot.get("player_state", {}).get("allies", [team])
-	var candidates: Array = []
+	var best: Dictionary = {}
+	var best_distance := INF
+	var best_id := 2147483647
 	for category in ["units", "buildings"]:
 		for target_value in snapshot.get(category, []):
 			var target: Dictionary = target_value
@@ -908,15 +911,14 @@ static func _defence_enemy(snapshot: Dictionary, team: int, anchor: Vector2, rad
 				domains = [String(target.get("movement_domain", "land"))]
 			if domain not in domains or Vector2(target.get("pos", Vector2.ZERO)).distance_to(anchor) > radius + 0.0001:
 				continue
-			candidates.append(target)
-	candidates.sort_custom(func(left, right):
-		var left_distance := Vector2(left.get("pos", Vector2.ZERO)).distance_squared_to(anchor)
-		var right_distance := Vector2(right.get("pos", Vector2.ZERO)).distance_squared_to(anchor)
-		if not is_equal_approx(left_distance, right_distance):
-			return left_distance < right_distance
-		return int(left.get("id", -1)) < int(right.get("id", -1))
-	)
-	return {} if candidates.is_empty() else candidates[0]
+			var distance := Vector2(target.get("pos", Vector2.ZERO)).distance_squared_to(anchor)
+			var target_id := int(target.get("id", -1))
+			var same_distance := is_equal_approx(distance, best_distance)
+			if (not same_distance and distance < best_distance) or (same_distance and target_id < best_id):
+				best = target
+				best_distance = distance
+				best_id = target_id
+	return best
 
 
 static func _defence_anchors(snapshot: Dictionary, team: int, numbers: Dictionary, occupied_ids: Dictionary, _limit: int) -> Array:
@@ -1154,7 +1156,8 @@ static func _entities_by_distance(entities: Array, position: Vector2) -> Array:
 
 static func _compatible_visible_target(snapshot: Dictionary, team: int, domain: String) -> Dictionary:
 	var allies: Array = snapshot.get("player_state", {}).get("allies", [team])
-	var targets: Array = []
+	var selected: Dictionary = {}
+	var selected_id := 2147483647
 	for category in ["units", "buildings"]:
 		for target_value in snapshot.get(category, []):
 			var target: Dictionary = target_value
@@ -1166,10 +1169,11 @@ static func _compatible_visible_target(snapshot: Dictionary, team: int, domain: 
 			var domains: Array = target.get("target_domains", [])
 			if domains.is_empty():
 				domains = [String(target.get("movement_domain", "land"))]
-			if domain in domains:
-				targets.append(target)
-	targets.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
-	return {} if targets.is_empty() else targets[0]
+			var target_id := int(target.get("id", -1))
+			if domain in domains and target_id < selected_id:
+				selected = target
+				selected_id = target_id
+	return selected
 
 
 static func _extermination_frontier(snapshot: Dictionary, group) -> Variant:
@@ -1183,25 +1187,18 @@ static func _frontier_for_domain(snapshot: Dictionary, domain: String, origin: V
 	var navigation_knowledge: Dictionary = snapshot.get("navigation", {})
 	var reachable_frontier: Array = navigation_knowledge.get("reachable_frontier", {}).get(domain, []) if navigation_knowledge.has("reachable_frontier") else []
 	if navigation_knowledge.has("reachable_frontier"):
-		var reachable_candidates: Array = reachable_frontier.filter(func(point): return Vector2(point).distance_to(origin) > minimum_distance + 0.0001)
-		if reachable_candidates.is_empty():
-			return null
-		reachable_candidates.sort_custom(func(left, right):
-			var left_point := Vector2(left)
-			var right_point := Vector2(right)
-			var left_distance := left_point.distance_squared_to(origin)
-			var right_distance := right_point.distance_squared_to(origin)
-			if not is_equal_approx(left_distance, right_distance):
-				return left_distance < right_distance
-			if not is_equal_approx(left_point.y, right_point.y):
-				return left_point.y < right_point.y
-			return left_point.x < right_point.x
-		)
-		return Vector2(reachable_candidates[0])
+		var best_reachable: Variant = null
+		for point_value in reachable_frontier:
+			var point := Vector2(point_value)
+			if point.distance_to(origin) <= minimum_distance + 0.0001:
+				continue
+			if best_reachable == null or _frontier_point_precedes(point, Vector2(best_reachable), origin):
+				best_reachable = point
+		return best_reachable
 	var navigation: Array = navigation_knowledge.get(domain, [])
 	if size.x <= 0 or size.y <= 0 or fog_cells.size() != size.x * size.y or navigation.is_empty():
 		return null
-	var candidates: Array[Vector2] = []
+	var best_candidate: Variant = null
 	for point_value in navigation:
 		var point := Vector2(point_value)
 		if point.distance_to(origin) <= minimum_distance + 0.0001:
@@ -1212,31 +1209,30 @@ static func _frontier_for_domain(snapshot: Dictionary, domain: String, origin: V
 		for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			var neighbor: Vector2i = cell + offset
 			if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y and int(fog_cells[neighbor.y * size.x + neighbor.x]) == 0:
-				candidates.append(point)
+				if best_candidate == null or _frontier_point_precedes(point, Vector2(best_candidate), origin):
+					best_candidate = point
 				break
-	if candidates.is_empty():
-		return null
-	candidates.sort_custom(func(left, right):
-		var left_distance: float = left.distance_squared_to(origin)
-		var right_distance: float = right.distance_squared_to(origin)
-		if not is_equal_approx(left_distance, right_distance):
-			return left_distance < right_distance
-		if not is_equal_approx(left.y, right.y):
-			return left.y < right.y
-		return left.x < right.x
-	)
-	return candidates[0]
+	return best_candidate
+
+
+static func _frontier_point_precedes(left: Vector2, right: Vector2, origin: Vector2) -> bool:
+	var left_distance := left.distance_squared_to(origin)
+	var right_distance := right.distance_squared_to(origin)
+	if not is_equal_approx(left_distance, right_distance):
+		return left_distance < right_distance
+	if not is_equal_approx(left.y, right.y):
+		return left.y < right.y
+	return left.x < right.x
 
 
 static func _observe_group_target(group, units_by_id: Dictionary) -> void:
-	var observed: Array[int] = []
+	var observed_target_id := 2147483647
 	for entity_id in group.active_member_ids:
 		var unit: Variant = units_by_id.get(entity_id)
 		if unit != null and String(unit.get("task", "idle")) == "attack" and int(unit.get("target_id", -1)) >= 0:
-			observed.append(int(unit.get("target_id", -1)))
-	if not observed.is_empty():
-		observed.sort()
-		group.target_id = observed[0]
+			observed_target_id = mini(observed_target_id, int(unit.get("target_id", -1)))
+	if observed_target_id < 2147483647:
+		group.target_id = observed_target_id
 		group.target_observed = true
 
 
@@ -1351,27 +1347,25 @@ static func _idle_worker_commands(snapshot: Dictionary, tick: int, own_units: Ar
 			resources.append(building)
 	if resources.is_empty():
 		return []
-	var commands: Array = []
+	var idle_workers: Array = []
+	var movement_domains: Array = []
 	for worker_value in own_units:
 		var worker: Dictionary = worker_value
 		if excluded_workers.has(int(worker.get("id", -1))) or not bool(worker.get("components", {}).get("worker", {}).get("enabled", false)) or String(worker.get("task", "idle")) != "idle":
 			continue
-		var closest: Variant = null
-		var closest_distance := INF
-		var closest_id := 2147483647
+		idle_workers.append(worker)
+		movement_domains.append(String(worker.get("movement_domain", "land")))
+	if idle_workers.is_empty():
+		return []
+	var resource_index := ResourceSpatialIndex.new()
+	resource_index.rebuild(resources, movement_domains, true)
+	var commands: Array = []
+	for worker_value in idle_workers:
+		var worker: Dictionary = worker_value
 		var worker_position := Vector2(worker.get("pos", Vector2.ZERO))
-		for resource_value in resources:
-			var resource: Dictionary = resource_value
-			if not _resource_allows_worker(resource, worker):
-				continue
-			var distance := worker_position.distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO)))
-			var resource_id := int(resource.get("id", -1))
-			if distance < closest_distance - 0.000001 or (is_equal_approx(distance, closest_distance) and resource_id < closest_id):
-				closest = resource
-				closest_distance = distance
-				closest_id = resource_id
+		var closest: Variant = resource_index.nearest(worker_position, String(worker.get("movement_domain", "land")))
 		if closest != null:
-			commands.append(Commands.GatherCommand.new(tick, [int(worker.get("id", -1))], closest_id))
+			commands.append(Commands.GatherCommand.new(tick, [int(worker.get("id", -1))], int(closest.get("id", -1))))
 	return commands
 
 
@@ -1389,7 +1383,7 @@ static func _housing_command(snapshot: Dictionary, tick: int, own_units: Array, 
 		sites = city_plan.filter_sites(sites, "house")
 	if sites.is_empty():
 		return null
-	var candidates: Array = []
+	var best_candidate: Dictionary = {}
 	for worker_value in own_units:
 		var worker: Dictionary = worker_value
 		if not bool(worker.get("components", {}).get("worker", {}).get("enabled", false)) or String(worker.get("task", "idle")) != "idle" or String(worker.get("movement_domain", "land")) != "land":
@@ -1401,22 +1395,17 @@ static func _housing_command(snapshot: Dictionary, tick: int, own_units: Array, 
 			continue
 		for site_value in sites:
 			var site := Vector2(site_value)
-			candidates.append({
+			var candidate := {
 				"worker": worker,
 				"site": site,
 				"plan_rank": city_plan.site_rank(site, "house") if city_plan != null else 0,
 				"distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(site),
-			})
-	if candidates.is_empty():
+			}
+			if best_candidate.is_empty() or _site_candidate_precedes(candidate, best_candidate):
+				best_candidate = candidate
+	if best_candidate.is_empty():
 		return null
-	candidates.sort_custom(func(left, right):
-		if int(left.get("plan_rank", 0)) != int(right.get("plan_rank", 0)):
-			return int(left.get("plan_rank", 0)) < int(right.get("plan_rank", 0))
-		if not is_equal_approx(float(left["distance"]), float(right["distance"])):
-			return float(left["distance"]) < float(right["distance"])
-		return int(left["worker"].get("id", -1)) < int(right["worker"].get("id", -1))
-	)
-	var chosen: Dictionary = candidates[0]
+	var chosen: Dictionary = best_candidate
 	return Commands.BuildCommand.new(tick, [int(chosen["worker"].get("id", -1))], "house", chosen["site"])
 
 
@@ -1438,7 +1427,7 @@ static func _next_build_order_command(snapshot: Dictionary, tick: int, team: int
 			var sites: Array = _source_distance_filtered_sites(snapshot.get("build_sites", {}).get(building_alias, []), building_alias, own_buildings, numbers)
 			if city_plan != null:
 				sites = city_plan.filter_sites(sites, building_alias)
-			var candidates: Array = []
+			var best_candidate: Dictionary = {}
 			for worker_value in own_units:
 				var worker: Dictionary = worker_value
 				if String(worker.get("task", "idle")) != "idle" or String(worker.get("movement_domain", "land")) != "land" or not bool(worker.get("components", {}).get("worker", {}).get("enabled", false)):
@@ -1450,22 +1439,17 @@ static func _next_build_order_command(snapshot: Dictionary, tick: int, team: int
 					continue
 				for site_value in sites:
 					var site := Vector2(site_value)
-					candidates.append({
+					var candidate := {
 						"worker": worker,
 						"site": site,
 						"plan_rank": city_plan.site_rank(site, building_alias) if city_plan != null else 0,
 						"distance": Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(site),
-					})
-			if candidates.is_empty():
+					}
+					if best_candidate.is_empty() or _site_candidate_precedes(candidate, best_candidate):
+						best_candidate = candidate
+			if best_candidate.is_empty():
 				return null
-			candidates.sort_custom(func(left, right):
-				if int(left.get("plan_rank", 0)) != int(right.get("plan_rank", 0)):
-					return int(left.get("plan_rank", 0)) < int(right.get("plan_rank", 0))
-				if not is_equal_approx(float(left["distance"]), float(right["distance"])):
-					return float(left["distance"]) < float(right["distance"])
-				return int(left["worker"].get("id", -1)) < int(right["worker"].get("id", -1))
-			)
-			var chosen: Dictionary = candidates[0]
+			var chosen: Dictionary = best_candidate
 			return Commands.BuildCommand.new(tick, [int(chosen["worker"].get("id", -1))], building_alias, chosen["site"])
 		var producers: Array = own_buildings.filter(func(building):
 			return String(building.get("state", "complete")) == "complete" and _entity_matches_source(building, producer_source_id) and building.get("production_queue", []).is_empty()
@@ -1529,6 +1513,9 @@ static func _building_matches_entry(building: Dictionary, source_id: int, alias:
 	return _entity_matches_source(building, source_id) or (not alias.is_empty() and String(building.get("kind", "")) == alias)
 
 
-static func _resource_allows_worker(resource: Dictionary, worker: Dictionary) -> bool:
-	var allowed_domains: Array = resource.get("allowed_gatherer_domains", [])
-	return allowed_domains.is_empty() or String(worker.get("movement_domain", "land")) in allowed_domains
+static func _site_candidate_precedes(left: Dictionary, right: Dictionary) -> bool:
+	if int(left.get("plan_rank", 0)) != int(right.get("plan_rank", 0)):
+		return int(left.get("plan_rank", 0)) < int(right.get("plan_rank", 0))
+	if not is_equal_approx(float(left["distance"]), float(right["distance"])):
+		return float(left["distance"]) < float(right["distance"])
+	return int(left["worker"].get("id", -1)) < int(right["worker"].get("id", -1))

@@ -4,6 +4,7 @@ var cell_size: float = 2.0
 var buckets: Dictionary = {}
 var unit_buckets: Dictionary = {}
 var unit_entities: Array = []
+var unit_index_by_id: Dictionary = {}
 var unit_positions: Array[Vector2] = []
 var unit_radii: Array[float] = []
 var unit_cells: Array[Vector2i] = []
@@ -19,6 +20,7 @@ func clear() -> void:
 	buckets.clear()
 	unit_buckets.clear()
 	unit_entities.clear()
+	unit_index_by_id.clear()
 	unit_positions.clear()
 	unit_radii.clear()
 	unit_cells.clear()
@@ -33,6 +35,7 @@ func insert(entity: Dictionary, position: Vector2, radius: float, category: Stri
 		maximum_unit_clearance = maxf(maximum_unit_clearance, float(entity.get("minimum_clearance", 0.0)))
 		var unit_index := unit_entities.size()
 		unit_entities.append(entity)
+		unit_index_by_id[int(entity.get("id", -1))] = unit_index
 		unit_positions.append(position)
 		unit_radii.append(mobile_radius)
 		var unit_cell := cell_for(position)
@@ -65,19 +68,7 @@ func synchronize_dynamic_entities(units: Array, buildings: Array) -> bool:
 			continue
 		if unit_index >= unit_entities.size() or int(unit_entities[unit_index].get("id", -1)) != int(unit.get("id", -1)):
 			return false
-		var position: Vector2 = unit.get("pos", Vector2.ZERO)
-		var next_cell := cell_for(position)
-		var previous_cell := unit_cells[unit_index]
-		unit_positions[unit_index] = position
-		if next_cell != previous_cell:
-			var previous_bucket: Array = unit_buckets.get(previous_cell, [])
-			previous_bucket.erase(unit_index)
-			if previous_bucket.is_empty():
-				unit_buckets.erase(previous_cell)
-			if not unit_buckets.has(next_cell):
-				unit_buckets[next_cell] = []
-			unit_buckets[next_cell].append(unit_index)
-			unit_cells[unit_index] = next_cell
+		_update_unit_slot(unit_index, Vector2(unit.get("pos", Vector2.ZERO)))
 		unit_index += 1
 	if unit_index != unit_entities.size():
 		return false
@@ -91,6 +82,42 @@ func synchronize_dynamic_entities(units: Array, buildings: Array) -> bool:
 			return false
 		obstacle_index += 1
 	return obstacle_index == obstacle_entities.size()
+
+
+func synchronize_active_units(units: Array) -> bool:
+	# Lifecycle changes are handled by the world's dirty flag. Between those
+	# boundaries only active units can have moved, so update their dense slots
+	# directly instead of walking the complete authoritative roster.
+	for unit_value in units:
+		var unit: Dictionary = unit_value
+		if float(unit.get("hp", 0.0)) <= 0.0:
+			return false
+		var entity_id := int(unit.get("id", -1))
+		if not unit_index_by_id.has(entity_id):
+			return false
+		var unit_index := int(unit_index_by_id[entity_id])
+		if unit_index < 0 or unit_index >= unit_entities.size() or int(unit_entities[unit_index].get("id", -1)) != entity_id:
+			return false
+		_update_unit_slot(unit_index, Vector2(unit.get("pos", Vector2.ZERO)))
+	return true
+
+
+func _update_unit_slot(unit_index: int, position: Vector2) -> void:
+	if unit_positions[unit_index] == position:
+		return
+	var next_cell := cell_for(position)
+	var previous_cell := unit_cells[unit_index]
+	unit_positions[unit_index] = position
+	if next_cell == previous_cell:
+		return
+	var previous_bucket: Array = unit_buckets.get(previous_cell, [])
+	previous_bucket.erase(unit_index)
+	if previous_bucket.is_empty():
+		unit_buckets.erase(previous_cell)
+	if not unit_buckets.has(next_cell):
+		unit_buckets[next_cell] = []
+	unit_buckets[next_cell].append(unit_index)
+	unit_cells[unit_index] = next_cell
 
 
 func movement_neighbor_radius(entity: Dictionary) -> float:
