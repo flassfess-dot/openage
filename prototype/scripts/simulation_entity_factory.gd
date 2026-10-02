@@ -220,6 +220,14 @@ func add_resource(kind: String, position: Vector2, amount: int, resolve_placemen
 		"selection_height": footprint["selection_height"],
 		"components": components,
 	}
+	if kind == "tree":
+		resource["tree_phase"] = "standing" if safe_amount > 0 else "stump"
+		resource["tree_fall_elapsed"] = 0.0
+		resource["tree_fall_duration"] = 0.65
+		resource["source_felled_graphic_id"] = int(source.get("graphics", {}).get("death", 636))
+		resource["source_felled_asset_name"] = "graphic_%d" % int(resource["source_felled_graphic_id"])
+		if safe_amount <= 0:
+			resource["hp"] = 0.0
 	world.apply_archetype_identity(resource, kind)
 	world.resource_nodes.append(resource)
 	world.resource_nodes_by_id[entity_id] = resource

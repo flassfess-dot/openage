@@ -73,6 +73,8 @@ var resource_nodes: Array = []
 var resource_nodes_by_id: Dictionary = {}
 var resource_nodes_by_cell: Dictionary = {}
 var decaying_resource_nodes: Array = []
+# Only actively falling trees are visited by the fixed-tick lifecycle pass.
+var falling_resource_nodes: Array = []
 var known_resources_by_player: Dictionary = {}
 var ai_navigation_knowledge = AiNavigationKnowledge.new()
 var known_ai_resources_by_player: Dictionary = {}
@@ -412,6 +414,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	resource_nodes_by_id.clear()
 	resource_nodes_by_cell.clear()
 	decaying_resource_nodes.clear()
+	falling_resource_nodes.clear()
 	known_resources_by_player.clear()
 	ai_navigation_knowledge.clear()
 	last_known_buildings_by_player.clear()

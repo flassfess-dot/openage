@@ -116,7 +116,7 @@
           "farmer_idle": {"asset_name": "farmer_idle", "enemy_asset_name": "enemy_farmer_idle", "graphic_id": 298, "loop": true},
           "farmer_move": {"asset_name": "farmer_move", "enemy_asset_name": "enemy_farmer_move", "graphic_id": 679, "loop": true},
           "farmer_work": {"asset_name": "farmer_work", "enemy_asset_name": "enemy_farmer_work", "graphic_id": 468, "loop": true},
-          "farmer_carry": {"asset_name": "farmer_carry", "enemy_asset_name": "enemy_farmer_carry", "graphic_id": 829, "loop": true},
+          "farmer_carry": {"asset_name": "villager_carry_food", "enemy_asset_name": "enemy_villager_carry_food", "graphic_id": 90, "loop": true, "composite_parts": [{"asset_name": "farmer_carry", "enemy_asset_name": "enemy_farmer_carry", "graphic_id": 829, "loop": true}]},
           "farmer_death": {"asset_name": "farmer_death", "enemy_asset_name": "enemy_farmer_death", "graphic_id": 184, "loop": false},
           "farmer_corpse": {"asset_name": "farmer_corpse", "enemy_asset_name": "enemy_farmer_corpse", "graphic_id": 149, "loop": false}
         },

@@ -20,10 +20,12 @@ func configure(items: Array) -> void:
 		if String(item.get("presentation_layer", "scenery")) == "ambient_actor":
 			ambient_items.append(item)
 			continue
+		static_items.append(item)
+	static_items.sort_custom(func(left, right): return int(left.get("id", 0)) < int(right.get("id", 0)))
+	for index in range(static_items.size()):
+		var item: Dictionary = static_items[index]
 		var position: Vector2 = item.get("position", Vector2.ZERO)
 		var bounds: Array = item.get("presentation_bounds", [0.0, 0.0, 0.0, 0.0])
-		var index := static_items.size()
-		static_items.append(item)
 		for y in range(floori(position.y + float(bounds[1])), floori(position.y + float(bounds[3])) + 1):
 			for x in range(floori(position.x + float(bounds[0])), floori(position.x + float(bounds[2])) + 1):
 				var cell := Vector2i(x, y)
@@ -40,8 +42,11 @@ func query(bounds: Rect2i) -> Array:
 			for index in items_by_cell.get(Vector2i(x, y), []):
 				if seen.has(index): continue
 				seen[index] = true
-				result.append(static_items[index])
-	result.sort_custom(func(left, right): return int(left.get("id", 0)) < int(right.get("id", 0)))
+	# Native integer sorting avoids a script comparator for every visible item.
+	var indices: Array = seen.keys()
+	indices.sort()
+	for index in indices:
+		result.append(static_items[index])
 	return result
 
 

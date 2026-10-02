@@ -21,10 +21,9 @@ func _initialize() -> void:
 	assert_true(status["blocked"] and not status["blink_on"], "off-screen owned blocked queue also drives the global indicator")
 	for size in [Vector2(640, 480), Vector2(800, 600), Vector2(1024, 768), Vector2(1280, 720), Vector2(1920, 800)]:
 		var layout := InterfaceLayout.for_viewport(size)
-		var overlay: Rect2 = layout["status_overlay"]
-		assert_true(layout["world"].encloses(overlay), "status indicator stays in the world area at %s" % size)
+		assert_true(not layout.has("status_overlay"), "population remains in the flat top bar, without a world overlay at %s" % size)
 		for region_name in ["top", "bottom", "command", "selection", "minimap"]:
-			assert_true(not overlay.intersects(layout[region_name]), "status indicator does not cover %s at %s" % [region_name, size])
+			assert_true(not layout["world"].intersects(layout[region_name]), "world view excludes %s at %s" % [region_name, size])
 	if failures.is_empty():
 		print("P08 population/timer and L3 layout tests passed")
 		quit(0)

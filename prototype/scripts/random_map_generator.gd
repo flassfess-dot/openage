@@ -920,6 +920,8 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	_report_progress(progress, 0.18, "Выбор рельефа и природных областей")
 	var fields := Landscape.select_fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed)
 	var levels: Array[int] = fields["vertex_levels"]
+	var rock_ridges := Landscape.rock_ridges(size, terrain, starts, fields, cliffs, seed ^ 0xCF67)
+	cliffs = rock_ridges["cells"]
 	_apply_cliff_elevation(levels, size, cliffs)
 	Landscape.relax_heights(levels, size)
 	var zone_contract: Dictionary = generator.get("strategic_zone_contract", {}).duplicate(true)
@@ -933,7 +935,7 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	var reserved_foundations: Array = naval_reserved.keys()
 	reserved_foundations.sort_custom(func(a, b): return a.y < b.y or (a.y == b.y and a.x < b.x))
 	var result := {"size": size, "seed": seed, "generator_version": Landscape.VERSION, "theme": "temperate_v2", "environment_pack": "aoe2_temperate",
-		"terrain_ids": terrain, "vertex_levels": levels, "cliff_cells": cliffs, "strategic_zones": zones, "water_features": water_features,
+		"terrain_ids": terrain, "vertex_levels": levels, "cliff_cells": cliffs, "cliff_obstructions": rock_ridges["scenery"], "strategic_zones": zones, "water_features": water_features,
 		"naval_start_zones": naval_zones, "reserved_foundation_cells": reserved_foundations, "resources": [], "scenery": [],
 		"generation_candidates": fields["generation_candidates"]}
 	Landscape.paint_ground(result, fields)

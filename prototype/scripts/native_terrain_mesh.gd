@@ -7,7 +7,7 @@ const TerrainRules := preload("res://scripts/terrain_rules.gd")
 # Capture each terrain/height sample once, instead of crossing the script and
 # dictionary boundary for every vertex of every material layer. The native
 # kernel retains the reference's 8x8 blends and 16x16 coastline tessellation.
-static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pack, regions: Dictionary, atlas_size: Vector2, timings: Dictionary = {}) -> Dictionary:
+static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pack, regions: Dictionary, atlas_size: Vector2, timings: Dictionary = {}, sample_cache: Variant = null) -> Dictionary:
 	if bounds.size.x <= 0 or bounds.size.y <= 0:
 		return {}
 	var started := Time.get_ticks_usec()
@@ -31,28 +31,50 @@ static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pa
 			Terrain._priority(int(id), pack), 1.0 if id in [1, 4, 22] else 0.0,
 			1.0 if imported else 0.0, uv_origin.x, uv_origin.y, uv_size.x, uv_size.y,
 		]))
+	var samples: Dictionary = sample_cache if sample_cache is Dictionary else {}
+	var prior_cells: Dictionary = samples.get("cells", {})
+	var prior_heights: Dictionary = samples.get("heights", {})
+	var prior_frames: Dictionary = samples.get("frames", {})
+	var next_cells: Dictionary = {}
+	var next_heights: Dictionary = {}
+	var next_frames: Dictionary = {}
 	var cells := PackedInt32Array()
 	cells.resize((bounds.size.x + 2) * (bounds.size.y + 2))
 	var index := 0
 	for y in range(bounds.position.y - 1, bounds.end.y + 1):
 		for x in range(bounds.position.x - 1, bounds.end.x + 1):
-			var id := int(provider.call(Vector2i(x, y)))
-			cells[index] = -1 if id < 0 else int(slots[Terrain._material_id(id, pack)])
+			var cell := Vector2i(x, y)
+			var slot := int(prior_cells.get(cell, -2))
+			if slot == -2:
+				var id := int(provider.call(cell))
+				slot = -1 if id < 0 else int(slots[Terrain._material_id(id, pack)])
+			cells[index] = slot
+			next_cells[cell] = slot
 			index += 1
 	var heights := PackedFloat32Array()
 	heights.resize((bounds.size.x + 1) * (bounds.size.y + 1))
 	index = 0
 	for y in range(bounds.position.y, bounds.end.y + 1):
 		for x in range(bounds.position.x, bounds.end.x + 1):
-			heights[index] = elevation.vertex_elevation(Vector2i(x, y))
+			var cell := Vector2i(x, y)
+			var height: float = float(prior_heights[cell]) if prior_heights.has(cell) else elevation.vertex_elevation(cell)
+			heights[index] = height
+			next_heights[cell] = height
 			index += 1
 	var frames := PackedInt32Array()
 	frames.resize(bounds.size.x * bounds.size.y)
 	index = 0
 	for y in range(bounds.position.y, bounds.end.y):
 		for x in range(bounds.position.x, bounds.end.x):
-			frames[index] = TerrainRules.tile_variant(Vector2i(x, y), "terrain", seed, 9)
+			var cell := Vector2i(x, y)
+			var frame := int(prior_frames.get(cell, -1))
+			if frame < 0: frame = TerrainRules.tile_variant(cell, "terrain", seed, 9)
+			frames[index] = frame
+			next_frames[cell] = frame
 			index += 1
+	samples["cells"] = next_cells
+	samples["heights"] = next_heights
+	samples["frames"] = next_frames
 	timings["capture_us"] = Time.get_ticks_usec() - started
 	return {"bounds": bounds, "cells": cells, "heights": heights, "frames": frames, "materials": materials, "seed": seed}
 

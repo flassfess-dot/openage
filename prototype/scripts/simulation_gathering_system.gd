@@ -163,6 +163,9 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 	OrderPipeline.transition(worker, OrderPipeline.PERFORM_ACTION)
 	deposit_carried_resources(worker)
 	worker["deposit_cycles"] = int(worker["deposit_cycles"]) + 1
+	if String(OrderPipeline.current(worker).get("type", "")) == "return_resources":
+		finish_gather_order(worker, "resources_returned")
+		return GATHER_UPDATE_IDLE
 	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
 	var resource: Variant = simulation_world.find_resource(int(worker["resource_id"]))
 	if resource != null and prepare_group_gather_approach(worker, resource):
@@ -176,6 +179,9 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 	var simulation_world = world
 	var resource: Variant = simulation_world.find_resource(resource_id)
 	if resource == null or int(resource["amount"]) <= 0:
+		return 0.0
+	if String(resource.get("kind", "")) == "tree" and String(resource.get("tree_phase", "standing")) != "felled":
+		chop_tree(resource, worker)
 		return 0.0
 	var capacity := maxf(0.0, float(worker["carry_capacity"]))
 	var remaining_capacity := maxf(0.0, capacity - float(worker["carried_amount"]))
@@ -208,6 +214,31 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 	simulation_world.update_resource_state(resource)
 	EntityComponents.sync_resource_carrier(worker)
 	return amount
+
+
+func chop_tree(tree: Dictionary, worker: Dictionary) -> void:
+	if String(tree.get("tree_phase", "standing")) in ["falling", "stump"]:
+		return
+	# Original trees have their own HP. Wood is harvested only after felling.
+	var damage := maxf(1.0, float(worker.get("attack_damage", 3.0)))
+	tree["hp"] = maxf(0.0, float(tree.get("hp", 25.0)) - damage)
+	tree["tree_phase"] = "chopping" if float(tree["hp"]) > 0.0 else "falling"
+	if float(tree["hp"]) <= 0.0:
+		tree["tree_fall_elapsed"] = 0.0
+		world.falling_resource_nodes.append(tree)
+		world.emit_domain_event("tree_felled", {"resource_id": int(tree["id"]), "worker_id": int(worker["id"])})
+	EntityComponents.sync_dynamic(tree)
+	world.mark_known_resource_dirty(tree)
+
+
+func advance_falling_trees(delta: float) -> void:
+	for index in range(world.falling_resource_nodes.size() - 1, -1, -1):
+		var tree: Dictionary = world.falling_resource_nodes[index]
+		tree["tree_fall_elapsed"] = float(tree.get("tree_fall_elapsed", 0.0)) + maxf(0.0, delta)
+		if float(tree["tree_fall_elapsed"]) >= float(tree.get("tree_fall_duration", 0.65)):
+			tree["tree_phase"] = "felled" if int(tree.get("amount", 0)) > 0 else "stump"
+			world.falling_resource_nodes.remove_at(index)
+		world.mark_known_resource_dirty(tree)
 
 
 func deposit_carried_resources(worker: Dictionary) -> int:
@@ -389,6 +420,10 @@ func assign_command_return_resources(selected: Array, target_building_id: int = 
 		world.release_building_approach_slot(worker)
 		world.release_unit_destination(worker)
 		worker["task"] = "gather"
+		# A manual deposit ends here; automatic harvesting keeps its resource ID.
+		worker["resource_id"] = -1
+		worker["target_building_id"] = -1
+		worker["pending_hunt_target_id"] = -1
 		worker["gather_stage"] = "returning"
 		worker["dropoff_id"] = int(dropoff["id"])
 		worker["dropoff_position"] = dropoff_approach_position(worker, dropoff)
@@ -431,6 +466,9 @@ func update_resource_state(resource: Dictionary) -> void:
 	var stage_key := "resource_depletion_stage" if harvestable_building else "depletion_stage"
 	var previous_state := String(resource.get(state_key, ""))
 	if amount <= 0:
+		if String(resource.get("kind", "")) == "tree":
+			resource["tree_phase"] = "stump"
+			resource["hp"] = 0.0
 		resource[state_key] = "depleted"
 		resource[stage_key] = 2
 	elif float(amount) / float(maximum) <= 0.5:
@@ -454,6 +492,7 @@ func update_resource_state(resource: Dictionary) -> void:
 
 
 func advance_resource_lifecycle(delta: float) -> void:
+	advance_falling_trees(delta)
 	var expired_count := 0
 	for resource in world.decaying_resource_nodes:
 		if int(resource.get("amount", 0)) <= 0:

@@ -134,7 +134,7 @@ func decorate_resource(resource: Dictionary, key: String, variant: int = 0) -> D
 	# Source presentation fields survive compact snapshots and saved resources.
 	if not objects_by_key.has(key) or objects_by_key[key].get("role", "") != "tree":
 		return {}
-	var result := resource.duplicate(true)
+	var result := resource.duplicate()
 	result["source_graphic_asset_name"] = PREFIX + key
 	result["source_depleted_asset_name"] = PREFIX + String(objects_by_key[key]["depleted_key"])
 	result["source_frame"] = posmod(variant, object_variant_count(key))

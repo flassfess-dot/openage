@@ -1,0 +1,20 @@
+{
+  "minimap": {
+    "region": [
+      796,
+      7,
+      219,
+      109
+    ],
+    "source": "RoR hud_shell_1024, bottom frame, all five styles",
+    "opaque_pixels": 11991
+  },
+  "source": "AoEDE/Assets/UI/icons/resourceicons.SLP",
+  "source_sha256": "de0f51be3d2720eb9cbff515b1dda3cf41dcb1781a201b57bbeb077e6312b6da",
+  "height": 62,
+  "frame": 8,
+  "asset_sha256": "f57cae43e8b737c4ecb5253cf7cb357e5e5f1edb6c5984423e1e9658c2a9e0af",
+  "adaptation": "Native DE sprite, clipped inside a square RoR command well at runtime",
+  "asset": "population.png",
+  "width": 62
+}

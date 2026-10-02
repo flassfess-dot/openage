@@ -212,6 +212,9 @@ func prepare_building_approach(worker: Dictionary, building: Dictionary) -> bool
 
 func release_building_approach_slot(worker: Dictionary) -> void:
 	var building_id := int(worker.get("target_building_id", -1))
+	var building: Variant = world.find_building(building_id)
+	if building != null:
+		building.get("builders", {}).erase(int(worker.get("id", -1)))
 	if world.building_approach_slots.has(building_id):
 		var reservations: Dictionary = world.building_approach_slots[building_id]
 		reservations.erase(int(worker.get("id", -1)))

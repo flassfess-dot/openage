@@ -43,6 +43,7 @@ func _create_projection(entity: Dictionary) -> Dictionary:
 		"selection_height", "source_frame", "source_graphic_id", "source_graphic_asset_name",
 		"source_requested_graphic_asset_name", "source_asset_fallback_reason",
 		"source_depleted_graphic_id", "source_depleted_asset_name", "combat_enabled",
+		"source_felled_graphic_id", "source_felled_asset_name", "tree_fall_duration",
 	]:
 		if entity.has(key):
 			result[key] = entity[key]
@@ -82,7 +83,7 @@ func _update_projection(result: Dictionary, entity: Dictionary, category: String
 	var keys: Array
 	match category:
 		"resource":
-			keys = ["amount", "state", "resource_state", "depletion_stage", "display_graphic_id"]
+			keys = ["hp", "amount", "state", "resource_state", "depletion_stage", "display_graphic_id"]
 		"building":
 			keys = [
 				"team", "kind", "entity_type", "source_unit_id", "hp", "state", "resource_state", "amount",
@@ -101,6 +102,9 @@ func _update_projection(result: Dictionary, entity: Dictionary, category: String
 	for key in keys:
 		if entity.has(key):
 			result[key] = entity[key]
+	if category == "resource" and entity.has("tree_phase"):
+		result["tree_phase"] = entity["tree_phase"]
+		result["tree_fall_elapsed"] = entity.get("tree_fall_elapsed", 0.0)
 	if category == "unit":
 		result["presentation_state_overrides"] = entity.get("presentation_state_overrides", {})
 

@@ -225,29 +225,11 @@ func _unit_availability(building: Variant, team: int, kind: String, enforce_runt
 	if queue.size() >= 15:
 		result["reason"] = "queue_full"
 		return result
-	for queued_value in queue:
-		var queued_order: Dictionary = queued_value
-		if String(queued_order.get("order_type", "unit")) == "research":
-			result["reason"] = "research_in_progress"
-			return result
-		if _unit_line_key(team, String(queued_order.get("kind", ""))) != _unit_line_key(team, kind):
-			result["reason"] = "different_unit_line_queued"
-			return result
 	if not world.economy_system.can_afford(team, cost):
 		result["reason"] = "insufficient_resources"
 		return result
 	result["accepted"] = true
 	return result
-
-
-func _unit_line_key(team: int, kind: String) -> String:
-	var repository = world.data_repository
-	if not repository.is_configured() or not repository.has_archetype(kind):
-		return kind
-	var source_id := int(repository.identifiers(kind).get("source_unit_id", -1))
-	if source_id < 0:
-		return kind
-	return "source:%d" % int(world.technology_system.resolved_unit_id(team, source_id))
 
 
 func _production_target_failure(building: Dictionary, team: int, kind: String) -> String:
@@ -297,7 +279,7 @@ func enqueue_research(building_id: int, team: int, technology_id: int) -> Varian
 	next_order_id += 1
 	queue.append(order)
 	_sync_queue(building, queue)
-	building["components"]["technology"]["active_research_id"] = technology_id
+	# The active research is always the queue head; queued upgrades remain reserved.
 	world.emit_domain_event("research_queued", {
 		"order_id": int(order["id"]),
 		"building_id": building_id,
@@ -357,8 +339,8 @@ func _research_availability(building: Variant, team: int, technology_id: int) ->
 	if not rule_reason.is_empty():
 		result["reason"] = rule_reason
 		return result
-	if not building.get("production_queue", []).is_empty():
-		result["reason"] = "building_busy"
+	if building.get("production_queue", []).size() >= 15:
+		result["reason"] = "queue_full"
 		return result
 	if not world.economy_system.can_afford(team, cost):
 		result["reason"] = "insufficient_resources"
@@ -383,7 +365,7 @@ func update(delta: float) -> void:
 			active_building_ids.erase(int(building_id))
 			continue
 		var order: Dictionary = queue[0]
-		order["status"] = "training"
+		order["status"] = "researching" if String(order.get("order_type", "unit")) == "research" else "training"
 		order["progress"] = minf(float(order["duration"]), float(order.get("progress", 0.0)) + maxf(0.0, delta))
 		queue[0] = order
 		building["production_progress"] = float(order["progress"]) / maxf(0.05, float(order["duration"]))
@@ -409,7 +391,6 @@ func _complete_research(building: Dictionary, queue: Array, order: Dictionary) -
 		"building_id": int(building.get("id", -1)),
 	})
 	_sync_queue(building, queue)
-	building["components"]["technology"]["active_research_id"] = -1
 	building["components"]["technology"]["researched_ids"] = world.technology_system.researched_ids(team)
 
 
@@ -461,7 +442,6 @@ func cancel(building_id: int, queue_index: int = 0, refund_cost: bool = true, re
 		world.technology_system.cancel_research(team, int(order.get("technology_id", -1)))
 	queue.remove_at(queue_index)
 	_sync_queue(building, queue)
-	building["components"]["technology"]["active_research_id"] = -1 if queue.is_empty() or String(queue[0].get("order_type", "unit")) != "research" else int(queue[0].get("technology_id", -1))
 	world.emit_domain_event("production_cancelled", {
 		"order_id": int(order.get("id", -1)),
 		"building_id": building_id,
@@ -522,6 +502,7 @@ func free_spawn_position(building: Dictionary, kind: String) -> Variant:
 func _sync_queue(building: Dictionary, queue: Array) -> void:
 	building["production_queue"] = queue
 	building["components"]["production"]["queue"] = queue
+	building["components"]["technology"]["active_research_id"] = int(queue[0].get("technology_id", -1)) if not queue.is_empty() and String(queue[0].get("order_type", "unit")) == "research" else -1
 	building["production_progress"] = 0.0 if queue.is_empty() else float(queue[0].get("progress", 0.0)) / maxf(0.05, float(queue[0]["duration"]))
 	var building_id := int(building.get("id", -1))
 	if queue.is_empty():

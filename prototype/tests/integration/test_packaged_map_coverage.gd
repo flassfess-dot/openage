@@ -15,7 +15,8 @@ func _initialize() -> void:
 func run() -> void:
 	var pack := Pack.new()
 	check(pack.enable(), "export includes the current mixed environment definition, manifest and textures")
-	check(Decorations.palette().size() == 23, "export includes all current decoration families")
+	check(Decorations.palette().size() == 20, "current palette includes the twenty permitted decoration families")
+	check(not Decorations.palette().any(func(spec): return spec["key"] in ["ror_stone_dirt_trail", "ror_stone_grass_trail", "overgrown_trail"]), "removed paved and overgrown roads stay excluded")
 	var fixtures := [
 		["compact", "grasslands", 1],
 		["standard", "mediterranean", 41721],

@@ -437,6 +437,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		"objectives": sorted_objectives,
 		"buildings": sorted_buildings,
 		"control_buildings": control_buildings,
+		"production_overview": _production_overview(world, observer_team) if bool(options.get("include_production_overview", false)) else [],
 		"projectiles": sorted_projectiles,
 		"overview": {
 			"units": sorted_overview_units,
@@ -546,6 +547,11 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 	result.erase("selected")
 	result.erase("formation_shared_motion")
 	result.erase("formation_shared_isolated")
+	if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
+		for private_key in ["production_queue", "production_progress", "command_options", "rally_point"]:
+			result.erase(private_key)
+		result.get("components", {}).erase("production")
+		result.get("components", {}).erase("order")
 	var cargo: Dictionary = result.get("components", {}).get("cargo", {})
 	if bool(cargo.get("enabled", false)):
 		cargo["count"] = cargo.get("passenger_ids", []).size()
@@ -576,7 +582,7 @@ static func _compact_render_entity(entity: Dictionary) -> Dictionary:
 		"footprint_radius", "selection_radius", "selection_height",
 		"anim", "anim_state", "facing", "presentation_facing",
 		"death_phase", "death_elapsed", "construction_stage",
-		"environment_asset", "environment_variant", "tree_condition", "display_graphic_id", "source_frame", "source_graphic_id", "source_graphic_asset_name",
+		"environment_asset", "environment_variant", "tree_condition", "tree_phase", "tree_fall_elapsed", "tree_fall_duration", "source_felled_graphic_id", "source_felled_asset_name", "display_graphic_id", "source_frame", "source_graphic_id", "source_graphic_asset_name",
 		"source_requested_graphic_asset_name", "source_asset_fallback_reason",
 		"source_depleted_graphic_id", "source_depleted_asset_name", "combat_enabled", "task", "target_id",
 		"target_building_id", "formation_forward", "carried_amount",
@@ -633,7 +639,7 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 	]:
 		if entity.has(key):
 			result[key] = entity[key]
-	if entity.has("production_queue"):
+	if entity.has("production_queue") and (observer_team <= 0 or int(entity.get("team", 0)) == observer_team):
 		result["production_queue"] = entity.get("production_queue", []).duplicate(true)
 	var source_components: Dictionary = entity.get("components", {})
 	var components: Dictionary = result.get("components", {}).duplicate(true)
@@ -652,6 +658,9 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 		if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
 			for private_field in ["target_dock_id", "home_dock_id", "selected_input_resource_type_id", "approach_position", "cargo_goods", "cargo_gold", "trip_count"]:
 				components["trade"].erase(private_field)
+	if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
+		for private_key in ["production_progress", "rally_point", "resource_id", "dropoff_id", "worker_role_source_unit_id", "diagnostic_reason"]:
+			result.erase(private_key)
 	result["components"] = components
 	return result
 
@@ -940,3 +949,25 @@ static func _victory_state(world) -> Dictionary:
 		"result": world.victory_system.result.duplicate(true),
 		"scenario": world.scenario_system.canonical_state(),
 	}
+
+
+static func _production_overview(world, observer_team: int) -> Array:
+	var result: Array = []
+	if observer_team <= 0:
+		return result
+	# Use the existing active producer index, never scan units/resources or idle buildings.
+	for id_value in world.production_system.active_building_ids:
+		var building: Variant = world.find_building(int(id_value))
+		if building == null or int(building.get("team", 0)) != observer_team or float(building.get("hp", 0)) <= 0:
+			continue
+		var queue: Array = building.get("production_queue", [])
+		if queue.is_empty():
+			continue
+		var order: Dictionary = queue[0]
+		result.append({
+			"id": int(building["id"]),
+			"kind": String(building.get("kind", "")),
+			"components": {"ownership": {"civilization_id": int(world.civilization_by_team.get(observer_team, 13))}},
+			"production_queue": [{"id": int(order.get("id", -1)), "order_type": String(order.get("order_type", "unit")), "kind": String(order.get("kind", "")), "technology_id": int(order.get("technology_id", -1)), "status": String(order.get("status", "queued")), "duration": float(order.get("duration", 0.05)), "progress": float(order.get("progress", 0))}],
+		})
+	return result

@@ -48,3 +48,39 @@ EXE/PCK pair and never invokes Node.js, Python, an importer, or a build step.
 Run the complete headless test suite with:
 
     .tools/godot-4.7.2/Godot_v4.7.2-stable_win64_console.exe --headless --path prototype --script res://tests/test_suite.gd
+
+The compact in-game HUD now uses all five original civilization interface families.
+The top strip uses Arial, a square population glyph from the locally owned AoE DE
+UI, and a screen-centered age name without a match clock. The bottom panel keeps
+its 126-pixel desktop height and shows the current production item, progress,
+remaining time, an explicit cancel button, and grouped waiting orders. Shift-click
+queues up to five affordable units; Shift-click a waiting unit group cancels up to
+five. Research and unit orders share one paid FIFO queue, with refunds on explicit
+cancellation. The small production overview selects the corresponding building.
+Command buttons retain their 50-pixel size as buildings and technologies unlock.
+The grid reserves up to ten columns and two rows independently of the current
+selection. The production recess is left-aligned beside it and capped at 360 pixels.
+Smaller windows page commands instead of shrinking them; construction keeps Back
+accessible on every page. Narrow windows reflow the HUD without stretching the
+original minimap frame.
+
+Terrain now prepares the next full-quality view on a worker before scrolling
+exits the current mesh. Numeric terrain/height/variant samples are retained only
+for the current window and invalidated by terrain revisions. Scenery queries
+reuse unchanged render records, resolve only entering or changed objects, and
+merge their depth order without rebuilding all decorations. Effects-only draws
+preserve the scene cache. Regression tests cover cache bounds, camera projection,
+terrain prefetch and exact geometry; the default map size and artwork are unchanged.
+Worker and inspection behavior
+------------------------------
+Workers can resume an existing owned foundation through the same context build
+command without reserving its cost again. Farm placement uses its native 3x3
+obstruction footprint rather than the larger selection outline. A manual cargo
+deposit finishes the current order; automatic gathering trips resume harvesting.
+Trees consume their original HP before a short fall, then yield wood from the
+fallen trunk and leave a visible, passable stump after depletion. Only actively
+falling trees are updated by the animation lifecycle, regardless of forest size.
+Visible neutral and foreign objects can be inspected individually; their command
+palettes and private production/research queues are never exposed.
+Generated highlands now support seven elevation levels. Native RoR brown cliff
+strips reserve connected footprints before resource and route placement.

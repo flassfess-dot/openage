@@ -278,6 +278,22 @@ func building_frame_info(building: Dictionary, animation_time: float = 0.0) -> D
 
 
 func resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
+	var phase := String(resource.get("tree_phase", ""))
+	if String(resource.get("kind", "")) == "tree" and phase == "felled" and int(resource.get("amount", 0)) > 0:
+		var felled := resource.duplicate()
+		felled["source_graphic_id"] = int(resource.get("source_felled_graphic_id", 636))
+		felled["source_graphic_asset_name"] = String(resource.get("source_felled_asset_name", "graphic_636"))
+		felled["source_frame"] = posmod(int(resource.get("id", 0)), 2)
+		return source_resource_frame_info(felled, animation_time)
+	var result := _standing_resource_frame_info(resource, animation_time)
+	if phase == "falling" and not result.is_empty():
+		var progress := clampf(float(resource.get("tree_fall_elapsed", 0.0)) / maxf(0.01, float(resource.get("tree_fall_duration", 0.65))), 0.0, 1.0)
+		result["rotation"] = (1.0 if int(resource.get("id", 0)) % 2 == 0 else -1.0) * progress * progress * PI * 0.5
+		result["fall_opacity"] = 1.0 - progress * 0.5
+	return result
+
+
+func _standing_resource_frame_info(resource: Dictionary, animation_time: float) -> Dictionary:
 	if environment_pack.enabled and resource.has("environment_asset"):
 		var presentation := environment_pack.decorate_resource(resource, String(resource["environment_asset"]), int(resource.get("environment_variant", 0)))
 		if not presentation.is_empty():

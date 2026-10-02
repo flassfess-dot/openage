@@ -18,18 +18,28 @@ const GROUND_DECAL_SOURCE_IDS := {
 
 var cached_resource_signature: int = 0
 var cached_resource_drawables: Array = []
+var cached_resource_projection: Variant = null
 var cached_environment_signature: int = 0
 var cached_environment_drawables: Array = []
 var cached_environment_signature_valid := false
+var cached_environment_records: Dictionary = {}
+var cached_environment_revision := -1
+var cached_environment_animated: Array = []
+var cached_environment_projection: Variant = null
 var performance_probe: Variant = null
 
 
 func clear_caches() -> void:
 	cached_resource_signature = 0
 	cached_resource_drawables.clear()
+	cached_resource_projection = null
 	cached_environment_signature = 0
 	cached_environment_drawables.clear()
 	cached_environment_signature_valid = false
+	cached_environment_records.clear()
+	cached_environment_revision = -1
+	cached_environment_animated.clear()
+	cached_environment_projection = null
 
 
 func create_world_drawables(world_source, world_to_screen: Callable, interpolation_alpha: float = 1.0, frame_info_provider: Callable = Callable(), preview_ids: Array[int] = [], observer_team: int = 0, selected_ids: Array[int] = []) -> Array:
@@ -65,7 +75,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids + selected_ids) if from_snapshot else []
 	_observe_stage("resources", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
-	var environment_projection := _snapshot_environment_drawables(source_environment, world_to_screen, frame_info_provider) if from_snapshot else {"static": [], "animated": source_environment}
+	var environment_projection := _snapshot_environment_drawables(source_environment, world_to_screen, frame_info_provider, int(world_source.get("environment_revision", -1))) if from_snapshot and world_source.has("environment") else {"static": [], "animated": source_environment}
 	var environment_drawables: Array = environment_projection["static"]
 	source_environment = environment_projection["animated"]
 	_observe_stage("environment_cache", stage_started)
@@ -102,7 +112,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				var resource_position: Vector2 = resource["pos"]
 				var resource_screen: Vector2 = world_to_screen.call(resource_position)
 				var resource_info := _frame_info(frame_info_provider, "resource", resource)
-				drawables.append(RenderItem.create("resource", RenderItem.Layer.UNIT_BUILDING, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0))))
+				drawables.append(RenderItem.create("resource", resource_layer(resource), resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0))))
 				if preview_id_lookup.has(int(resource["id"])):
 					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0)), Color("d6bc63"), 1.0, 1))
 	for objective in source_objectives:
@@ -294,7 +304,25 @@ static func _ambient_roll(entity_id: int, cycle: int, salt: int, limit: int) -> 
 	return posmod(state, maxi(1, limit))
 
 
+func _reproject_statics(drawables: Array, world_to_screen: Callable) -> void:
+	for drawable_value in drawables:
+		var drawable: Dictionary = drawable_value
+		var screen: Vector2 = world_to_screen.call(drawable["world_anchor"])
+		drawable["screen_position"] = screen
+		drawable["screen_y"] = screen.y
+
+static func resource_layer(resource: Dictionary) -> int:
+	# Carcasses and harvested trunks lie on the ground, below workers on any side.
+	if "carcass" in resource.get("behavior_tags", []) or String(resource.get("tree_phase", "")) in ["felled", "stump"]:
+		return RenderItem.Layer.DECAL
+	return RenderItem.Layer.UNIT_BUILDING
+
+
 func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, frame_info_provider: Callable, preview_ids: Array[int]) -> Array:
+	var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
+	if cached_resource_projection != projection:
+		_reproject_statics(cached_resource_drawables, world_to_screen)
+		cached_resource_projection = projection
 	if resources.is_empty():
 		return []
 	var signature := 17
@@ -302,6 +330,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var resource: Dictionary = resource_value
 		signature = signature * 31 + int(resource.get("id", -1))
 		signature = signature * 31 + int(resource.get("depletion_stage", 0))
+		signature = signature * 31 + hash(String(resource.get("tree_phase", "")))
 		signature = signature * 31 + hash(String(resource.get("environment_asset", "")))
 		signature = signature * 31 + int(resource.get("environment_variant", 0))
 		signature = signature * 31 + hash(String(resource.get("source_graphic_asset_name", "")))
@@ -318,7 +347,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 			var resource_id := int(drawable.get("stable_id", -1))
 			if current_by_id.has(resource_id):
 				drawable["data"] = current_by_id[resource_id]
-				if String(current_by_id[resource_id].get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
+				if String(current_by_id[resource_id].get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS or String(current_by_id[resource_id].get("tree_phase", "")) == "falling":
 					var frame_info := _frame_info(frame_info_provider, "resource", current_by_id[resource_id])
 					drawable["frame_info"] = frame_info
 					drawable["frame"] = int(frame_info.get("frame_index", 0))
@@ -336,57 +365,74 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var resource_info := _frame_info(frame_info_provider, "resource", resource)
 		var resource_screen: Vector2 = world_to_screen.call(position)
 		var elevation := float(resource.get("elevation", 0.0))
-		cached_resource_drawables.append(RenderItem.create("resource", RenderItem.Layer.UNIT_BUILDING, position, resource_screen, resource_id, resource, resource_info, elevation))
+		cached_resource_drawables.append(RenderItem.create("resource", resource_layer(resource), position, resource_screen, resource_id, resource, resource_info, elevation))
 		if preview_id_lookup.has(resource_id):
 			cached_resource_drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, resource_screen, resource_id, resource, resource_info, elevation, Color("d6bc63"), 1.0, 1))
 	cached_resource_drawables.sort_custom(RenderItem.less)
 	return cached_resource_drawables
 
 
-func _snapshot_environment_drawables(environment_items: Array, world_to_screen: Callable, frame_info_provider: Callable) -> Dictionary:
+func _snapshot_environment_drawables(environment_items: Array, world_to_screen: Callable, frame_info_provider: Callable, revision: int = -1) -> Dictionary:
+	# Pan/zoom preserves depth order, but cached and newly entering items must
+	# share the current projection before merging with units and buildings.
+	var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
+	if cached_environment_projection != projection:
+		_reproject_statics(cached_environment_drawables, world_to_screen)
+
+		cached_environment_projection = projection
+	# The main scene publishes a revision for its immutable spatial query.
+	# Avoid hashing every decoration again on all 20 simulation ticks.
+	if revision >= 0 and cached_environment_signature_valid and revision == cached_environment_revision:
+		return {"static": cached_environment_drawables, "animated": cached_environment_animated}
 	var animated: Array = []
+	var wanted: Dictionary = {}
 	var signature := 17
 	for item_value in environment_items:
 		var item: Dictionary = item_value
 		if bool(item.get("animated", false)):
 			animated.append(item)
 			continue
-		var position: Vector2 = item.get("position", Vector2.ZERO)
-		signature = signature * 31 + int(item.get("id", -1))
-		signature = signature * 31 + int(item.get("graphic_id", -1))
-		signature = signature * 31 + hash(String(item.get("asset_name", "")))
-		signature = signature * 31 + hash(position)
-		signature = signature * 31 + int(item.get("source_frame", 0))
-		signature = signature * 31 + hash(String(item.get("presentation_layer", "scenery")))
-		signature = signature * 31 + hash(float(item.get("source_elevation", 0.0)))
+		var item_id := int(item.get("id", -1))
+		var item_signature := hash([item_id, item.get("graphic_id", -1), item.get("asset_name", ""), item.get("position", Vector2.ZERO), item.get("source_frame", 0), item.get("presentation_layer", "scenery"), item.get("source_elevation", 0.0), item.get("source_unit_id", -1)])
+		wanted[item_id] = {"signature": item_signature, "item": item}
+		signature = signature * 31 + item_signature
+	cached_environment_revision = revision
+	cached_environment_animated = animated
 	if cached_environment_signature_valid and signature == cached_environment_signature:
 		return {"static": cached_environment_drawables, "animated": animated}
-	cached_environment_signature = signature
-	cached_environment_signature_valid = true
-	cached_environment_drawables = []
-	for item_value in environment_items:
-		var item: Dictionary = item_value
-		if bool(item.get("animated", false)):
+	var retained: Dictionary = {}
+	var next_records: Dictionary = {}
+	var added: Array = []
+	for item_id in wanted:
+		var entry: Dictionary = wanted[item_id]
+		var item: Dictionary = entry["item"]
+		var previous: Dictionary = cached_environment_records.get(item_id, {})
+		if not previous.is_empty() and int(previous["signature"]) == int(entry["signature"]):
+			previous["drawable"]["data"] = item
+			next_records[item_id] = previous
+			retained[item_id] = true
 			continue
 		var position: Vector2 = item.get("position", Vector2.ZERO)
 		var frame_info := _frame_info(frame_info_provider, "environment", item)
-		var layer := environment_layer(item)
-		cached_environment_drawables.append(RenderItem.create(
-			"environment",
-			layer,
-			position,
-			world_to_screen.call(position),
-			int(item.get("id", -1)),
-			item,
-			frame_info,
-			float(item.get("source_elevation", 0.0)),
-			Color.WHITE,
-			1.0,
-			int(frame_info.get("graphic_layer", 0)) * 1000
-		))
-	cached_environment_drawables.sort_custom(RenderItem.less)
+		var drawable := RenderItem.create("environment", environment_layer(item), position, world_to_screen.call(position), item_id, item, frame_info, float(item.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(frame_info.get("graphic_layer", 0)) * 1000)
+		next_records[item_id] = {"signature": entry["signature"], "drawable": drawable}
+		added.append(drawable)
+	var kept: Array = []
+	for drawable_value in cached_environment_drawables:
+		var drawable: Dictionary = drawable_value
+		if retained.has(int(drawable["stable_id"])):
+			kept.append(drawable)
+	added.sort_custom(RenderItem.less)
+	cached_environment_drawables = merge_sorted_drawables(kept, added)
+	# Evict offscreen records: memory is bounded by the current query, not by
+	# how much of a supergiant map the player has visited.
+	cached_environment_records = next_records
+	cached_environment_signature = signature
+	cached_environment_signature_valid = true
+	if performance_probe != null:
+		performance_probe.increment("presentation.environment.frames_resolved", added.size())
+		performance_probe.increment("presentation.environment.frames_reused", kept.size())
 	return {"static": cached_environment_drawables, "animated": animated}
-
 
 func merge_sorted_drawables(first: Array, second: Array) -> Array:
 	# Both inputs are sorted by the strict total RenderItem order (distinct

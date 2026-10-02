@@ -11,9 +11,9 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load_generated_data()
-	test_homogeneous_unit_queue(catalog)
+	test_mixed_unit_queue(catalog)
 	test_completion_time_population_block(catalog)
-	test_research_is_exclusive(catalog)
+	test_mixed_research_queue(catalog)
 	test_building_loss_refunds_only_waiting_orders(catalog)
 	test_active_research_is_lost_with_building(catalog)
 	test_stop_preserves_active_order(catalog)
@@ -27,19 +27,21 @@ func _initialize() -> void:
 	quit(1)
 
 
-func test_homogeneous_unit_queue(catalog) -> void:
+func test_mixed_unit_queue(catalog) -> void:
 	var world = original_world(catalog)
 	world.set_resource_amount(1, 0, 500)
 	world.set_resource_amount(1, 1, 500)
 	var building: Dictionary = world.add_building(710, "town_center", Vector2(10, 10), 1)
-	assert_true(world.enqueue_unit_production(int(building["id"]), 1, "clubman") != null, "first unit starts the active line")
-	assert_true(world.enqueue_unit_production(int(building["id"]), 1, "archer") == null, "different unit line cannot join an active queue")
-	assert_equal(world.last_production_failure, "different_unit_line_queued", "different unit line has a stable rejection reason")
-	assert_true(world.enqueue_unit_production(int(building["id"]), 1, "clubman") != null, "same unit line can add a waiting instance")
-	assert_equal(building.get("production_queue", []).size(), 2, "only matching units occupy the queue")
-	assert_equal(world.get_resource_amount(1, 0), 400, "both accepted units pay at enqueue, rejected line pays nothing")
+	for kind in ["clubman", "archer", "clubman"]:
+		assert_true(world.enqueue_unit_production(710, 1, kind) != null, "%s joins the paid FIFO" % kind)
+	assert_equal(building["production_queue"].map(func(order): return order["kind"]), ["clubman", "archer", "clubman"], "different unit lines preserve request order")
+	var paid_food := 0
+	for order in building["production_queue"]:
+		paid_food += int(order["cost"].get(0, 0))
+	assert_equal(world.get_resource_amount(1, 0), 500 - paid_food, "all accepted units pay at enqueue")
+	world.update_production(1)
+	assert_equal(float(building["production_queue"][1]["progress"]), 0.0, "waiting units cannot train in parallel")
 	assert_equal(world.get_reserved_population(1), 0, "queued units do not reserve population")
-
 
 func test_completion_time_population_block(catalog) -> void:
 	var world = original_world(catalog)
@@ -58,21 +60,51 @@ func test_completion_time_population_block(catalog) -> void:
 	assert_equal(world.get_reserved_population(1), 0, "completion does not release a nonexistent reservation")
 
 
-func test_research_is_exclusive(catalog) -> void:
+func test_mixed_research_queue(catalog) -> void:
 	var world = original_world(catalog)
-	world.set_resource_amount(1, 0, 1000)
+	world.set_resource_amount(1, 0, 2000)
 	var building: Dictionary = world.add_building(712, "town_center", Vector2(10, 10), 1)
 	world.grant_technology(1, 0)
 	world.grant_technology(1, 10)
-	assert_true(world.enqueue_unit_production(int(building["id"]), 1, "clubman") != null, "unit queue starts before research request")
-	assert_true(world.enqueue_research(int(building["id"]), 1, 101) == null, "research cannot wait behind a unit")
-	assert_equal(world.last_research_failure, "building_busy", "busy producer explains research rejection")
-	assert_true(world.cancel_production(int(building["id"]), 0), "explicit cancellation frees the producer")
-	assert_true(world.enqueue_research(int(building["id"]), 1, 101) != null, "research starts in the idle producer")
-	assert_true(world.enqueue_unit_production(int(building["id"]), 1, "clubman") == null, "unit cannot wait behind research")
-	assert_equal(world.last_production_failure, "research_in_progress", "active research explains training rejection")
-	assert_equal(building.get("production_queue", []).size(), 1, "research is the building's sole active operation")
+	assert_true(world.enqueue_unit_production(712, 1, "clubman") != null, "unit starts before research")
+	assert_true(world.enqueue_research(712, 1, 101) != null, "age research can wait behind a unit")
+	assert_true(world.enqueue_unit_production(712, 1, "clubman") != null, "unit can wait behind research")
+	assert_equal(building["production_queue"].map(func(order): return order["order_type"]), ["unit", "research", "unit"], "mixed FIFO preserves its order")
+	assert_equal(building["components"]["technology"]["active_research_id"], -1, "waiting research does not impersonate the active operation")
+	var before_duplicate: int = world.get_resource_amount(1, 0)
+	assert_true(world.enqueue_research(712, 1, 101) == null, "reserved research cannot be queued twice")
+	assert_equal(world.get_resource_amount(1, 0), before_duplicate, "duplicate request costs nothing")
+	world.update_production(26)
+	assert_equal(building["components"]["technology"]["active_research_id"], 101, "research becomes active only after the unit completes")
+	assert_equal(float(building["production_queue"][0]["progress"]), 0.0, "new head starts with zero progress")
+	world.update_production(120)
+	assert_equal(world.get_current_age(1), 101, "mixed queue completes the original age technology")
+	assert_equal(building["components"]["technology"]["active_research_id"], -1, "following unit clears the active research ID")
+	assert_equal(building["production_queue"].size(), 1, "research completion retains the following unit")
 
+	var upgrades = original_world(catalog)
+	upgrades.set_runtime_catalog(catalog.runtime_catalog_data)
+	upgrades.grant_technology(1, 101)
+	upgrades.grant_technology(1, 39)
+	upgrades.set_resource_amount(1, 0, 1000)
+	var pit: Dictionary = upgrades.add_building(750, "storage_pit", Vector2(10, 10), 1)
+	assert_true(upgrades.enqueue_research(750, 1, 40) != null, "first legal armor upgrade starts")
+	assert_true(upgrades.enqueue_research(750, 1, 41) != null, "another armor upgrade waits behind it")
+	assert_equal(upgrades.get_resource_amount(1, 0), 825, "both technologies pay exact original costs")
+	upgrades.update_production(30)
+	assert_true(upgrades.get_researched_technologies(1).has(40), "first upgrade applies its effects")
+	assert_equal(pit["components"]["technology"]["active_research_id"], 41, "next research remains the active head after completion")
+	assert_true(upgrades.cancel_production(750, 0), "next upgrade can be cancelled")
+	assert_equal(upgrades.get_resource_amount(1, 0), 925, "cancelling refunds only the remaining upgrade")
+	assert_true(not upgrades.technology_system.is_researching(1, 41), "cancelling releases its reservation")
+	assert_true(upgrades.enqueue_research(750, 1, 41) != null, "cancelled research can be queued again")
+	for _index in range(14):
+		# Fill the same producer with ordinary paid units to exercise the shared limit.
+		upgrades.set_resource_amount(1, 0, 10000)
+		upgrades.production_system.enqueue_unit(750, 1, "clubman", false)
+	assert_equal(pit["production_queue"].size(), 15, "units and research share the fifteen-order limit")
+	assert_true(upgrades.enqueue_research(750, 1, 46) == null, "full mixed queue rejects additional research")
+	assert_equal(upgrades.last_research_failure, "queue_full", "shared queue reports capacity explicitly")
 
 func test_building_loss_refunds_only_waiting_orders(catalog) -> void:
 	for loss_reason in ["destroyed", "converted"]:

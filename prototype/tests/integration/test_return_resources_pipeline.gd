@@ -34,6 +34,10 @@ func test_explicit_return_and_resource_types(catalog) -> void:
 	enemy["stance"] = "passive"
 	world.worker_role_system.apply(worker, world.worker_role_system.profile_for_resource_type(worker, 1), false)
 	worker["resource_id"] = int(source["id"])
+	for chop in range(100):
+		if source["tree_phase"] == "falling": break
+		world.gather(int(source["id"]), worker)
+	world.advance_resource_lifecycle(0.7)
 	for _amount in range(3):
 		world.gather(int(source["id"]), worker)
 	var starting_wood := world.get_wood()
@@ -47,6 +51,7 @@ func test_explicit_return_and_resource_types(catalog) -> void:
 			break
 	assert_true(bool(controller.get_command_result(return_command.sequence_id).get("accepted", false)), "explicit return command is accepted")
 	assert_equal(world.get_wood(), starting_wood + 3, "explicit return deposits the exact carried amount")
+	assert_equal(worker["task"], "idle", "explicit return ends the worker order")
 	assert_true(controller.events_after().any(func(event): return String(event.get("type", "")) == "resources_deposited"), "deposit is forwarded as domain event")
 
 	var granary: Dictionary = world.add_building(701, "granary", Vector2(5.0, 12.0), 1)

@@ -77,8 +77,9 @@ func build_update(snapshot: Dictionary, selected_ids: Array[int], formation_name
 func refresh_dynamic_model(model: Dictionary, snapshot: Dictionary, selected_ids: Array[int]) -> void:
 	model["tick"] = int(snapshot.get("tick", 0))
 	model["status_indicators"] = status_indicators(snapshot, model)
+	refresh_global_progress(model, snapshot)
 	var selected := _selected_entities(snapshot, selected_ids)
-	if selected.size() != 1 or _category(selected[0]) != "building":
+	if bool(model.get("read_only", false)) or selected.size() != 1 or _category(selected[0]) != "building":
 		return
 	var source_queue: Array = selected[0].get("production_queue", [])
 	var model_queue: Array = model.get("queue", [])
@@ -89,12 +90,15 @@ func refresh_dynamic_model(model: Dictionary, snapshot: Dictionary, selected_ids
 		var model_order: Dictionary = model_queue[index]
 		var duration := maxf(0.05, float(order.get("duration", 0.05)))
 		model_order["progress"] = clampf(float(order.get("progress", 0.0)) / duration, 0.0, 1.0)
+		model_order["remaining_seconds"] = maxf(0, duration - float(order.get("progress", 0)))
 
 
 func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name: String, locale: String) -> Dictionary:
 	var player_state: Dictionary = snapshot.get("player_state", {})
 	var spectator := String(player_state.get("status", "active")) in ["resigned", "defeated"]
 	var disabled_reason := "battle_over" if bool(snapshot.get("battle_over", false)) else "player_not_active" if spectator else ""
+	var observer_team := int(snapshot.get("observer_team", player_state.get("team", 0)))
+	var foreign_selection := selected.any(func(entity): return _category(entity) != "resource" and int(entity.get("team", observer_team)) != observer_team)
 	var selection_model := _selection_model(selected, player_state, locale)
 	var model := {
 		"tick": int(snapshot.get("tick", 0)),
@@ -114,6 +118,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 		"age": _age_model(int(player_state.get("age", 0)), locale),
 		"selection": selection_model,
 		"command_title": "COMMANDS",
+		"global_queue": global_queue_model(snapshot, locale),
 		"commands": [],
 		"queue": [],
 		"battle_over": bool(snapshot.get("battle_over", false)),
@@ -121,6 +126,11 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 		"spectator": spectator,
 		"match_result": snapshot.get("match_result", {}).duplicate(true),
 	}
+	if foreign_selection:
+		model["read_only"] = true
+		model["global_queue"] = []
+		model["selection"]["leader"]["show_population"] = false
+		return model
 	var unit_count := selected.filter(func(entity): return _category(entity) == "unit").size()
 	if unit_count == selected.size() and unit_count > 0:
 		var leader_stance := String(selected[0].get("stance", "aggressive"))
@@ -308,12 +318,14 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 	elif model["commands"].any(func(command): return String(command.get("type", "")) in ["formation", "unit_action"]):
 		model["command_title"] = "ORDERS"
 	model["status_indicators"] = status_indicators(snapshot, model)
+	refresh_global_progress(model, snapshot)
 	return model
 
 
 func _input_signature(snapshot: Dictionary, selected: Array, formation_name: String, locale: String) -> int:
 	var player_state: Dictionary = snapshot.get("player_state", {})
 	var values: Array = [
+		global_input_signature(snapshot),
 		formation_name,
 		locale,
 		int(snapshot.get("observer_team", player_state.get("team", 0))),
@@ -346,6 +358,7 @@ func _entity_input_signature(entity: Dictionary) -> int:
 	var worker: Dictionary = components.get("worker", {})
 	return hash([
 		int(entity.get("id", -1)),
+		int(entity.get("team", 0)),
 		String(entity.get("kind", "")),
 		_category(entity),
 		float(entity.get("hp", 0.0)),
@@ -420,7 +433,6 @@ func _selected_entities(snapshot: Dictionary, selected_ids: Array[int]) -> Array
 	var requested: Dictionary = {}
 	for entity_id in selected_ids:
 		requested[int(entity_id)] = true
-	var player_team := int(snapshot.get("observer_team", snapshot.get("player_state", {}).get("team", 0)))
 	var result: Array = []
 	var has_control_projection := snapshot.has("control_units") and snapshot.has("control_buildings") and snapshot.has("control_resources")
 	var collection_sets: Array = []
@@ -439,7 +451,7 @@ func _selected_entities(snapshot: Dictionary, selected_ids: Array[int]) -> Array
 			for entity_value in snapshot.get(collection_name, []):
 				var entity: Dictionary = entity_value
 				var entity_id := int(entity.get("id", -1))
-				if requested.has(entity_id) and not found.has(entity_id) and (is_resource_collection or int(entity.get("team", 0)) == player_team) and (is_resource_collection or float(entity.get("hp", 0.0)) > 0.0):
+				if requested.has(entity_id) and not found.has(entity_id) and not bool(entity.get("last_known", false)) and (is_resource_collection or float(entity.get("hp", 0.0)) > 0.0):
 					# The view model only reads the detached presentation snapshot. A
 					# second deep copy duplicated combat tables and production queues on
 					# every fixed tick without providing additional isolation.
@@ -535,18 +547,25 @@ func _queue_model(queue: Array, context_entity: Dictionary, locale: String) -> A
 	for index in range(queue.size()):
 		var order: Dictionary = queue[index]
 		var order_type := String(order.get("order_type", "unit"))
+		var kind := String(order.get("kind", ""))
+		var technology_id := int(order.get("technology_id", -1))
 		var duration := maxf(0.05, float(order.get("duration", 0.05)))
-		var label := _name_for_kind(String(order.get("kind", "")), context_entity, locale) if order_type == "unit" else _technology_name(int(order.get("technology_id", -1)), locale)
+		var technology: Dictionary = object_catalog.get("technologies", {}).get(String.num_int64(technology_id), {})
 		result.append({
 			"index": index,
 			"id": int(order.get("id", -1)),
 			"type": order_type,
-			"label": label,
+			"kind": kind,
+			"technology_id": technology_id,
+			"label": _name_for_kind(kind, context_entity, locale) if order_type == "unit" else _technology_name(technology_id, locale),
+			"icon_kind": "unit" if order_type == "unit" else "technology",
+			"icon_id": _icon_id_for_kind(kind, context_entity) if order_type == "unit" else int(technology.get("icon_id", -1)),
 			"status": String(order.get("status", "queued")),
+			"duration": duration,
+			"remaining_seconds": maxf(0, duration - float(order.get("progress", 0))),
 			"progress": clampf(float(order.get("progress", 0.0)) / duration, 0.0, 1.0),
 		})
 	return result
-
 
 func _name_for_kind(kind: String, entity: Dictionary, locale: String) -> String:
 	var archetype: Dictionary = runtime_catalog.get("archetypes", {}).get(kind, {})
@@ -615,6 +634,45 @@ func _is_worker(entity: Dictionary) -> bool:
 
 func _age_model(age: int, locale: String) -> Dictionary:
 	var english := ["Stone Age", "Tool Age", "Bronze Age", "Iron Age"]
-	var russian := ["Каменный век", "Век орудий", "Бронзовый век", "Железный век"]
+	var russian := ["Каменный век", "Неолит", "Бронзовый век", "Железный век"]
 	var index := clampi(age - 100 if age >= 100 else age, 0, english.size() - 1)
 	return {"id": age, "label": russian[index] if locale == "ru" else english[index]}
+
+
+func global_queue_model(snapshot: Dictionary, locale: String) -> Array:
+	var result: Array = []
+	for building_value in snapshot.get("production_overview", []):
+		var building: Dictionary = building_value
+		var orders := _queue_model(building.get("production_queue", []), building, locale)
+		if orders.is_empty():
+			continue
+		var entry: Dictionary = orders[0]
+		entry["building_id"] = int(building.get("id", -1))
+		entry["building_label"] = _name_for_kind(String(building.get("kind", "")), building, locale)
+		result.append(entry)
+	return result
+
+
+static func global_input_signature(snapshot: Dictionary) -> int:
+	var values: Array = []
+	for building_value in snapshot.get("production_overview", []):
+		var building: Dictionary = building_value
+		var orders: Array = building.get("production_queue", [])
+		if not orders.is_empty():
+			var order: Dictionary = orders[0]
+			values.append([building.get("id"), order.get("id"), order.get("status")])
+	return hash(values)
+
+
+static func refresh_global_progress(model: Dictionary, snapshot: Dictionary) -> void:
+	var heads: Dictionary = {}
+	for building_value in snapshot.get("production_overview", []):
+		var building: Dictionary = building_value
+		var orders: Array = building.get("production_queue", [])
+		if not orders.is_empty():
+			heads[int(building.get("id", -1))] = orders[0]
+	for entry_value in model.get("global_queue", []):
+		var entry: Dictionary = entry_value
+		var order: Dictionary = heads.get(int(entry.get("building_id", -1)), {})
+		var duration := maxf(0.05, float(order.get("duration", 0.05)))
+		entry["progress"] = clampf(float(order.get("progress", 0)) / duration, 0, 1)

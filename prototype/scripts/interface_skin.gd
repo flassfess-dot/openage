@@ -85,11 +85,11 @@ func texture(asset_name: String, frame: int = 0) -> Texture2D:
 func hud_shell(source_width: int, style_index: int = 0) -> Dictionary:
 	var style := clampi(style_index, 0, 4)
 	var asset_name := RoRInterfaceLayout.shell_asset_name(source_width, style)
-	var top := _normalized_shell_frame(texture(asset_name, 0), int(RoRInterfaceLayout.TOP_HEIGHT))
+	var top := _normalized_shell_frame(texture(asset_name, 0), int(RoRInterfaceLayout.SOURCE_TOP_HEIGHT))
 	var bottom := _normalized_shell_frame(texture(asset_name, 1), int(RoRInterfaceLayout.BOTTOM_HEIGHT))
 	if (top == null or bottom == null) and style == 4:
 		asset_name = RoRInterfaceLayout.shell_asset_name(source_width, 1)
-		top = _normalized_shell_frame(texture(asset_name, 0), int(RoRInterfaceLayout.TOP_HEIGHT))
+		top = _normalized_shell_frame(texture(asset_name, 0), int(RoRInterfaceLayout.SOURCE_TOP_HEIGHT))
 		bottom = _normalized_shell_frame(texture(asset_name, 1), int(RoRInterfaceLayout.BOTTOM_HEIGHT))
 	return {
 		"asset_name": asset_name,
@@ -255,3 +255,33 @@ func _asset_key(asset_name: String, frame: int) -> String:
 
 func _source_key(source: String, source_id: int) -> String:
 	return "%s:%d" % [source.replace("\\", "/").to_lower(), source_id]
+
+
+func flat_top_texture(style_index: int) -> Texture2D:
+	var key := "flat_top:%d" % clampi(style_index, 0, 4)
+	if not texture_cache.has(key):
+		var source: Texture2D = hud_shell(1024, style_index).get("top")
+		if source == null:
+			return null
+		var image := source.get_image().get_region(Rect2i(300, 2, 96, 16))
+		image.resize(96, 32, Image.INTERPOLATE_NEAREST)
+		texture_cache[key] = ImageTexture.create_from_image(image)
+	return texture_cache[key]
+
+
+func resource_icon(resource_name: String, style_index: int) -> Texture2D:
+	var positions := {"wood": 9, "food": 76, "gold": 143, "stone": 210}
+	if not positions.has(resource_name):
+		return null
+	var key := "resource:%d:%s" % [style_index, resource_name]
+	if not texture_cache.has(key):
+		var atlas := AtlasTexture.new()
+		atlas.atlas = hud_shell(1024, style_index).get("top")
+		atlas.region = Rect2(positions[resource_name], 2, 22, 16)
+		texture_cache[key] = atlas
+	return texture_cache[key]
+
+
+static func rim_colors(style_index: int) -> Array[Color]:
+	var tones := [["c5aa7d", "675232"], ["d8d5c9", "6c6b63"], ["908976", "34342c"], ["c9ae77", "5c492b"], ["9b9b8c", "35382f"]]
+	return [Color(tones[clampi(style_index, 0, 4)][0]), Color(tones[clampi(style_index, 0, 4)][1])]

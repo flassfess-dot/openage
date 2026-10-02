@@ -5,6 +5,7 @@ const NativeTerrainMesh := preload("res://scripts/native_terrain_mesh.gd")
 const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 const MESH_OVERSCAN_CELLS := 12
+const MESH_PREFETCH_CELLS := 6
 
 var map_size := Vector2i.ONE
 var map_seed := 1
@@ -32,6 +33,9 @@ var native_enabled := true
 var native_kernel: Variant
 var terrain_mesh: ArrayMesh
 var terrain_mesh_bounds := Rect2i()
+var native_sample_cache: Dictionary = {}
+var native_sample_revision := -1
+var refinement_prefetch := false
 
 
 func _ready() -> void:
@@ -43,6 +47,8 @@ func _ready() -> void:
 
 func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable, visible_bounds_provider: Callable) -> void:
 	_finish_refinement()
+	native_sample_cache.clear()
+	native_sample_revision = -1
 	queued_refinement = null
 	map_size = size
 	map_seed = seed
@@ -68,10 +74,14 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 	var visible_bounds: Rect2i = bounds_provider.call() if bounds_provider.is_valid() else Rect2i()
 	if projection_changed or terrain_mesh == null or not _bounds_contains(terrain_mesh_bounds, visible_bounds):
 		_rebuild_terrain_mesh(async_rebuilds)
+	elif async_rebuilds and _uses_world_mesh() and not _bounds_contains(terrain_mesh_bounds, _expanded_bounds(visible_bounds, MESH_PREFETCH_CELLS)):
+		_schedule_terrain_prefetch(visible_bounds)
 	queue_redraw()
 
 
 func invalidate_content() -> void:
+	native_sample_cache.clear()
+	native_sample_revision = -1
 	_rebuild_terrain_mesh()
 	queue_redraw()
 
@@ -195,7 +205,8 @@ func _rebuild_terrain_mesh(refine_async: bool = false) -> void:
 		if native_kernel == null:
 			native_kernel = ClassDB.instantiate("RoRTerrainKernel")
 		var native_bounds := _expanded_bounds(bounds_provider.call(), MESH_OVERSCAN_CELLS)
-		var request := NativeTerrainMesh.capture(native_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, last_mesh_build_metrics)
+		_prepare_native_samples()
+		var request := NativeTerrainMesh.capture(native_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, last_mesh_build_metrics, native_sample_cache)
 		var native_arrays := NativeTerrainMesh.build_request(native_kernel, request, 4 if refine_async else 16, last_mesh_build_metrics)
 		if not native_arrays.is_empty():
 			terrain_mesh_bounds = native_bounds
@@ -330,12 +341,30 @@ func _install_native_arrays(arrays: Array) -> void:
 	last_mesh_build_metrics["vertices"] = arrays[Mesh.ARRAY_VERTEX].size()
 
 
+func _prepare_native_samples() -> void:
+	if native_sample_revision != terrain_revision:
+		native_sample_cache.clear()
+		native_sample_revision = terrain_revision
+
+
+func _schedule_terrain_prefetch(visible_bounds: Rect2i) -> void:
+	if not native_enabled or native_kernel == null or refinement_task_id >= 0 or queued_refinement != null:
+		return
+	_prepare_native_samples()
+	var next_bounds := _expanded_bounds(visible_bounds, MESH_OVERSCAN_CELLS)
+	var job := NativeTerrainMesh.new()
+	job.kernel = native_kernel
+	job.request = NativeTerrainMesh.capture(next_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, job.timings, native_sample_cache)
+	queued_refinement = {"job": job, "bounds": next_bounds, "revision": terrain_revision, "generation": mesh_generation, "prefetch": true}
+	_start_queued_refinement()
+
 func _start_queued_refinement() -> void:
 	if refinement_task_id >= 0 or queued_refinement == null: return
 	refinement_job = queued_refinement["job"]
 	refinement_bounds = queued_refinement["bounds"]
 	refinement_revision = int(queued_refinement["revision"])
 	refinement_generation = int(queued_refinement["generation"])
+	refinement_prefetch = bool(queued_refinement.get("prefetch", false))
 	queued_refinement = null
 	refinement_task_id = WorkerThreadPool.add_task(Callable(refinement_job, "run"), false, "Terrain surface detail")
 	set_process(true)
@@ -347,7 +376,11 @@ func _process(_delta: float) -> void:
 	refinement_task_id = -1
 	# Rapid minimap clicks may supersede a request while it is being built.
 	# Never replace the new view with geometry captured for an older view.
-	if refinement_generation == mesh_generation and queued_refinement == null and refinement_bounds == terrain_mesh_bounds and refinement_revision == terrain_revision and not refinement_job.result.is_empty():
+	var bounds_valid := _bounds_contains(refinement_bounds, bounds_provider.call()) if refinement_prefetch else refinement_bounds == terrain_mesh_bounds
+	if refinement_generation == mesh_generation and queued_refinement == null and bounds_valid and refinement_revision == terrain_revision and not refinement_job.result.is_empty():
+		if refinement_prefetch:
+			terrain_mesh_bounds = refinement_bounds
+			last_mesh_build_metrics = refinement_job.timings.duplicate()
 		_install_native_arrays(refinement_job.result)
 		last_mesh_build_metrics["refinement_us"] = refinement_job.timings.get("native_us", 0)
 		queue_redraw()

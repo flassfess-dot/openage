@@ -65,6 +65,7 @@ func test_group_foraging_cycle(catalog) -> void:
 	assert_true(second["resource_approach_slot"] is Vector2 and not second.get("path", []).is_empty(), "second forager receives an immediate reachable route")
 	var starting_food: int = world.get_food()
 	for unused in range(1200):
+		world.advance_resource_lifecycle(0.05)
 		world.update_units(0.05, 1, 2)
 		world.rebuild_spatial_index()
 		if int(berries["amount"]) <= 0 and first["task"] == "idle" and second["task"] == "idle":
@@ -85,6 +86,7 @@ func test_complete_gather_cycle(catalog) -> void:
 	var saw_full_inventory := false
 	var stockpile_before_first_deposit := true
 	for unused in range(2400):
+		world.advance_resource_lifecycle(0.05)
 		world.update_units(0.05, 1, 2)
 		world.rebuild_spatial_index()
 		saw_work = saw_work or worker["anim_state"] == AnimationController.GATHER

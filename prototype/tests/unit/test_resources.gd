@@ -156,6 +156,10 @@ func test_depletion_and_navigation_release() -> void:
 	var berry_cell := Vector2i(floori(berries["pos"].x), floori(berries["pos"].y))
 	assert_true(not world.navigation_grid.is_walkable(tree_cell), "live tree blocks navigation")
 	assert_true(world.find_resource(int(tree["id"])) == tree, "resource id index resolves the original static node dictionary")
+	for chop in range(100):
+		if tree["tree_phase"] == "falling": break
+		world.gather(int(tree["id"]), worker)
+	world.advance_resource_lifecycle(0.7)
 	for unused in range(4):
 		world.gather(int(tree["id"]), worker)
 	assert_equal(tree["amount"], 1, "first gather leaves exact remainder")

@@ -1,67 +1,60 @@
 class_name RoRInterfaceLayout
 extends RefCounted
 
-const TOP_HEIGHT := 20.0
+const TOP_HEIGHT := 32.0
+const SOURCE_TOP_HEIGHT := 20.0
 const BOTTOM_HEIGHT := 126.0
 const REFERENCE_WIDTHS := [640, 800, 1024]
-const WIDE_LEFT_WIDTH := 304.0
-const WIDE_RIGHT_WIDTH := 308.0
-const WIDE_RIGHT_SOURCE_X := 716.0
-
-const REFERENCE_REGIONS := {
-	640: {
-		"command": Rect2(136, 4, 270, 118),
-		"selection": Rect2(4, 4, 128, 118),
-		"minimap": Rect2(412, 4, 220, 114),
-	},
-	800: {
-		"command": Rect2(136, 4, 270, 118),
-		"selection": Rect2(4, 4, 128, 118),
-		"minimap": Rect2(572, 4, 220, 114),
-	},
-	1024: {
-		"command": Rect2(136, 4, 270, 118),
-		"selection": Rect2(4, 4, 128, 118),
-		"minimap": Rect2(796, 4, 220, 114),
-	},
-}
+const WIDE_RIGHT_WIDTH := 232.0
+const WIDE_RIGHT_SOURCE_X := 792.0
+const COMMAND_CELL_SIZE := 50.0
+const COMMAND_GAP := 4.0
+# Two rows fit all 18 catalogued buildings plus Back at desktop widths.
+const COMMAND_MAX_COLUMNS := 10
+const PRODUCTION_MAX_WIDTH := 360.0
+const PRODUCTION_GAP := 10.0
 
 
 static func for_viewport(viewport_size: Vector2) -> Dictionary:
-	var source_width := source_width_for(viewport_size.x)
-	var panel_top := viewport_size.y - BOTTOM_HEIGHT
-	var regions: Dictionary = REFERENCE_REGIONS[source_width]
-	var command: Rect2 = regions["command"]
-	var selection: Rect2 = regions["selection"]
-	var minimap: Rect2 = regions["minimap"]
-	var expanded := viewport_size.x > 1024.0
-	if expanded:
-		command = Rect2(command.position, command.size)
-		minimap = Rect2(Vector2(viewport_size.x - (1024.0 - minimap.position.x), minimap.position.y), minimap.size)
-		selection = Rect2(selection.position, selection.size)
-	elif viewport_size.x < float(source_width):
-		var clipped_width := maxf(320.0, viewport_size.x)
-		var factor := clipped_width / float(source_width)
-		command = Rect2(command.position * factor, command.size * Vector2(factor, 1.0))
-		selection = Rect2(selection.position * Vector2(factor, 1.0), selection.size * Vector2(factor, 1.0))
-		minimap = Rect2(minimap.position * Vector2(factor, 1.0), minimap.size * Vector2(factor, 1.0))
-	var bottom_origin := Vector2(0.0, panel_top)
+	var width := maxf(320.0, viewport_size.x)
+	var narrow := width < 720.0
+	var top_height := 64.0 if narrow else TOP_HEIGHT
+	var bottom_height := 252.0 if narrow else BOTTOM_HEIGHT
+	var panel_top := viewport_size.y - bottom_height
+	var minimap_scale := minf(1.0, maxf(0.5, (width - 174.0) / 232.0)) if narrow else 1.0
+	var bottom := Rect2(0, panel_top, width, bottom_height)
+	var selection := Rect2(4, panel_top + 4, 128, 118)
+	var map_plane := Rect2(width - 232, panel_top, 232, 126)
+	var production_minimum := 250.0 if width >= 960.0 else 170.0
+	var command_space := width - 136.0 - 244.0 - PRODUCTION_GAP - production_minimum
+	if narrow:
+		map_plane = Rect2(width - 232 * minimap_scale, panel_top + 126, 232 * minimap_scale, 126 * minimap_scale)
+		command_space = map_plane.position.x - 12.0
+	var columns := clampi(floori((command_space + COMMAND_GAP) / (COMMAND_CELL_SIZE + COMMAND_GAP)), 1, COMMAND_MAX_COLUMNS)
+	var command_width := columns * (COMMAND_CELL_SIZE + COMMAND_GAP) - COMMAND_GAP
+	var command := Rect2(136, panel_top + 4, command_width, 118)
+	var production_left := command.end.x + PRODUCTION_GAP
+	var production_width := minf(PRODUCTION_MAX_WIDTH, width - production_left - 244.0)
+	var production := Rect2(production_left, panel_top + 4, production_width, 118)
+	if narrow:
+		command = Rect2(4, panel_top + 130, command_width, 118)
+		production = Rect2(136, panel_top + 4, minf(PRODUCTION_MAX_WIDTH, width - 140), 118)
+	var minimap := Rect2(map_plane.position + Vector2(4, 7) * minimap_scale, Vector2(219, 109) * minimap_scale)
 	return {
 		"viewport": viewport_size,
-		"source_width": source_width,
-		"expanded": expanded,
-		"top": Rect2(0.0, 0.0, viewport_size.x, TOP_HEIGHT),
-		"world": Rect2(0.0, TOP_HEIGHT, viewport_size.x, maxf(1.0, viewport_size.y - TOP_HEIGHT - BOTTOM_HEIGHT)),
-		"status_overlay": Rect2(maxf(0.0, viewport_size.x - 148.0), TOP_HEIGHT + 6.0, 140.0, 37.0),
-		"bottom": Rect2(0.0, panel_top, viewport_size.x, BOTTOM_HEIGHT),
-		"command": Rect2(command.position + bottom_origin, command.size),
-		"selection": Rect2(selection.position + bottom_origin, selection.size),
-		"minimap": Rect2(minimap.position + bottom_origin, minimap.size),
-		"wide_split": {
-			"left_width": WIDE_LEFT_WIDTH,
-			"right_width": WIDE_RIGHT_WIDTH,
-			"right_source_x": WIDE_RIGHT_SOURCE_X,
-		},
+		"source_width": 1024,
+		"expanded": width > 1024.0,
+		"narrow": narrow,
+		"top": Rect2(0, 0, width, top_height),
+		"world": Rect2(0, top_height, width, maxf(1, panel_top - top_height)),
+		"bottom": bottom,
+		"command": command,
+		"selection": selection,
+		"production": production,
+		"minimap": minimap,
+		"minimap_plane": map_plane,
+		"minimap_scale": minimap_scale,
+		"wide_split": {"left_width": 136.0, "right_width": WIDE_RIGHT_WIDTH, "right_source_x": WIDE_RIGHT_SOURCE_X},
 	}
 
 

@@ -53,8 +53,8 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 		var building: Dictionary = building_value
 		if float(building.get("hp", 0.0)) <= 0.0:
 			continue
-		var existing_half_size := Vector2(building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5)))
-		var candidate_half_size := Vector2(footprint.get("half_size", Vector2(0.5, 0.5)))
+		var existing_half_size := Vector2(building.get("footprint", {}).get("obstruction_half_size", building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))))
+		var candidate_half_size := Vector2(footprint.get("obstruction_half_size", footprint.get("half_size", Vector2(0.5, 0.5))))
 		var delta := (Vector2(building.get("pos", Vector2.ZERO)) - position).abs()
 		if delta.x < existing_half_size.x + candidate_half_size.x - 0.001 and delta.y < existing_half_size.y + candidate_half_size.y - 0.001:
 			world.last_build_failure = "blocked_or_sloped"

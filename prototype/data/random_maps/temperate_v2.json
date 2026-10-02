@@ -12,55 +12,55 @@
   },
   "profiles": {
     "grasslands": {
-      "relief": 2,
+      "relief": 4,
       "forest_threshold": 0.61,
       "moisture_bias": 0.03,
       "rock_threshold": 0.74
     },
     "highlands": {
-      "relief": 4,
+      "relief": 7,
       "forest_threshold": 0.56,
       "moisture_bias": -0.05,
       "rock_threshold": 0.6
     },
     "hill_country": {
-      "relief": 3,
+      "relief": 6,
       "forest_threshold": 0.57,
       "moisture_bias": 0,
       "rock_threshold": 0.63
     },
     "narrows": {
-      "relief": 2,
+      "relief": 4,
       "forest_threshold": 0.59,
       "moisture_bias": 0,
       "rock_threshold": 0.66
     },
     "coastal": {
-      "relief": 2,
+      "relief": 4,
       "forest_threshold": 0.59,
       "moisture_bias": 0.08,
       "rock_threshold": 0.72
     },
     "continental": {
-      "relief": 3,
+      "relief": 5,
       "forest_threshold": 0.58,
       "moisture_bias": 0.04,
       "rock_threshold": 0.68
     },
     "mediterranean": {
-      "relief": 2,
+      "relief": 4,
       "forest_threshold": 0.63,
       "moisture_bias": -0.09,
       "rock_threshold": 0.67
     },
     "islands": {
-      "relief": 2,
+      "relief": 4,
       "forest_threshold": 0.58,
       "moisture_bias": 0.12,
       "rock_threshold": 0.73
     },
     "small_islands": {
-      "relief": 2,
+      "relief": 3,
       "forest_threshold": 0.6,
       "moisture_bias": 0.1,
       "rock_threshold": 0.75

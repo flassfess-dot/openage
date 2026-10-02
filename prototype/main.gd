@@ -55,6 +55,7 @@ const TerrainElevation := preload("res://scripts/terrain_elevation.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const FogPresentation := preload("res://scripts/fog_presentation.gd")
 const InterfaceLayout := preload("res://scripts/interface_layout.gd")
+const MinimapAperture := preload("res://scripts/minimap_aperture.gd")
 const MAP_SEED := 41721
 const FormationPreview := preload("res://scripts/formation_preview.gd")
 const TILE_WIDTH := Coordinates.TILE_WIDTH
@@ -199,6 +200,7 @@ var cached_presentation_selection_signature: int = 0
 var cached_presentation_diagnostics := false
 var cached_overview_tick: int = -1
 var cached_overview_resource_revision: int = -1
+var cached_environment_revision := 0
 var cached_environment_bounds := Rect2i()
 var cached_environment_items: Array = []
 var cached_world_drawables: Array = []
@@ -239,6 +241,7 @@ func _ready() -> void:
 	if String(map_definition.get("environment_pack", "")) == "aoe2_temperate":
 		resource_catalog.enable_environment_pack()
 	environment_items.append_array(map_definition.get("scenery", []))
+	environment_items.append_array(map_definition.get("cliff_obstructions", []))
 	environment_presentation_field.configure(environment_items)
 	map_size = map_definition.get("size", MAP_SIZE)
 	map_seed = int(map_definition.get("seed", MAP_SEED))
@@ -277,6 +280,7 @@ func _ready() -> void:
 	hud_controls.cancel_production_requested.connect(cancel_production_from_hud)
 	hud_controls.trade_resource_requested.connect(set_trade_resource_from_hud)
 	hud_controls.unit_action_requested.connect(issue_unit_action)
+	hud_controls.building_selected.connect(select_hud_building)
 	top_bar_controls = TopBarControls.new()
 	add_child(top_bar_controls)
 	top_bar_controls.configure(resource_catalog.interface_skin, interface_style_index)
@@ -384,7 +388,7 @@ func center_initial_view() -> void:
 		scenario_overlay.position = Vector2.ZERO
 		scenario_overlay.size = size
 	if network_chat_input != null:
-		network_chat_input.position = Vector2(16, size.y - HUD_BOTTOM - 40)
+		network_chat_input.position = Vector2(16, size.y - hud_bottom_height() - 40)
 	var initial_world := Vector2(map_size.x / 2.0, map_size.y / 2.0)
 	var local_team := local_player_team
 	for player_value in match_definition.get("players", []):
@@ -393,7 +397,7 @@ func center_initial_view() -> void:
 			initial_world = player.get("start", initial_world)
 			break
 	var initial_screen := iso_raw(initial_world) * view_zoom
-	view_offset = Vector2(size.x * 0.5, (size.y - HUD_BOTTOM + HUD_TOP) * 0.48) - initial_screen
+	view_offset = Vector2(size.x * 0.5, (size.y - hud_bottom_height() + hud_top_height()) * 0.48) - initial_screen
 	_sync_terrain_canvas()
 	queue_redraw()
 
@@ -534,7 +538,7 @@ func update_camera(delta: float) -> void:
 	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): direction.y += 1.0
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): direction.y -= 1.0
 	if get_window().has_focus():
-		direction += PointerController.edge_scroll_direction(get_viewport().get_mouse_position(), get_viewport_rect().size, PointerController.EDGE_SCROLL_MARGIN, HUD_TOP, HUD_BOTTOM)
+		direction += PointerController.edge_scroll_direction(get_viewport().get_mouse_position(), get_viewport_rect().size, PointerController.EDGE_SCROLL_MARGIN, hud_top_height(), hud_bottom_height())
 	if direction != Vector2.ZERO:
 		view_offset += direction.normalized() * 430.0 * delta
 
@@ -690,7 +694,7 @@ func _create_network_chat_input() -> void:
 	network_chat_input = LineEdit.new()
 	network_chat_input.placeholder_text = "Enter: союзный чат  /all: всем  /pop N: лимит хоста"
 	network_chat_input.size = Vector2(470, 32)
-	network_chat_input.position = Vector2(16, get_viewport_rect().size.y - HUD_BOTTOM - 40)
+	network_chat_input.position = Vector2(16, get_viewport_rect().size.y - hud_bottom_height() - 40)
 	network_chat_input.visible = false
 	network_chat_input.text_submitted.connect(_submit_network_chat)
 	network_chat_input.gui_input.connect(_network_chat_gui_input)
@@ -815,7 +819,9 @@ func enqueue_with_feedback(command: Variant, accepted_message: String, sound_nam
 func process_presentation_events() -> void:
 	var new_events := game_controller.events_after(command_feedback_router.event_cursor)
 	for feedback in command_feedback_router.consume(new_events, local_player_team):
-		game_message = String(feedback["message"])
+		var quiet_order := bool(feedback["accepted"]) and String(feedback.get("command_type", "")) in ["train", "research", "cancel_production"]
+		if not quiet_order:
+			game_message = String(feedback["message"])
 		if bool(feedback["accepted"]):
 			var sound_name := String(feedback["sound_name"])
 			if not sound_name.is_empty():
@@ -825,7 +831,7 @@ func process_presentation_events() -> void:
 			elif feedback["marker"] is Dictionary:
 				resource_feedback_id = int(feedback["marker"].get("resource_id", -1))
 				resource_feedback_time = 0.7
-		message_time = 1.8
+		message_time = 0.0 if quiet_order else 1.8
 	presentation_effect_timeline.consume(new_events, Callable(self, "presentation_effect_visible"))
 	_sync_effect_snapshot()
 	process_world_audio_events(new_events)
@@ -931,7 +937,7 @@ func handle_minimap_input(event: InputEvent) -> bool:
 	if not screen_position is Vector2:
 		return false
 	var geometry := minimap_geometry()
-	if not geometry["rectangle"].has_point(screen_position) or not MinimapProjection.contains_world(screen_position, map_size, geometry["center"], geometry["scale"]):
+	if not MinimapAperture.contains(screen_position, geometry["rectangle"]) or not MinimapProjection.contains_world(screen_position, map_size, geometry["center"], geometry["scale"]):
 		return false
 	center_view_on_world(MinimapProjection.minimap_to_world(screen_position, geometry["center"], geometry["scale"]))
 	queue_redraw()
@@ -1308,7 +1314,7 @@ func _load_failed(reason: String) -> bool:
 	return false
 
 func is_world_interaction_area(position: Vector2) -> bool:
-	return position.y > HUD_TOP and position.y < get_viewport_rect().size.y - HUD_BOTTOM
+	return position.y > hud_top_height() and position.y < get_viewport_rect().size.y - hud_bottom_height()
 
 func assign_control_group(group_number: int) -> void:
 	var ids := _selection_ids(selected_units())
@@ -1355,7 +1361,7 @@ func center_view_on_units(entity_ids: Array[int]) -> void:
 
 func center_view_on_world(world_position: Vector2) -> void:
 	var viewport_size := get_viewport_rect().size
-	var visible_center := Vector2(viewport_size.x * 0.5, (HUD_TOP + viewport_size.y - HUD_BOTTOM) * 0.5)
+	var visible_center := Vector2(viewport_size.x * 0.5, (hud_top_height() + viewport_size.y - hud_bottom_height()) * 0.5)
 	view_offset = visible_center - iso_raw(Coordinates.clamp_world(world_position, map_size)) * view_zoom
 
 func zoom_at(mouse: Vector2, factor: float) -> void:
@@ -1371,15 +1377,17 @@ func finish_selection(first: Vector2, mouse: Vector2, mode: String = "select_cli
 	if click:
 		for hit_value in pick_stack_at(mouse):
 			var hit: Dictionary = hit_value
-			if (int(hit.get("team", 0)) == local_player_team and String(hit.get("entity_type", "")) in ["unit", "building", "foundation"]) or String(hit.get("entity_type", "")) == "resource":
+			if String(hit.get("entity_type", "")) in ["unit", "building", "foundation", "resource"] and not bool(hit.get("entity", {}).get("last_known", false)):
 				hits.append(picking_service.context_entity(hit))
 				break
 	else:
 		hits = selection_hits_in_rectangle(rectangle)
 
 	var eligible_ids := selectable_player_ids()
-	if click and not hits.is_empty() and String(hits[0].get("entity_type", "")) == "resource":
-		eligible_ids.append(int(hits[0]["id"]))
+	if click and not hits.is_empty():
+		var clicked_id := int(hits[0]["id"])
+		if not eligible_ids.has(clicked_id):
+			eligible_ids.append(clicked_id)
 	var hit_ids: Array[int] = []
 	if click and mode == "select_double_click" and not hits.is_empty():
 		var clicked: Dictionary = hits[0]
@@ -1387,7 +1395,9 @@ func finish_selection(first: Vector2, mouse: Vector2, mode: String = "select_cli
 	if hit_ids.is_empty():
 		for unit in hits:
 			hit_ids.append(int(unit["id"]))
-	player_control_state.apply_selection(eligible_ids, hit_ids, Input.is_key_pressed(KEY_SHIFT))
+	var inspection_click := click and not hits.is_empty() and int(hits[0].get("team", 0)) != local_player_team
+	var previous_inspection := selected_entities().any(func(entity): return int(entity.get("team", 0)) != local_player_team)
+	player_control_state.apply_selection(eligible_ids, hit_ids, Input.is_key_pressed(KEY_SHIFT) and not inspection_click and not previous_inspection)
 	refresh_hud_model()
 	var selected := selected_entities()
 	game_message = "Выбрано объектов: %d" % selected.size()
@@ -1416,10 +1426,9 @@ func current_world_drawables() -> Array:
 		retained_snapshot["effects"] = []
 		render_world.performance_probe = game_controller.performance_probe if game_controller != null else null
 		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, local_player_team, selected_ids)
-		# Cached resource/environment statics keep the screen position of their
-		# last refresh; a publication frame may skip refresh entirely, so force
-		# one static re-projection pass or panned scenery lags one frame behind.
-		render_world.refresh_world_drawables(cached_world_drawables, Callable(self, "world_to_screen"), interpolation_alpha, true)
+		# Retained static caches project before their depth merge. Refresh only
+		# interpolation here; a second full scenery projection wastes frame time.
+		render_world.refresh_world_drawables(cached_world_drawables, Callable(self, "world_to_screen"), interpolation_alpha, false)
 		cached_world_drawables_revision = presentation_revision
 		cached_world_drawables_control_signature = control_signature
 	else:
@@ -1715,13 +1724,14 @@ func selected_units() -> Array:
 
 
 func selected_entities() -> Array:
-	var selected: Array = selected_units()
-	for building in presentation_snapshot.get("buildings", []):
-		if int(building.get("team", 0)) == local_player_team and float(building.get("hp", 0.0)) > 0.0 and player_control_state.is_selected(int(building.get("id", -1))):
-			selected.append(building)
-	for resource in presentation_snapshot.get("resources", []):
-		if player_control_state.is_selected(int(resource.get("id", -1))):
-			selected.append(resource)
+	var selected: Array = []
+	for collection_name in ["units", "buildings", "resources"]:
+		for entity in presentation_snapshot.get(collection_name, []):
+			if not player_control_state.is_selected(int(entity.get("id", -1))):
+				continue
+			if collection_name != "resources" and (float(entity.get("hp", 0.0)) <= 0.0 or bool(entity.get("last_known", false))):
+				continue
+			selected.append(entity)
 	selected.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	return selected
 
@@ -1743,7 +1753,9 @@ func selectable_player_ids() -> Array[int]:
 	# Overview data refreshes less often than the local snapshot. A newly
 	# spawned selected object must not be pruned before its first overview pass.
 	for entity in units + presentation_snapshot.get("buildings", []):
-		if int(entity.get("team", 0)) != local_player_team or float(entity.get("hp", 0.0)) <= 0.0:
+		if float(entity.get("hp", 0.0)) <= 0.0 or bool(entity.get("last_known", false)):
+			continue
+		if int(entity.get("team", 0)) != local_player_team and not player_control_state.is_selected(int(entity.get("id", -1))):
 			continue
 		var entity_id := int(entity.get("id", -1))
 		if entity_id >= 0 and not seen.has(entity_id):
@@ -1948,6 +1960,10 @@ func refresh_hud_model() -> void:
 		# from the structural signature. Keep their public model values current
 		# without rebuilding commands or deep-copying them into controls.
 		hud_view_model.refresh_dynamic_model(hud_model, presentation_snapshot, player_control_state.selected_ids())
+		if hud_controls != null:
+			hud_controls.update_dynamic_model(hud_model)
+		if top_bar_controls != null:
+			top_bar_controls.queue_redraw()
 		var probe: Variant = game_controller.performance_probe if game_controller != null else null
 		if probe != null:
 			probe.increment("presentation.hud.skipped")
@@ -1955,6 +1971,8 @@ func refresh_hud_model() -> void:
 	hud_model = update.get("model", {})
 	if hud_controls != null:
 		hud_controls.set_view_model(hud_model)
+	if top_bar_controls != null:
+		top_bar_controls.set_view_model(hud_model)
 
 
 func sync_world_state(force: bool = true) -> void:
@@ -1982,6 +2000,7 @@ func sync_world_state(force: bool = true) -> void:
 		"include_overview": refresh_overview,
 		"include_overview_resources": refresh_overview_resources,
 		"compact_render_entities": not diagnostics_enabled,
+		"include_production_overview": true,
 		"borrow_visible_render_entities": not diagnostics_enabled,
 		"borrow_overview_entities": not diagnostics_enabled,
 		"entity_bounds": Rect2(Vector2(snapshot_bounds.position), Vector2(snapshot_bounds.size)),
@@ -2012,12 +2031,13 @@ func sync_world_state(force: bool = true) -> void:
 	presentation_snapshot["markers"] = match_definition.get("presentation_markers", [])
 	var visible_bounds := visible_tile_bounds()
 	var environment_bounds := Rect2i(visible_bounds.position - Vector2i(2, 2), visible_bounds.size + Vector2i(4, 4))
-	if cached_environment_items.is_empty() or cached_environment_bounds != environment_bounds:
+	if cached_environment_bounds != environment_bounds:
 		cached_environment_bounds = environment_bounds
 		cached_environment_items = environment_presentation_field.query(environment_bounds)
 		cached_environment_items.append_array(environment_presentation_field.mobile_items())
-		cached_environment_items.sort_custom(func(left, right): return int(left.get("id", 0)) < int(right.get("id", 0)))
+		cached_environment_revision += 1
 	presentation_snapshot["environment"] = cached_environment_items
+	presentation_snapshot["environment_revision"] = cached_environment_revision
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.environment", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -2596,6 +2616,12 @@ func draw_render_body(item: Dictionary) -> void:
 		screen.y -= float(item["data"].get("visual_height", 0.0)) * TerrainElevation.ELEVATION_PIXEL_STEP * view_zoom
 	var screen_offset: Vector2 = frame_info.get("screen_offset", Vector2.ZERO)
 	screen += screen_offset * view_zoom
+	if frame_info.has("rotation"):
+		draw_set_transform(screen, float(frame_info["rotation"]), Vector2.ONE * view_zoom)
+		var texture: Texture2D = frame_info["texture"]
+		draw_texture(texture, -Vector2(item["hotspot"]), Color(1, 1, 1, float(item["opacity"]) * float(frame_info.get("fall_opacity", 1.0))))
+		draw_set_transform(Vector2.ZERO)
+		return
 	draw_anchored_texture(frame_info["texture"], frame_info["asset_name"], item["frame"], screen, view_zoom, bool(frame_info.get("mirrored", false)), float(item["opacity"]), item["hotspot"])
 
 
@@ -2787,131 +2813,32 @@ func draw_diagnostic_cross(center: Vector2, color: Color) -> void:
 
 func draw_hud() -> void:
 	var viewport_size := get_viewport_rect().size
-	var width := viewport_size.x
 	var layout := InterfaceLayout.for_viewport(viewport_size)
-	var resources: Dictionary = hud_model.get("resources", {})
 	draw_source_hud_shell(layout)
-	var hud_text_color: Color = resource_catalog.interface_skin.text_color(interface_style_index)
-	var resource_x := [32.0, 104.0, 172.0, 240.0]
-	var resource_keys := ["wood", "food", "gold", "stone"]
-	for index in range(resource_x.size()):
-		draw_string(font, Vector2(resource_x[index], 15), String.num_int64(int(resources.get(resource_keys[index], 0))), HORIZONTAL_ALIGNMENT_LEFT, 44.0, 11, hud_text_color)
-	draw_string(font, Vector2(width * 0.5 - 90.0, 15), String(hud_model.get("age", {}).get("label", "")), HORIZONTAL_ALIGNMENT_CENTER, 180.0, 11, hud_text_color)
-	if compact_status_visible:
-		var status_rect: Rect2 = layout["status_overlay"]
-		var indicators: Dictionary = hud_model.get("status_indicators", {})
-		draw_rect(status_rect, Color(0.05, 0.04, 0.03, 0.88), true)
-		draw_rect(status_rect, Color("ae8b55"), false, 1.0)
-		var population_color := Color("ff9b78") if bool(indicators.get("blocked", false)) else Color("eee0b8")
-		# Presentation blink remains live while simulation time is paused.
-		if not bool(indicators.get("blocked", false)) or int(Time.get_ticks_msec() / 500) % 2 == 0:
-			draw_string(font, status_rect.position + Vector2(5, 14), "НАС %s" % String(indicators.get("population_text", "0/0")), HORIZONTAL_ALIGNMENT_LEFT, status_rect.size.x - 10.0, 10, population_color)
-		draw_string(font, status_rect.position + Vector2(5, 29), "ВРЕМЯ %s" % String(indicators.get("clock_text", "00:00:00")), HORIZONTAL_ALIGNMENT_LEFT, status_rect.size.x - 10.0, 10, Color("eee0b8"))
-
-	var command_rect: Rect2 = layout["command"]
-	var info_rect: Rect2 = layout["selection"]
-	var map_rect: Rect2 = layout["minimap"]
-
-	var selection: Dictionary = hud_model.get("selection", {})
-	var leader: Dictionary = selection.get("leader", {})
-	if not leader.is_empty():
-		draw_rect(Rect2(info_rect.position + Vector2(3, 3), info_rect.size - Vector2(6, 6)), Color.BLACK, true)
-		draw_string(font, info_rect.position + Vector2(5, 14), String(leader.get("civilization_name", "")), HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 10.0, 10, Color.WHITE)
-		draw_string(font, info_rect.position + Vector2(5, 28), String(leader.get("name", "")), HORIZONTAL_ALIGNMENT_LEFT, info_rect.size.x - 10.0, 10, Color.WHITE)
-		var portrait: Texture2D = resource_catalog.interface_icons.texture(String(leader.get("icon_kind", "object")), int(leader.get("icon_id", -1)))
-		if portrait != null:
-			draw_texture_rect(portrait, Rect2(info_rect.position + Vector2(5, 35), Vector2(50, 50)), false)
-		var text_x := 61.0
-		var selected_count := int(selection.get("count", 0))
-		if selected_count > 1:
-			draw_string(font, info_rect.position + Vector2(text_x, 48), "%d ×" % selected_count, HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
-		if String(selection.get("category", "")) == "resource":
-			draw_string(font, info_rect.position + Vector2(text_x, 63), "РЕС %d" % int(leader.get("resource_amount", 0)), HORIZONTAL_ALIGNMENT_LEFT, 65.0, 10, Color.WHITE)
-			draw_string(font, info_rect.position + Vector2(text_x, 77), "ИЗ %d" % int(leader.get("resource_maximum", 0)), HORIZONTAL_ALIGNMENT_LEFT, 65.0, 10, Color.WHITE)
-		elif bool(leader.get("show_population", false)):
-			draw_string(font, info_rect.position + Vector2(text_x, 63), "НАС %d/%d" % [int(leader.get("population_current", 0)), int(leader.get("population_cap", 0))], HORIZONTAL_ALIGNMENT_LEFT, 70.0, 10, Color.WHITE)
-		elif bool(leader.get("show_combat_stats", true)):
-			draw_string(font, info_rect.position + Vector2(text_x, 63), "АТК %d" % int(leader.get("attack", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
-			draw_string(font, info_rect.position + Vector2(text_x, 77), "БРН %d" % int(leader.get("armor", 0)), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 10, Color.WHITE)
-		if int(leader.get("carried_amount", 0)) > 0:
-			draw_string(font, info_rect.position + Vector2(text_x, 91), "%s %d" % [String(leader.get("carried_resource", "")).to_upper(), int(leader.get("carried_amount", 0))], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color("f0d16d"))
-		if bool(leader.get("conversion_enabled", false)):
-			draw_string(font, info_rect.position + Vector2(text_x, 91), "ВЕРА %d" % roundi(float(leader.get("faith", 0.0))), HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color("d8c8ff"))
-		if bool(leader.get("show_hp", true)):
-			var hp := int(leader.get("hp", 0))
-			var max_hp := maxi(1, int(leader.get("max_hp", 1)))
-			var hp_ratio := clampf(float(hp) / float(max_hp), 0.0, 1.0)
-			var hp_rect := Rect2(info_rect.position + Vector2(5, 91), Vector2(50, 7))
-			if not health_status_frames.is_empty():
-				var hp_frame := resource_catalog.interface_skin.status_frame_index(hp_ratio, health_status_frames.size())
-				draw_texture(health_status_frames[hp_frame], hp_rect.position)
-			else:
-				draw_rect(hp_rect, Color("351714"), true)
-				var hp_color := Color("18d74a") if hp_ratio > 0.5 else Color("e2c62d") if hp_ratio > 0.25 else Color("dc352f")
-				draw_rect(Rect2(hp_rect.position + Vector2.ONE, Vector2((hp_rect.size.x - 2.0) * hp_ratio, hp_rect.size.y - 2.0)), hp_color, true)
-			draw_string(font, info_rect.position + Vector2(5, 108), "%d/%d" % [hp, max_hp], HORIZONTAL_ALIGNMENT_LEFT, 60.0, 9, Color.WHITE)
-	var queue: Array = hud_model.get("queue", [])
-	var queue_text := ""
-	var queue_blocked := false
-	if not queue.is_empty():
-		queue_blocked = String(queue[0].get("status", "")) == "blocked_population"
-		queue_text = "Очередь: %s ×%d  %d%%" % [String(queue[0].get("label", "")), queue.size(), roundi(float(queue[0].get("progress", 0.0)) * 100.0)]
-		if queue_blocked:
-			queue_text = "НЕТ МЕСТА · " + queue_text
-	if not queue_text.is_empty():
-		draw_string(font, command_rect.position + Vector2(4, 116), queue_text, HORIZONTAL_ALIGNMENT_LEFT, command_rect.size.x - 8.0, 9, Color("ffb7a2") if queue_blocked else Color("e6d6ae"))
-
-	draw_minimap(map_rect)
+	draw_minimap(layout["minimap"])
 	if message_time > 0.0:
-		var message_rect := Rect2(0.0, viewport_size.y - HUD_BOTTOM - 18.0, width, 18.0)
-		draw_rect(message_rect, Color(0.0, 0.0, 0.0, 0.92), true)
-		draw_string(font, message_rect.position + Vector2(5, 13), game_message, HORIZONTAL_ALIGNMENT_LEFT, message_rect.size.x - 10.0, 10, Color.WHITE)
+		var message_rect := Rect2(0, viewport_size.y - hud_bottom_height() - 18, viewport_size.x, 18)
+		draw_rect(message_rect, Color(0, 0, 0, 0.92))
+		draw_string(font, message_rect.position + Vector2(5, 13), game_message, HORIZONTAL_ALIGNMENT_LEFT, message_rect.size.x - 10, 10, Color.WHITE)
 
 
 func draw_source_hud_shell(layout: Dictionary) -> void:
-	var viewport_size: Vector2 = layout["viewport"]
-	var bottom_rect: Rect2 = layout["bottom"]
-	draw_rect(layout["top"], Color("17130d"), true)
-	draw_rect(bottom_rect, Color("4f3926"), true)
-	if interface_panel_texture != null:
-		var x := 0.0
-		var panel_width := float(interface_panel_texture.get_width())
-		var overlap := minf(2.0, maxf(0.0, panel_width - 1.0))
-		var stride := maxf(1.0, panel_width - overlap)
-		while x < viewport_size.x:
-			draw_texture(interface_panel_texture, Vector2(x, bottom_rect.position.y))
-			x += stride
-	var shell: Dictionary = resource_catalog.interface_skin.hud_shell(int(layout["source_width"]), interface_style_index)
-	var top_texture: Texture2D = shell.get("top")
-	var bottom_texture: Texture2D = shell.get("bottom")
-	if top_texture == null or bottom_texture == null:
+	var bottom: Rect2 = layout["bottom"]
+	draw_rect(bottom, Color("393833"))
+	var shell: Dictionary = resource_catalog.interface_skin.hud_shell(1024, interface_style_index)
+	var texture: Texture2D = shell.get("bottom")
+	if texture == null:
 		return
-	if not bool(layout["expanded"]):
-		draw_texture(top_texture, Vector2.ZERO)
-		draw_texture(bottom_texture, bottom_rect.position)
-		return
-	var split: Dictionary = layout["wide_split"]
-	draw_split_hud_texture(top_texture, 0.0, viewport_size.x, 0.0, split)
-	draw_split_hud_texture(bottom_texture, bottom_rect.position.y, viewport_size.x, bottom_rect.position.y, split)
-
-
-func draw_split_hud_texture(texture: Texture2D, destination_y: float, destination_width: float, _source_y: float, split: Dictionary) -> void:
-	var left_width := float(split["left_width"])
-	var right_width := float(split["right_width"])
-	var right_source_x := float(split["right_source_x"])
-	var overlap := 2.0
-	draw_texture_rect_region(texture, Rect2(0, destination_y, left_width, texture.get_height()), Rect2(0, 0, left_width, texture.get_height()))
-	var source_x := maxf(0.0, left_width - overlap)
-	var source_center_width := right_source_x - source_x
-	var destination_x := maxf(0.0, left_width - overlap)
-	var destination_end := minf(destination_width, destination_width - right_width + overlap)
-	while destination_x < destination_end:
-		var piece_width := minf(source_center_width, destination_end - destination_x)
-		draw_texture_rect_region(texture, Rect2(destination_x, destination_y, piece_width, texture.get_height()), Rect2(source_x, 0, piece_width, texture.get_height()))
-		if piece_width <= overlap:
-			break
-		destination_x += piece_width - overlap
-	draw_texture_rect_region(texture, Rect2(destination_width - right_width, destination_y, right_width, texture.get_height()), Rect2(right_source_x, 0, right_width, texture.get_height()))
+	var left_width := 136.0 if bool(layout["narrow"]) else float(layout["wide_split"]["left_width"])
+	for row in range(2 if bool(layout["narrow"]) else 1):
+		var x := left_width if row == 0 else 0.0
+		var y := bottom.position.y + row * 126
+		while x < bottom.size.x:
+			var piece := minf(376, bottom.size.x - x)
+			draw_texture_rect_region(texture, Rect2(x, y, piece, 126), Rect2(416, 0, piece, 126))
+			x += piece
+	draw_texture_rect_region(texture, Rect2(0, bottom.position.y, left_width, 126), Rect2(0, 0, left_width, 126))
+	draw_texture_rect_region(texture, layout["minimap_plane"], Rect2(792, 0, 232, 126))
 
 func living_player_count() -> int:
 	return units.filter(func(unit): return unit["team"] == local_player_team and unit["hp"] > 0.0).size()
@@ -2966,10 +2893,10 @@ func draw_minimap(rectangle: Rect2) -> void:
 		draw_mesh(cached_minimap_mesh, null)
 	draw_polyline(PackedVector2Array([map_points[0], map_points[1], map_points[2], map_points[3], map_points[0]]), Color("d2bd7d"), 1.0)
 	var camera_world := PackedVector2Array([
-		Coordinates.clamp_world(screen_to_world(Vector2(0, HUD_TOP)), map_size),
-		Coordinates.clamp_world(screen_to_world(Vector2(get_viewport_rect().size.x, HUD_TOP)), map_size),
-		Coordinates.clamp_world(screen_to_world(Vector2(get_viewport_rect().size.x, get_viewport_rect().size.y - HUD_BOTTOM)), map_size),
-		Coordinates.clamp_world(screen_to_world(Vector2(0, get_viewport_rect().size.y - HUD_BOTTOM)), map_size),
+		Coordinates.clamp_world(screen_to_world(Vector2(0, hud_top_height())), map_size),
+		Coordinates.clamp_world(screen_to_world(Vector2(get_viewport_rect().size.x, hud_top_height())), map_size),
+		Coordinates.clamp_world(screen_to_world(Vector2(get_viewport_rect().size.x, get_viewport_rect().size.y - hud_bottom_height())), map_size),
+		Coordinates.clamp_world(screen_to_world(Vector2(0, get_viewport_rect().size.y - hud_bottom_height())), map_size),
 	])
 	var camera_points := PackedVector2Array()
 	for world_point in camera_world:
@@ -3090,10 +3017,10 @@ func fog_runs() -> Array:
 func visible_tile_bounds(margin: int = 4) -> Rect2i:
 	var viewport_size := get_viewport_rect().size
 	var world_corners: Array[Vector2] = [
-		screen_to_world(Vector2(0, HUD_TOP)),
-		screen_to_world(Vector2(viewport_size.x, HUD_TOP)),
-		screen_to_world(Vector2(viewport_size.x, viewport_size.y - HUD_BOTTOM)),
-		screen_to_world(Vector2(0, viewport_size.y - HUD_BOTTOM)),
+		screen_to_world(Vector2(0, hud_top_height())),
+		screen_to_world(Vector2(viewport_size.x, hud_top_height())),
+		screen_to_world(Vector2(viewport_size.x, viewport_size.y - hud_bottom_height())),
+		screen_to_world(Vector2(0, viewport_size.y - hud_bottom_height())),
 	]
 	return ViewportCulling.tile_bounds(map_size, world_corners, margin)
 
@@ -3114,16 +3041,23 @@ func minimap_geometry(rectangle: Rect2 = Rect2()) -> Dictionary:
 	}
 
 
+func hud_top_height() -> float:
+	return 64.0 if get_viewport_rect().size.x < 720.0 else 32.0
 
 
+func hud_bottom_height() -> float:
+	return 252.0 if get_viewport_rect().size.x < 720.0 else 126.0
 
 
-
-
-
-
-
-
-
-
-
+func select_hud_building(building_id: int) -> void:
+	if simulation_world == null:
+		return
+	var building: Variant = simulation_world.find_building(building_id)
+	if building == null or int(building.get("team", 0)) != local_player_team or float(building.get("hp", 0)) <= 0:
+		return
+	var ids: Array[int] = [building_id]
+	player_control_state.replace_or_add(ids, false)
+	center_view_on_world(Vector2(building.get("pos", Vector2.ZERO)))
+	sync_world_state()
+	refresh_hud_model()
+	queue_redraw()

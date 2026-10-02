@@ -55,7 +55,7 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 				if has_worker:
 					return {
 						"type": "build",
-						"building_type": String(clicked_entity.get("building_type", "")),
+						"building_type": String(clicked_entity.get("kind", clicked_entity.get("building_type", ""))),
 						"target": clicked_entity.get("pos", ground_target),
 					}
 			"building":

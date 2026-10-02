@@ -6,7 +6,7 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
-	test_buttons_and_signals()
+	await test_buttons_and_signals()
 
 	if failures.is_empty():
 		print("C-006 HUD control tests passed")
@@ -20,6 +20,7 @@ func _initialize() -> void:
 
 func test_buttons_and_signals() -> void:
 	var hud = HUDControls.new()
+	root.add_child(hud)
 	assert_equal(hud.formation_buttons.size(), 5, "formation button count")
 	for formation_name in ["LINE", "RECTANGLE", "COLUMN", "WEDGE", "STAGGERED"]:
 		var icon: Texture2D = hud.formation_buttons[formation_name].icon
@@ -120,7 +121,7 @@ func test_buttons_and_signals() -> void:
 	]})
 	hud.train_button.emit_signal("pressed")
 	assert_equal(unit_action_request[0], "hold", "unit-order button preserves its semantic action")
-	assert_true(hud.train_button.text.contains("H") and hud.train_button.text.contains("ДЕРЖ"), "an unconfigured icon registry keeps the readable text fallback")
+	assert_true(hud.hotkey_badges[0].text == "H" and hud.train_button.text.contains("ДЕРЖ"), "an unconfigured icon registry keeps the readable text fallback")
 
 	var dense_commands: Array = []
 	for index in range(22):
@@ -132,16 +133,31 @@ func test_buttons_and_signals() -> void:
 	hud.set_layout({"command": Rect2(4, 8, 270, 118)})
 	assert_equal(hud.active_train_commands.size(), 23, "dense build palette retains every command plus Back")
 	assert_true(hud.train_buttons.size() >= 23, "action button pool grows with the data-driven command set")
-	var grid: Dictionary = HUDControls.adaptive_grid(Vector2(270, 118), hud.active_train_commands.size())
-	assert_true(float(grid["cell_size"].x) > 0.0, "adaptive grid keeps dense commands usable")
-	assert_true(int(grid["columns"]) * float(grid["cell_size"].x) <= 270.0, "adaptive grid fits the command width")
-	assert_true(int(grid["rows"]) * float(grid["cell_size"].y) <= 118.0, "adaptive grid fits the command height")
-	for index in range(hud.active_train_commands.size()):
-		var button: Button = hud.train_buttons[index]
-		assert_true(button.offset_left >= 4.0 and button.offset_right <= 274.0, "dense command %d remains inside the HUD command width" % index)
-		assert_true(126.0 + button.offset_top >= 8.0 and 126.0 + button.offset_bottom <= 126.0, "dense command %d remains inside the HUD command height" % index)
-	var sparse_grid: Dictionary = HUDControls.adaptive_grid(Vector2(270, 118), 4)
-	assert_equal(sparse_grid["columns"], 4, "small command sets preserve the familiar single-row layout")
+	await process_frame
+	var grid: Dictionary = HUDControls.command_grid(Vector2(270, 118))
+	assert_equal(grid["cell_size"], Vector2(50, 50), "dense commands keep the native button size")
+	assert_equal(grid["capacity"], 10, "two fixed rows fit the constrained palette")
+	assert_true(hud.next_commands_button.visible, "overflow uses pages instead of shrinking")
+	var reached: Dictionary = {}
+	for page in range(hud.command_page_count):
+		for index in range(hud.active_train_commands.size()):
+			var button: Button = hud.train_buttons[index]
+			if not button.visible:
+				continue
+			reached[index] = true
+			assert_equal(button.size, Vector2(50, 50), "dense command %d retains its size" % index)
+			assert_true(button.offset_left >= 4.0 and button.offset_right <= 274.0, "dense command %d remains inside command width" % index)
+			assert_true(126.0 + button.offset_top >= 8.0 and 126.0 + button.offset_bottom <= 126.0, "dense command %d remains inside command height" % index)
+		assert_true(hud.train_buttons[22].visible, "Back remains available on every construction page")
+		if not hud.next_commands_button.disabled:
+			hud.next_commands_button.emit_signal("pressed")
+	assert_equal(reached.size(), 23, "paging exposes every command plus Back")
+	var retained_page: int = hud.command_page
+	hud.set_view_model(hud.current_model)
+	assert_equal(hud.command_page, retained_page, "ordinary model refresh retains the current command page")
+	hud.train_buttons[22].emit_signal("pressed")
+	assert_true(not hud.build_menu_open, "Back from the final page closes construction")
+	assert_equal(hud.command_page, 0, "changing command context resets paging")
 	hud.free()
 
 

@@ -12,9 +12,14 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 	world.reset_game(false, true)
 	world.configure_map_data(map_data)
 	var obstructions: Array = definition.get("static_obstructions", []).duplicate(true)
+	var rendered_cliff_cells: Dictionary = {}
+	for cliff in map_data.get("cliff_obstructions", []):
+		obstructions.append(cliff.duplicate(true))
+		for cell in cliff.get("occupied_cells", []): rendered_cliff_cells[cell] = true
 	var cliff_cells: Array = map_data.get("cliff_cells", [])
 	for index in range(cliff_cells.size()):
 		var cell: Vector2i = cliff_cells[index]
+		if rendered_cliff_cells.has(cell): continue
 		obstructions.append({"id": -100000 - index, "kind": "cliff", "position": Vector2(cell) + Vector2(0.5, 0.5), "occupied_cells": [cell]})
 	world.configure_static_obstructions(obstructions)
 

@@ -70,7 +70,7 @@ static func build_fields(size: Vector2i, terrain: Array[int], starts: Array[Vect
 		var point := Vector2(i % size.x + 0.5, i / size.x + 0.5)
 		var start_distance := INF
 		for start in starts: start_distance = minf(start_distance, point.distance_to(start))
-		var ridge := clampf((macro[i] * 0.65 + detail[i] * 0.35 - 0.34) * 2.0, 0.0, 1.0)
+		var ridge := clampf((macro[i] * 0.82 + detail[i] * 0.18 - 0.24) * 1.8, 0.0, 1.0)
 		var height := mini(int(recipe["relief"]), floori(ridge * (float(recipe["relief"]) + 0.7)))
 		# Distance to the actual shoreline replaces the old all-dry bounding-box test.
 		height = mini(height, maxi(0, (coast[i] - 2) / 3))
@@ -83,7 +83,7 @@ static func build_fields(size: Vector2i, terrain: Array[int], starts: Array[Vect
 	levels.resize((size.x + 1) * (size.y + 1))
 	for y in range(size.y + 1):
 		for x in range(size.x + 1):
-			var height := 4
+			var height := int(recipe["relief"])
 			for dy in [-1, 0]:
 				for dx in [-1, 0]:
 					var cell := Vector2i(clampi(x + dx, 0, size.x - 1), clampi(y + dy, 0, size.y - 1))
@@ -92,6 +92,76 @@ static func build_fields(size: Vector2i, terrain: Array[int], starts: Array[Vect
 	relax_heights(levels, size)
 	return {"moisture": moisture, "woodland": woodland, "geology": geology, "coast_distance": coast,
 		"forest_potential": potential, "vertex_levels": levels, "recipe": recipe}
+
+
+static func rock_ridges(size: Vector2i, terrain: Array[int], starts: Array[Vector2], fields: Dictionary, existing_cells: Array, seed: int) -> Dictionary:
+	var cells: Dictionary = {}
+	for cell in existing_cells:
+		var safe := true
+		for start in starts:
+			if start.distance_squared_to(Vector2(cell)) < 10.0 * 10.0: safe = false
+		if safe: cells[cell] = true
+	var scenery: Array = []
+	var used: Dictionary = {}
+	var levels: Array[int] = fields["vertex_levels"]
+	# Native RoR cliff strips occupy three cells along their axis. Lay whole
+	# connected strips, reserving their complete footprint before placing economy.
+	for cell_value in existing_cells:
+		var cell: Vector2i = cell_value
+		if not cells.has(cell) or used.has(cell): continue
+		var near_start := false
+		for start in starts:
+			if start.distance_squared_to(Vector2(cell)) < 12.0 * 12.0: near_start = true
+		if near_start: continue
+		var along_y := cells.has(cell + Vector2i.DOWN) or cells.has(cell + Vector2i.UP)
+		var axis := Vector2i.DOWN if along_y else Vector2i.RIGHT
+		if (cell.y if along_y else cell.x) % 3 != 1: continue
+		_append_cliff_strip(scenery, cells, used, cell, axis, size, terrain, levels, seed)
+	# Sparse, reproducible geological ridges on raised inland ground. A short
+	# chain always has open ends; starting areas and shore approaches stay clear.
+	var spacing := 24
+	for y in range(12, size.y - 12, spacing):
+		for x in range(12, size.x - 12, spacing):
+			var anchor := Vector2i(x, y)
+			if random_at(anchor, seed ^ 0xAF415) > 0.55: continue
+			if int(levels[y * (size.x + 1) + x]) < 2 or int(fields["coast_distance"][y * size.x + x]) < 10: continue
+			var axis := Vector2i.RIGHT if random_at(anchor, seed ^ 0xCD662) > 0.5 else Vector2i.DOWN
+			var count := 3 + int(random_at(anchor, seed ^ 0xE139) * 3.0)
+			var valid := true
+			for step in range(count):
+				var center := anchor + axis * step * 3
+				for start in starts:
+					if start.distance_squared_to(Vector2(center)) < 26.0 * 26.0: valid = false
+				for dy in range(-1, 2):
+					for dx in range(-1, 2):
+						var cell := center + Vector2i(dx, dy)
+						if cell.x < 2 or cell.y < 2 or cell.x >= size.x - 2 or cell.y >= size.y - 2:
+							valid = false
+						elif terrain[cell.y * size.x + cell.x] in WATER or cells.has(cell): valid = false
+			if not valid: continue
+			for step in range(count):
+				_append_cliff_strip(scenery, cells, used, anchor + axis * step * 3, axis, size, terrain, levels, seed)
+	var ordered: Array[Vector2i] = []
+	ordered.assign(cells.keys())
+	ordered.sort_custom(func(a, b): return a.y < b.y or (a.y == b.y and a.x < b.x))
+	return {"cells": ordered, "scenery": scenery}
+
+
+static func _append_cliff_strip(scenery: Array, cells: Dictionary, used: Dictionary, center: Vector2i, axis: Vector2i, size: Vector2i, terrain: Array[int], levels: Array[int], seed: int) -> void:
+	var variants := [1, 2, 19] if axis == Vector2i.RIGHT else [3, 4, 15]
+	var frame := int(variants[int(random_at(center, seed) * 10000.0) % variants.size()])
+	var occupied: Array[Vector2i] = []
+	scenery.append({"id": -700000 - scenery.size(), "kind": "cliff", "position": Vector2(center) + Vector2(0.5, 0.5),
+		"source_unit_id": 264, "graphic_id": 107, "asset_name": "graphic_107", "source_frame": frame,
+		"presentation_layer": "scenery", "presentation_bounds": [-2.0, -2.0, 2.0, 2.0], "cliff_axis": axis, "occupied_cells": occupied})
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			var cell := center + Vector2i(dx, dy)
+			if cell.x < 0 or cell.y < 0 or cell.x >= size.x or cell.y >= size.y: continue
+			if terrain[cell.y * size.x + cell.x] in WATER: continue
+			cells[cell] = true
+			used[cell] = true
+			occupied.append(cell)
 
 
 static func paint_ground(map_data: Dictionary, fields: Dictionary) -> void:
@@ -339,7 +409,7 @@ static func random_at(cell: Vector2i, seed: int) -> float:
 
 static func fingerprint(map_data: Dictionary) -> String:
 	var stable: Array = [VERSION, map_data.get("size"), map_data.get("seed"), map_data.get("terrain_ids"), map_data.get("vertex_levels"),
-		map_data.get("cliff_cells", []), map_data.get("resources", []), map_data.get("scenery", []), map_data.get("naval_start_zones", [])]
+		map_data.get("cliff_cells", []), map_data.get("cliff_obstructions", []), map_data.get("resources", []), map_data.get("scenery", []), map_data.get("naval_start_zones", [])]
 	return JSON.stringify(Replay.new().encode_variant(stable)).sha256_text()
 
 
