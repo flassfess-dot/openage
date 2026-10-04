@@ -1287,6 +1287,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	var animation_microseconds := 0
 	var component_sync_microseconds := 0
 	var boarding_ready: Array = []
+	var unloading_ready: Array = []
 	var task_order_update := {
 		"moving": false,
 		"animation_state": AnimationController.IDLE,
@@ -1334,6 +1335,8 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		match task_name:
 			"board":
 				moving = transport_system.advance_board_order(unit, delta, boarding_ready)
+			"unload":
+				moving = transport_system.advance_unload_order(unit, delta, unloading_ready)
 			"trade":
 				var trade_update := trade_system.advance_unit(unit, delta)
 				moving = bool(trade_update.get("moving", false))
@@ -1425,6 +1428,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		probe.increment("movement.native_unit_updates", movement_native_unit_updates)
 		probe.increment("movement.native_neighbor_candidates", movement_native_neighbor_candidates)
 	transport_system.finish_boarding_tick(boarding_ready)
+	transport_system.finish_unloading_tick(unloading_ready)
 	unit_activity_registry.finish_tick()
 
 
@@ -2484,14 +2488,17 @@ func _finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> 
 	combat_system.finish_combat(unit, reason)
 
 
+func stop_unit_motion(unit: Dictionary) -> void:
+	movement_system.stop_unit_motion(unit)
+
+
 func halt_unit(unit: Dictionary, reason: String = "stopped") -> void:
 	if reason in ["stop", "hold", "converted", "unit_died"]:
 		OrderPipeline.clear_queued(unit)
 	conversion_system.cancel(unit, reason)
 	healing_system.cancel(unit, reason)
 	trade_system.cancel(unit, reason)
-	for field in ["boarding_position", "boarding_transport_position", "boarding_navigation_revision", "boarding_failed_positions", "boarding_detour_attempts"]:
-		unit.erase(field)
+	transport_system.clear_pending_order(unit)
 	release_resource_approach_slot(unit)
 	release_building_approach_slot(unit)
 	unit["task"] = "idle"
@@ -2506,13 +2513,14 @@ func halt_unit(unit: Dictionary, reason: String = "stopped") -> void:
 	if entity_is_worker(unit):
 		worker_role_system.clear(unit)
 	_clear_combat_intent(unit)
-	release_unit_destination(unit)
+	stop_unit_motion(unit)
 	restore_formation_facing(unit)
 	OrderPipeline.complete(unit, reason)
 	EntityComponents.sync_dynamic(unit)
 
 
 func _clear_combat_intent(unit: Dictionary) -> void:
+	unit["combat_pursuit"] = false
 	unit["attack_autonomous"] = false
 	unit["combat_resume"] = {}
 	unit["combat_leash_origin"] = unit.get("pos", Vector2.ZERO)

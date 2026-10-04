@@ -59,6 +59,13 @@ func _initialize() -> void:
 	var legacy := ai.canonical_state()
 	legacy.erase("navigation_failures")
 	check(ai.restore_state(legacy), "legacy AI state defaults to an empty failure policy")
+	var worker := {"id": 42, "team": 2, "hp": 25, "pos": Vector2(8.5, 8.5), "task": "idle", "diagnostic_reason": "stuck_stopped_nearest_valid", "path_request_id": 10, "components": {"worker": {"enabled": true}}, "combat_enabled": false}
+	var worker_snapshot := {"observer_team": 2, "units": [worker], "navigation": {"recovery_positions": {42: Vector2(9.5, 8.5)}}, "player_state": {"status": "active"}}
+	var worker_ai := Ai.new({"team": 2, "ai": {"economic_interval_ticks": 20}})
+	check(worker_ai.collect_commands(worker_snapshot, 0).all(func(command): return 42 not in command.unit_ids), "stuck workers wait for the bounded recovery deadline")
+	var recovery: Array = worker_ai.collect_commands(worker_snapshot, 80).filter(func(command): return 42 in command.unit_ids)
+	check(recovery.size() == 1 and recovery[0].command_type() == "move" and recovery[0].target == Vector2(9.5, 8.5), "worker recovery takes precedence over reassignment to the same blocked job")
+	check(worker_ai.collect_commands(worker_snapshot, 81).all(func(command): return 42 not in command.unit_ids), "one pending recovery is not flooded with duplicate commands")
 	for failure in failures: push_error(failure)
 	print("AI navigation recovery: %d failures" % failures.size())
 	quit(0 if failures.is_empty() else 1)

@@ -27,11 +27,12 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	var source: Dictionary = world.object_record_for(kind, team)
 	var terrain_restriction := int(source.get("links", {}).get("terrain_restriction", stats.get("terrain_restriction", -1)))
 	var movement_domain := "water" if terrain_restriction == 3 else "land"
-	if movement_domain == "water":
-		var placement_cell: Vector2i = world.pathfinder.nearest_walkable(Vector2i(floori(position.x), floori(position.y)), movement_domain, terrain_restriction)
+	var footprint: Dictionary = Footprint.mobile(kind, stats)
+	var radius := float(footprint["movement_radius"])
+	if movement_domain == "water" and not world.navigation_grid.is_position_walkable_for(position, radius, movement_domain, terrain_restriction):
+		var placement_cell: Vector2i = world.pathfinder.nearest_walkable(Vector2i(floori(position.x), floori(position.y)), movement_domain, terrain_restriction, radius)
 		if placement_cell.x >= 0:
 			position = Vector2(placement_cell) + Vector2(0.5, 0.5)
-	var footprint: Dictionary = Footprint.mobile(kind, stats)
 	var initial_facing: int = world.facing_for_vector(Vector2(12.0, 12.0) - position)
 	var entity_id: int = world.entity_id_sequence.next()
 	var civilization_id := int(world.civilization_by_team.get(team, 13))

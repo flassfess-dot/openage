@@ -65,10 +65,20 @@ func test_ship_placement_uses_original_restriction() -> void:
 	var world = SimulationWorld.new(Vector2i(12, 12))
 	world.set_gamespec({"units": {"scout_ship": {"terrain_restriction": 3, "hit_points": 120.0, "speed": 1.75, "selection_radius": [1.0, 1.0, 2.0]}}})
 	world.set_terrain_catalog(catalog.terrain_catalog_data)
+	# A full-size hull needs a real water body; the default world's one-cell
+	# border contains no legal placement for this ship's footprint.
+	var terrain: Array[int] = []
+	for y in range(12):
+		for x in range(12): terrain.append(1 if x < 4 else 0)
+	var levels: Array[int] = []
+	levels.resize(13 * 13)
+	levels.fill(0)
+	world.configure_map_data({"terrain_ids": terrain, "vertex_levels": levels})
 	var ship: Dictionary = world.add_unit(1, "scout_ship", Vector2(8.5, 8.5), false)
 	var cell := Vector2i(floori(ship["pos"].x), floori(ship["pos"].y))
 	assert_equal(ship["movement_domain"], "water", "terrain restriction 3 selects naval movement")
 	assert_true(world.navigation_grid.is_walkable_for(cell, "water", 3), "ship requested on land is placed on nearest legal water cell")
+	assert_true(world.navigation_grid.is_position_walkable_for(ship["pos"], float(ship["footprint_radius"]), "water", 3), "placement respects the entire ship hull")
 
 
 func assert_true(value: bool, context: String) -> void:

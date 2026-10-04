@@ -16,7 +16,9 @@ responses, terrain, interface stonework, and music.
 Controls:
 
 - left mouse: select units or drag a selection rectangle
-- right mouse: move, attack an enemy, or gather a resource
+- right mouse: move, attack an enemy, gather a resource, or board a friendly transport
+- `U` / Unload button, then left click a coast: sail to the chosen landing point and unload; `Shift` queues the landing, right click or `Esc` cancels targeting
+- a boarding selection may exceed transport capacity: everyone approaches, free seats fill, and the rest wait on shore
 - `Ctrl+1`-`Ctrl+9`: assign a control group
 - `1`-`9`: recall a group; press again to center, use `Shift` to add it
 - `F5`-`F9`: line, rectangle, column, wedge, and staggered formations

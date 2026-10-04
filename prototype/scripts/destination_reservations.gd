@@ -127,7 +127,11 @@ func is_occupied(entity: Dictionary) -> bool:
 	return entity["pos"].distance_squared_to(reservation) <= tolerance * tolerance
 
 
-func _is_available(position: Vector2, radius: float, navigation_grid, movement_domain: String = "land", restriction_id: int = -1) -> bool:
+func can_reserve(entity_id: int, position: Vector2, radius: float, navigation_grid, movement_domain: String = "land", restriction_id: int = -1) -> bool:
+	return _is_available(position, radius, navigation_grid, movement_domain, restriction_id, entity_id)
+
+
+func _is_available(position: Vector2, radius: float, navigation_grid, movement_domain: String = "land", restriction_id: int = -1, ignored_entity_id: int = -1) -> bool:
 	if navigation_grid != null and not navigation_grid.is_position_walkable_for(position, radius, movement_domain, restriction_id):
 		return false
 	var reach := radius + maximum_reserved_radius + 0.02
@@ -136,6 +140,8 @@ func _is_available(position: Vector2, radius: float, navigation_grid, movement_d
 	for y in range(minimum_cell.y, maximum_cell.y + 1):
 		for x in range(minimum_cell.x, maximum_cell.x + 1):
 			for entity_id in reservation_buckets.get(Vector2i(x, y), []):
+				if int(entity_id) == ignored_entity_id:
+					continue
 				var existing: Dictionary = reservations.get(entity_id, {})
 				if existing.is_empty():
 					continue

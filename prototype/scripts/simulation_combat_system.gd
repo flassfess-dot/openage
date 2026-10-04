@@ -112,6 +112,7 @@ func assign_command_attack(selected: Array, target_id: int, policy: Dictionary =
 			}
 		elif not autonomous:
 			unit["combat_resume"] = {}
+			unit["combat_pursuit"] = not huntable and not static_attacker
 		world.release_resource_approach_slot(unit)
 		world.release_building_approach_slot(unit)
 		unit["gather_stage"] = "none"
@@ -160,6 +161,8 @@ func finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> v
 	var resume: Dictionary = unit.get("combat_resume", {}).duplicate(true)
 	OrderPipeline.complete(unit, reason)
 	unit["diagnostic_reason"] = "combat_complete:%s" % reason
+	if reason in ["target_became_allied", "target_unreachable"]:
+		unit["combat_pursuit"] = false
 	unit["target_id"] = -1
 	unit["combat_role"] = ""
 	unit["combat_slot_index"] = -1
@@ -173,11 +176,15 @@ func finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> v
 		return
 	if waiting_for_carcass:
 		unit["task"] = "idle"
-		world.release_unit_destination(unit)
+		world.stop_unit_motion(unit)
 		return
 	if world.entity_is_worker(unit):
 		unit["pending_hunt_target_id"] = -1
 		world.worker_role_system.clear(unit)
+	if bool(unit.get("combat_pursuit", false)):
+		unit["task"] = "idle"
+		world.stop_unit_motion(unit)
+		return
 	var formation_home: Variant = unit.get("formation_home")
 	if formation_home is Vector2 and int(unit.get("formation_group_id", -1)) >= 0:
 		unit["task"] = "move"
@@ -195,7 +202,7 @@ func finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> v
 			OrderPipeline.complete(unit, "resume_unreachable")
 	else:
 		unit["task"] = "idle"
-		world.release_unit_destination(unit)
+		world.stop_unit_motion(unit)
 		world.restore_formation_facing(unit)
 
 
@@ -304,7 +311,7 @@ func _advance_target_attack_order(unit: Dictionary, delta: float, result: Dictio
 		simulation_world.finish_combat(unit, "target_became_allied")
 	elif bool(unit.get("attack_autonomous", false)) and not simulation_world.is_entity_visible_to(int(unit.get("team", 0)), enemy):
 		simulation_world.finish_combat(unit, "target_lost")
-	elif String(unit.get("stance", "passive")) == "stand_ground" and not CombatRules.is_in_range(unit, enemy):
+	elif not bool(unit.get("combat_pursuit", false)) and String(unit.get("stance", "passive")) == "stand_ground" and not CombatRules.is_in_range(unit, enemy):
 		simulation_world.finish_combat(unit, "stand_ground_range")
 	elif bool(unit.get("attack_autonomous", false)) and Vector2(unit.get("combat_leash_origin", unit.get("pos", Vector2.ZERO))).distance_to(Vector2(enemy.get("pos", Vector2.ZERO))) > float(unit.get("chase_range", 0.0)) + 0.0001:
 		simulation_world.finish_combat(unit, "leash_exceeded")

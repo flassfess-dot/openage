@@ -90,7 +90,7 @@ func verify_dock_roster_and_upgrades(catalog) -> void:
 func verify_board_unload_and_information_boundary(catalog) -> void:
 	var world = configured_world(catalog)
 	prepare_economy(world)
-	var transport: Dictionary = world.add_unit(1, "transport", Vector2(6.5, 10.5), false)
+	var transport: Dictionary = world.add_unit(1, "transport", Vector2(6.0, 10.5), false)
 	var first: Dictionary = world.add_unit(1, "villager", Vector2(7.8, 10.2), false)
 	var second: Dictionary = world.add_unit(1, "clubman", Vector2(7.9, 10.8), false)
 	var enemy_observer: Dictionary = world.add_unit(2, "clubman", Vector2(8.5, 10.5), false)
@@ -133,7 +133,7 @@ func verify_board_unload_and_information_boundary(catalog) -> void:
 func verify_capacity_and_landing_rejections(catalog) -> void:
 	var world = configured_world(catalog)
 	prepare_economy(world)
-	var transport: Dictionary = world.add_unit(1, "transport", Vector2(6.5, 16.5), false)
+	var transport: Dictionary = world.add_unit(1, "transport", Vector2(6.0, 16.5), false)
 	var passengers: Array = []
 	for index in range(5):
 		passengers.append(world.add_unit(1, "villager", Vector2(7.8 + float(index % 2) * 0.1, 15.8 + float(index) * 0.3), false))
@@ -144,9 +144,11 @@ func verify_capacity_and_landing_rejections(catalog) -> void:
 	var too_many = Commands.BoardCommand.new(0, passenger_ids, int(transport["id"]))
 	controller.enqueue_command(too_many, true, 1)
 	controller.process_commands()
-	assert_equal(controller.get_command_result(too_many.sequence_id).get("reason"), "transport_full", "capacity overflow has an explicit rejection")
-	assert_equal(world.get_embarked_units().size(), 0, "capacity rejection is atomic")
-	assert_equal(transport["components"]["cargo"]["passenger_ids"], [], "rejected boarding does not mutate manifest")
+	assert_true(bool(controller.get_command_result(too_many.sequence_id).get("accepted", false)), "oversized selection receives a boarding order")
+	assert_equal(world.get_embarked_units().size(), 4, "only available seats embark")
+	assert_equal(passengers[4]["task"], "board", "overflow passenger keeps waiting on shore")
+	assert_true(world.find_unit(int(passengers[4]["id"])) != null, "overflow never destroys a passenger")
+
 
 	var accepted = Commands.BoardCommand.new(0, [int(passengers[0]["id"])], int(transport["id"]))
 	controller.enqueue_command(accepted, true, 1)
@@ -155,13 +157,13 @@ func verify_capacity_and_landing_rejections(catalog) -> void:
 	controller.enqueue_command(water_landing, true, 1)
 	controller.process_commands()
 	assert_true(not bool(controller.get_command_result(water_landing.sequence_id).get("accepted", false)), "landing beyond Transport range is rejected")
-	assert_equal(transport["components"]["cargo"]["passenger_ids"], [int(passengers[0]["id"])], "rejected unload keeps cargo aboard")
+	assert_equal(transport["components"]["cargo"]["passenger_ids"], passenger_ids.slice(0, 4), "rejected unload keeps cargo aboard")
 
 
 func verify_conversion_and_destruction_policy(catalog) -> void:
 	var conversion_world = configured_world(catalog)
 	prepare_economy(conversion_world)
-	var transport: Dictionary = conversion_world.add_unit(1, "transport", Vector2(6.5, 20.5), false)
+	var transport: Dictionary = conversion_world.add_unit(1, "transport", Vector2(6.0, 20.5), false)
 	var passenger: Dictionary = conversion_world.add_unit(1, "villager", Vector2(7.8, 20.5), false)
 	assert_equal(conversion_world.board_units([passenger], transport), "", "conversion fixture boards passenger")
 	assert_true(conversion_world.transfer_entity_ownership(transport, 2, 999), "enemy conversion transfers Transport")
@@ -177,7 +179,7 @@ func verify_conversion_and_destruction_policy(catalog) -> void:
 
 	var death_world = configured_world(catalog)
 	prepare_economy(death_world)
-	var doomed: Dictionary = death_world.add_unit(1, "transport", Vector2(6.5, 22.5), false)
+	var doomed: Dictionary = death_world.add_unit(1, "transport", Vector2(6.0, 22.5), false)
 	var first: Dictionary = death_world.add_unit(1, "villager", Vector2(7.8, 22.2), false)
 	var second: Dictionary = death_world.add_unit(1, "clubman", Vector2(7.8, 22.8), false)
 	assert_equal(death_world.board_units([first, second], doomed), "", "destruction fixture boards passengers")

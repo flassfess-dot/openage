@@ -1,6 +1,7 @@
 class_name RoRHudViewModel
 extends RefCounted
 
+const IconRegistry := preload("res://scripts/interface_icon_registry.gd")
 const RoRCommands := preload("res://scripts/commands.gd")
 const RESOURCE_NAMES := {0: "food", 1: "wood", 2: "stone", 3: "gold"}
 const FORMATIONS := [
@@ -15,15 +16,6 @@ const STANCE_LABELS_RU := {
 	"defensive": "Оборонительная",
 	"stand_ground": "Держать позицию",
 	"passive": "Не атаковать",
-}
-const UNIT_ACTION_ICON_IDS := {
-	"attack_move": 4,
-	"attack_ground": 4,
-	"stop": 3,
-	"hold": 12,
-	"stance": 7,
-	"repair": 0,
-	"delete": 10,
 }
 const HIDDEN_COMMAND_REASONS := {
 	"building_unavailable": true,
@@ -146,12 +138,19 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 		]:
 			var action: Dictionary = action_value
 			action["type"] = "unit_action"
-			action["icon_kind"] = "command"
-			action["icon_id"] = int(UNIT_ACTION_ICON_IDS.get(String(action.get("id", "")), -1))
+			if String(action["id"]) in ["attack_move", "hold", "stance"] and selected.all(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false))) and not selected.any(func(unit): return bool(unit.get("combat_enabled", false))):
+				continue
+			action.merge(IconRegistry.command_icon(String(action["id"]), next_stance))
 			action["enabled"] = disabled_reason.is_empty()
 			action["active"] = false
 			action["reason"] = disabled_reason
 			model["commands"].append(action)
+		var transports := selected.filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)))
+		if not transports.is_empty():
+			var loaded := transports.any(func(unit): return not unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).is_empty())
+			var action := {"type": "unit_action", "id": "unload", "label": "Высадить пассажиров", "short_label": "ВЫСАДКА", "hotkey": "U", "enabled": loaded and disabled_reason.is_empty(), "active": false, "reason": disabled_reason if not disabled_reason.is_empty() else "" if loaded else "Нет пассажиров"}
+			action.merge(IconRegistry.command_icon("unload"))
+			model["commands"].push_front(action)
 		var all_ground_attackers := true
 		for entity in selected:
 			var combat: Dictionary = entity.get("components", {}).get("combat", {})
@@ -165,8 +164,8 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"label": "Атаковать землю",
 				"short_label": "ПО ЗЕМЛЕ",
 				"hotkey": "G",
-				"icon_kind": "command",
-				"icon_id": int(UNIT_ACTION_ICON_IDS["attack_ground"]),
+				"icon_kind": "command_custom",
+				"icon_id": 0,
 				"enabled": disabled_reason.is_empty(),
 				"active": false,
 				"reason": disabled_reason,
@@ -216,7 +215,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"short_label": "РЕМОНТ",
 				"hotkey": "R",
 				"icon_kind": "command",
-				"icon_id": int(UNIT_ACTION_ICON_IDS["repair"]),
+				"icon_id": int(IconRegistry.COMMAND_GLYPHS["repair"]),
 				"enabled": disabled_reason.is_empty(),
 				"active": false,
 				"reason": disabled_reason,
@@ -322,7 +321,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"short_label": "СТОП" if locale == "ru" else "STOP",
 				"hotkey": "X",
 				"icon_kind": "command",
-				"icon_id": int(UNIT_ACTION_ICON_IDS["stop"]),
+				"icon_id": int(IconRegistry.COMMAND_GLYPHS["stop"]),
 				"enabled": disabled_reason.is_empty(),
 				"active": false,
 				"reason": disabled_reason,
@@ -372,6 +371,7 @@ func _entity_input_signature(entity: Dictionary) -> int:
 	var trade: Dictionary = components.get("trade", {})
 	var ownership: Dictionary = components.get("ownership", {})
 	var worker: Dictionary = components.get("worker", {})
+	var cargo: Dictionary = components.get("cargo", {})
 	return hash([
 		int(entity.get("id", -1)),
 		int(entity.get("team", 0)),
@@ -405,6 +405,9 @@ func _entity_input_signature(entity: Dictionary) -> int:
 		int(trade.get("cargo_gold", 0)),
 		int(ownership.get("civilization_id", runtime_catalog.get("default_civilization_id", 13))),
 		bool(worker.get("enabled", false)),
+		bool(cargo.get("enabled", false)),
+		int(cargo.get("capacity", 0)),
+		hash(cargo.get("passenger_ids", [])),
 		hash(entity.get("behavior_tags", [])),
 		hash(entity.get("command_options", {})),
 		_production_queue_signature(entity.get("production_queue", [])),

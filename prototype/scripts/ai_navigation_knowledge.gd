@@ -198,9 +198,12 @@ func _region_targets(world, team: int, entry: Dictionary) -> void:
 		entry["region_signature"] = signature
 	var recovery := {}
 	for unit in units:
-		if String(unit.get("diagnostic_reason", "")) not in ["no_path", "no_group_route"]: continue
+		if not preload("res://scripts/ai_navigation_policy.gd").is_failure(String(unit.get("diagnostic_reason", ""))): continue
 		var origin := Vector2(unit["pos"])
 		var cell := Vector2i(origin.floor())
+		var recovery_radius := float(unit.get("footprint_radius", 0.3))
+		if not planner.grid.is_position_walkable_for(origin, recovery_radius, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+			recovery_radius = 0.0
 		var best: Variant = null
 		var best_distance := INF
 		for y in range(cell.y - 2, cell.y + 3):
@@ -209,8 +212,11 @@ func _region_targets(world, team: int, entry: Dictionary) -> void:
 				if not planner.grid.contains(next) or not entry["known"].has(y * world.map_size.x + x): continue
 				var point := Vector2(next) + Vector2(0.5, 0.5)
 				var distance := origin.distance_squared_to(point)
-				if distance <= 0.01 or distance >= best_distance: continue
-				if planner.cells_connected(cell, next, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), float(unit.get("footprint_radius", 0.3))):
+				if distance <= 0.5625 or distance >= best_distance: continue
+				if not planner.grid.is_position_walkable_for(point, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))): continue
+				var occupied: bool = world.query_units_near(point, float(unit.get("footprint_radius", 0.3)) + 1.0).any(func(other): return int(other["id"]) != int(unit["id"]) and float(other.get("hp", 0.0)) > 0 and world.is_entity_visible_to(team, other) and point.distance_squared_to(Vector2(other["pos"])) < pow(float(unit.get("footprint_radius", 0.3)) + float(other.get("footprint_radius", 0.3)) + 0.1, 2))
+				if occupied: continue
+				if planner.cells_connected(cell, next, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), recovery_radius):
 					best = point
 					best_distance = distance
 		if best != null: recovery[int(unit["id"])] = best

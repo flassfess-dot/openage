@@ -50,12 +50,14 @@ func collect_commands(world, tick: int) -> Array:
 		var task := String(unit.get("task", "idle"))
 		if task not in ["idle", "attack_move"] and not (task == "attack" and bool(unit.get("attack_autonomous", false))):
 			continue
-		var stance := String(unit.get("stance", "passive"))
+		var stance := "aggressive" if bool(unit.get("combat_pursuit", false)) else String(unit.get("stance", "passive"))
 		if stance == "passive":
 			continue
 		# Task and stance are cheap fields and reject the overwhelming majority
 		# of marching/working units. Run metadata/tag eligibility only for actors
 		# that can actually acquire or validate a target on this tick.
+		if not unit.get("components", {}).get("order", {}).get("queued", []).is_empty():
+			continue
 		if not _awareness_due(unit, tick, stance) or not _eligible_for_awareness(world, unit):
 			continue
 		due_units.append(unit)
@@ -99,7 +101,7 @@ func collect_commands(world, tick: int) -> Array:
 
 	for unit_value in acquisition_units:
 		var unit: Dictionary = unit_value
-		var stance := String(unit.get("stance", "passive"))
+		var stance := "aggressive" if bool(unit.get("combat_pursuit", false)) else String(unit.get("stance", "passive"))
 		var query_range := _query_range(unit, stance)
 		var allowed_target_id := -1
 		if stance == "defensive":
@@ -213,7 +215,7 @@ func _candidate_index(targets: Array, tick: int) -> Dictionary:
 func _eligible_for_awareness(world, unit: Dictionary) -> bool:
 	if int(unit.get("team", 0)) <= 0 or world.battle_over or float(unit.get("hp", 0.0)) <= 0.0 or not bool(unit.get("combat_enabled", false)):
 		return false
-	if world.entity_has_behavior_tag(unit, "scout") and int(unit.get("retaliation_target_id", -1)) < 0:
+	if world.entity_has_behavior_tag(unit, "scout") and int(unit.get("retaliation_target_id", -1)) < 0 and not bool(unit.get("combat_pursuit", false)):
 		return false
 	if world.entity_is_static(unit) and String(unit.get("state", "complete")) != "complete":
 		return false
@@ -229,7 +231,7 @@ func _target_remains_valid(world, unit: Dictionary, target: Variant) -> bool:
 		return false
 	if not world.is_entity_visible_to(int(unit.get("team", 0)), target):
 		return false
-	if String(unit.get("stance", "passive")) == "stand_ground" and not world.is_unit_in_attack_range(unit, target):
+	if not bool(unit.get("combat_pursuit", false)) and String(unit.get("stance", "passive")) == "stand_ground" and not world.is_unit_in_attack_range(unit, target):
 		return false
 	if bool(unit.get("attack_autonomous", false)):
 		var origin := Vector2(unit.get("combat_leash_origin", unit.get("pos", Vector2.ZERO)))
@@ -356,6 +358,8 @@ func _awareness_cell(position: Vector2) -> Vector2i:
 
 
 func _query_range(unit: Dictionary, stance: String) -> float:
+	if bool(unit.get("combat_pursuit", false)):
+		return maxf(float(unit.get("acquisition_range", 0.0)), float(unit.get("components", {}).get("vision", {}).get("range", 0.0)))
 	if stance == "stand_ground":
 		return maxf(0.85, float(unit.get("attack_range", 0.0)))
 	return maxf(0.0, float(unit.get("acquisition_range", 0.0)))

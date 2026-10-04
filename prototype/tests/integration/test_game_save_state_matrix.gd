@@ -91,9 +91,11 @@ func test_formation_and_combat_state(game) -> void:
 	game.game_controller.enqueue_command(attack, true, 1)
 	advance_ticks(game, 2)
 	assert_command_accepted(game, attack, "formation attack command")
-	var group = game.game_controller.formation_groups.values()[0]
-	assert_true(String(group.state) == "ENGAGED", "combat releases the formation into ENGAGED")
-	round_trip(game, "formation/engaged-combat")
+	assert_true(game.game_controller.formation_groups.is_empty(), "explicit combat releases the marching formation")
+	for soldier in matching_entities(game.simulation_world.get_units(), 1, "clubman"):
+		assert_true(int(soldier.get("formation_group_id", -1)) == -1, "explicit attacker leaves its formation")
+		assert_true(bool(soldier.get("combat_pursuit", false)), "explicit attacker retains combat pursuit")
+	round_trip(game, "combat/explicit-pursuit")
 
 
 func test_production_and_research_state(game) -> void:

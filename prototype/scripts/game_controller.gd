@@ -285,6 +285,15 @@ func _dispatch_command(command) -> Dictionary:
 		"population_limit":
 			rejection_reason = _apply_population_limit(command)
 	if rejection_reason.is_empty():
+		if command.command_type() in REPLACING_ORDERS and command.command_type() != "attack" and not bool(command.params.get("autonomous", false)):
+			for unit_id in command.unit_ids:
+				var unit = simulation_world.find_unit(int(unit_id))
+				if unit != null: unit["combat_pursuit"] = false
+		if command.command_type() in REPLACING_ORDERS and command.command_type() not in ["board", "unload"]:
+			for unit_id in command.unit_ids:
+				var unit = simulation_world.find_unit(int(unit_id))
+				if unit != null:
+					simulation_world.transport_system.clear_pending_order(unit)
 		if command.command_type() in REPLACING_ORDERS and not bool(command.params.get("queued_execution", false)) and not bool(command.params.get("autonomous", false)):
 			for unit_id in command.unit_ids:
 				var unit = simulation_world.find_unit(int(unit_id))
@@ -507,6 +516,8 @@ func _apply_attack(command) -> String:
 		return "invalid_target"
 	if attackers.all(func(unit): return simulation_world.are_teams_allied(int(unit.get("team", 0)), int(target.get("team", 0)))):
 		return "friendly_target"
+	if not bool(command.params.get("autonomous", false)):
+		_detach_units_from_formations(attackers.filter(func(unit): return not simulation_world.entity_is_static(unit)))
 	return "" if simulation_world.assign_command_attack(attackers, command.target_entity_id, command.params) else "unreachable_target"
 
 
@@ -633,7 +644,10 @@ func _apply_unload(command) -> String:
 	var transports := _units_for_ids(command.unit_ids, command.issuer_id)
 	if transports.is_empty():
 		return "invalid_transport"
-	return simulation_world.unload_transports(transports, command.target, command.passenger_ids)
+	var rejection: String = simulation_world.transport_system.assign_unload_order(transports, command.target, command.passenger_ids)
+	if rejection.is_empty():
+		_detach_units_from_formations(transports)
+	return rejection
 
 
 func _apply_set_trade_resource(command) -> String:
@@ -822,6 +836,7 @@ func _apply_stance(command) -> String:
 		return "invalid_stance"
 	for unit in selected:
 		unit["stance"] = stance
+		unit["combat_pursuit"] = false
 		unit["diagnostic_reason"] = "stance:%s" % stance
 	return ""
 

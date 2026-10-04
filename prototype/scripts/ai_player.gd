@@ -92,9 +92,11 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 		return []
 	if String(snapshot.get("player_state", {}).get("status", "active")) != "active":
 		return []
-	var result: Array = []
+	var navigation_reserved := navigation_policy.reserved_units(snapshot, next_tick)
+	var result: Array = navigation_policy.recovery_commands(snapshot, next_tick, navigation_reserved)
 	if profile == "source_campaign_v1":
-		var economic_reserved: Dictionary = {}
+		var recovery_count := result.size()
+		var economic_reserved: Dictionary = navigation_reserved.duplicate()
 		if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
 			var economic_commands: Array = SourceCampaignPlanner.plan_economy(snapshot, next_tick, team, source_contract, source_city_plan)
 			result.append_array(economic_commands)
@@ -148,11 +150,24 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 				_prune_completed_source_groups()
 			_prune_completed_assignment_groups()
 			last_military_tick = next_tick
-		return result
-	var skirmish_reserved_ids: Dictionary = navigation_policy.reserved_units(snapshot, next_tick)
+		var filtered: Array = result.slice(0, recovery_count)
+		for command in result.slice(recovery_count):
+			if command.unit_ids.is_empty():
+				filtered.append(command)
+				continue
+			var ids: Array[int] = []
+			for id in command.unit_ids:
+				if not navigation_reserved.has(int(id)): ids.append(int(id))
+			if not ids.is_empty():
+				command.unit_ids = ids
+				filtered.append(command)
+		return filtered
+	var skirmish_reserved_ids: Dictionary = navigation_reserved
 	if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
 		_remember_failed_gather_targets(snapshot)
-		var support_commands: Array = SupportPlanner.plan(snapshot, next_tick, team)
+		var support_snapshot := snapshot.duplicate()
+		support_snapshot["units"] = snapshot.get("units", []).filter(func(unit): return not skirmish_reserved_ids.has(int(unit.get("id", -1))))
+		var support_commands: Array = SupportPlanner.plan(support_snapshot, next_tick, team)
 		result.append_array(support_commands)
 		for command in support_commands:
 			for unit_id in command.unit_ids:

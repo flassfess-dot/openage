@@ -13,6 +13,21 @@ const ASSET_NAMES := {
 	"building_4": "building_icon_4",
 }
 
+# One semantic map for both the model and renderer. Never reuse unrelated
+# original glyphs for newer commands such as stances and ground fire.
+const COMMAND_GLYPHS := {
+	"repair": 0, "open_build_menu": 2, "stop": 3, "attack_move": 4,
+	"unload": 5, "delete": 10, "cancel_production": 10, "close_build_menu": 10, "hold": 12,
+}
+const CUSTOM_COMMANDS := ["attack_ground", "aggressive", "defensive", "stand_ground", "passive"]
+
+static func command_icon(action: String, stance: String = "aggressive") -> Dictionary:
+	if action == "stance":
+		return {"icon_kind": "command_custom", "icon_id": CUSTOM_COMMANDS.find(stance)}
+	if action == "attack_ground":
+		return {"icon_kind": "command_custom", "icon_id": 0}
+	return {"icon_kind": "command", "icon_id": int(COMMAND_GLYPHS.get(action, -1))}
+
 var records_by_sheet: Dictionary = {}
 var texture_cache: Dictionary = {}
 
@@ -45,6 +60,8 @@ func configure(asset_records: Variant, indexed_frame_records: Dictionary = {}) -
 
 
 func has_icon(icon_kind: String, icon_id: int) -> bool:
+	if icon_kind == "command_custom":
+		return icon_id >= 0 and icon_id < CUSTOM_COMMANDS.size()
 	var sheet_name := String(ASSET_NAMES.get(icon_kind, ""))
 	return icon_id >= 0 and records_by_sheet.get(sheet_name, {}).has(icon_id)
 
@@ -52,6 +69,11 @@ func has_icon(icon_kind: String, icon_id: int) -> bool:
 func texture(icon_kind: String, icon_id: int) -> Texture2D:
 	if not has_icon(icon_kind, icon_id):
 		return null
+	if icon_kind == "command_custom":
+		var custom_key := "custom:%d" % icon_id
+		if not texture_cache.has(custom_key):
+			texture_cache[custom_key] = load("res://assets/ui/commands/%s.svg" % CUSTOM_COMMANDS[icon_id])
+		return texture_cache[custom_key]
 	var sheet_name := String(ASSET_NAMES[icon_kind])
 	var cache_key := "%s:%d" % [sheet_name, icon_id]
 	if texture_cache.has(cache_key):

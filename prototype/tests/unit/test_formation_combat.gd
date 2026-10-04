@@ -108,7 +108,12 @@ func test_group_returns_home_after_combat() -> void:
 	controller.advance_frame(0.05, 1, 2)
 	var first_home: Vector2 = first["formation_home"]
 	var second_home: Vector2 = second["formation_home"]
-	world.assign_command_attack([first, second], enemy["id"])
+	first["vision_radius"] = 10.0
+	first["components"]["vision"] = {"range": 10.0, "enabled": true}
+	second["vision_radius"] = 10.0
+	second["components"]["vision"] = {"range": 10.0, "enabled": true}
+	world.update_fog_of_war()
+	world.assign_command_attack([first, second], enemy["id"], {"autonomous": true, "trigger": "formation_encounter", "chase_range": 10.0})
 	assert_true(first["combat_destination"] != second["combat_destination"], "integration assigns unique melee contacts")
 	enemy["hp"] = 0.0
 	world.update_units(0.05, 1, 2)

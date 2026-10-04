@@ -133,7 +133,7 @@ func test_capacity_cancellation_and_target_loss(catalog, native: bool) -> void:
 	var board = submit_board(controller, first, ship)
 	check(bool(controller.get_command_result(board.sequence_id)["accepted"]), "distant boarding command is accepted")
 	var overflow = submit_board(controller, second, ship)
-	check(controller.get_command_result(overflow.sequence_id)["reason"] == "transport_full" and second["task"] == "idle", "pending passengers reserve seats without mutating rejected units")
+	check(bool(controller.get_command_result(overflow.sequence_id)["accepted"]) and second["task"] == "board", "every passenger approaches even when the boat has fewer seats")
 	controller.enqueue_command(Commands.StopCommand.new(controller.tick_index, [int(first["id"])]), true, 1)
 	controller.process_commands()
 	check(first["task"] == "idle" and not first.has("boarding_position"), "Stop cancels a pending boarding order")

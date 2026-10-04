@@ -65,7 +65,11 @@ func test_formation_front_is_preserved_and_restored() -> void:
 	assert_equal(first["facing"], formation_facing, "standing unit faces formation front")
 
 	var target: Dictionary = world.add_unit(2, "clubman", first["pos"] + Vector2(-0.4, 0.0), false)
-	world.assign_command_attack([first], target["id"])
+	first["vision_radius"] = 10.0
+	first["components"]["vision"] = {"range": 10.0, "enabled": true}
+	first["stance"] = "passive"
+	world.update_fog_of_war()
+	world.assign_command_attack([first], target["id"], {"autonomous": true, "trigger": "formation_encounter", "chase_range": 10.0})
 	world.update_units(0.05, 1, 2)
 	assert_equal(first["facing"], world.facing_for_vector(target["pos"] - first["pos"]), "combat temporarily faces target")
 	target["hp"] = 0.0

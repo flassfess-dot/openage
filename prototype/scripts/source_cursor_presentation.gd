@@ -4,7 +4,7 @@ extends RefCounted
 # data/Interfac.drs SLP 51000: the seven cursor frames shipped with RoR 1.1.
 static func frame_for_semantic(semantic: String) -> int:
 	match semantic:
-		"select", "gather", "return_resources", "build", "repair", "heal", "board", "trade": return 3
+		"select", "gather", "return_resources", "build", "repair", "heal", "board", "unload", "trade": return 3
 		"attack", "attack_move", "convert": return 4
 		"attack_ground": return 5
 		"unsupported": return 6

@@ -129,6 +129,7 @@ var resource_feedback_time := 0.0
 var placement_preview_key := ""
 var placement_preview_valid := false
 var pending_target_command := ""
+var pending_target_queue_order := false
 var game_message := "Выберите отряд и отдайте приказ правой кнопкой"
 var message_time := 5.0
 var battle_over := false
@@ -973,17 +974,17 @@ func handle_input_action(action: Dictionary) -> void:
 			selection_preview_ids.clear()
 		"selection_committed":
 			if not pending_target_command.is_empty():
-				commit_pending_target(action["to"])
+				commit_pending_target(action["to"], bool(action.get("queue_order", false)))
 			elif pending_build_kind.is_empty():
 				finish_selection(action["from"], action["to"], String(action.get("mode", "select_click")))
 			else:
 				commit_build_placement(action["to"], bool(action.get("queue_order", false)), action["from"])
 			selection_preview_ids.clear()
 		"context_committed":
-			if pending_target_command == "repair":
+			if pending_target_command in ["repair", "unload"]:
 				cancel_pending_targeting()
 			elif not pending_target_command.is_empty():
-				commit_pending_target(action["position"])
+				commit_pending_target(action["position"], bool(action.get("queue_order", false)))
 			elif pending_build_kind.is_empty():
 				issue_order(action["position"], action.get("direction_end"), bool(action.get("queue_order", false)))
 			else:
@@ -1664,20 +1665,29 @@ func issue_delete_context() -> void:
 
 
 func issue_unload_at_pointer(queue_order: bool = false) -> void:
-	var selected := selected_units()
-	var transports: Array = selected.filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)))
+	if battle_over or local_spectator:
+		return
+	var transports := selected_units().filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)) and not unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).is_empty())
 	if transports.is_empty():
-		game_message = "Для выгрузки выберите транспорт"
+		game_message = "Для высадки выберите транспорт с пассажирами"
 		message_time = 1.5
 		return
-	var target := screen_to_world(input_adapter.pointer_position)
-	var command = RoRCommands.UnloadCommand.new(game_controller.tick_index + 1, _selection_ids(transports), target)
-	if queue_order:
-		command.params["queue_order"] = true
-	enqueue_with_feedback(command, "Высадить пассажиров", "", target)
+	pending_build_kind = ""
+	pending_build_started = false
+	pending_target_command = "unload"
+	pending_target_queue_order = queue_order
+	input_adapter.reset()
+	if hud_controls != null:
+		hud_controls.set_build_menu_open(false)
+	update_interaction_cursor(input_adapter.pointer_position)
+	game_message = "Укажите берег для высадки (ПКМ или Esc — отмена)"
+	message_time = 4.0
 
 
 func issue_unit_action(action_name: String) -> void:
+	if action_name == "unload":
+		issue_unload_at_pointer()
+		return
 	if action_name == "repair":
 		begin_repair()
 		return
@@ -1742,6 +1752,7 @@ func cancel_pending_targeting() -> bool:
 	pending_build_kind = ""
 	pending_build_started = false
 	pending_target_command = ""
+	pending_target_queue_order = false
 	input_adapter.reset()
 	selection_preview_ids.clear()
 	update_interaction_cursor(input_adapter.pointer_position)
@@ -1804,12 +1815,12 @@ func begin_attack_ground() -> void:
 	message_time = 4.0
 
 
-func commit_pending_target(screen_position: Vector2) -> void:
+func commit_pending_target(screen_position: Vector2, queue_order: bool = false) -> void:
 	var target_command := pending_target_command
 	if target_command == "repair":
 		commit_repair_target(screen_position)
 		return
-	if target_command not in ["attack_move", "attack_ground"]:
+	if target_command not in ["attack_move", "attack_ground", "unload"]:
 		return
 	pending_target_command = ""
 	update_interaction_cursor(input_adapter.pointer_position)
@@ -1819,7 +1830,16 @@ func commit_pending_target(screen_position: Vector2) -> void:
 	var target := screen_to_world(screen_position)
 	var command: Variant
 	var message: String
-	if target_command == "attack_ground":
+	if target_command == "unload":
+		selected = selected.filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)) and not unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).is_empty())
+		if selected.is_empty():
+			return
+		command = RoRCommands.UnloadCommand.new(game_controller.tick_index + 1, _selection_ids(selected), target)
+		if pending_target_queue_order or queue_order:
+			command.params["queue_order"] = true
+		pending_target_queue_order = false
+		message = "Высадить пассажиров"
+	elif target_command == "attack_ground":
 		selected = selected.filter(func(unit): return simulation_world.can_attack_ground(unit))
 		if selected.is_empty():
 			return

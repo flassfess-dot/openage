@@ -10,8 +10,8 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 	var candidates: Array = snapshot.get("units", []).filter(func(entity):
 		return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0 and not reserved_unit_ids.has(int(entity.get("id", -1))) and (include_workers or not bool(entity.get("components", {}).get("worker", {}).get("enabled", false))) and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", [])) and String(entity.get("task", "idle")) in ["idle", "hold"]
 	)
-	var stranded: Array = candidates.filter(func(entity): return String(entity.get("diagnostic_reason", "")) in ["no_path", "no_group_route"])
-	var fighters: Array = candidates.filter(func(entity): return String(entity.get("diagnostic_reason", "")) not in ["no_path", "no_group_route"])
+	var stranded: Array = candidates.filter(func(entity): return preload("res://scripts/ai_navigation_policy.gd").is_failure(String(entity.get("diagnostic_reason", ""))))
+	var fighters: Array = candidates.filter(func(entity): return not preload("res://scripts/ai_navigation_policy.gd").is_failure(String(entity.get("diagnostic_reason", ""))))
 	var result := _recovery_commands(snapshot, tick, stranded)
 	if refresh_stalled_attack and String(goal.get("type", "")) == "attack":
 		result.append_array(_stalled_attack_commands(snapshot, tick, team, goal, include_workers, reserved_unit_ids))

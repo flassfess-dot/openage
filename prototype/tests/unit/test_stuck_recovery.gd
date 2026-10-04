@@ -8,6 +8,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_recovery_sequence_without_teleport()
 	test_progress_resets_recovery()
+	test_orbit_and_slow_route_progress()
 
 	if failures.is_empty():
 		print("N-007 stuck recovery tests passed")
@@ -41,3 +42,29 @@ func test_progress_resets_recovery() -> void:
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
+
+func test_orbit_and_slow_route_progress() -> void:
+	var unit := {"id": 5, "pos": Vector2(6, 6), "target": Vector2(20, 6), "destination": Vector2(20, 6), "push_priority": 2, "base_push_priority": 2, "stuck_ticks": 0, "diagnostic_reason": ""}
+	StuckRecovery.update_route_progress(unit)
+	var stopped := false
+	for tick in range(100):
+		unit["pos"] = Vector2(6, 6) + Vector2(cos(tick * 0.8), sin(tick * 0.8)) * 0.08
+		if StuckRecovery.update_route_progress(unit) == "stop": stopped = true
+	assert_equal(stopped, true, "continuous orbit escalates despite nonzero velocity")
+	unit["destination"] = Vector2(21, 6)
+	unit["target"] = Vector2(21, 6)
+	StuckRecovery.update_route_progress(unit)
+	assert_equal(unit["stuck_ticks"], 0, "a new destination resets the old failure")
+	for tick in range(120):
+		unit["pos"] += Vector2(0.002, 0)
+		StuckRecovery.update_route_progress(unit)
+	assert_equal(int(unit["stuck_ticks"]) < StuckRecovery.LOCAL_REPATH_TICK + 3, true, "slow accumulated forward progress does not get stopped")
+	# An L-shaped route initially moves away from its final destination.
+	StuckRecovery.reset(unit)
+	unit["pos"] = Vector2(6, 6)
+	unit["target"] = Vector2(6, 12)
+	unit["destination"] = Vector2(20, 6)
+	for tick in range(40):
+		unit["pos"].y += 0.03
+		StuckRecovery.update_route_progress(unit)
+	assert_equal(unit["stuck_ticks"], 0, "leg progress accepts a legitimate detour away from the final destination")

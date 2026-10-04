@@ -55,6 +55,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		var path: Array = unit.get("path", [])
 		var next_index := int(unit.get("path_index", 0)) + 1
 		if next_index < path.size():
+			StuckRecovery.reset(unit)
 			unit["path_index"] = next_index
 			unit["target"] = path[next_index]
 			unit["path_knowledge_revision"] = -1
@@ -126,6 +127,11 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		simulation_world.movement_native_neighbor_candidates += maxi(0, roundi(native_result.w))
 	else:
 		movement_reason = LocalMovement.calculate_runtime_unit_into(unit, unit["target"], simulation_world.movement_neighbor_buffer, simulation_world.navigation_grid, delta, open_envelope)
+	if movement_reason == "local_blocked":
+		var escape_velocity := _escape_invalid_footprint(unit, delta)
+		if escape_velocity.length_squared() > 0.000001:
+			unit["actual_velocity"] = escape_velocity
+			movement_reason = "escaping_invalid_footprint"
 	if probe != null:
 		simulation_world.movement_local_calculation_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
@@ -156,7 +162,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		var movement_facing := facing_for_vector(actual_displacement)
 		unit["movement_facing"] = movement_facing
 		unit["facing"] = movement_facing
-	var recovery_action := StuckRecovery.update_squared(unit, actual_displacement_squared)
+	var recovery_action := StuckRecovery.update_route_progress(unit)
 	match recovery_action:
 		"local_repath":
 			assign_unit_destination(unit, unit["destination"], false)
@@ -164,19 +170,53 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			simulation_world.pathfinder.clear_route_cache()
 			assign_unit_destination(unit, unit["destination"], false)
 		"stop":
-			unit["path"] = []
-			unit["path_index"] = 0
-			unit["target"] = unit["pos"]
-			unit["task"] = "idle"
-			OrderPipeline.complete(unit, "stuck")
-			release_unit_destination(unit)
-			restore_formation_facing(unit)
+			# Release work and formation reservations as well as movement slots;
+			# an abandoned approach must not block every following worker.
+			if String(unit["task"]) == "board":
+				unit["task"] = "idle"
+				stop_unit_motion(unit, false)
+				OrderPipeline.complete(unit, "stuck")
+			else:
+				simulation_world.halt_unit(unit, "stuck_stopped_nearest_valid")
+			unit["diagnostic_reason"] = "stuck_stopped_nearest_valid"
+			unit["formation_shared_motion"] = false
+			unit["formation_slot_mode"] = "released"
+			unit["formation_group_id"] = -1
+			unit["formation_home"] = null
 			if probe != null:
 				simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return false
 	if probe != null:
 		simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 	return true
+
+
+# Legacy saves can contain a ship whose centre is legal but whose hull
+# overlaps the shore. Permit a gradual retreat only through already-overlapped
+# cells; this cannot cross a new wall, terrain boundary or mobile obstacle.
+func _escape_invalid_footprint(unit: Dictionary, delta: float) -> Vector2:
+	var grid = world.navigation_grid
+	var origin := Vector2(unit["pos"])
+	var radius := float(unit["footprint_radius"])
+	var domain := String(unit["movement_domain"])
+	var restriction := int(unit["terrain_restriction"])
+	if not grid.is_position_walkable_for(origin, 0.0, domain, restriction) or grid.is_position_walkable_for(origin, radius, domain, restriction):
+		return Vector2.ZERO
+	var offsets := [Vector2.ZERO, Vector2(radius, 0), Vector2(-radius, 0), Vector2(0, radius), Vector2(0, -radius)]
+	var existing: Dictionary = {}
+	for offset in offsets:
+		var cell := Vector2i((origin + offset).floor())
+		if not grid.is_walkable_for(cell, domain, restriction): existing[cell] = true
+	var difference := Vector2(unit["target"]) - origin
+	var velocity := difference.normalized() * minf(float(unit["speed"]), difference.length() / maxf(0.0001, delta))
+	var neighbors: Array = world.query_units_near(origin, radius + 2.0).filter(func(other): return int(other["id"]) != int(unit["id"]))
+	velocity = MobileCollision.constrain(unit, velocity, neighbors, delta)
+	var next := origin + velocity * delta
+	if not grid.is_position_walkable_for(next, 0.0, domain, restriction): return Vector2.ZERO
+	for offset in offsets:
+		var cell := Vector2i((next + offset).floor())
+		if not grid.is_walkable_for(cell, domain, restriction) and not existing.has(cell): return Vector2.ZERO
+	return velocity
 
 
 func face_unit_toward(unit: Dictionary, target: Vector2) -> void:
@@ -324,9 +364,21 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 	unit["path_index"] = 0
 	if unit["path"].is_empty():
 		unit["target"] = unit["pos"]
+		if Vector2(unit["pos"]).distance_squared_to(clamped_destination) <= 0.001225:
+			unit["path_status"] = "arrived"
+			if String(unit["task"]) in ["move", "attack_move"]:
+				unit["task"] = "idle"
+				release_unit_destination(unit)
+				OrderPipeline.complete(unit, "destination_reached")
+				restore_formation_facing(unit)
+			else:
+				OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+			return true
+		# Work orders need the same terminal failure as movement orders. Leaving
+		# a failed gather/build active retries A* every tick and holds its slot.
+		world.halt_unit(unit, "no_path")
+		unit["path_status"] = "unreachable"
 		unit["diagnostic_reason"] = "no_path"
-		if unit["task"] in ["move", "attack_move"]:
-			unit["task"] = "idle"
 		return false
 	unit["target"] = unit["path"][0]
 	unit["diagnostic_reason"] = ""
@@ -389,6 +441,20 @@ func ensure_navigation_destination(unit: Dictionary, destination: Vector2) -> vo
 	var previous_destination: Vector2 = unit.get("destination", unit["pos"])
 	if previous_destination.distance_squared_to(destination) > 0.25 or unit.get("path", []).is_empty():
 		assign_unit_destination(unit, destination, false)
+
+
+func stop_unit_motion(unit: Dictionary, reset_progress: bool = true) -> void:
+	world.open_movement_envelopes_by_id.erase(int(unit["id"]))
+	release_unit_destination(unit)
+	unit["path"] = []
+	unit["path_index"] = 0
+	unit["path_status"] = "idle"
+	unit["target"] = unit["pos"]
+	unit["destination"] = unit["pos"]
+	unit["actual_velocity"] = Vector2.ZERO
+	unit["desired_velocity"] = Vector2.ZERO
+	if reset_progress:
+		StuckRecovery.reset(unit)
 
 
 func release_unit_destination(unit: Dictionary) -> void:

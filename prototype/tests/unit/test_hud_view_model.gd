@@ -126,7 +126,7 @@ func _initialize() -> void:
 	assert_equal(first_command(model["commands"], "unit_action", "stop").get("icon_id"), 3, "stop uses the source raised-hand glyph")
 	assert_equal(first_command(model["commands"], "unit_action", "hold").get("icon_id"), 12, "hold-position uses the source guarded-stance glyph")
 	assert_equal(first_command(model["commands"], "unit_action", "hold").get("icon_kind"), "command", "unit orders identify the source command glyph sheet")
-	assert_equal(first_command(model["commands"], "unit_action", "stance").get("icon_id"), 7, "stance cycling uses a distinct source order glyph")
+	assert_equal(first_command(model["commands"], "unit_action", "stance").get("icon_kind"), "command_custom", "stance cycling uses an icon for its actual mode")
 	assert_equal(first_command(model["commands"], "unit_action", "stance").get("stance"), "defensive", "stance action derives the next mode from authoritative selection state")
 	assert_equal(model["selection"]["leader"].get("stance"), "aggressive", "selection presentation exposes the authoritative stance")
 	var siege: Dictionary = world.add_unit(1, "stone_thrower", Vector2(8.0, 7.0), false)

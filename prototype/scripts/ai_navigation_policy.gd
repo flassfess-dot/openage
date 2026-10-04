@@ -1,9 +1,29 @@
 class_name RoRAiNavigationPolicy
 extends RefCounted
-const FAILURE_REASONS := ["no_path", "no_group_route"]
+const Commands := preload("res://scripts/commands.gd")
+const FAILURE_REASONS := ["no_path", "no_group_route", "stuck_stopped_nearest_valid", "target_unreachable", "boarding_shore_unreachable"]
 const BASE_RETRY_TICKS := 80
 const MAX_RETRY_TICKS := 1200
 var failures: Dictionary = {}
+
+static func is_failure(reason: String) -> bool:
+	return reason.trim_prefix("combat_complete:") in FAILURE_REASONS
+
+func recovery_commands(snapshot: Dictionary, tick: int, reserved: Dictionary) -> Array:
+	var result: Array = []
+	var positions: Dictionary = snapshot.get("navigation", {}).get("recovery_positions", {})
+	for unit in snapshot.get("units", []):
+		var id := int(unit.get("id", -1))
+		if reserved.has(id) or not positions.has(id) or int(unit.get("team", 0)) != int(snapshot.get("observer_team", -1)) or float(unit.get("hp", 0.0)) <= 0.0:
+			continue
+		if String(unit.get("task", "idle")) not in ["idle", "hold"] or not is_failure(String(unit.get("diagnostic_reason", ""))):
+			continue
+		result.append(Commands.MoveCommand.new(tick, [id], Vector2(positions[id])))
+		reserved[id] = true
+		if failures.has(id):
+			failures[id]["retry_tick"] = tick + BASE_RETRY_TICKS
+	return result
+
 
 func reserved_units(snapshot: Dictionary, tick: int) -> Dictionary:
 	var reserved := {}
@@ -17,7 +37,7 @@ func reserved_units(snapshot: Dictionary, tick: int) -> Dictionary:
 		if not previous.is_empty() and previous["cell"] != cell:
 			failures.erase(id)
 			previous = {}
-		if String(unit.get("diagnostic_reason", "")) not in FAILURE_REASONS or String(unit.get("task", "idle")) not in ["idle", "hold"]: continue
+		if not is_failure(String(unit.get("diagnostic_reason", ""))) or String(unit.get("task", "idle")) not in ["idle", "hold"]: continue
 		var request := int(unit.get("path_request_id", 0))
 		if previous.is_empty() or int(previous["request"]) != request:
 			var attempts := mini(5, int(previous.get("attempts", 0)) + 1)

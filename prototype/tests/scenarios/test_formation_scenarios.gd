@@ -98,7 +98,12 @@ func test_narrow_passage_combat_recovery_and_front_loss() -> void:
 	controller.enqueue_command(Commands.FormationMoveCommand.new(1, ids, Vector2(11, 10), FormationGeometry.BLOCK, Vector2(1, 0)))
 	controller.advance_frame(0.05, 1, 2)
 	var group = controller.formation_groups[1]
-	world.assign_command_attack(members, enemy["id"])
+	for unit in members:
+		unit["vision_radius"] = 20.0
+		unit["components"]["vision"] = {"range": 20.0, "enabled": true}
+		unit["stance"] = "passive"
+	world.update_fog_of_war()
+	world.assign_command_attack(members, enemy["id"], {"autonomous": true, "trigger": "scenario_encounter", "chase_range": 20.0})
 	for unit in members:
 		assert_equal(unit["formation_group_id"], 1, "combat preserves group in scenario")
 	enemy["hp"] = 0.0

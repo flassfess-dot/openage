@@ -27,10 +27,11 @@ func _initialize() -> void:
 	levels.resize(33 * 33)
 	levels.fill(0)
 	world.configure_map_data({"terrain_ids": terrain, "vertex_levels": levels})
-	var ship: Dictionary = world.add_unit(1, "transport", Vector2(6.5, 10.5), false)
+	var ship: Dictionary = world.add_unit(1, "transport", Vector2(6.0, 10.5), false)
 	var worker: Dictionary = world.add_unit(1, "villager", Vector2(16.5, 10.5), false)
 	var soldier: Dictionary = world.add_unit(1, "clubman", Vector2(17.5, 12.5), false)
 	var house: Dictionary = world.add_building(800, "house", Vector2(22.5, 22.5), 1)
+	check(world.navigation_grid.is_position_walkable_for(ship["pos"], float(ship["footprint_radius"]), "water", int(ship["terrain_restriction"])), "repair fixture has full hull clearance at the shore")
 	ship["hp"] = float(ship["max_hp"]) - 20.0
 	house["hp"] = float(house["max_hp"]) - 20.0
 	world.update_fog_of_war()

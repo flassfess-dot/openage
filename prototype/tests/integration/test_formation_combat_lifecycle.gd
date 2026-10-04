@@ -1,5 +1,6 @@
 extends SceneTree
 
+const Catalog := preload("res://scripts/resource_catalog.gd")
 const Commands := preload("res://scripts/commands.gd")
 const FormationGeometry := preload("res://scripts/formation_geometry.gd")
 const GameController := preload("res://scripts/game_controller.gd")
@@ -20,21 +21,33 @@ func _initialize() -> void:
 
 
 func test_formation_releases_combat_and_reforms() -> void:
+	var catalog = Catalog.new()
+	catalog.load()
 	var world = SimulationWorld.new(Vector2i(32, 32))
+	world.set_gamespec(catalog.gamespec_data)
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
 	world.navigation_grid.configure_terrain(func(_cell): return "grass")
 	var units: Array = []
 	var ids: Array[int] = []
 	for index in range(3):
 		var unit: Dictionary = world.add_unit(1, "clubman", Vector2(4.0 + index, 6.0), false)
+		unit["stance"] = "passive"
+		unit["components"]["vision"]["range"] = 10.0
 		units.append(unit)
 		ids.append(int(unit["id"]))
 	var target: Dictionary = world.add_unit(2, "clubman", Vector2(9.0, 6.0), false)
-	world.add_unit(2, "clubman", Vector2(28.0, 28.0), false)
+	target["hp"] = 100.0
+	target["max_hp"] = 100.0
+	target["stance"] = "passive"
+	world.add_unit(2, "clubman", Vector2(28.0, 28.0), false)["stance"] = "passive"
+	world.update_fog_of_war()
 	var controller := GameController.new(world)
+	controller.set_speed_multiplier(1.0)
 	controller.enqueue_command(Commands.FormationMoveCommand.new(1, ids, Vector2(7.0, 6.0), FormationGeometry.LINE, Vector2(1, 0)), true, 1)
 	controller.advance_frame(0.05, 1, 2)
 	var group = controller.formation_groups[1]
-	controller.enqueue_command(Commands.AttackCommand.new(2, ids, int(target["id"])), true, 1)
+	controller.enqueue_command(Commands.AttackCommand.new(2, ids, int(target["id"]), {"autonomous": true}), true, 1)
 	controller.advance_frame(0.05, 1, 2)
 	assert_equal(group.state, "ENGAGED", "attack command transitions group to engaged")
 	for unit in units:
@@ -42,6 +55,7 @@ func test_formation_releases_combat_and_reforms() -> void:
 
 	target["hp"] = 0.0
 	controller.advance_frame(0.05, 1, 2)
+	controller.reconcile_formation_groups()
 	assert_equal(group.state, "REGROUP", "last target ending transitions group to regroup")
 	for unit in units:
 		unit["pos"] = unit["formation_home"]

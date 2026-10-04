@@ -1,6 +1,8 @@
 class_name RoRHUDControls
 extends Control
 
+const IconRegistry := preload("res://scripts/interface_icon_registry.gd")
+
 const InterfaceLayout := preload("res://scripts/interface_layout.gd")
 const StatusPanel := preload("res://scripts/hud_status_panel.gd")
 const Typography := preload("res://scripts/hud_typography.gd")
@@ -418,15 +420,10 @@ func command_icon(command: Dictionary) -> Texture2D:
 	if interface_skin != null and command_type == "trade_resource":
 		var resource_name := String({0: "food", 1: "wood", 2: "stone"}.get(int(command.get("resource_type_id", -1)), ""))
 		return interface_skin.resource_icon(resource_name, interface_style_index)
-	if interface_skin != null and command_type == "open_build_menu":
+	if interface_skin != null and command_type in ["open_build_menu", "cancel_production", "close_build_menu"]:
 		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
-		return glyphs[2] if glyphs.size() > 2 else null
-	if interface_skin != null and command_type == "cancel_production":
-		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
-		return glyphs[10] if glyphs.size() > 10 else null
-	if interface_skin != null and command_type == "close_build_menu":
-		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
-		return glyphs[10] if glyphs.size() > 10 else null
+		var frame := int(IconRegistry.COMMAND_GLYPHS.get(command_type, -1))
+		return glyphs[frame] if frame >= 0 and frame < glyphs.size() else null
 	return icon_registry.texture(String(command.get("icon_kind", "")), int(command.get("icon_id", -1))) if icon_registry != null else null
 
 func make_style(fill: Color, border: Color) -> StyleBoxFlat:
