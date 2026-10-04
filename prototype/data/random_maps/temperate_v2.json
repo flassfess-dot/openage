@@ -99,8 +99,8 @@
     "conifer": {
       "native": [
         {
-          "unit_id": 140,
-          "graphic_id": 607
+          "unit_id": 136,
+          "graphic_id": 603
         },
         {
           "unit_id": 194,
@@ -133,6 +133,11 @@
           "unit_id": 366,
           "graphic_id": 630,
           "condition": "dry"
+        },
+        {
+          "unit_id": 140,
+          "graphic_id": 607,
+          "condition": "autumn"
         }
       ]
     }

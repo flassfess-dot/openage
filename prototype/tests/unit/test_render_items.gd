@@ -75,10 +75,10 @@ func test_harvestable_building_sandwiches_worker_and_unit_parts() -> void:
 	var farm_part: Dictionary = items.filter(func(item): return item["kind"] == "building_part")[0]
 	var worker_body: Dictionary = items.filter(func(item): return item["kind"] == "unit")[0]
 	var worker_part: Dictionary = items.filter(func(item): return item["kind"] == "unit_part")[0]
-	assert_equal(worker_body["screen_y"], farm_base["screen_y"], "farmer uses the Farm depth anchor while gathering")
+	assert_equal(worker_body["screen_y"], 40.0, "farmer retains its own projected depth while gathering")
 	assert_true(items.find(farm_base) < items.find(worker_body), "Farm ground layer renders behind its farmer")
 	assert_true(items.find(worker_body) < items.find(worker_part), "composite worker hull or tool renders with its body")
-	assert_true(items.find(worker_part) < items.find(farm_part), "Farm foreground layer renders in front without swallowing the farmer")
+	assert_true(items.find(farm_part) < items.find(worker_body), "Farm crop parts stay beneath the complete farmer")
 
 
 func test_projected_depth_precedes_source_elevation() -> void:

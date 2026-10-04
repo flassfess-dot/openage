@@ -146,7 +146,10 @@ func reseed_harvestable_building(building: Dictionary, workers: Array = []) -> V
 
 
 func complete_foundation(building: Dictionary) -> void:
-	var completing_builder_ids: Array = building.get("builders", {}).keys()
+	var completing_builder_ids: Array = []
+	for worker in world.get_units():
+		if int(worker.get("target_building_id", -1)) == int(building["id"]) and String(worker.get("task", "")) == "build":
+			completing_builder_ids.append(int(worker["id"]))
 	completing_builder_ids.sort()
 	building["state"] = "complete"
 	building["construction_progress"] = 1.0
@@ -203,9 +206,17 @@ func assign_builders_to_next_visible_foundation(builder_ids: Array, completed_bu
 				continue
 			var candidate_position := Vector2(candidate.get("pos", Vector2.ZERO))
 			var distance_squared := worker_position.distance_squared_to(candidate_position)
-			if distance_squared > vision_range * vision_range or world.visibility_system.state_at_world(team, candidate_position) != FogOfWar.VISIBLE:
+			var half_size := Vector2(candidate.get("footprint", {}).get("half_size", Vector2(0.5, 0.5)))
+			var outside := (candidate_position - worker_position).abs() - half_size
+			outside = Vector2(maxf(0.0, outside.x), maxf(0.0, outside.y))
+			if outside.length_squared() > vision_range * vision_range:
 				continue
-			if int(worker.get("id", -1)) not in world.reachable_builder_ids(candidate):
+			var visible: bool = world.visibility_system.state_at_world(team, candidate_position) == FogOfWar.VISIBLE
+			for cell in candidate.get("occupied_cells", []):
+				visible = visible or world.visibility_system.state_at_world(team, Vector2(cell) + Vector2(0.5, 0.5)) == FogOfWar.VISIBLE
+			if not visible:
+				continue
+			if not world.worker_can_reach_foundation(worker, String(candidate["kind"]), candidate_position):
 				continue
 			if nearest_foundation == null or distance_squared < nearest_distance_squared or (is_equal_approx(distance_squared, nearest_distance_squared) and int(candidate.get("id", -1)) < int(nearest_foundation.get("id", -1))):
 				nearest_foundation = candidate

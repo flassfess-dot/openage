@@ -67,9 +67,15 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	if String(worker["gather_stage"]) == "returning":
 		return update_dropoff_order(worker, delta)
 
+	var capacity := maxf(0.0, float(worker["carry_capacity"]))
 	var resource: Variant = simulation_world.find_resource(int(worker["resource_id"]))
 	if resource == null or int(resource["amount"]) <= 0:
 		release_resource_approach_slot(worker)
+		if _continue_fishing(worker, resource):
+			if capacity > 0.0 and float(worker["carried_amount"]) >= capacity - 0.0001:
+				begin_resource_return(worker)
+				return GATHER_UPDATE_CARRY_IDLE
+			return GATHER_UPDATE_IDLE
 		if float(worker["carried_amount"]) > 0.0:
 			begin_resource_return(worker)
 			return GATHER_UPDATE_CARRY_IDLE
@@ -78,7 +84,6 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 		finish_gather_order(worker, "resource_unavailable")
 		return GATHER_UPDATE_IDLE
 
-	var capacity := maxf(0.0, float(worker["carry_capacity"]))
 	if capacity > 0.0 and float(worker["carried_amount"]) >= capacity - 0.0001:
 		begin_resource_return(worker)
 		return GATHER_UPDATE_CARRY_IDLE
@@ -116,7 +121,9 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	worker["work"] = maxf(0.05, float(worker["gather_interval"]))
 	worker["gather_cycles"] = int(worker["gather_cycles"]) + 1
 	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
-	if int(resource.get("amount", 0)) <= 0 or (capacity > 0.0 and float(worker.get("carried_amount", 0.0)) >= capacity - 0.0001):
+	var exhausted := int(resource.get("amount", 0)) <= 0
+	var continued := exhausted and _continue_fishing(worker, resource)
+	if (exhausted and not continued) or (capacity > 0.0 and float(worker.get("carried_amount", 0.0)) >= capacity - 0.0001):
 		begin_resource_return(worker)
 	return GATHER_UPDATE_ACTION
 
@@ -128,7 +135,7 @@ func _worker_in_resource_range(worker: Dictionary, resource: Dictionary) -> bool
 	var position: Vector2 = worker["pos"]
 	var cell := Vector2i(position)
 	var cell_offset := position - Vector2(cell)
-	if cell == Vector2i(Vector2(resource["pos"])) or cell_offset.x < 0.12 or cell_offset.x > 0.88 or cell_offset.y < 0.12 or cell_offset.y > 0.88:
+	if String(worker.get("movement_domain", "land")) != "water" and (cell == Vector2i(Vector2(resource["pos"])) or cell_offset.x < 0.12 or cell_offset.x > 0.88 or cell_offset.y < 0.12 or cell_offset.y > 0.88):
 		return false
 	var reach := maxf(0.5, float(resource.get("footprint_radius", 0.2))) + float(worker.get("footprint_radius", 0.3)) + 0.32
 	return position.distance_squared_to(Vector2(resource["pos"])) <= reach * reach
@@ -154,6 +161,8 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 	if not destination is Vector2:
 		destination = dropoff_approach_position(worker, dropoff)
 		worker["dropoff_position"] = destination
+		if not destination is Vector2:
+			return GATHER_UPDATE_CARRY_IDLE
 	if worker["pos"].distance_squared_to(destination) > 0.0144:
 		simulation_world.ensure_navigation_destination(worker, destination)
 		return GATHER_UPDATE_CARRY_MOVE if simulation_world.movement_system.move_unit(worker, delta) else GATHER_UPDATE_CARRY_IDLE
@@ -259,6 +268,8 @@ func deposit_carried_resources(worker: Dictionary) -> int:
 	worker["carried_resource_type_id"] = -1
 	worker["dropoff_id"] = -1
 	worker["dropoff_position"] = null
+	world.release_building_approach_slot(worker)
+	worker["target_building_id"] = -1
 	EntityComponents.sync_resource_carrier(worker)
 	return amount
 
@@ -269,7 +280,9 @@ func prepare_resource_approach(worker: Dictionary, resource: Dictionary) -> bool
 	worker["dropoff_id"] = -1
 	worker["dropoff_position"] = null
 	if worker.get("resource_approach_slot") is Vector2:
-		return simulation_world.approach_system.resume(worker, worker["resource_approach_slot"])
+		if simulation_world.approach_system.resume(worker, worker["resource_approach_slot"]):
+			return true
+		release_resource_approach_slot(worker)
 	var resource_id := int(resource["id"])
 	var reservations: Dictionary = simulation_world.resource_approach_slots.get(resource_id, {})
 	var runtime_metadata: Dictionary = simulation_world.data_repository.runtime_metadata(String(resource.get("kind", "")))
@@ -288,6 +301,8 @@ func prepare_resource_approach(worker: Dictionary, resource: Dictionary) -> bool
 func prepare_group_gather_approach(worker: Dictionary, requested_resource: Dictionary) -> bool:
 	if int(requested_resource.get("amount", 0)) > 0 and prepare_resource_approach(worker, requested_resource):
 		return true
+	if String(worker.get("movement_domain", "land")) == "water":
+		return _continue_fishing(worker, requested_resource)
 	var neighbors: Array = []
 	var requested_position := Vector2(requested_resource["pos"])
 	for candidate_value in world.get_resources():
@@ -316,6 +331,45 @@ func prepare_group_gather_approach(worker: Dictionary, requested_resource: Dicti
 	return false
 
 
+# Retarget only an existing fishing order. Stop/move and queued player orders
+# retain priority, and the search uses this boat's sight rather than allied fog.
+func _continue_fishing(worker: Dictionary, previous_resource: Variant = null) -> bool:
+	if String(worker.get("movement_domain", "land")) != "water" or not bool(worker.get("components", {}).get("worker", {}).get("enabled", false)) or not OrderPipeline.queued(worker).is_empty():
+		return false
+	var sight := maxf(0.0, float(worker.get("components", {}).get("vision", {}).get("range", 0.0)))
+	if sight <= 0.0:
+		return false
+	var origin := Vector2(worker["pos"])
+	var previous_id := int(previous_resource.get("id", -1)) if previous_resource is Dictionary else -1
+	var candidates: Array = []
+	# Resource cells are indexed at creation. The cost depends on the sight
+	# radius, so depleted shoals do not scan a whole supergiant map.
+	for y in range(maxi(0, floori(origin.y - sight)), mini(world.map_size.y, floori(origin.y + sight) + 1)):
+		for x in range(maxi(0, floori(origin.x - sight)), mini(world.map_size.x, floori(origin.x + sight) + 1)):
+			for candidate in world.resource_nodes_by_cell.get(y * world.map_size.x + x, []):
+				if int(candidate.get("id", -1)) == previous_id or int(candidate.get("amount", 0)) <= 0:
+					continue
+				if int(candidate.get("resource_type_id", -1)) != 0 or String(candidate.get("kind", "")) not in ["deep_fish", "shore_fish", "whale"]:
+					continue
+				if origin.distance_squared_to(Vector2(candidate["pos"])) > sight * sight:
+					continue
+				if world.resource_accessible_to_team(candidate, int(worker["team"])) and world.resource_allows_worker(candidate, worker):
+					candidates.append(candidate)
+	candidates.sort_custom(func(left: Dictionary, right: Dictionary):
+		var left_distance := origin.distance_squared_to(Vector2(left["pos"]))
+		var right_distance := origin.distance_squared_to(Vector2(right["pos"]))
+		return left_distance < right_distance if not is_equal_approx(left_distance, right_distance) else int(left["id"]) < int(right["id"]))
+	release_resource_approach_slot(worker)
+	for candidate in candidates:
+		if not prepare_resource_approach(worker, candidate):
+			continue
+		worker["resource_id"] = int(candidate["id"])
+		world.worker_role_system.apply(worker, world.worker_role_system.profile_for_resource(worker, candidate), false)
+		OrderPipeline.begin(worker, "gather", int(candidate["id"]), candidate["pos"], true)
+		return true
+	return false
+
+
 func resource_approach_candidates(worker: Dictionary, resource: Dictionary, runtime_metadata: Dictionary = {}) -> Array[Vector2]:
 	var result: Array[Vector2] = []
 	var world_size: Vector2i = world.map_size
@@ -333,6 +387,14 @@ func resource_approach_candidates(worker: Dictionary, resource: Dictionary, runt
 	for slot_index in range(16):
 		var angle := PI + TAU * float(slot_index) / 16.0
 		result.append(Coordinates.clamp_world(Vector2(resource["pos"]) + Vector2(cos(angle), sin(angle)) * distance, world_size))
+	if String(worker.get("movement_domain", "land")) == "water":
+		var center := Vector2i(Vector2(resource["pos"]).floor())
+		var reach := maxf(0.5, float(resource.get("footprint_radius", 0.2))) + worker_radius + 0.32
+		for y in range(center.y - 2, center.y + 3):
+			for x in range(center.x - 2, center.x + 3):
+				var berth := Vector2(x + 0.5, y + 0.5)
+				if berth.distance_squared_to(Vector2(resource["pos"])) <= reach * reach:
+					result.append(berth)
 	return result
 
 
@@ -357,8 +419,20 @@ func begin_resource_return(worker: Dictionary) -> bool:
 	worker["gather_stage"] = "returning"
 	worker["dropoff_id"] = int(dropoff["id"])
 	worker["dropoff_position"] = dropoff_approach_position(worker, dropoff)
-	world.assign_unit_destination(worker, worker["dropoff_position"], false)
-	return true
+	if not worker["dropoff_position"] is Vector2:
+		worker["gather_stage"] = "approaching"
+		return false
+	if Vector2(worker["pos"]).distance_squared_to(Vector2(worker["dropoff_position"])) <= 0.0144:
+		# A worker already at the deposit slot has no route to request. An empty
+		# same-position route is arrival, not an unreachable automatic return.
+		worker["path"] = []
+		worker["path_index"] = 0
+		worker["target"] = worker["pos"]
+		worker["destination"] = worker["dropoff_position"]
+		worker["path_status"] = "idle"
+		worker["diagnostic_reason"] = ""
+		return true
+	return world.assign_unit_destination(worker, worker["dropoff_position"], false)
 
 
 func nearest_dropoff(worker: Dictionary) -> Variant:
@@ -427,25 +501,57 @@ func assign_command_return_resources(selected: Array, target_building_id: int = 
 		worker["gather_stage"] = "returning"
 		worker["dropoff_id"] = int(dropoff["id"])
 		worker["dropoff_position"] = dropoff_approach_position(worker, dropoff)
+		if not worker["dropoff_position"] is Vector2:
+			finish_gather_order(worker, "no_dropoff_slot")
+			continue
 		OrderPipeline.begin(worker, "return_resources", int(dropoff["id"]), worker["dropoff_position"], false)
 		world.assign_unit_destination(worker, worker["dropoff_position"], false)
 		assigned += 1
 	return assigned > 0
 
 
-func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Vector2:
-	var candidates: Array[Vector2] = world.building_perimeter_candidates(worker, building)
-	for offset in range(candidates.size()):
-		# Stable entity-derived starting slots prevent a crowd of carriers from
-		# converging on the same point and deadlocking around a drop site.
-		var candidate: Vector2 = candidates[posmod(int(worker.get("id", 0)) + offset, candidates.size())]
-		if world.navigation_grid.is_position_walkable_for(candidate, float(worker.get("footprint_radius", 0.3)), String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1))):
-			return candidate
-	return Vector2(building["pos"])
+func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Variant:
+	world.release_building_approach_slot(worker)
+	var building_id := int(building["id"])
+	var reservations: Dictionary = world.building_approach_slots.get(building_id, {})
+	var candidates: Array[Vector2] = world.available_approach_slots(worker, world.building_perimeter_candidates(worker, building), reservations, true)
+	var best: Variant = null
+	var best_length := INF
+	var origin := Vector2(worker["pos"])
+	for candidate in candidates:
+		# Euclidean distance bounds every route, so a direct nearest slot ends the search.
+		if origin.distance_to(candidate) >= best_length:
+			break
+		if origin.distance_squared_to(candidate) <= 0.0144:
+			best = candidate
+			best_length = 0.0
+			break
+		var route: Array[Vector2] = world.pathfinder.find_path(origin, candidate, String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1)), float(worker.get("footprint_radius", 0.3)))
+		if route.is_empty() and origin.distance_squared_to(candidate) > 0.0144:
+			continue
+		if not route.is_empty() and route.back().distance_squared_to(candidate) > 0.0144:
+			continue
+		var length := 0.0
+		var cursor := origin
+		for point in route:
+			length += cursor.distance_to(point)
+			cursor = point
+		if length < best_length:
+			best_length = length
+			best = candidate
+	if best is Vector2:
+		reservations[int(worker["id"])] = best
+		world.building_approach_slots[building_id] = reservations
+		worker["target_building_id"] = building_id
+		worker["building_approach_slot"] = best
+		return best
+	return null
 
 
 func finish_gather_order(worker: Dictionary, reason: String) -> void:
 	release_resource_approach_slot(worker)
+	world.release_building_approach_slot(worker)
+	worker["target_building_id"] = -1
 	world.release_unit_destination(worker)
 	worker["task"] = "idle"
 	worker["resource_id"] = -1

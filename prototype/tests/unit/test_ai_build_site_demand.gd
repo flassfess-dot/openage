@@ -44,6 +44,7 @@ func _initialize() -> void:
 	changed["buildings"] = [_building("town_center", "complete")]
 	changed["buildings"][0]["production_queue"] = [{"status": "blocked_population", "order_type": "unit"}]
 	_verify(changed, ["house", "barracks"], "queue demand is evaluated live")
+	_test_spending_and_naval_filters(base)
 	if failures.is_empty():
 		print("AI construction demand preserves planner commands")
 		quit(0)
@@ -79,3 +80,33 @@ func _commands(commands: Array) -> Array:
 func _check(condition: bool, context: String) -> void:
 	if not condition:
 		failures.append(context)
+
+
+func _test_spending_and_naval_filters(base: Dictionary) -> void:
+	var snapshot: Dictionary = base.duplicate(true)
+	var age_policy: Dictionary = policy.duplicate(true)
+	age_policy["minimum_workers_before_age_up"] = 1
+	age_policy["age_advance_technology_ids"] = [101]
+	age_policy["age_saving_construction_exceptions"] = ["barracks"]
+	snapshot["units"][0]["command_options"]["build"][1]["cost"] = {1: 125}
+	var center := _building("town_center", "complete")
+	center["command_options"]["research"] = [{"technology_id": 101, "accepted": false, "reason": "insufficient_resources", "cost": {0: 500}}]
+	snapshot["buildings"] = [center]
+	snapshot["player_state"]["population"] = 7
+	var kinds := Planner.construction_site_kinds(snapshot["build_sites"].keys(), snapshot["units"], snapshot["buildings"], snapshot["player_state"], 2, age_policy)
+	_check(kinds == ["barracks"], "age saving prepares only allowed buildings that avoid the reserved resources")
+	var filtered: Dictionary = snapshot.duplicate(true)
+	filtered["build_sites"].erase("house")
+	_check(_commands(Planner.plan(filtered, 1, 2, age_policy)) == _commands(Planner.plan(snapshot, 1, 2, age_policy)), "age-saving filtering preserves planner commands")
+	center["command_options"]["research"][0]["accepted"] = true
+	_check(Planner.construction_site_kinds(snapshot["build_sites"].keys(), snapshot["units"], snapshot["buildings"], snapshot["player_state"], 2, age_policy).is_empty(), "accepted age-up avoids all unused construction searches")
+	snapshot = base.duplicate(true)
+	snapshot["buildings"] = [_building("dock", "complete")]
+	snapshot["navigation"] = {"reachable_frontier": {"water": [Vector2(5, 5)]}}
+	var fishing_boat: Dictionary = snapshot["units"][0].duplicate(true)
+	fishing_boat["id"] = 2
+	fishing_boat["movement_domain"] = "water"
+	snapshot["units"].append(fishing_boat)
+	_check(Planner.construction_site_kinds(snapshot["build_sites"].keys(), snapshot["units"], snapshot["buildings"], snapshot["player_state"], 2, policy, snapshot["navigation"]).is_empty(), "pending naval scout avoids unused land construction searches")
+	fishing_boat["combat_enabled"] = true
+	_check(Planner.construction_site_kinds(snapshot["build_sites"].keys(), snapshot["units"], snapshot["buildings"], snapshot["player_state"], 2, policy, snapshot["navigation"]) == ["barracks"], "a completed naval scout immediately restores construction demand")

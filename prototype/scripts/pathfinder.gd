@@ -1,5 +1,7 @@
 class_name RoRPathfinder
 
+const MobileCollision := preload("res://scripts/mobile_collision.gd")
+
 const CARDINAL_COST: float = 1.0
 const DIAGONAL_COST: float = 1.41421356237
 const MAX_ROUTE_CACHE_ENTRIES: int = 2048
@@ -11,6 +13,10 @@ const DIRECTIONS := [
 
 var grid
 var cache: Dictionary = {}
+var cell_cache: Dictionary = {}
+var smoothed_cell_cache: Dictionary = {}
+var geometry_metadata: Dictionary = {"world": {}, "cells": {}, "smooth": {}}
+var fallback_components: Dictionary = {}
 var cache_hits: int = 0
 var route_cache_revision: int = -1
 var performance_probe: Variant = null
@@ -25,6 +31,7 @@ var native_movement_radii := PackedFloat32Array()
 var native_movement_clearances := PackedFloat32Array()
 var native_movement_priorities := PackedInt32Array()
 var native_movement_health := PackedFloat32Array()
+var native_movement_solid_animals := PackedByteArray()
 var observed_path_query_microseconds: int = 0
 
 
@@ -47,6 +54,8 @@ func path_query_tick_microseconds() -> int:
 
 func clear_cache() -> void:
 	clear_route_cache()
+	fallback_components.clear()
+	route_cache_revision = -1
 	native_kernels.clear()
 	native_movement_kernels_by_unit_id.clear()
 	native_shared_movement_kernel = null
@@ -57,6 +66,9 @@ func clear_route_cache() -> void:
 	# but the revisioned walkability mask remains valid. Topology changes call
 	# clear_cache(), which additionally invalidates native kernels.
 	cache.clear()
+	cell_cache.clear()
+	smoothed_cell_cache.clear()
+	geometry_metadata = {"world": {}, "cells": {}, "smooth": {}}
 	cache_hits = 0
 
 
@@ -94,6 +106,7 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 	native_movement_clearances.resize(units.size())
 	native_movement_priorities.resize(units.size())
 	native_movement_health.resize(units.size())
+	native_movement_solid_animals.resize(units.size())
 	var first_unit: Dictionary = units[0]
 	var shared_domain := String(first_unit["movement_domain"])
 	var shared_restriction := int(first_unit["terrain_restriction"])
@@ -110,6 +123,7 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 		native_movement_clearances[index] = float(unit["minimum_clearance"])
 		native_movement_priorities[index] = int(unit["push_priority"])
 		native_movement_health[index] = float(unit["hp"])
+		native_movement_solid_animals[index] = int(MobileCollision.is_solid_animal(unit))
 	if homogeneous_configuration:
 		native_shared_movement_kernel = _native_kernel_for(shared_domain, shared_restriction)
 		native_shared_movement_kernel.configure_movement_snapshot(
@@ -118,7 +132,8 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 			native_movement_radii,
 			native_movement_clearances,
 			native_movement_priorities,
-			native_movement_health
+			native_movement_health,
+			native_movement_solid_animals
 		)
 		return
 	var configurations: Dictionary = {}
@@ -142,7 +157,8 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 			native_movement_radii,
 			native_movement_clearances,
 			native_movement_priorities,
-			native_movement_health
+			native_movement_health,
+			native_movement_solid_animals
 		)
 		kernels_by_configuration[configuration_key] = kernel
 	for unit_id in configuration_by_unit_id:
@@ -174,20 +190,14 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	var started := Time.get_ticks_usec() if performance_probe != null else 0
 	if performance_probe != null:
 		performance_probe.increment("navigation.path_queries")
-	# Cache keys embed the revision, so entries from older revisions can never
-	# hit again; dropping them on the first post-change request bounds memory
-	# instead of accumulating every historical route.
-	if grid.revision != route_cache_revision:
-		cache.clear()
-		route_cache_revision = grid.revision
+	# Keep valid geometry across unrelated map edits; failed routes depend on
+	# global connectivity and are invalidated on every topology change.
+	_sync_route_revision()
 	var start := Vector2i(floori(start_world.x), floori(start_world.y))
 	var requested_goal := Vector2i(floori(goal_world.x), floori(goal_world.y))
-	var goal := nearest_walkable(requested_goal, movement_domain, restriction_id, clearance_radius)
-	if goal.x < 0:
-		return _finish_path_observation(started, [], false)
-	# Exact endpoints matter even when both requests fall into the same cell.
-	# Without them a return-to-slot request can reuse an earlier contact point.
-	var key := "%d:%s:%d:%.4f:%d:%d:%d:%d:%.4f:%.4f:%.4f:%.4f" % [grid.revision, movement_domain, restriction_id, clearance_radius, start.x, start.y, goal.x, goal.y, start_world.x, start_world.y, goal_world.x, goal_world.y]
+	# Resolving a blocked endpoint can visit the entire map. The requested
+	# endpoint and topology already determine that result, including failure.
+	var key := "%s:%d:%.8f:%d:%d:%d:%d:%.4f:%.4f:%.4f:%.4f" % [movement_domain, restriction_id, clearance_radius, start.x, start.y, requested_goal.x, requested_goal.y, start_world.x, start_world.y, goal_world.x, goal_world.y]
 	if cache.has(key):
 		cache_hits += 1
 		var cached_path: Array[Vector2] = []
@@ -196,8 +206,12 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	# Keys include exact world-space endpoints. In a long, otherwise static
 	# match most routes are unique; topology revision alone cannot bound them.
 	# Keep the last full cache until after its final possible hit.
-	if cache.size() >= MAX_ROUTE_CACHE_ENTRIES:
-		cache.clear()
+	_trim_geometry_cache("world")
+	var goal := nearest_walkable(requested_goal, movement_domain, restriction_id, clearance_radius)
+	if goal.x < 0:
+		cache[key] = []
+		_record_geometry("world", key, [], start, requested_goal, clearance_radius)
+		return _finish_path_observation(started, [], false)
 	var smoothed: Array[Vector2i]
 	var direct_path := false
 	if uses_native_kernel():
@@ -215,6 +229,7 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 			smoothed = smooth_cells(cells, movement_domain, restriction_id, clearance_radius)
 	if smoothed.is_empty():
 		cache[key] = []
+		_record_geometry("world", key, [], start, requested_goal, clearance_radius)
 		return _finish_path_observation(started, [], false)
 	if direct_path and performance_probe != null:
 		performance_probe.increment("navigation.direct_path_hits")
@@ -229,6 +244,9 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	if goal == requested_goal and not result.is_empty() and grid.is_position_walkable_for(goal_world, clearance_radius, movement_domain, restriction_id):
 		result[result.size() - 1] = goal_world
 	cache[key] = result.duplicate()
+	_record_geometry("world", key, result, start, requested_goal, clearance_radius)
+	# Opening a closer endpoint can occur outside the previous route bounds.
+	geometry_metadata["world"][key]["global"] = goal != requested_goal
 	return _finish_path_observation(started, result, false)
 
 
@@ -244,11 +262,125 @@ func _finish_path_observation(started: int, path: Array[Vector2], cache_hit: boo
 	return path
 
 
+func _geometry_bucket(name: String) -> Dictionary:
+	return cache if name == "world" else (cell_cache if name == "cells" else smoothed_cell_cache)
+
+
+func _sync_route_revision() -> void:
+	if grid.revision == route_cache_revision:
+		return
+	var changed: Variant = grid.changed_cells_since(route_cache_revision) if route_cache_revision >= 0 and grid.has_method("changed_cells_since") else null
+	for name in ["world", "cells", "smooth"]:
+		var bucket := _geometry_bucket(name)
+		var metadata: Dictionary = geometry_metadata[name]
+		for key in bucket.keys():
+			var record: Dictionary = metadata.get(key, {})
+			var invalid: bool = changed == null or record.is_empty() or bool(record.get("empty", true)) or bool(record.get("global", false))
+			if not invalid:
+				var bounds: Rect2i = record["bounds"]
+				for cell in changed:
+					if bounds.has_point(cell):
+						invalid = true
+						break
+			if invalid:
+				bucket.erase(key)
+				metadata.erase(key)
+	fallback_components.clear()
+	route_cache_revision = grid.revision
+
+
+func _trim_geometry_cache(name: String) -> void:
+	var bucket := _geometry_bucket(name)
+	if bucket.size() >= MAX_ROUTE_CACHE_ENTRIES:
+		var oldest: Variant = bucket.keys()[0]
+		bucket.erase(oldest)
+		geometry_metadata[name].erase(oldest)
+
+
+func _record_geometry(name: String, key: String, path: Array, start: Vector2i, goal: Vector2i, radius: float) -> void:
+	var minimum := Vector2i(mini(start.x, goal.x), mini(start.y, goal.y))
+	var maximum := Vector2i(maxi(start.x, goal.x), maxi(start.y, goal.y))
+	for point in path:
+		var cell := Vector2i(point)
+		minimum = Vector2i(mini(minimum.x, cell.x), mini(minimum.y, cell.y))
+		maximum = Vector2i(maxi(maximum.x, cell.x), maxi(maximum.y, cell.y))
+	var margin := Vector2i.ONE * (ceili(radius) + 1)
+	geometry_metadata[name][key] = {"bounds": Rect2i(minimum - margin, maximum - minimum + Vector2i.ONE + margin * 2), "empty": path.is_empty()}
+
+
+func _cell_key(start: Vector2i, goal: Vector2i, domain: String, restriction: int, radius: float) -> String:
+	return "%s:%d:%.8f:%d:%d:%d:%d" % [domain, restriction, radius, start.x, start.y, goal.x, goal.y]
+
+
 func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
+	_sync_route_revision()
+	var key := _cell_key(start, goal, movement_domain, restriction_id, clearance_radius)
+	if cell_cache.has(key):
+		if performance_probe != null: performance_probe.increment("navigation.cell_cache_hits")
+		var cached: Array[Vector2i] = []
+		cached.assign(cell_cache[key])
+		return cached
+	var path := _search_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+	_trim_geometry_cache("cells")
+	cell_cache[key] = path.duplicate()
+	_record_geometry("cells", key, path, start, goal, clearance_radius)
+	return path
+
+
+func component_id(cell: Vector2i, domain: String = "land", restriction: int = -1, radius: float = 0.0) -> int:
+	if grid == null or not grid.contains(cell): return -1
+	if uses_native_kernel(): return int(_native_kernel_for(domain, restriction).component_id(cell, radius))
+	_sync_route_revision()
+	var key := "%s:%d:%.8f" % [domain, restriction, radius]
+	if not fallback_components.has(key):
+		if fallback_components.size() >= 16: fallback_components.clear()
+		var labels := PackedInt32Array()
+		labels.resize(grid.size.x * grid.size.y)
+		labels.fill(-1)
+		for index in range(labels.size()):
+			var origin := Vector2i(index % grid.size.x, index / grid.size.x)
+			if labels[index] >= 0 or not _cell_walkable(origin, domain, restriction, radius): continue
+			var queue: Array[Vector2i] = [origin]
+			labels[index] = index
+			var cursor := 0
+			while cursor < queue.size():
+				var current := queue[cursor]
+				cursor += 1
+				for direction in DIRECTIONS:
+					var next: Vector2i = current + direction
+					if not grid.contains(next): continue
+					var next_index: int = next.y * grid.size.x + next.x
+					if labels[next_index] >= 0 or not _can_step(current, next, domain, restriction, radius): continue
+					labels[next_index] = index
+					queue.append(next)
+		fallback_components[key] = labels
+	return int(fallback_components[key][cell.y * grid.size.x + cell.x])
+
+
+func cells_connected(start: Vector2i, goal: Vector2i, domain: String = "land", restriction: int = -1, radius: float = 0.0) -> bool:
+	if grid == null or not grid.contains(start) or not grid.contains(goal): return false
+	if uses_native_kernel(): return bool(_native_kernel_for(domain, restriction).cells_connected(start, goal, radius))
+	var target := component_id(goal, domain, restriction, radius)
+	if target < 0: return false
+	var origin := component_id(start, domain, restriction, radius)
+	if origin >= 0: return origin == target
+	for direction in DIRECTIONS:
+		var next: Vector2i = start + direction
+		if _can_step(start, next, domain, restriction, radius) and component_id(next, domain, restriction, radius) == target: return true
+	return false
+
+
+func _search_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
 	if grid == null or not grid.contains(start) or not grid.contains(goal) or not _cell_walkable(goal, movement_domain, restriction_id, clearance_radius):
 		return []
 	if uses_native_kernel():
 		return _find_native_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+	# Without the native module, a cold full-map component scan costs more
+	# than A* for a short reachable request. Reuse an existing region index,
+	# otherwise let the reference search resolve the local query directly.
+	var configuration := "%s:%d:%.8f" % [movement_domain, restriction_id, clearance_radius]
+	if fallback_components.has(configuration) and not cells_connected(start, goal, movement_domain, restriction_id, clearance_radius):
+		return []
 	var expanded_nodes := 0
 	var frontier: Array = []
 	_frontier_push(frontier, {"cell": start, "score": 0.0, "cost": 0.0})
@@ -303,6 +435,19 @@ func _find_native_cell_path(start: Vector2i, goal: Vector2i, movement_domain: St
 
 
 func _find_native_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String, restriction_id: int, clearance_radius: float) -> Dictionary:
+	_sync_route_revision()
+	var key := _cell_key(start, goal, movement_domain, restriction_id, clearance_radius)
+	if smoothed_cell_cache.has(key):
+		if performance_probe != null: performance_probe.increment("navigation.cell_cache_hits")
+		return smoothed_cell_cache[key].duplicate(true)
+	var result := _search_native_smoothed_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+	_trim_geometry_cache("smooth")
+	smoothed_cell_cache[key] = result.duplicate(true)
+	_record_geometry("smooth", key, result["path"], start, goal, clearance_radius)
+	return result
+
+
+func _search_native_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String, restriction_id: int, clearance_radius: float) -> Dictionary:
 	var kernel = _native_kernel_for(movement_domain, restriction_id)
 	var packed: PackedInt32Array = kernel.find_smoothed_cell_path(start, goal, clearance_radius)
 	if performance_probe != null:
@@ -341,18 +486,39 @@ func _native_kernel_for(movement_domain: String, restriction_id: int):
 					performance_probe.increment("navigation.native_mask_updated_cells", indices.size())
 					performance_probe.observe_microseconds("navigation.native_mask_update", Time.get_ticks_usec() - started)
 				return kernel
-	var mask := PackedByteArray()
-	mask.resize(grid.size.x * grid.size.y)
-	var index := 0
-	for y in range(grid.size.y):
-		for x in range(grid.size.x):
-			mask[index] = 1 if grid.is_walkable_for(Vector2i(x, y), movement_domain, restriction_id) else 0
-			index += 1
+	var mask: PackedByteArray = grid.native_walkability_mask(movement_domain, restriction_id, performance_probe)
 	kernel.configure(grid.size.x, grid.size.y, grid.revision, mask)
 	if performance_probe != null:
 		performance_probe.increment("navigation.native_mask_rebuilds")
 		performance_probe.observe_microseconds("navigation.native_mask_rebuild", Time.get_ticks_usec() - started)
 	return kernel
+
+
+func patch_native_masks(changed_cells: Array[Vector2i]) -> void:
+	# Exploration can reveal thousands of cells at once, exceeding the bounded
+	# grid journal. Apply that exact batch directly instead of rebuilding a map.
+	if changed_cells.is_empty():
+		return
+	for key in native_kernels:
+		var kernel = native_kernels[key]
+		if not bool(kernel.is_configured()) or int(kernel.get_revision()) != grid.revision - 1:
+			continue
+		var configuration := String(key).split(":")
+		var domain := String(configuration[0])
+		var restriction := int(configuration[1])
+		var started := Time.get_ticks_usec() if performance_probe != null else 0
+		var indices := PackedInt32Array()
+		var values := PackedByteArray()
+		indices.resize(changed_cells.size())
+		values.resize(changed_cells.size())
+		for index in range(changed_cells.size()):
+			var cell: Vector2i = changed_cells[index]
+			indices[index] = cell.y * grid.size.x + cell.x
+			values[index] = 1 if grid.is_walkable_for(cell, domain, restriction) else 0
+		if bool(kernel.update_walkable(grid.revision, indices, values)) and performance_probe != null:
+			performance_probe.increment("navigation.native_mask_updates")
+			performance_probe.increment("navigation.native_mask_updated_cells", indices.size())
+			performance_probe.observe_microseconds("navigation.native_mask_update", Time.get_ticks_usec() - started)
 
 
 func _frontier_push(frontier: Array, entry: Dictionary) -> void:
@@ -452,9 +618,8 @@ func nearest_walkable(requested: Vector2i, movement_domain: String = "land", res
 	for radius in range(1, maximum_radius + 1):
 		var candidates: Array[Vector2i] = []
 		for y in range(requested.y - radius, requested.y + radius + 1):
-			for x in range(requested.x - radius, requested.x + radius + 1):
-				if absi(x - requested.x) != radius and absi(y - requested.y) != radius:
-					continue
+			var columns: Array = range(requested.x - radius, requested.x + radius + 1) if absi(y - requested.y) == radius else [requested.x - radius, requested.x + radius]
+			for x in columns:
 				var cell := Vector2i(x, y)
 				if grid.contains(cell) and _cell_walkable(cell, movement_domain, restriction_id, clearance_radius):
 					candidates.append(cell)

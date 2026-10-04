@@ -15,6 +15,8 @@ var icon_registry
 var skin
 var style_index := 0
 var frame_texture: Texture2D
+var production_frame: StyleBoxTexture
+var production_visible := false
 var name_label: Label
 var owner_label: Label
 var stats_label: Label
@@ -92,7 +94,19 @@ func configure(registry, interface_skin, requested_style: int) -> void:
 	icon_registry = registry
 	skin = interface_skin
 	style_index = clampi(requested_style, 0, 4)
-	frame_texture = Aperture.frame_texture(skin.hud_shell(1024, style_index).get("bottom"))
+	var bottom_texture: Texture2D = skin.hud_shell(1024, style_index).get("bottom")
+	frame_texture = Aperture.frame_texture(bottom_texture)
+	production_frame = null
+	if bottom_texture != null:
+		# Reuse the selection window's native bevel, preserving its edge thickness.
+		var selection_frame := AtlasTexture.new()
+		selection_frame.atlas = bottom_texture
+		selection_frame.region = Rect2(0, 0, 136, 126)
+		production_frame = StyleBoxTexture.new()
+		production_frame.texture = selection_frame
+		production_frame.draw_center = false
+		for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+			production_frame.set_texture_margin(side, 4.0)
 	cancel_button.icon = skin.texture("hud_glyph_50721", 10)
 	for button in pending_buttons + global_buttons + [cancel_button, previous_button, next_button, global_more]:
 		style_button(button)
@@ -141,7 +155,12 @@ func set_view_model(value: Dictionary) -> void:
 
 func update_dynamic_model(value: Dictionary) -> void:
 	model = value
-	var orders: Array = model.get("queue", [])
+	var selection: Dictionary = model.get("selection", {})
+	var show_production: bool = String(selection.get("category", "none")) == "building" and not selection.get("leader", {}).is_empty()
+	if production_visible != show_production:
+		production_visible = show_production
+		layout_pending()
+	var orders: Array = model.get("queue", []) if production_visible else []
 	var active: Dictionary = orders[0] if not orders.is_empty() else {}
 	for node in [job_label, job_icon, percent_label, time_label, cancel_button]:
 		node.visible = not active.is_empty()
@@ -190,10 +209,14 @@ func layout_contents() -> void:
 	place(cancel_button, Rect2(Vector2(production.end.x - 42, production.position.y + 79), Vector2(34, 34)))
 	layout_pending()
 	layout_global()
-	job_icon.visible = not model.get("queue", []).is_empty() and _show_job_icon()
+	job_icon.visible = production_visible and not model.get("queue", []).is_empty() and _show_job_icon()
 
 
 func layout_pending() -> void:
+	if not production_visible:
+		for button in pending_buttons + [previous_button, next_button]:
+			button.visible = false
+		return
 	if layout.is_empty():
 		return
 	var production: Rect2 = layout["production"]
@@ -269,15 +292,16 @@ func _draw() -> void:
 			draw_rect(health, Color("292c23"))
 			var ratio := clampf(float(leader.get("hp", 0)) / maxf(1, float(leader.get("max_hp", 1))), 0, 1)
 			draw_rect(Rect2(health.position, Vector2(health.size.x * ratio, 4)), Color("58b340") if ratio > 0.5 else Color("d7a443"))
-	var production: Rect2 = layout["production"]
-	draw_recess(production)
-	var orders: Array = model.get("queue", [])
-	if not orders.is_empty():
-		var active: Dictionary = orders[0]
-		var track := Rect2(production.position + Vector2(8, 55), Vector2(production.size.x - 16, 6))
-		draw_rect(track, Color(0.039, 0.055, 0.027, 0.4))
-		var blocked := String(active.get("status", "")).begins_with("blocked_")
-		draw_rect(Rect2(track.position, Vector2(track.size.x * clampf(float(active.get("progress", 0)), 0, 1), 6)), Color("d7a443") if blocked else Color("57af33"))
+	if production_visible:
+		var production: Rect2 = layout["production"]
+		draw_recess(production)
+		var orders: Array = model.get("queue", [])
+		if not orders.is_empty():
+			var active: Dictionary = orders[0]
+			var track := Rect2(production.position + Vector2(8, 55), Vector2(production.size.x - 16, 6))
+			draw_rect(track, Color(0.039, 0.055, 0.027, 0.4))
+			var blocked := String(active.get("status", "")).begins_with("blocked_")
+			draw_rect(Rect2(track.position, Vector2(track.size.x * clampf(float(active.get("progress", 0)), 0, 1), 6)), Color("d7a443") if blocked else Color("57af33"))
 	for index in range(visible_global_count):
 		var entry: Dictionary = global_entries[index]
 		var track := Rect2(global_buttons[index].position + Vector2(2, 44), Vector2(40, 4))
@@ -286,21 +310,15 @@ func _draw() -> void:
 
 
 func draw_recess(rectangle: Rect2) -> void:
+	if production_frame != null:
+		draw_style_box(production_frame, rectangle.grow(4))
 	draw_rect(rectangle, MASK)
-	var rim: Array[Color] = [Color("9b9b8c"), Color("35382f")]
-	if skin != null:
-		rim = skin.rim_colors(style_index)
-	for inset in range(5, 0, -1):
-		var shade := Color(0, 0, 0, 0.15 + (5 - inset) * 0.07)
-		draw_line(rectangle.position + Vector2(inset, inset), Vector2(rectangle.end.x - inset, rectangle.position.y + inset), shade)
-		draw_line(rectangle.position + Vector2(inset, inset), Vector2(rectangle.position.x + inset, rectangle.end.y - inset), shade)
-	draw_line(rectangle.position, Vector2(rectangle.end.x - 1, rectangle.position.y), rim[0])
-	draw_line(rectangle.position, Vector2(rectangle.position.x, rectangle.end.y - 1), rim[0])
-	draw_line(Vector2(rectangle.position.x, rectangle.end.y - 1), rectangle.end - Vector2.ONE, rim[1])
-	draw_line(Vector2(rectangle.end.x - 1, rectangle.position.y), rectangle.end - Vector2.ONE, rim[1])
-	draw_rect(rectangle.grow(-1), Color(0, 0, 0, 0.85), false, 1)
-	draw_line(rectangle.position + Vector2(2, 2), Vector2(rectangle.end.x - 3, rectangle.position.y + 2), Color(0, 0, 0, 0.65))
-	draw_line(Vector2(rectangle.position.x + 2, rectangle.end.y - 3), rectangle.end - Vector2(3, 3), Color(0.86, 0.82, 0.68, 0.2))
+	if production_frame == null:
+		# A simple inset border keeps the unconfigured fallback readable.
+		draw_line(rectangle.position, Vector2(rectangle.end.x - 1, rectangle.position.y), Color("35382f"))
+		draw_line(rectangle.position, Vector2(rectangle.position.x, rectangle.end.y - 1), Color("35382f"))
+		draw_line(Vector2(rectangle.position.x, rectangle.end.y - 1), rectangle.end - Vector2.ONE, Color("9b9b8c"))
+		draw_line(Vector2(rectangle.end.x - 1, rectangle.position.y), rectangle.end - Vector2.ONE, Color("9b9b8c"))
 
 
 func make_label(font_size: int, light: bool) -> Label:

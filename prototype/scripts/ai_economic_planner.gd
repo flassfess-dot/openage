@@ -4,9 +4,9 @@ extends RefCounted
 const Commands := preload("res://scripts/commands.gd")
 
 
-# Cheap necessary conditions from plan(). Keep site generation conservative:
-# reservations, age saving and tactical priorities are still decided by plan().
-static func construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary, team: int, policy: Dictionary) -> Array:
+# Filter using the same legal observer data and spending rules as plan().
+# Worker reservations are still resolved by the final planner.
+static func construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary, team: int, policy: Dictionary, navigation: Dictionary = {}) -> Array:
 	var structures: Array = buildings.filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
 	if structures.any(func(entity): return String(entity.get("state", "complete")) == "foundation"):
 		return []
@@ -24,14 +24,26 @@ static func construction_site_kinds(kinds: Array, units: Array, buildings: Array
 	var complete: Array = structures.filter(func(entity): return String(entity.get("state", "complete")) == "complete")
 	var blocked_population := int(player_state.get("blocked_population_queues", 0)) > 0 or complete.any(func(entity): return not entity.get("production_queue", []).is_empty() and String(entity.get("production_queue", [])[0].get("status", "")) == "blocked_population")
 	var needs_housing := _needs_housing(player_state, int(policy.get("housing_buffer", 0)), blocked_population, _active_order_population_points(complete))
+	var own_units: Array = units.filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
+	var land_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("movement_domain", "land")) == "land")
+	var construction_workers: Array = land_workers.filter(func(entity): return String(entity.get("task", "idle")) in ["idle", "gather"])
+	var age_intent := _age_advance_intent(complete, player_state, policy, land_workers.size(), 0)
+	if age_intent.has("command"):
+		return []
+	var naval_scout_pending := _naval_scout_pending(own_units, complete, navigation)
 	var result: Array = []
 	for kind in kinds:
+		if naval_scout_pending and kind not in ["house", "dock"]:
+			continue
+		if bool(age_intent.get("block_construction", false)) and not _age_saving_build_allowed(String(kind), construction_workers, age_intent.get("cost", {}), policy.get("age_saving_construction_exceptions", [])):
+			continue
 		var same_kind: Array = structures.filter(func(entity): return String(entity.get("kind", "")) == String(kind))
 		if same_kind.size() >= int(policy.get("building_limits", {}).get(kind, 1)) or same_kind.any(func(entity): return String(entity.get("state", "complete")) != "complete"):
 			continue
 		if kind == "house" and not needs_housing:
 			continue
 		result.append(kind)
+	_sort_build_kinds(result, policy.get("construction_priorities", []))
 	return result
 
 
@@ -43,11 +55,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 	var idle_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("task", "idle")) == "idle" and not reserved_unit_ids.has(int(entity.get("id", -1))))
 	var own_structures: Array = snapshot.get("buildings", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
 	var own_buildings: Array = own_structures.filter(func(entity): return String(entity.get("state", "complete")) == "complete")
-	var water_frontier: Array = snapshot.get("navigation", {}).get("reachable_frontier", {}).get("water", [])
-	var naval_scout_pending := not water_frontier.is_empty() and own_buildings.any(func(building): return String(building.get("kind", "")) == "dock")
-	if naval_scout_pending:
-		naval_scout_pending = own_units.any(func(unit): return String(unit.get("movement_domain", "")) == "water" and bool(unit.get("components", {}).get("worker", {}).get("enabled", false)))
-		naval_scout_pending = naval_scout_pending and not own_units.any(func(unit): return String(unit.get("movement_domain", "")) == "water" and (bool(unit.get("combat_enabled", false)) or "combatant" in unit.get("behavior_tags", [])))
+	var naval_scout_pending := _naval_scout_pending(own_units, own_buildings, snapshot.get("navigation", {}))
 	var blocked_population := int(snapshot.get("player_state", {}).get("blocked_population_queues", 0)) > 0 or own_buildings.any(func(building): return not building.get("production_queue", []).is_empty() and String(building.get("production_queue", [])[0].get("status", "")) == "blocked_population")
 	var queued_population_points := _active_order_population_points(own_buildings)
 	var land_workers: Array = own_units.filter(func(entity): return bool(entity.get("components", {}).get("worker", {}).get("enabled", false)) and String(entity.get("movement_domain", "land")) == "land")
@@ -134,13 +142,8 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 		var building: Dictionary = building_value
 		if bool(building.get("harvestable", false)) and int(building.get("team", 0)) == team and int(building.get("amount", 0)) > 0:
 			resources.append(building)
-	var age_resource_types: Array = []
-	if bool(age_intent.get("saving", false)):
-		for resource_type_value in age_intent.get("cost", {}).keys():
-			age_resource_types.append(int(resource_type_value))
-		var age_resources := resources.filter(func(resource): return int(resource.get("resource_type_id", -1)) in age_resource_types)
-		if not age_resources.is_empty():
-			resources = age_resources
+	# Age saving limits expenditure, not gathering. Prerequisite buildings and
+	# food infrastructure still need wood even when the age itself costs food.
 	if not resources.is_empty():
 		var stockpile: Dictionary = snapshot.get("player_state", {})
 		var desired_stock := {0: 600 if int(stockpile.get("age", 100)) <= 100 else 450, 1: 350, 2: 150, 3: 150}
@@ -528,3 +531,28 @@ static func _plan_idle_trade(snapshot: Dictionary, tick: int, team: int, own_uni
 			result.append(Commands.SetTradeResourceCommand.new(tick, [int(trader.get("id", -1))], chosen_resource))
 		result.append(Commands.TradeCommand.new(tick, [int(trader.get("id", -1))], int(foreign_docks[0].get("id", -1))))
 	return result
+
+
+static func _naval_scout_pending(units: Array, buildings: Array, navigation: Dictionary) -> bool:
+	return (
+		not navigation.get("reachable_frontier", {}).get("water", []).is_empty()
+		and buildings.any(func(building): return String(building.get("kind", "")) == "dock")
+		and units.any(func(unit): return String(unit.get("movement_domain", "")) == "water" and bool(unit.get("components", {}).get("worker", {}).get("enabled", false)))
+		and not units.any(func(unit): return String(unit.get("movement_domain", "")) == "water" and (bool(unit.get("combat_enabled", false)) or "combatant" in unit.get("behavior_tags", [])))
+	)
+
+
+static func has_usable_build_site(kind: String, sites: Array, units: Array, buildings: Array, team: int, policy: Dictionary) -> bool:
+	var structures: Array = buildings.filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
+	for worker_value in units:
+		var worker: Dictionary = worker_value
+		if int(worker.get("team", 0)) != team or float(worker.get("hp", 0.0)) <= 0.0 or not bool(worker.get("components", {}).get("worker", {}).get("enabled", false)) or String(worker.get("movement_domain", "land")) != "land" or String(worker.get("task", "idle")) not in ["idle", "gather"]:
+			continue
+		if not worker.get("command_options", {}).get("build", []).any(func(option): return String(option.get("kind", "")) == kind and bool(option.get("accepted", false))):
+			continue
+		if kind in policy.get("structure_gap_fallback_kinds", []):
+			return not sites.is_empty()
+		for site in sites:
+			if _site_preserves_structure_gap(Vector2(site), kind, worker, structures, float(policy.get("minimum_structure_gap", 0.0))):
+				return true
+	return false

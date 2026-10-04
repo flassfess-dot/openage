@@ -56,7 +56,7 @@ func collect_commands(world, tick: int) -> Array:
 		# Task and stance are cheap fields and reject the overwhelming majority
 		# of marching/working units. Run metadata/tag eligibility only for actors
 		# that can actually acquire or validate a target on this tick.
-		if not _eligible_for_awareness(world, unit) or not _awareness_due(unit, tick, stance):
+		if not _awareness_due(unit, tick, stance) or not _eligible_for_awareness(world, unit):
 			continue
 		due_units.append(unit)
 	if due_units.is_empty():
@@ -211,14 +211,13 @@ func _candidate_index(targets: Array, tick: int) -> Dictionary:
 
 
 func _eligible_for_awareness(world, unit: Dictionary) -> bool:
-	if float(unit.get("hp", 0.0)) <= 0.0 or not bool(unit.get("combat_enabled", false)):
+	if int(unit.get("team", 0)) <= 0 or world.battle_over or float(unit.get("hp", 0.0)) <= 0.0 or not bool(unit.get("combat_enabled", false)):
 		return false
 	if world.entity_has_behavior_tag(unit, "scout") and int(unit.get("retaliation_target_id", -1)) < 0:
 		return false
 	if world.entity_is_static(unit) and String(unit.get("state", "complete")) != "complete":
 		return false
-	var team := int(unit.get("team", 0))
-	return team > 0 and not world.battle_over
+	return true
 
 
 func _target_remains_valid(world, unit: Dictionary, target: Variant) -> bool:

@@ -26,6 +26,6 @@ target_link_libraries(ror_pathfinding PRIVATE godot-cpp)
 set_target_properties(ror_pathfinding PROPERTIES
     PREFIX ""
     OUTPUT_NAME "ror_pathfinding.windows.template_release.x86_64"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../prototype/bin"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../prototype/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )

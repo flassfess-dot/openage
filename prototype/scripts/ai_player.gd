@@ -1,6 +1,7 @@
 class_name RoRAiPlayer
 extends RefCounted
 
+const NavigationPolicy := preload("res://scripts/ai_navigation_policy.gd")
 const EconomicPlanner := preload("res://scripts/ai_economic_planner.gd")
 const SourceAssignmentGroup := preload("res://scripts/source_ai_assignment_group.gd")
 const SourceAttackGroup := preload("res://scripts/source_ai_attack_group.gd")
@@ -38,6 +39,7 @@ var source_assignment_groups: Dictionary = {}
 var next_source_assignment_group_id: int = 1
 var source_city_plan
 var failed_gather_targets: Dictionary = {}
+var navigation_policy := NavigationPolicy.new()
 
 
 func _init(player_definition: Dictionary) -> void:
@@ -147,7 +149,7 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 			_prune_completed_assignment_groups()
 			last_military_tick = next_tick
 		return result
-	var skirmish_reserved_ids: Dictionary = {}
+	var skirmish_reserved_ids: Dictionary = navigation_policy.reserved_units(snapshot, next_tick)
 	if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
 		_remember_failed_gather_targets(snapshot)
 		var support_commands: Array = SupportPlanner.plan(snapshot, next_tick, team)
@@ -328,6 +330,11 @@ func presentation_options() -> Dictionary:
 		"include_worker_command_options": false,
 		"requested_build_site_kinds": economic_policy.get("construction_priorities", []).duplicate(),
 		"build_site_filter": Callable(self, "_construction_site_kinds"),
+		"build_site_filter_navigation": true,
+		"build_site_candidate_filter": Callable(self, "_has_usable_build_site"),
+		"build_site_cache_ticks": 1200,
+		"economic_production_options_only": true,
+		"recover_abandoned_foundations_only": true,
 		"planning_technology_ids": economic_policy.get("age_advance_technology_ids", []).duplicate(),
 		"maximum_build_sites_per_kind": 12,
 		"build_site_search_radius": 12,
@@ -335,8 +342,24 @@ func presentation_options() -> Dictionary:
 	}
 
 
-func _construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary) -> Array:
-	return EconomicPlanner.construction_site_kinds(kinds, units, buildings, player_state, team, economic_policy)
+func _construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary, navigation: Dictionary = {}) -> Array:
+	return EconomicPlanner.construction_site_kinds(kinds, units, buildings, player_state, team, economic_policy, navigation)
+
+
+func _has_usable_build_site(kind: String, sites: Array, units: Array, buildings: Array) -> bool:
+	return EconomicPlanner.has_usable_build_site(kind, sites, units, buildings, team, economic_policy)
+
+
+static func initial_decision_tick(player, players: Array) -> int:
+	var cadence := maxi(1, mini(int(player.economic_interval), int(player.military_interval)))
+	var peers: Array = players.filter(func(peer): return bool(peer.enabled) and maxi(1, mini(int(peer.economic_interval), int(peer.military_interval))) == cadence)
+	peers.sort_custom(func(left, right): return int(left.team) < int(right.team))
+	if peers.is_empty():
+		return 1 + posmod(int(player.team) - 1, cadence)
+	var rank := peers.find(player)
+	var anchor := posmod(int(peers[0].team) - 1, cadence)
+	# Equal intervals remain unchanged; only their stable initial phases differ.
+	return 1 + posmod(anchor + floori(float(maxi(0, rank) * cadence) / float(peers.size())), cadence)
 
 
 func canonical_state() -> Dictionary:
@@ -372,11 +395,14 @@ func canonical_state() -> Dictionary:
 		"next_source_assignment_group_id": next_source_assignment_group_id,
 		"source_assignment_groups": assignment_groups,
 		"failed_gather_targets": failed_gathers,
+		"navigation_failures": navigation_policy.canonical_state(),
 		"source_city_plan": source_city_plan.canonical_state() if source_city_plan != null else {},
 	}
 
 
 func restore_state(data: Dictionary) -> bool:
+	if not navigation_policy.restore_state(data.get("navigation_failures", [])):
+		return false
 	if int(data.get("team", team)) != team or String(data.get("profile", profile)) != profile:
 		return false
 	last_economic_tick = int(data.get("last_economic_tick", -1))

@@ -76,18 +76,7 @@ static func _exploration_positions(snapshot: Dictionary, team: int, decision_ind
 		var frontier_source: Dictionary = navigation.get("reachable_frontier", {}) if has_reachability else navigation.get("frontier", {})
 		var frontier: Array = frontier_source.get(domain, []).duplicate()
 		if not frontier.is_empty():
-			frontier.sort_custom(func(left, right):
-				var left_point := Vector2(left)
-				var right_point := Vector2(right)
-				var left_distance := left_point.distance_squared_to(home_center)
-				var right_distance := right_point.distance_squared_to(home_center)
-				if not is_equal_approx(left_distance, right_distance):
-					return left_distance > right_distance
-				if not is_equal_approx(left_point.y, right_point.y):
-					return left_point.y < right_point.y
-				return left_point.x < right_point.x
-			)
-			positions_by_domain[domain] = frontier[posmod(decision_index, mini(frontier.size(), 4))]
+			positions_by_domain[domain] = exploration_target(frontier, home_center, decision_index)
 			continue
 		var known_source: Dictionary = navigation.get("reachable", {}) if has_reachability else navigation
 		var known: Array = known_source.get(domain, [])
@@ -97,3 +86,22 @@ static func _exploration_positions(snapshot: Dictionary, team: int, decision_ind
 		if not snapshot.get("navigation", {}).has("reachable"):
 			positions_by_domain["land"] = points[posmod(decision_index + team, points.size())]
 	return positions_by_domain
+
+
+static func exploration_target(points: Array, origin: Vector2, decision_index: int) -> Vector2:
+	# Retain only the four ordered extrema used by the exploration policy.
+	var best: Array = []
+	for point_value in points:
+		var point := Vector2(point_value)
+		var slot := 0
+		while slot < best.size():
+			var current: Vector2 = best[slot]
+			var distance := point.distance_squared_to(origin)
+			var current_distance := current.distance_squared_to(origin)
+			if distance > current_distance and not is_equal_approx(distance, current_distance): break
+			if is_equal_approx(distance, current_distance) and (point.y < current.y or (is_equal_approx(point.y, current.y) and point.x < current.x)): break
+			slot += 1
+		if slot < 4:
+			best.insert(slot, point)
+			if best.size() > 4: best.pop_back()
+	return best[posmod(decision_index, best.size())] if not best.is_empty() else origin

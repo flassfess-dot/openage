@@ -10,6 +10,7 @@ func _initialize() -> void:
 	test_terrain_and_bounds()
 	test_dynamic_resource_and_building_occupancy()
 	test_surface_components()
+	test_marine_resource_occupancy()
 	test_walkable_rectangle_rejects_obstacles_and_edges()
 
 	if failures.is_empty():
@@ -79,3 +80,18 @@ func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 func assert_true(value: bool, context: String) -> void:
 	if not value:
 		failures.append("%s: expected true" % context)
+
+
+func test_marine_resource_occupancy() -> void:
+	var grid = NavigationGrid.new(Vector2i(12, 12))
+	grid.configure_terrain(func(_cell): return "water")
+	var fish := {"id": 9, "pos": Vector2(5.5, 5.5), "amount": 250, "behavior_tags": ["fish", "food", "static"]}
+	grid.rebuild([fish], [])
+	assert_true(grid.is_position_walkable_for(Vector2(5.5, 5.5), 0.75, "water"), "marine food does not obstruct a shipping channel")
+	assert_true(not grid.occupied_cells.has(Vector2i(5, 5)), "reconciliation does not recreate a fish obstacle")
+	fish["blocks_navigation"] = true
+	grid.rebuild([fish], [])
+	assert_equal(grid.is_walkable_for(Vector2i(5, 5), "water"), false, "explicit solid resource override is respected")
+	fish["blocks_navigation"] = false
+	grid.rebuild([fish], [])
+	assert_true(grid.is_walkable_for(Vector2i(5, 5), "water"), "explicit passability releases resource occupancy")

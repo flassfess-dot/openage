@@ -119,6 +119,11 @@ func verify_case(case_value: Dictionary, catalog) -> void:
 		assert_true(int(issued_by_team.get(team, 0)) > 0, "%s AI team %d issues an opening through legal knowledge" % [context, team])
 		assert_true(int(accepted_by_team.get(team, 0)) > 0, "%s AI team %d reaches the public command pipeline (rejected=%s)" % [context, team, rejected])
 	assert_true(not world.is_battle_over(), "%s remains active after the multiplayer opening tick" % context)
+	for zone in zones:
+		var team := int(zone["team"])
+		var dock: Dictionary = world.add_building(10000 + team, "dock", Vector2(zone["dock_position"]), team)
+		world.add_unit(team, "scout_ship", Vector2(zone["water_staging"]), false)
+		assert_true(world.free_spawn_position(dock, "fishing_boat") is Vector2, "%s team %d retains a real production exit with a stationary scout" % [context, team])
 	print("E5-006C multiplayer matrix %s passed: commands=%d accepted_teams=%d" % [context, submitted.size(), accepted_by_team.size()])
 
 

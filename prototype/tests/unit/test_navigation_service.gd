@@ -10,6 +10,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	test_deterministic_request_result_envelope()
+	test_result_history_is_bounded()
 	test_unreachable_result()
 	test_world_records_latest_request()
 	test_prevalidated_direct_result_matches_normal_result()
@@ -33,6 +34,18 @@ func test_deterministic_request_result_envelope() -> void:
 	assert_equal(first["status"], "resolved", "reachable request has explicit status")
 	assert_equal(first["grid_revision"], second["grid_revision"], "result records navigation revision")
 	assert_equal(service.result_for(1)["entity_id"], 7, "result can be correlated by request ID")
+
+
+func test_result_history_is_bounded() -> void:
+	var service := service_for_terrain("grass")
+	for index in range(NavigationService.MAX_OBSERVED_RESULTS * 3):
+		service.register_prevalidated_direct_path(7, Vector2(1.5, 1.5), Vector2(6.5, 6.5))
+	assert_equal(service.results_by_request.size(), NavigationService.MAX_OBSERVED_RESULTS, "path observations stay bounded in long matches")
+	assert_true(service.result_for(1).is_empty(), "old diagnostic requests expire")
+	assert_equal(service.result_for(service.next_request_id - 1)["entity_id"], 7, "latest request stays available")
+	var next_id := service.next_request_id
+	service.clear_observations()
+	assert_equal(service.register_prevalidated_direct_path(7, Vector2.ZERO, Vector2.ONE)["request_id"], next_id, "clearing diagnostics never resets authoritative request IDs")
 
 
 func test_unreachable_result() -> void:

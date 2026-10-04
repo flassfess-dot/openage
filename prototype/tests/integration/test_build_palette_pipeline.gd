@@ -29,12 +29,41 @@ func _initialize() -> void:
 			var mixed_ids: Array[int] = [int(escort["id"]), int(worker["id"])]
 			game.player_control_state.replace_or_add(mixed_ids, false)
 			game.refresh_hud_model()
-			assert_equal(String(game.hud_controls.active_train_commands[0].get("type", "")), "open_build_menu", "mixed group with a worker keeps construction in the HUD command grid")
+			assert_equal(String(game.hud_controls.active_train_commands[command_index(game.hud_controls.active_train_commands, "open_build_menu", "open_build_menu")].get("type", "")), "open_build_menu", "mixed group with a worker keeps construction in the HUD command grid")
 		var selected_worker_ids: Array[int] = [int(worker["id"])]
 		game.player_control_state.replace_or_add(selected_worker_ids, false)
 		game.refresh_hud_model()
-		assert_equal(String(game.hud_controls.active_train_commands[0].get("type", "")), "open_build_menu", "worker HUD starts from the source build-root action")
-		game.hud_controls.train_button.emit_signal("pressed")
+		assert_equal(String(game.hud_controls.active_train_commands[command_index(game.hud_controls.active_train_commands, "open_build_menu", "open_build_menu")].get("type", "")), "open_build_menu", "worker HUD starts from the source build-root action")
+		var key := InputEventKey.new()
+		key.pressed = true
+		key.keycode = KEY_B
+		game._unhandled_input(key)
+		assert_true(game.hud_controls.build_menu_open, "B opens the source construction layer")
+		key.keycode = KEY_R
+		game._unhandled_input(key)
+		assert_equal(game.pending_target_command, "repair", "R enters explicit Repair instead of resetting the match")
+		assert_true(not game.hud_controls.build_menu_open, "R restores actions while entering Repair")
+		key.keycode = KEY_ESCAPE
+		game._unhandled_input(key)
+		assert_equal(game.pending_target_command, "", "Escape cancels Repair targeting")
+		key.keycode = KEY_B
+		game._unhandled_input(key)
+		key.keycode = KEY_ESCAPE
+		game._unhandled_input(key)
+		assert_true(not game.hud_controls.build_menu_open, "Escape returns from construction to actions")
+		var repair_index := command_index(game.hud_controls.active_train_commands, "unit_action", "repair")
+		assert_true(repair_index >= 0, "worker has a distinct Repair action beside Build")
+		var build_root_index := command_index(game.hud_controls.active_train_commands, "open_build_menu", "open_build_menu")
+		assert_true(game.hud_controls.train_buttons[build_root_index].icon == game.resource_catalog.interface_icons.texture("command", 2), "Build uses the original first plain-hammer glyph")
+		assert_true(game.hud_controls.train_buttons[repair_index].icon == game.resource_catalog.interface_icons.texture("command", 0), "Repair uses the original second command glyph")
+		assert_equal(build_root_index, 0, "first button is Build without moving the icon")
+		assert_equal(repair_index, 1, "second button is Repair without moving the icon")
+		game.hud_controls.train_buttons[repair_index].emit_signal("pressed")
+		assert_equal(game.pending_target_command, "repair", "clicking the second icon enters Repair")
+		game.hud_controls.train_buttons[build_root_index].emit_signal("pressed")
+		assert_equal(game.pending_target_command, "", "clicking the first icon switches from Repair to the build layer")
+		var back_index := command_index(game.hud_controls.active_train_commands, "close_build_menu", "close_build_menu")
+		assert_true(game.hud_controls.train_buttons[back_index].icon == game.resource_catalog.interface_icons.texture("command", 10), "construction uses the original red cross to return to actions")
 		var build_index := command_index(game.hud_controls.active_train_commands, "build", "house")
 		assert_true(build_index >= 0, "source build-root opens House in the age-filtered palette")
 		if build_index >= 0:
@@ -44,6 +73,9 @@ func _initialize() -> void:
 			assert_true(button.icon != game.resource_catalog.interface_icons.texture("unit", 15), "House action cannot regress to the Catapult unit icon")
 			button.emit_signal("pressed")
 			assert_equal(game.pending_build_kind, "house", "HUD click enters placement mode")
+			assert_true(not game.hud_controls.active_train_commands.any(func(command): return command.get("type") == "build"), "building choice immediately restores the action layer")
+			game.refresh_hud_model()
+			assert_true(not game.hud_controls.active_train_commands.any(func(command): return command.get("type") == "build"), "an unchanged simulation snapshot cannot leave stale construction icons")
 
 			var target := valid_build_position(game, "house")
 			assert_true(target.x >= 0.0, "fixture has an explored valid House placement")

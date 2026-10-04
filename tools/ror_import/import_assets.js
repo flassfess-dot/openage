@@ -13,6 +13,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
+const PresentationDerivatives = require("./presentation_derivatives.js");
 
 const argv = process.argv.slice(2);
 
@@ -836,7 +837,7 @@ if (selectionPath) {
       const filename = `${item.name}${suffix}.png`;
       const requestedPaletteId = item.palette || 50500;
       const palette = palettes.get(requestedPaletteId) || palettes.get(50500);
-	  const components = cacheComponents("slp", sourceHash, palette, {archive: item.archive, id: item.id, frame, player: item.player || 1, paletteOverride: item.palette || null, source: requestedSource, name: item.name});
+	  const components = cacheComponents("slp", sourceHash, palette, {archive: item.archive, id: item.id, frame, player: item.player || 1, paletteOverride: item.palette || null, source: requestedSource, name: item.name, ...(item.derivative ? {derivative: item.derivative, derivativeHash: sha256(require.resolve("./presentation_derivatives.js")), framesPerAngle: item.derivedFramesPerAngle || 1} : {})});
       const key = cacheKey(components);
       if (currentKeys.has(filename)) {
         if (currentKeys.get(filename) !== key) throw new Error(`conflicting selection entries write ${filename}`);
@@ -851,12 +852,14 @@ if (selectionPath) {
       } else {
         let decoded;
         try {
-          decoded = decodeSlp(source, palettes, frame, item.player || 1, item.palette || null);
+          decoded = decodeSlp(source, palettes, item.derivedFramesPerAngle ? Math.floor(frame / item.derivedFramesPerAngle) : frame, item.player || 1, item.palette || null);
+          if (item.derivative) decoded = PresentationDerivatives.derive(decoded, item.derivative, frame, item.derivedFramesPerAngle || 1);
         } catch (error) {
           throw new Error(`failed to decode ${item.name} from ${item.archive}:${item.id}${requestedSource ? ` (${requestedSource})` : ""} frame ${frame}: ${error.message}`);
         }
         writePng(path.join(outputDir, filename), decoded.width, decoded.height, decoded.rgba);
         asset = {name: item.name, file: filename, archive: item.archive, source: requestedSource, id: item.id, frame, frameCount: decoded.frameCount, width: decoded.width, height: decoded.height, hotspot: [decoded.hotspotX, decoded.hotspotY], paletteId: decoded.paletteId, semanticPixels: decoded.semanticPixels};
+        if (item.derivative) asset.derivation = {kind: item.derivative, sourceFrame: item.derivedFramesPerAngle ? Math.floor(frame / item.derivedFramesPerAngle) : frame, framesPerAngle: item.derivedFramesPerAngle || 1};
         cacheMisses += 1;
       }
       asset.fileSha256 = sha256(path.join(outputDir, filename));

@@ -3,6 +3,7 @@ extends "res://scripts/environment_preview.gd"
 const Settings := preload("res://scripts/skirmish_settings.gd")
 var generated: Dictionary = {}
 var profile_choice: OptionButton
+var size_choice: OptionButton
 var seed_input: SpinBox
 var profiles: Array = []
 
@@ -13,6 +14,9 @@ func _ready() -> void:
 	catalog.enable_environment_pack()
 	_build_map_ui()
 	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--map-size="):
+			for index in range(Settings.catalog()["map_sizes"].size()):
+				if Settings.catalog()["map_sizes"][index]["id"] == argument.trim_prefix("--map-size="): size_choice.select(index)
 		if argument.begins_with("--seed="): seed_input.value = int(argument.trim_prefix("--seed="))
 		if argument.begins_with("--map-type="):
 			for index in range(profiles.size()):
@@ -43,6 +47,10 @@ func _build_map_ui() -> void:
 	for profile in profiles: profile_choice.add_item(String(profile.get("name", profile["id"])))
 	profile_choice.select(3)
 	row.add_child(profile_choice)
+	size_choice = OptionButton.new()
+	for entry in Settings.catalog()["map_sizes"]: size_choice.add_item(String(entry["name"]))
+	size_choice.select(1)
+	row.add_child(size_choice)
 	seed_input = SpinBox.new()
 	seed_input.min_value = 1
 	seed_input.max_value = 2147483647
@@ -71,6 +79,7 @@ func _build_map_ui() -> void:
 func generate_map() -> void:
 	var settings := Settings.default_settings()
 	settings["map_type_id"] = profiles[profile_choice.selected]["id"]
+	settings["map_size_id"] = Settings.catalog()["map_sizes"][size_choice.selected]["id"]
 	settings["seed"] = int(seed_input.value)
 	for i in range(8): settings["players"][i]["enabled"] = i < 4
 	generated = Settings.build(settings)
@@ -90,6 +99,7 @@ func generate_map() -> void:
 	for y in range(map_size.y):
 		for x in range(map_size.x): cells[Vector2i(x, y)] = int(data["terrain_ids"][y * map_size.x + x])
 	objects.append_array(data["scenery"])
+	objects.append_array(data.get("cliff_obstructions", []))
 	for resource_index in range(data["resources"].size()):
 		var resource: Dictionary = data["resources"][resource_index]
 		var presentation: Dictionary = resource.duplicate(true)

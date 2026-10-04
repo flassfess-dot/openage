@@ -22,6 +22,20 @@
     "disabled_rule": "capture the same control when source command legality disables it",
     "comparison_rule": "map observed executable pixels to source frames; never infer semantic states from frame index alone"
   },
+  "worker_menu_user_capture": {
+    "date": "2026-10-03",
+    "provenance": "User-supplied original AoE1 Rise of Rome screenshots; executable identity not independently verified from screenshots",
+    "resolution": [1680, 1050],
+    "civilization": "Macedonians",
+    "age": "Stone Age",
+    "artifacts": [
+      {"layer": "actions", "path": "res://qa/source-worker-menu/original-actions-1680x1050.png", "sha256": "84069747177f5544ed3600eb602080c10c92858e208e5174df822123cdc1244d"},
+      {"layer": "construction", "path": "res://qa/source-worker-menu/original-construction-1680x1050.png", "sha256": "5c19dcf69aa58d015e89ffeab0decc7a05dc1acf86c2fb5d3e9e48f2a3c5d0b4"}
+    ],
+    "source_id": 50721,
+    "glyph_mapping": {"build": 2, "repair": 0, "delete_or_back": 10},
+    "scope": "Worker menu layers and normal glyphs; action bindings corrected from the user observation: first plain hammer opens Build, second icon enters Repair. Other scenes, native resolutions and interaction states remain pending"
+  },
   "candidate_families": [
     {
       "id": "command_54x54",

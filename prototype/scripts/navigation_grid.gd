@@ -218,7 +218,13 @@ func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []
 func resource_blocks_navigation(resource: Dictionary) -> bool:
 	if resource.has("blocks_navigation"):
 		return bool(resource["blocks_navigation"])
-	return "carcass" not in resource.get("behavior_tags", [])
+	return default_resource_blocks_navigation(resource.get("behavior_tags", []))
+
+
+static func default_resource_blocks_navigation(behavior_tags: Array) -> bool:
+	# Food floating in water must not close shipping channels as a solid tile.
+	# Explicit runtime flags still take priority for custom solid resources.
+	return "carcass" not in behavior_tags and "fish" not in behavior_tags
 
 
 func _append_occupants(target: Dictionary, cells: Array, category: String, entity_id: int) -> void:
@@ -415,3 +421,14 @@ func can_place(cells: Array, movement_domain: String, restriction_id: int = -1) 
 		if not is_walkable_for(cell, movement_domain, restriction_id):
 			return false
 	return true
+
+
+func native_walkability_mask(domain: String, restriction_id: int, probe: Variant = null) -> PackedByteArray:
+	var mask := PackedByteArray()
+	mask.resize(size.x * size.y)
+	for y in range(size.y):
+		for x in range(size.x):
+			mask[y * size.x + x] = int(is_walkable_for(Vector2i(x, y), domain, restriction_id))
+	if probe != null:
+		probe.increment("navigation.native_mask_evaluated_cells", mask.size())
+	return mask

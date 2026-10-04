@@ -28,12 +28,15 @@ public:
         const PackedFloat32Array &radii,
         const PackedFloat32Array &clearances,
         const PackedInt32Array &priorities,
-        const PackedFloat32Array &health);
+        const PackedFloat32Array &health,
+        const PackedByteArray &solid_animals = PackedByteArray());
     Vector4 calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta);
     int64_t get_revision() const;
     int32_t get_last_expanded_nodes() const;
     bool get_last_path_was_direct() const;
     bool is_configured() const;
+    int32_t component_id(const Vector2i &cell, double clearance_radius = 0.0);
+    bool cells_connected(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
 
 protected:
     static void _bind_methods();
@@ -56,12 +59,15 @@ private:
     std::vector<int32_t> parents_;
     std::vector<uint32_t> seen_generation_;
     std::vector<FrontierEntry> frontier_;
+    std::unordered_map<uint64_t, std::vector<int32_t>> components_by_radius_;
+    const std::vector<int32_t> &components(double clearance_radius);
     std::vector<int32_t> movement_ids_;
     std::vector<Vector2> movement_positions_;
     std::vector<float> movement_radii_;
     std::vector<float> movement_clearances_;
     std::vector<int32_t> movement_priorities_;
     std::vector<float> movement_health_;
+    std::vector<uint8_t> movement_solid_animals_;
     std::unordered_map<int32_t, int32_t> movement_index_by_id_;
     std::unordered_map<int64_t, std::vector<int32_t>> movement_buckets_;
     std::vector<int32_t> movement_candidates_;

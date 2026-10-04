@@ -27,9 +27,11 @@ var cached_environment_revision := -1
 var cached_environment_animated: Array = []
 var cached_environment_projection: Variant = null
 var performance_probe: Variant = null
+var cached_building_depth_index: Dictionary = {}
 
 
 func clear_caches() -> void:
+	cached_building_depth_index.clear()
 	cached_resource_signature = 0
 	cached_resource_drawables.clear()
 	cached_resource_projection = null
@@ -80,9 +82,8 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	source_environment = environment_projection["animated"]
 	_observe_stage("environment_cache", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
-	var building_by_id: Dictionary = {}
+	cached_building_depth_index = _building_depth_index(source_buildings)
 	for building in source_buildings:
-		building_by_id[int(building.get("id", -1))] = building
 		if building["hp"] <= 0.0 and String(building.get("death_phase", "removed")) not in ["dying", "ruin"]:
 			continue
 		if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, building, true):
@@ -94,12 +95,17 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		var building_elevation := float(building.get("elevation", 0.0))
 		var is_interior_resource := bool(building.get("harvestable", false))
 		var base_sub_order := int(building_info.get("graphic_layer", 20)) * 1000 - (100 if is_interior_resource else 0)
-		drawables.append(RenderItem.create("building", RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, building_info, building_elevation, Color.WHITE, 1.0, base_sub_order))
+		drawables.append(RenderItem.create("building", RenderItem.Layer.DECAL if is_interior_resource else RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, building_info, building_elevation, Color.WHITE, 1.0, base_sub_order))
 		var building_part_index := 0
 		for part in building_info.get("composite_parts", []):
 			building_part_index += 1
 			var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + (100 if is_interior_resource else 0) + building_part_index
-			drawables.append(RenderItem.create("building_part", RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order))
+			var upright := String(part.get("presentation_layer", "")) == "upright"
+			var part_item := RenderItem.create("building_part", RenderItem.Layer.UNIT_BUILDING if upright or not is_interior_resource else RenderItem.Layer.DECAL, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order)
+			var depth_offset: Vector2 = part.get("depth_world_offset", Vector2.ZERO)
+			part_item["depth_world_offset"] = depth_offset
+			part_item["screen_y"] = Vector2(world_to_screen.call(building_position + depth_offset)).y
+			drawables.append(part_item)
 		if selected_id_lookup.has(building_id) or preview_id_lookup.has(building_id):
 			drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, building_screen, building_id, building, building_info, building_elevation, RenderItem.color_for_team(int(building.get("team", 0))), 1.0, 1))
 	_observe_stage("buildings", stage_started)
@@ -164,9 +170,8 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			var render_position: Vector2 = previous_position.lerp(unit["pos"], alpha)
 			var unit_screen: Vector2 = world_to_screen.call(render_position)
 			var unit_sort_screen := unit_screen
-			var gathered_building: Variant = building_by_id.get(int(unit.get("resource_id", -1)))
-			if gathered_building != null and bool(gathered_building.get("harvestable", false)) and String(unit.get("task", "")) == "gather":
-				unit_sort_screen.y = world_to_screen.call(Vector2(gathered_building.get("pos", Vector2.ZERO))).y
+			var depth_offset := _unit_building_depth_offset(render_position, unit_screen.y, cached_building_depth_index, world_to_screen)
+			unit_sort_screen.y += depth_offset
 			var frame_info := _frame_info(frame_info_provider, "unit", unit)
 			var stable_id := int(unit["id"])
 			var elevation := float(unit.get("elevation", 0.0))
@@ -176,6 +181,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			var unit_base_sub_order := int(frame_info.get("graphic_layer", 20)) * 1000
 			var unit_item := RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, unit_base_sub_order)
 			unit_item["screen_y"] = unit_sort_screen.y
+			unit_item["depth_offset"] = depth_offset
 			drawables.append(unit_item)
 			var unit_part_index := 0
 			for part_value in frame_info.get("composite_parts", []):
@@ -184,6 +190,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + unit_part_index
 				var unit_part_item := RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order)
 				unit_part_item["screen_y"] = unit_sort_screen.y
+				unit_part_item["depth_offset"] = depth_offset
 				drawables.append(unit_part_item)
 			var highlighted: bool = selected_id_lookup.has(stable_id) or bool(unit.get("selected", false)) or preview_id_lookup.has(stable_id)
 			if death_phase == "alive" and highlighted:
@@ -279,6 +286,9 @@ static func _is_ambient_actor(item: Dictionary) -> bool:
 
 
 static func environment_layer(item: Dictionary) -> int:
+	# Compatibility for generated or saved shoals carrying the old scenery role.
+	if item.get("decoration_key", "") == "ror_shallows" or item.get("asset_name", "") == "aoe2_temperate:ror_shallows" or int(item.get("graphic_id", -1)) == 503:
+		return RenderItem.Layer.DECAL
 	match String(item.get("presentation_layer", "scenery")):
 		"decal":
 			return RenderItem.Layer.DECAL
@@ -393,7 +403,7 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 			animated.append(item)
 			continue
 		var item_id := int(item.get("id", -1))
-		var item_signature := hash([item_id, item.get("graphic_id", -1), item.get("asset_name", ""), item.get("position", Vector2.ZERO), item.get("source_frame", 0), item.get("presentation_layer", "scenery"), item.get("source_elevation", 0.0), item.get("source_unit_id", -1)])
+		var item_signature := hash([item_id, item.get("graphic_id", -1), item.get("asset_name", ""), item.get("position", Vector2.ZERO), item.get("source_frame", 0), item.get("presentation_layer", "scenery"), item.get("source_elevation", 0.0), item.get("source_unit_id", -1), item.get("cliff_screen_offset", Vector2.ZERO)])
 		wanted[item_id] = {"signature": item_signature, "item": item}
 		signature = signature * 31 + item_signature
 	cached_environment_revision = revision
@@ -486,7 +496,8 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 			if projection_changed:
 				var static_screen: Vector2 = world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO)))
 				drawable["screen_position"] = static_screen
-				drawable["screen_y"] = static_screen.y
+				var sort_offset := Vector2(drawable.get("depth_world_offset", Vector2.ZERO))
+				drawable["screen_y"] = Vector2(world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO)) + sort_offset)).y
 			continue
 		var resolved_position: Vector2 = position
 		if not resolved_position.is_equal_approx(Vector2(drawable.get("world_anchor", resolved_position))):
@@ -494,7 +505,13 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		drawable["world_anchor"] = resolved_position
 		var screen_position: Vector2 = world_to_screen.call(resolved_position)
 		drawable["screen_position"] = screen_position
-		drawable["screen_y"] = screen_position.y
+		if kind in ["unit", "unit_part"]:
+			drawable["depth_offset"] = _unit_building_depth_offset(resolved_position, screen_position.y, cached_building_depth_index, world_to_screen)
+		drawable["screen_y"] = screen_position.y + float(drawable.get("depth_offset", 0.0))
+	if projection_changed:
+		var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
+		cached_resource_projection = projection
+		cached_environment_projection = projection
 	if moved:
 		var static_drawables: Array = []
 		var moving_drawables: Array = []
@@ -532,3 +549,36 @@ func _observe_stage(stage: String, started: int) -> void:
 	if performance_probe != null:
 		performance_probe.observe_microseconds("presentation.draw.world_prepare.%s" % stage, Time.get_ticks_usec() - started)
 
+
+
+static func _unit_building_depth_offset(position: Vector2, screen_y: float, index: Dictionary, project: Callable) -> float:
+	var adjusted := screen_y
+	for building in index.get(Vector2i((position / 4.0).floor()), []):
+		if bool(building.get("harvestable", false)) or float(building.get("hp", 0.0)) <= 0.0:
+			continue
+		var center := Vector2(building["pos"])
+		var half := Vector2(building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5)))
+		var offset := position - center
+		if absf(offset.x) > half.x + 1.5 or absf(offset.y) > half.y + 1.5:
+			continue
+		if offset.x >= half.x or offset.y >= half.y:
+			adjusted = maxf(adjusted, Vector2(project.call(center)).y + 0.01)
+	return adjusted - screen_y
+
+
+static func _building_depth_index(buildings: Array) -> Dictionary:
+	var index: Dictionary = {}
+	for building in buildings:
+		if bool(building.get("harvestable", false)) or float(building.get("hp", 0.0)) <= 0.0:
+			continue
+		var center := Vector2(building["pos"])
+		var extent := Vector2(building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))) + Vector2.ONE * 1.5
+		var first := Vector2i(((center - extent) / 4.0).floor())
+		var last := Vector2i(((center + extent) / 4.0).floor())
+		for y in range(first.y, last.y + 1):
+			for x in range(first.x, last.x + 1):
+				var key := Vector2i(x, y)
+				if not index.has(key):
+					index[key] = []
+				index[key].append(building)
+	return index

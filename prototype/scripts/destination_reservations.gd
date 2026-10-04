@@ -23,6 +23,15 @@ func clear() -> void:
 	_invalidate_search_cursor()
 
 
+func restore_state(records: Dictionary) -> void:
+	# The compact durable records own the truth; rebuild all query indices.
+	var restored := records.duplicate(true)
+	clear()
+	for id in restored:
+		var record: Dictionary = restored[id]
+		_store(int(id), record["position"], float(record["radius"]), int(record["group_id"]))
+
+
 func release(entity_id: int) -> void:
 	var released := reservations.has(entity_id)
 	if reservation_cells.has(entity_id):

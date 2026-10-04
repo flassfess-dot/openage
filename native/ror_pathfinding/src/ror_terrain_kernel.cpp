@@ -84,7 +84,7 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
         const int ox = static_cast<int>(std::floor(sample.x));
         const int oy = static_cast<int>(std::floor(sample.y));
         const Vector2 linear = sample - Vector2(ox, oy);
-        const Vector2 fraction(smooth(0.18, 0.82, linear.x), smooth(0.18, 0.82, linear.y));
+        const Vector2 fraction(smooth(0.30, 0.70, linear.x), smooth(0.30, 0.70, linear.y));
         Weights weights;
         double linear_land = 0.0, linear_total = 0.0, land_sum = 0.0, water_sum = 0.0;
         for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
@@ -101,7 +101,7 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
         }
         if (land_sum + water_sum < 0.000001) { weights = Weights(); weights.add(fallback, 1.0); return weights; }
         const double coverage = land_sum > 0.0 && water_sum > 0.0 ?
-            smooth(0.48, 0.56, linear_land / std::max(linear_total, 0.000001)) : (land_sum > 0.0 ? 1.0 : 0.0);
+            smooth(0.495, 0.535, linear_land / std::max(linear_total, 0.000001)) : (land_sum > 0.0 ? 1.0 : 0.0);
         for (int i = 0; i < weights.count; ++i) {
             weights.values[i] *= water(weights.ids[i]) ? (water_sum > 0.0 ? (1.0 - coverage) / water_sum : 0.0) :
                 (land_sum > 0.0 ? coverage / land_sum : 0.0);

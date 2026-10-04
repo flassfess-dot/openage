@@ -88,7 +88,11 @@ func manual_and_automatic_deposit(catalog) -> void:
 	check(worker["task"] == "idle" and worker["resource_id"] == -1, "manual deposit stops instead of resuming old gathering")
 	world.assign_command_gather([worker], int(berries["id"]))
 	for step in range(5): world.gather(int(berries["id"]), worker)
+	var probe = preload("res://scripts/performance_probe.gd").new()
+	world.pathfinder.set_performance_probe(probe)
 	check(world.begin_resource_return(worker), "automatic return is available")
+	check(int(probe.counters.get("navigation.path_queries", 0)) == 0, "automatic deposit at the current slot performs no redundant route search")
+	check(worker["diagnostic_reason"] != "no_path", "an already reached deposit slot never becomes an unreachable order")
 	worker["pos"] = worker["dropoff_position"]
 	world.gathering_system.update_dropoff_order(worker, 0.05)
 	check(worker["task"] == "gather" and worker["resource_id"] == berries["id"], "automatic deposit continues normal gathering")

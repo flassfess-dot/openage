@@ -31,7 +31,7 @@ static func weights(point: Vector2, provider: Callable, pack, fallback: int) -> 
 	var sample := point + bend - Vector2(0.5, 0.5)
 	var origin := Vector2i(floori(sample.x), floori(sample.y))
 	var linear := sample - Vector2(origin)
-	var fraction := Vector2(smoothstep(0.18, 0.82, linear.x), smoothstep(0.18, 0.82, linear.y))
+	var fraction := Vector2(smoothstep(0.30, 0.70, linear.x), smoothstep(0.30, 0.70, linear.y))
 	var result: Dictionary = {}
 	var linear_land := 0.0
 	var linear_total := 0.0
@@ -55,7 +55,7 @@ static func weights(point: Vector2, provider: Callable, pack, fallback: int) -> 
 	if land + water < 0.000001: return {fallback: 1.0}
 	# A contour of the interpolated land field rounds capes and coves across
 	# cell boundaries. Separately smoothing each cell edge makes a staircase.
-	var coverage := smoothstep(0.48, 0.56, linear_land / maxf(linear_total, 0.000001)) if land > 0.0 and water > 0.0 else (1.0 if land > 0.0 else 0.0)
+	var coverage := smoothstep(0.495, 0.535, linear_land / maxf(linear_total, 0.000001)) if land > 0.0 and water > 0.0 else (1.0 if land > 0.0 else 0.0)
 	for id in result:
 		result[id] *= ((1.0 - coverage) / water if water > 0.0 else 0.0) if id in [1, 4, 22] else (coverage / land if land > 0.0 else 0.0)
 	return result

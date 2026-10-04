@@ -1,6 +1,7 @@
 class_name RoRRandomMapLandscape
 extends RefCounted
 
+const CliffChain := preload("res://scripts/cliff_chain.gd")
 const Replay := preload("res://scripts/replay_system.gd")
 const Decorations := preload("res://scripts/random_map_decorations.gd")
 const Navigation := preload("res://scripts/random_map_navigation.gd")
@@ -76,7 +77,7 @@ static func build_fields(size: Vector2i, terrain: Array[int], starts: Array[Vect
 		height = mini(height, maxi(0, (coast[i] - 2) / 3))
 		if not is_inf(start_distance): height = mini(height, maxi(0, floori((start_distance - 5.0) / 3.0)))
 		cell_levels[i] = height
-		moisture[i] = clampf(moisture[i] + float(recipe["moisture_bias"]) + maxf(0.0, 0.16 - float(coast[i]) * 0.012) - ridge * 0.13, 0.0, 1.0)
+		moisture[i] = clampf(moisture[i] + float(recipe["moisture_bias"]) + maxf(0.0, 0.16 - float(coast[i]) * 0.012), 0.0, 1.0)
 		var suitability := woodland[i] * 0.78 + moisture[i] * 0.22
 		potential[i] = int(suitability > float(recipe["forest_threshold"]) and start_distance > 6.0 and coast[i] > 1)
 	var levels: Array[int] = []
@@ -106,17 +107,16 @@ static func rock_ridges(size: Vector2i, terrain: Array[int], starts: Array[Vecto
 	var levels: Array[int] = fields["vertex_levels"]
 	# Native RoR cliff strips occupy three cells along their axis. Lay whole
 	# connected strips, reserving their complete footprint before placing economy.
-	for cell_value in existing_cells:
-		var cell: Vector2i = cell_value
-		if not cells.has(cell) or used.has(cell): continue
-		var near_start := false
-		for start in starts:
-			if start.distance_squared_to(Vector2(cell)) < 12.0 * 12.0: near_start = true
-		if near_start: continue
-		var along_y := cells.has(cell + Vector2i.DOWN) or cells.has(cell + Vector2i.UP)
-		var axis := Vector2i.DOWN if along_y else Vector2i.RIGHT
-		if (cell.y if along_y else cell.x) % 3 != 1: continue
-		_append_cliff_strip(scenery, cells, used, cell, axis, size, terrain, levels, seed)
+	# Determine direction from the original centreline, before expanding any
+	# sprite footprint. Expanded 3x3 cells used to turn X ridges into Y sprites.
+	for run in _source_ridge_runs(cells):
+		var axis: Vector2i = run["axis"]
+		for center in run["centers"]:
+			var near_start := false
+			for start in starts:
+				if start.distance_squared_to(Vector2(center)) < 12.0 * 12.0: near_start = true
+			if near_start or used.has(center): continue
+			_append_cliff_strip(scenery, cells, used, center, axis, size, terrain, levels, seed)
 	# Sparse, reproducible geological ridges on raised inland ground. A short
 	# chain always has open ends; starting areas and shore approaches stay clear.
 	var spacing := 24
@@ -127,9 +127,15 @@ static func rock_ridges(size: Vector2i, terrain: Array[int], starts: Array[Vecto
 			if int(levels[y * (size.x + 1) + x]) < 2 or int(fields["coast_distance"][y * size.x + x]) < 10: continue
 			var axis := Vector2i.RIGHT if random_at(anchor, seed ^ 0xCD662) > 0.5 else Vector2i.DOWN
 			var count := 3 + int(random_at(anchor, seed ^ 0xE139) * 3.0)
+			var chain: Array[Vector2i] = [anchor]
+			var bend := count >= 4 and random_at(anchor, seed ^ 0x7135B) > 0.5
+			for step in range(1, count):
+				# An optional stair turn uses both native corner pieces. Validate
+				# the whole bent footprint before reserving any of its cells.
+				var direction := (Vector2i.UP if axis == Vector2i.RIGHT else Vector2i.LEFT) if bend and step == 2 else axis
+				chain.append(chain.back() + direction * CliffChain.STRIDE)
 			var valid := true
-			for step in range(count):
-				var center := anchor + axis * step * 3
+			for center in chain:
 				for start in starts:
 					if start.distance_squared_to(Vector2(center)) < 26.0 * 26.0: valid = false
 				for dy in range(-1, 2):
@@ -139,8 +145,13 @@ static func rock_ridges(size: Vector2i, terrain: Array[int], starts: Array[Vecto
 							valid = false
 						elif terrain[cell.y * size.x + cell.x] in WATER or cells.has(cell): valid = false
 			if not valid: continue
-			for step in range(count):
-				_append_cliff_strip(scenery, cells, used, anchor + axis * step * 3, axis, size, terrain, levels, seed)
+			for center in chain:
+				_append_cliff_strip(scenery, cells, used, center, axis, size, terrain, levels, seed)
+	var variations: Dictionary = {}
+	for item in scenery:
+		var center := Vector2i(Vector2(item["position"]).floor())
+		variations[center] = int(random_at(center, seed) * 10000.0)
+	CliffChain.apply(scenery, variations)
 	var ordered: Array[Vector2i] = []
 	ordered.assign(cells.keys())
 	ordered.sort_custom(func(a, b): return a.y < b.y or (a.y == b.y and a.x < b.x))
@@ -148,11 +159,11 @@ static func rock_ridges(size: Vector2i, terrain: Array[int], starts: Array[Vecto
 
 
 static func _append_cliff_strip(scenery: Array, cells: Dictionary, used: Dictionary, center: Vector2i, axis: Vector2i, size: Vector2i, terrain: Array[int], levels: Array[int], seed: int) -> void:
-	var variants := [1, 2, 19] if axis == Vector2i.RIGHT else [3, 4, 15]
+	var variants := [1, 2] if axis == Vector2i.RIGHT else [4, 5]
 	var frame := int(variants[int(random_at(center, seed) * 10000.0) % variants.size()])
 	var occupied: Array[Vector2i] = []
 	scenery.append({"id": -700000 - scenery.size(), "kind": "cliff", "position": Vector2(center) + Vector2(0.5, 0.5),
-		"source_unit_id": 264, "graphic_id": 107, "asset_name": "graphic_107", "source_frame": frame,
+		"source_unit_id": 264, "graphic_id": 107, "asset_name": "cliff_grounded", "source_frame": frame,
 		"presentation_layer": "scenery", "presentation_bounds": [-2.0, -2.0, 2.0, 2.0], "cliff_axis": axis, "occupied_cells": occupied})
 	for dy in range(-1, 2):
 		for dx in range(-1, 2):
@@ -166,18 +177,16 @@ static func _append_cliff_strip(scenery: Array, cells: Dictionary, used: Diction
 
 static func paint_ground(map_data: Dictionary, fields: Dictionary) -> void:
 	var terrain: Array[int] = map_data["terrain_ids"]
-	var size: Vector2i = map_data["size"]
-	var levels: Array[int] = map_data["vertex_levels"]
 	for i in range(terrain.size()):
 		if int(terrain[i]) in WATER: continue
-		var height := levels[(i / size.x) * (size.x + 1) + i % size.x]
 		var moisture := float(fields["moisture"][i])
 		var rock := float(fields["geology"][i])
-		if rock > float(fields["recipe"]["rock_threshold"]) and height > 0:
-			terrain[i] = 1000 if rock > float(fields["recipe"]["rock_threshold"]) + 0.10 else 1001
-		elif moisture < 0.40 and height > 0:
+		# Sparse exposed patches depend on soil and moisture, never elevation.
+		if rock > maxf(0.86, float(fields["recipe"]["rock_threshold"])) and moisture < 0.38:
+			terrain[i] = 1000
+		elif moisture < 0.24 and rock > 0.72:
 			terrain[i] = 1002
-		elif moisture < 0.48 and height > 0:
+		elif moisture < 0.32 and rock > 0.78:
 			terrain[i] = 1001
 		else:
 			terrain[i] = 0
@@ -234,7 +243,7 @@ static func forests(map_data: Dictionary, fields: Dictionary, exclusions: Dictio
 static func bind_tree(resource: Dictionary, fields: Dictionary, size: Vector2i, seed: int) -> void:
 	var cell := Vector2i(resource["position"])
 	var index := cell.y * size.x + cell.x
-	var pine := float(fields["moisture"][index]) < 0.47 or int(fields["vertex_levels"][cell.y * (size.x + 1) + cell.x]) >= 2
+	var pine := float(fields["moisture"][index]) < 0.47
 	var palette: Dictionary = theme()["tree_palettes"]
 	var family: Dictionary = palette["conifer" if pine else "broadleaf"]
 	var variants: Array = family["native"]
@@ -244,6 +253,7 @@ static func bind_tree(resource: Dictionary, fields: Dictionary, size: Vector2i, 
 	var native_share := lerpf(float(palette["native_share_min"]), float(palette["native_share_max"]), float(fields["geology"][index]))
 	resource.erase("environment_asset")
 	resource.erase("environment_variant")
+	resource.erase("tree_condition")
 	if random_at(cell, seed ^ 0x421CDF) >= native_share:
 		resource["environment_asset"] = family["imported"]
 		resource["environment_variant"] = int(random_at(cell, seed ^ 0x71873) * 10000.0) % int(family["imported_variants"])
@@ -271,7 +281,7 @@ static func forest_accents(map_data: Dictionary, fields: Dictionary, occupied: D
 		if resource.get("kind", "") != "tree": continue
 		var cell := Vector2i(resource["position"])
 		var i := cell.y * size.x + cell.x
-		if float(fields["moisture"][i]) < 0.47 or int(fields["vertex_levels"][cell.y * (size.x + 1) + cell.x]) >= 2: continue
+		if float(fields["moisture"][i]) < 0.47: continue
 		if random_at(cell, seed ^ 0x251AD) >= float(accents["forest_chance"]) or not _clear_neighborhood(cell, accent_cells, spacing): continue
 		_bind_accent(resource, accents, seed)
 		accent_cells[cell] = true
@@ -430,3 +440,56 @@ static func paint_resource_grounds(map_data: Dictionary) -> void:
 				var i := y * size.x + x
 				if terrain[i] in WATER or forest[i] != 0: continue
 				terrain[i] = 1000 if Vector2i(x, y) == cell else 1001
+
+
+static func _source_ridge_runs(source_cells: Dictionary) -> Array:
+	var pending := source_cells.duplicate()
+	var result: Array = []
+	var origins: Array = source_cells.keys()
+	origins.sort_custom(func(a, b): return a.y < b.y or (a.y == b.y and a.x < b.x))
+	for origin in origins:
+		if not pending.has(origin): continue
+		var group: Array[Vector2i] = [origin]
+		pending.erase(origin)
+		var cursor := 0
+		while cursor < group.size():
+			var cell := group[cursor]
+			cursor += 1
+			for dy in range(-2, 3):
+				for dx in range(-2, 3):
+					var next := cell + Vector2i(dx, dy)
+					if pending.has(next):
+						pending.erase(next)
+						group.append(next)
+		var xs: Array[int] = []
+		var ys: Array[int] = []
+		for cell in group:
+			xs.append(cell.x)
+			ys.append(cell.y)
+		xs.sort()
+		ys.sort()
+		var along_x: bool = xs.back() - xs.front() >= ys.back() - ys.front()
+		var axis := Vector2i.RIGHT if along_x else Vector2i.DOWN
+		var along: Array[int] = xs if along_x else ys
+		var across: Array[int] = ys if along_x else xs
+		var normal: int = across[across.size() / 2]
+		var first: int = along.front() + posmod(1 - along.front(), 3)
+		var centers: Array[Vector2i] = []
+		for value in range(first, along.back() + 1, 3):
+			centers.append(Vector2i(value, normal) if along_x else Vector2i(normal, value))
+		if not centers.is_empty(): result.append({"axis": axis, "centers": centers})
+	return result
+
+
+static func paint_cliff_grounds(map_data: Dictionary) -> void:
+	var size: Vector2i = map_data["size"]
+	var terrain: Array[int] = map_data["terrain_ids"]
+	var occupied: Dictionary = {}
+	for cell in map_data.get("cliff_cells", []): occupied[cell] = true
+	for cell in occupied:
+		if terrain[cell.y * size.x + cell.x] in WATER: continue
+		var interior := true
+		for neighbor in [Vector2i.UP, Vector2i.DOWN, Vector2i.LEFT, Vector2i.RIGHT]:
+			if not occupied.has(cell + neighbor): interior = false
+		# Local scree beneath the native footprint, blended by terrain borders.
+		terrain[cell.y * size.x + cell.x] = 1000 if interior else 1001

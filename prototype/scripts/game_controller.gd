@@ -266,6 +266,8 @@ func _dispatch_command(command) -> Dictionary:
 			rejection_reason = _apply_repair(command)
 		"tribute":
 			rejection_reason = _apply_tribute(command)
+		"set_rally_point":
+			rejection_reason = _apply_set_rally_point(command)
 		"train":
 			rejection_reason = _apply_train(command)
 		"research":
@@ -621,8 +623,10 @@ func _apply_board(command) -> String:
 	var transport = simulation_world.find_unit(int(command.transport_id))
 	if transport == null or (int(command.issuer_id) > 0 and not simulation_world.are_teams_allied(int(command.issuer_id), int(transport.get("team", 0)))):
 		return "invalid_transport"
-	_detach_units_from_formations(passengers)
-	return simulation_world.board_units(passengers, transport)
+	var rejection: String = simulation_world.transport_system.assign_board_order(passengers, transport)
+	if rejection.is_empty():
+		_detach_units_from_formations(passengers)
+	return rejection
 
 
 func _apply_unload(command) -> String:
@@ -704,6 +708,24 @@ func _apply_train(command) -> String:
 		var order = simulation_world.enqueue_unit_production(int(building["id"]), int(command.team), String(command.unit_type))
 		return "" if order != null else String(simulation_world.last_production_failure if not simulation_world.last_production_failure.is_empty() else "train_rejected")
 	return "" if simulation_world.train_unit(command.team, command.unit_type, command.target) else String(simulation_world.last_production_failure if not simulation_world.last_production_failure.is_empty() else "train_rejected")
+
+
+func _apply_set_rally_point(command) -> String:
+	var producers: Array = []
+	for entity_id in command.unit_ids:
+		var building = simulation_world.find_building(int(entity_id))
+		if building == null or float(building.get("hp", 0.0)) <= 0.0 or String(building.get("state", "")) != "complete":
+			return "invalid_production_building"
+		if int(command.issuer_id) > 0 and int(building.get("team", 0)) != int(command.issuer_id):
+			return "issuer_team_mismatch"
+		if simulation_world.get_unit_production_options(int(entity_id), int(building.get("team", 0))).is_empty():
+			return "invalid_production_building"
+		producers.append(building)
+	if producers.is_empty():
+		return "invalid_production_building"
+	for building in producers:
+		simulation_world.set_rally_point(int(building["id"]), command.target)
+	return ""
 
 
 func _apply_research(command) -> String:
@@ -820,9 +842,15 @@ func _combat_entities_for_ids(entity_ids: Array[int], issuer_id: int = 0) -> Arr
 			selected.append(entity)
 	return selected
 
-func _assign_formation(selected: Array, anchor: Vector2, formation_name: String, requested_forward: Vector2 = Vector2.ZERO) -> bool:
+func _assign_formation(selected: Array, anchor: Vector2, formation_name: String, requested_forward: Vector2 = Vector2.ZERO, partition: bool = true) -> bool:
 	if selected.is_empty():
 		return false
+	if partition:
+		var partitions := _formation_partitions(selected)
+		if partitions.size() > 1:
+			var resolved := false
+			for members in partitions: resolved = _assign_formation(members, anchor, formation_name, requested_forward, false) or resolved
+			return resolved
 	var formation_probe_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var clamped_anchor := anchor
 	clamped_anchor.x = clampf(clamped_anchor.x, 1.0, simulation_world.get_map_size().x - 1.0)
@@ -1016,6 +1044,29 @@ func _set_group_lifecycle_state(group, state: String, reason: String) -> void:
 			"revision": int(group.lifecycle_revision),
 		})
 
+func _formation_partitions(members: Array) -> Array:
+	var maximums := {}
+	for unit in members:
+		var config := "%d:%s:%d" % [int(unit.get("team", 0)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))]
+		maximums[config] = maxf(float(maximums.get(config, 0)), float(unit.get("footprint_radius", 0.3)))
+	var groups := {}
+	for unit in members:
+		var team := int(unit.get("team", 0))
+		var domain := String(unit.get("movement_domain", "land"))
+		var restriction := int(unit.get("terrain_restriction", -1))
+		var config := "%d:%s:%d" % [team, domain, restriction]
+		var planner = simulation_world.movement_system.knowledge.planner(simulation_world, team)
+		var region: int = planner.component_id(Vector2i(Vector2(unit["pos"]).floor()), domain, restriction, maximums[config])
+		var key := "%s:%d" % [config, region] if region >= 0 else "unit:%d" % int(unit["id"])
+		if not groups.has(key): groups[key] = []
+		groups[key].append(unit)
+	var keys := groups.keys()
+	keys.sort()
+	var result := []
+	for key in keys: result.append(groups[key])
+	return result
+
+
 func _configure_group_route(group, members: Array, start_center: Vector2) -> Dictionary:
 	var maximum_radius := 0.0
 	var movement_domain := String(members[0].get("movement_domain", "land")) if not members.is_empty() else "land"
@@ -1027,7 +1078,19 @@ func _configure_group_route(group, members: Array, start_center: Vector2) -> Dic
 			homogeneous_movement = false
 	var corridor_plan := {"route": [], "modes": [], "required_width": 1, "has_compression": false}
 	if homogeneous_movement:
-		corridor_plan = FormationCorridor.plan(start_center, group.anchor, group.formation_type, members.size(), group.spacing, maximum_radius, simulation_world.pathfinder, simulation_world.navigation_grid, movement_domain, restriction_id)
+		var planner = simulation_world.movement_system.knowledge.planner(simulation_world, int(members[0].get("team", 0)))
+		var start_cell := Vector2i(start_center.floor())
+		var region: int = planner.component_id(Vector2i(Vector2(members[0]["pos"]).floor()), movement_domain, restriction_id, maximum_radius)
+		if region < 0 or planner.component_id(start_cell, movement_domain, restriction_id, maximum_radius) != region:
+			var best := INF
+			for member in members:
+				var position := Vector2(member["pos"])
+				var distance := position.distance_squared_to(start_center)
+				if distance < best:
+					best = distance
+					start_cell = Vector2i(position.floor())
+			start_center = Vector2(start_cell) + Vector2(0.5, 0.5)
+		corridor_plan = FormationCorridor.plan(start_center, group.anchor, group.formation_type, members.size(), group.spacing, maximum_radius, planner, planner.grid, movement_domain, restriction_id)
 	group.route.assign(corridor_plan["route"])
 	group.corridor_modes.assign(corridor_plan["modes"])
 	group.required_corridor_width = int(corridor_plan["required_width"])

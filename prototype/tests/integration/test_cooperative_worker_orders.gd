@@ -57,6 +57,7 @@ func verify_shared_gather(catalog, kind: String) -> void:
 	for step in range(1400):
 		world.update_units(0.05, 1, 2)
 		world.rebuild_spatial_index()
+		world.update_fog_of_war()
 		var harvesting: Array = workers.filter(func(worker): return String(worker.get("gather_stage", "")) == "harvesting" and int(worker.get("resource_id", -1)) == int(resource["id"]))
 		peak_active = maxi(peak_active, harvesting.size())
 		for left_index in range(harvesting.size()):
@@ -101,6 +102,7 @@ func verify_depleted_cluster_handoff(catalog) -> void:
 	for step in range(1400):
 		world.update_units(0.05, 1, 2)
 		world.rebuild_spatial_index()
+		world.update_fog_of_war()
 		if int(worker.get("gather_cycles", 0)) > 1:
 			break
 	if int(worker.get("gather_cycles", 0)) <= 1 or int(worker.get("resource_id", -1)) != int(neighbor["id"]):
@@ -121,6 +123,7 @@ func verify_shared_construction(catalog) -> void:
 	for step in range(1400):
 		world.update_units(0.05, 1, 2)
 		world.rebuild_spatial_index()
+		world.update_fog_of_war()
 		for builder_id in foundation.get("builders", {}).keys():
 			contributing_workers[int(builder_id)] = true
 		peak_builders = maxi(peak_builders, workers.filter(func(worker): return String(worker.get("task", "")) == "build" and Vector2(worker.get("pos", Vector2.ZERO)).distance_to(Vector2(foundation["pos"])) < 3.0).size())
@@ -162,6 +165,7 @@ func verify_completed_builder_handoff(catalog) -> void:
 	for unused in range(40):
 		world.update_units(0.05, 1, 2)
 		world.rebuild_spatial_index()
+		world.update_fog_of_war()
 		if String(first.get("state", "")) == "complete" and int(worker.get("target_building_id", -1)) == int(second.get("id", -1)):
 			break
 	if String(first.get("state", "")) != "complete" or String(worker.get("task", "")) != "build" or int(worker.get("target_building_id", -1)) != int(second.get("id", -1)):
@@ -216,6 +220,7 @@ func verify_generated_shared_gather(catalog, kind: String) -> void:
 	for step in range(1400):
 		world.update_units(0.05, 1, 2)
 		world.rebuild_spatial_index()
+		world.update_fog_of_war()
 		if workers.all(func(worker): return int(worker.get("gather_cycles", 0)) > 0):
 			break
 	var working_count := workers.filter(func(worker): return int(worker.get("gather_cycles", 0)) > 0).size()
@@ -261,6 +266,7 @@ func verify_generated_shared_construction(catalog) -> void:
 	for step in range(1400):
 		world.update_units(0.05, 1, 2)
 		world.rebuild_spatial_index()
+		world.update_fog_of_war()
 		for worker_id in foundation.get("builders", {}).keys():
 			contributing[int(worker_id)] = true
 		if String(foundation.get("state", "")) == "complete":

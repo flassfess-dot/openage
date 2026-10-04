@@ -59,6 +59,7 @@ func snapshot(world, fog, team: int, probe: Variant = null) -> Dictionary:
 	entry["surface_revision"] = int(grid.surface_revision)
 	entry["exploration_revision"] = int(fog.exploration_revision_for_player(team))
 	entry["reach_signature"] = reach["signature"]
+	_region_targets(world, team, entry)
 	entries[team] = entry
 	return entry["result"]
 
@@ -72,6 +73,7 @@ func _new_entry(size: Vector2i) -> Dictionary:
 		"known": {},
 		"buckets": buckets,
 		"result": {
+			"cell_geometry": true,
 			"land": buckets["land"],
 			"water": buckets["water"],
 			"frontier": {"land": buckets["frontier_land"], "water": buckets["frontier_water"]},
@@ -164,3 +166,53 @@ func _reachable_components(world, team: int) -> Dictionary:
 	water_keys.sort()
 	components["signature"] = [land_keys, water_keys]
 	return components
+
+
+func _region_targets(world, team: int, entry: Dictionary) -> void:
+	var planner = world.movement_system.knowledge.planner(world, team)
+	var units: Array = world.get_units().filter(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0)) > 0)
+	var signatures := {}
+	var unit_regions := {}
+	for unit in units:
+		var domain := String(unit.get("movement_domain", "land"))
+		var restriction := int(unit.get("terrain_restriction", -1))
+		var radius := float(unit.get("footprint_radius", 0.3))
+		var config := "%s:%d:%.8f" % [domain, restriction, radius]
+		var region: int = planner.component_id(Vector2i(Vector2(unit["pos"]).floor()), domain, restriction, radius)
+		unit_regions[int(unit["id"])] = "%s:%d" % [config, region] if region >= 0 else "unit:%d" % int(unit["id"])
+		signatures[config] = [domain, restriction, radius]
+	var keys := signatures.keys()
+	keys.sort()
+	var signature := [planner.grid.revision, entry["exploration_revision"], keys]
+	if entry.get("region_signature") != signature:
+		var by_region := {}
+		for config in keys:
+			var values: Array = signatures[config]
+			for point in entry["buckets"]["frontier_" + String(values[0])]:
+				var region: int = planner.component_id(Vector2i(point), values[0], values[1], values[2])
+				if region < 0: continue
+				var key := "%s:%d" % [config, region]
+				if not by_region.has(key): by_region[key] = []
+				by_region[key].append(point)
+		entry["result"]["frontier_by_region"] = by_region
+		entry["region_signature"] = signature
+	var recovery := {}
+	for unit in units:
+		if String(unit.get("diagnostic_reason", "")) not in ["no_path", "no_group_route"]: continue
+		var origin := Vector2(unit["pos"])
+		var cell := Vector2i(origin.floor())
+		var best: Variant = null
+		var best_distance := INF
+		for y in range(cell.y - 2, cell.y + 3):
+			for x in range(cell.x - 2, cell.x + 3):
+				var next := Vector2i(x, y)
+				if not planner.grid.contains(next) or not entry["known"].has(y * world.map_size.x + x): continue
+				var point := Vector2(next) + Vector2(0.5, 0.5)
+				var distance := origin.distance_squared_to(point)
+				if distance <= 0.01 or distance >= best_distance: continue
+				if planner.cells_connected(cell, next, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), float(unit.get("footprint_radius", 0.3))):
+					best = point
+					best_distance = distance
+		if best != null: recovery[int(unit["id"])] = best
+	entry["result"]["unit_regions"] = unit_regions
+	entry["result"]["recovery_positions"] = recovery

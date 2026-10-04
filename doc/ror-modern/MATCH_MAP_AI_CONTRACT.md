@@ -72,3 +72,11 @@ Space pauses; comma/period change the fixed-tick speed; R restarts the same defi
 - Full suite at integration: `108 passed, 0 failed`.
 
 I11 is `INTEGRATED`, not `PARITY`. Under the 2026-09-14 core-first rebaseline, E3 first revalidates the common gameplay command/AI boundary, E4 supplies the complete civilization content consumed by it, and E5 expands skirmish setup, random-map algorithms/biomes/fairness, economic/naval AI, difficulty and multi-team diplomacy. Long load/stability gates belong to E6. Scenario actions, imported RoR scenarios and campaigns are deliberately postponed to E7 so they consume a stable engine instead of driving it.
+
+## Normal-resource age progression regression (2026-10-03)
+
+Reserving the resources for the next age restricts spending, not the set of deposits workers may gather. Filtering that set to the age's cost types caused a Stone Age deadlock: food accumulation continued, while the wood required for prerequisite buildings could never be replenished. Legal observer-known wood and other resources remain available for economic assignments during saving; existing production/construction spending restrictions remain in force.
+
+`test_ai_player.gd` checks prerequisite wood gathering while reserving food for Tool Age or food/gold for Iron Age. `test_standard_resource_ai_progression.gd` uses a generated compact Grasslands match (seed 41721), ordinary 200 food/200 wood, standard difficulty, no free AI resources and no prebuilt prerequisites. The AI completes its own Barracks/Granary and Tool Age at tick 14580. The passive opponent receives extra HP solely to prevent victory from terminating the economy regression early.
+
+The longer diagnostic in `profile_skirmish_age_progression.gd` also reaches Bronze Age from ordinary starting resources. This confirms removal of the age-saving deadlock; it is not an economy-speed or late-game combat parity claim. Evidence is under `prototype/qa/economy-fixes-20261003/`.

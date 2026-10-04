@@ -105,6 +105,10 @@ func test_simulation_routes_around_town_center() -> void:
 	world.set_gamespec({"units": {"town_center": {"hit_points": 600.0, "selection_radius": [1.5, 1.5, 2.0]}}})
 	world.reset_game()
 	var unit: Dictionary = world.add_unit(1, "clubman", Vector2(9.5, 12.5), false)
+	# This geometry regression covers a known obstacle; unknown routing has its own suite.
+	for y in range(world.map_size.y):
+		for x in range(world.map_size.x):
+			world.fog_of_war.reveal_explored_cell(1, Vector2i(x, y))
 	world.assign_command_move([unit], Vector2(15.5, 12.5))
 	assert_true(unit["path"].size() >= 2, "town center forces a routed path")
 	var previous := Vector2i(floori(unit["pos"].x), floori(unit["pos"].y))

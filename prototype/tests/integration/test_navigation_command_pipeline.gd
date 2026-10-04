@@ -103,6 +103,7 @@ func test_water_formation_move_uses_naval_paths() -> void:
 func test_unreachable_formation_move_is_rejected_without_engine_errors() -> void:
 	var world = SimulationWorld.new(Vector2i(10, 10))
 	world.navigation_grid.configure_terrain(func(_cell): return "water")
+	reveal_map(world)
 	var first: Dictionary = world.add_unit(1, "clubman", Vector2(2.5, 2.5), false)
 	var second: Dictionary = world.add_unit(1, "clubman", Vector2(3.5, 2.5), false)
 	var controller = GameController.new(world)
@@ -119,6 +120,7 @@ func test_unreachable_formation_move_is_rejected_without_engine_errors() -> void
 func test_unreachable_command_is_explicitly_rejected() -> void:
 	var world = SimulationWorld.new(Vector2i(10, 10))
 	world.navigation_grid.configure_terrain(func(_cell): return "water")
+	reveal_map(world)
 	var unit: Dictionary = world.add_unit(1, "clubman", Vector2(2.5, 2.5), false)
 	world.add_unit(2, "clubman", Vector2(8.5, 8.5), false)
 	var controller = GameController.new(world)
@@ -146,3 +148,9 @@ func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 func assert_true(value: bool, context: String) -> void:
 	if not value:
 		failures.append("%s: expected true" % context)
+
+
+func reveal_map(world) -> void:
+	for y in range(world.map_size.y):
+		for x in range(world.map_size.x):
+			world.fog_of_war.reveal_explored_cell(1, Vector2i(x, y))

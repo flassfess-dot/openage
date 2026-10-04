@@ -1,6 +1,8 @@
 class_name RoRMatchBootstrap
 extends RefCounted
 
+const SceneryObstructions := preload("res://scripts/scenery_obstructions.gd")
+
 const RESOURCE_IDS := {"food": 0, "wood": 1, "stone": 2, "gold": 3}
 
 
@@ -12,6 +14,7 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 	world.reset_game(false, true)
 	world.configure_map_data(map_data)
 	var obstructions: Array = definition.get("static_obstructions", []).duplicate(true)
+	obstructions.append_array(SceneryObstructions.collect(map_data.get("scenery", []) + definition.get("presentation_environment", [])))
 	var rendered_cliff_cells: Dictionary = {}
 	for cliff in map_data.get("cliff_obstructions", []):
 		obstructions.append(cliff.duplicate(true))

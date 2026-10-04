@@ -3,9 +3,13 @@ extends RefCounted
 
 const Coordinates := preload("res://scripts/coordinates.gd")
 const EntityComponents := preload("res://scripts/entity_components.gd")
+const OrderPipeline := preload("res://scripts/order_pipeline.gd")
+const BoardingDetour := preload("res://scripts/boarding_detour.gd")
+const StuckRecovery := preload("res://scripts/stuck_recovery.gd")
 
 const BOARDING_MARGIN: float = 1.25
 const MAX_UNLOAD_DISTANCE: float = 4.5
+const MAX_BOARDING_RETRIES: int = 6
 
 var world_ref: WeakRef
 var world:
@@ -72,7 +76,7 @@ func board(passengers: Array, transport: Dictionary) -> String:
 	return ""
 
 
-func validate_board(passengers: Array, transport: Dictionary) -> String:
+func validate_board(passengers: Array, transport: Variant, require_range: bool = true) -> String:
 	if transport == null or float(transport.get("hp", 0.0)) <= 0.0 or not is_transport(transport):
 		return "invalid_transport"
 	if passengers.is_empty():
@@ -99,10 +103,175 @@ func validate_board(passengers: Array, transport: Dictionary) -> String:
 		var allowed_domains: Array = cargo.get("allowed_domains", ["land"])
 		if String(passenger.get("movement_domain", "land")) not in allowed_domains:
 			return "passenger_domain_forbidden"
-		var maximum_distance := float(passenger.get("footprint_radius", 0.3)) + float(transport.get("footprint_radius", 0.75)) + BOARDING_MARGIN
-		if Vector2(passenger.get("pos", Vector2.ZERO)).distance_to(Vector2(transport.get("pos", Vector2.ZERO))) > maximum_distance + 0.0001:
+		if require_range and not is_in_boarding_range(passenger, transport):
 			return "passenger_not_in_range"
 	return ""
+
+
+func assign_board_order(passengers: Array, transport: Dictionary) -> String:
+	var rejection := validate_board(passengers, transport, false)
+	if not rejection.is_empty():
+		return rejection
+	var transport_id := int(transport["id"])
+	var selected_ids: Dictionary = {}
+	for passenger in passengers:
+		selected_ids[int(passenger["id"])] = true
+	var waiting := 0
+	for unit in world.units:
+		if float(unit.get("hp", 0.0)) > 0.0 and String(unit.get("task", "")) == "board" and int(unit.get("target_id", -1)) == transport_id and not selected_ids.has(int(unit["id"])):
+			waiting += 1
+	if passenger_count(transport) + waiting + passengers.size() > int(transport["components"]["cargo"]["capacity"]):
+		return "transport_full"
+	var ordered := passengers.duplicate()
+	ordered.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
+	var plans: Array = []
+	var ready: Array = []
+	for passenger in ordered:
+		if is_in_boarding_range(passenger, transport):
+			ready.append(passenger)
+			continue
+		var approach: Variant = _boarding_approach(passenger, transport)
+		if not approach is Vector2:
+			return "boarding_shore_unreachable"
+		plans.append({"passenger": passenger, "position": approach})
+	# Resolve the whole selection before replacing any existing order.
+	for plan in plans:
+		var passenger: Dictionary = plan["passenger"]
+		world.halt_unit(passenger, "new_board_order")
+		passenger["task"] = "board"
+		passenger["target_id"] = transport_id
+		OrderPipeline.begin(passenger, "board", transport_id, transport["pos"])
+		_set_boarding_approach(passenger, transport, plan["position"])
+	if not ready.is_empty():
+		return board(ready, transport)
+	return ""
+
+
+func is_in_boarding_range(passenger: Dictionary, transport: Dictionary) -> bool:
+	var distance := float(passenger.get("footprint_radius", 0.3)) + float(transport.get("footprint_radius", 0.75)) + BOARDING_MARGIN
+	return Vector2(passenger["pos"]).distance_squared_to(Vector2(transport["pos"])) <= (distance + 0.0001) * (distance + 0.0001)
+
+
+func advance_board_order(passenger: Dictionary, delta: float, ready: Array) -> bool:
+	var transport: Variant = world.find_unit(int(passenger.get("target_id", -1)))
+	var rejection := validate_board([passenger], transport, false)
+	if not rejection.is_empty():
+		world.halt_unit(passenger, rejection)
+		return false
+	if is_in_boarding_range(passenger, transport):
+		OrderPipeline.transition(passenger, OrderPipeline.PERFORM_ACTION)
+		ready.append(passenger)
+		return false
+	var approach: Variant = passenger.get("boarding_position")
+	var ship_moved := Vector2(passenger.get("boarding_transport_position", transport["pos"])).distance_squared_to(Vector2(transport["pos"])) > 0.0625
+	var approach_blocked := not approach is Vector2
+	if not approach_blocked and int(passenger.get("boarding_navigation_revision", -1)) != world.navigation_grid.revision:
+		approach_blocked = not world.navigation_grid.is_position_walkable_for(approach, float(passenger["footprint_radius"]), String(passenger["movement_domain"]), int(passenger["terrain_restriction"]))
+		passenger["boarding_navigation_revision"] = world.navigation_grid.revision
+	var reached_old_approach: bool = approach is Vector2 and passenger.get("path", []).is_empty()
+	if ship_moved or approach_blocked or reached_old_approach:
+		if ship_moved:
+			passenger.erase("boarding_failed_positions")
+		approach = _boarding_approach(passenger, transport)
+		if not approach is Vector2 or not _set_boarding_approach(passenger, transport, approach):
+			world.halt_unit(passenger, "boarding_shore_unreachable")
+			return false
+	var moving: bool = world.movement_system.move_unit(passenger, delta)
+	if is_in_boarding_range(passenger, transport):
+		OrderPipeline.transition(passenger, OrderPipeline.PERFORM_ACTION)
+		ready.append(passenger)
+	elif int(passenger["stuck_ticks"]) >= StuckRecovery.STOP_TICK:
+		var attempts := int(passenger.get("boarding_detour_attempts", 0)) + 1
+		passenger["boarding_detour_attempts"] = attempts
+		var goal: Variant = _boarding_approach(passenger, transport, false)
+		var detour: Array[Vector2] = BoardingDetour.find(world, passenger, goal) if goal is Vector2 and attempts <= MAX_BOARDING_RETRIES else []
+		if not detour.is_empty() and world.assign_unit_waypoints(passenger, detour, detour.back(), true):
+			passenger["task"] = "board"
+			passenger["boarding_position"] = goal
+			OrderPipeline.begin(passenger, "board", int(transport["id"]), transport["pos"])
+			OrderPipeline.transition(passenger, OrderPipeline.MOVE_INTO_RANGE)
+			StuckRecovery.reset(passenger)
+			return moving
+		var failed: Array = passenger.get("boarding_failed_positions", [])
+		failed.append(passenger["boarding_position"])
+		passenger["boarding_failed_positions"] = failed
+		var alternate: Variant = _boarding_approach(passenger, transport) if failed.size() < MAX_BOARDING_RETRIES else null
+		if alternate is Vector2:
+			passenger["task"] = "board"
+			OrderPipeline.begin(passenger, "board", int(transport["id"]), transport["pos"])
+			if not _set_boarding_approach(passenger, transport, alternate):
+				world.halt_unit(passenger, "boarding_shore_unreachable")
+		else:
+			world.halt_unit(passenger, "boarding_shore_unreachable")
+	return moving
+
+
+func finish_boarding_tick(ready: Array) -> void:
+	if ready.is_empty():
+		return
+	# Removing units mutates the activity registry. Embark only after its update loop.
+	var by_transport: Dictionary = {}
+	for passenger in ready:
+		var transport_id := int(passenger["target_id"])
+		if not by_transport.has(transport_id):
+			by_transport[transport_id] = []
+		by_transport[transport_id].append(passenger)
+	var transport_ids := by_transport.keys()
+	transport_ids.sort()
+	for transport_id in transport_ids:
+		var passengers: Array = by_transport[transport_id]
+		var transport: Variant = world.find_unit(int(transport_id))
+		var rejection := validate_board(passengers, transport)
+		if rejection.is_empty():
+			board(passengers, transport)
+		else:
+			for passenger in passengers:
+				world.halt_unit(passenger, rejection)
+
+
+func _set_boarding_approach(passenger: Dictionary, transport: Dictionary, approach: Vector2) -> bool:
+	passenger["boarding_position"] = approach
+	passenger["boarding_transport_position"] = Vector2(transport["pos"])
+	passenger["boarding_navigation_revision"] = world.navigation_grid.revision
+	StuckRecovery.reset(passenger)
+	return world.assign_unit_destination(passenger, approach, false)
+
+
+func _boarding_approach(passenger: Dictionary, transport: Dictionary, avoid_failed: bool = true) -> Variant:
+	var radius := float(passenger["footprint_radius"])
+	var distance := radius + float(transport["footprint_radius"]) + BOARDING_MARGIN - 0.1
+	var center := Vector2(transport["pos"])
+	var origin := Vector2(passenger["pos"])
+	var domain := String(passenger["movement_domain"])
+	var restriction := int(passenger["terrain_restriction"])
+	var grid = world.navigation_grid
+	var component: int = grid.surface_component_id(Vector2i(origin), domain, restriction)
+	var candidates: Array[Vector2] = []
+	for y in range(maxi(0, floori(center.y - distance)), mini(world.map_size.y - 1, floori(center.y + distance)) + 1):
+		for x in range(maxi(0, floori(center.x - distance)), mini(world.map_size.x - 1, floori(center.x + distance)) + 1):
+			var cell := Vector2i(x, y)
+			if grid.surface_component_id(cell, domain, restriction) != component:
+				continue
+			var positions: Array[Vector2] = [Vector2(cell) + Vector2(0.5, 0.5)]
+			# Diagonal beaches may have a usable cell edge just inside boarding range.
+			var inset := minf(0.49, radius + 0.02)
+			positions.append(Vector2(clampf(center.x, x + inset, x + 1.0 - inset), clampf(center.y, y + inset, y + 1.0 - inset)))
+			for position in positions:
+				if position.distance_squared_to(center) <= distance * distance and grid.is_position_walkable_for(position, radius, domain, restriction):
+					candidates.append(position)
+	candidates.sort_custom(func(left, right):
+		var left_distance := origin.distance_squared_to(left)
+		var right_distance := origin.distance_squared_to(right)
+		return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and (left.y < right.y or (is_equal_approx(left.y, right.y) and left.x < right.x)))
+	)
+	var planner = world.movement_system.knowledge.planner(world, int(passenger["team"]))
+	for candidate in candidates:
+		if avoid_failed and passenger.get("boarding_failed_positions", []).any(func(position): return candidate.distance_squared_to(Vector2(position)) < 0.01):
+			continue
+		var route: Array[Vector2] = planner.find_path(origin, candidate, domain, restriction, radius)
+		if not route.is_empty() and route.back().distance_squared_to(candidate) <= 0.0144:
+			return candidate
+	return null
 
 
 func unload(transports: Array, target: Vector2, requested_passenger_ids: Array = []) -> String:

@@ -100,7 +100,9 @@ static func footprint_cells(spec: Dictionary, variant: int, position: Vector2) -
 	var bounds: Array = spec["ground_bounds"][variant]
 	# Upright rocks and wood use their base; projecting their height onto the
 	# ground would incorrectly exclude the bank behind a coastal rock.
-	if spec.get("role", "") == "scenery": bounds = [-0.35, -0.35, 0.35, 0.35]
+	if spec.get("role", "") == "scenery":
+		var radius := 0.499 if spec["key"] in ["boulders", "ror_rocks", "coastal_rocks", "ror_sea_rocks"] else 0.35
+		bounds = [-radius, -radius, radius, radius]
 	var result: Array[Vector2i] = []
 	if spec.has("ground_masks"):
 		var covered: Dictionary = {}
@@ -175,6 +177,10 @@ static func generate(data: Dictionary, fields: Dictionary, reserved: Dictionary,
 	var cursors: Dictionary = {}
 	var by_pass: Array = [{}, {}, {}]
 	var by_key: Dictionary = {}
+	var family_counts: Dictionary = {}
+	var land_cells := 0
+	for id in data["terrain_ids"]:
+		if id not in [1, 4, 22]: land_cells += 1
 	for spec in palette():
 		by_key[spec["key"]] = spec
 		var rule: Dictionary = spec["placement"]
@@ -212,6 +218,11 @@ static func generate(data: Dictionary, fields: Dictionary, reserved: Dictionary,
 				if roll <= 0.0:
 					selected = spec
 					break
+			var selected_rule: Dictionary = selected["placement"]
+			if rng.randf() > float(selected_rule.get("occurrence", 1.0)): continue
+			var family := String(selected_rule.get("budget_family", selected["key"]))
+			var budget := maxi(1, land_cells / int(selected_rule.get("area_per_item", 1)))
+			if int(family_counts.get(family, 0)) >= budget: continue
 			var position := Vector2(cell) + Vector2(0.5, 0.5)
 			if pass_index != 0: position += Vector2(rng.randf_range(-0.32, 0.32), rng.randf_range(-0.32, 0.32))
 			var spacing := float(selected["placement"]["spacing"])
@@ -226,6 +237,7 @@ static func generate(data: Dictionary, fields: Dictionary, reserved: Dictionary,
 			if chosen < 0: continue
 			cursors[selected["key"]] = (chosen + 1) % selected["frames"].size()
 			_remember(position, spacing, buckets)
+			family_counts[family] = int(family_counts.get(family, 0)) + 1
 			var key: String = selected["key"]
 			var source: String = selected.get("source_game", "aoe2")
 			result.append({"id": -800000 - result.size(), "position": position, "asset_name": "aoe2_temperate:" + key,

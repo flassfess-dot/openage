@@ -34,29 +34,30 @@ static func build(map_type: Dictionary, size: Vector2i, starts: Array[Vector2]) 
 				continue
 			var resource_rule: Dictionary = SOURCE_RESOURCE_KINDS[source_id]
 			var kind := String(resource_rule["kind"])
-			var near_group := not first_kind.has(kind)
-			first_kind[kind] = true
-			var lower := maxf(5.0, float(group.get("min_distance_to_players", 7)))
-			var upper := maxf(lower, float(group.get("max_distance_to_players", 18)))
-			if near_group:
-				upper = minf(upper, 16.0)
-			if topology == "islands":
-				upper = minf(upper, source_start_radius + 3.0)
-				lower = minf(lower, upper)
-			clusters.append({
-				"category": String(resource_rule.get("category", "resource")),
-				"kind": kind,
-				"count": maxi(1, int(group.get("objects_per_group", 1))),
-				"radius": maxf(1.0, float(group.get("group_radius", 2))),
-				"amount": int(resource_rule.get("amount", 0)),
-				"owner_start": [start.x, start.y],
-				"minimum_distance": lower,
-				"maximum_distance": upper,
-				"guarantee_radius": 20.0 if near_group else 0.0,
-				"placement_radius": maxf(20.0, upper + maxf(1.0, float(group.get("group_radius", 2))) + 1.0),
-				"source_unit_id": source_id,
-				"source_group": group.duplicate(true),
-			})
+			for group_index in range(maxi(1, int(group.get("groups_per_player", 1)))):
+				var near_group := not first_kind.has(kind)
+				first_kind[kind] = true
+				var lower := maxf(5.0, float(group.get("min_distance_to_players", 7)))
+				var upper := maxf(lower, float(group.get("max_distance_to_players", 18)))
+				if near_group:
+					upper = minf(upper, 16.0)
+				if topology == "islands":
+					upper = minf(upper, source_start_radius + 3.0)
+					lower = minf(lower, upper)
+				clusters.append({
+					"category": String(resource_rule.get("category", "resource")),
+					"kind": kind,
+					"count": maxi(1, int(group.get("objects_per_group", 1))),
+					"radius": maxf(1.0, float(group.get("group_radius", 2))),
+					"amount": int(resource_rule.get("amount", 0)),
+					"owner_start": [start.x, start.y],
+					"minimum_distance": lower,
+					"maximum_distance": upper,
+					"guarantee_radius": 20.0 if near_group else 0.0,
+					"placement_radius": maxf(20.0, upper + maxf(1.0, float(group.get("group_radius", 2))) + 1.0),
+					"source_unit_id": source_id,
+					"source_group": group.duplicate(true),
+				})
 	# Allocate each player's essential nearby food, wood and minerals before
 	# placing distant groups. Otherwise early players' surplus groups can occupy
 	# the last player's entire start region on crowded eight-player maps.

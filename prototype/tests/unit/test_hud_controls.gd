@@ -96,17 +96,24 @@ func test_buttons_and_signals() -> void:
 	hud.set_view_model({"commands": [
 		{"type": "formation", "id": "LINE", "label": "Линия", "hotkey": "F5", "enabled": true, "active": true, "reason": ""},
 		{"type": "build", "id": "house", "label": "Дом", "cost_text": "30 WOOD", "duration": 20.0, "enabled": true, "reason": ""},
+		{"type": "unit_action", "id": "repair", "label": "Ремонт", "icon_kind": "command", "icon_id": 0, "enabled": true, "reason": ""},
 		{"type": "unit_action", "id": "stop", "label": "Остановиться", "short_label": "СТОП", "hotkey": "X", "enabled": true, "reason": ""},
 	]})
-	assert_equal(hud.active_train_commands[0].get("type"), "open_build_menu", "worker first exposes the source build-menu command")
-	assert_equal(hud.active_train_commands[1].get("id"), "stop", "worker retains common unit orders beside the closed build root")
-	hud.train_button.emit_signal("pressed")
+	assert_equal(hud.active_train_commands[0].get("type"), "open_build_menu", "first hammer opens construction")
+	assert_equal(hud.active_train_commands[1].get("id"), "repair", "second icon enters Repair")
+	assert_equal(hud.active_train_commands[2].get("id"), "stop", "worker retains ordinary orders in the action layer")
+	assert_true(hud.formation_buttons["LINE"].visible, "formations stay with ordinary actions")
+	hud.train_buttons[0].emit_signal("pressed")
 	assert_equal(hud.active_train_commands[0].get("type"), "build", "build-menu command opens the building choices")
 	assert_equal(hud.active_train_commands.size(), 2, "open build submenu replaces common orders with build choices and back")
 	assert_true(not hud.formation_buttons["LINE"].visible, "open build submenu owns the command grid and hides formations")
 	hud.train_button.emit_signal("pressed")
 	assert_equal(build_request[0], "house", "build signal preserves selected building kind")
 	assert_equal(hud.build_menu_open, false, "choosing a building closes the presentation submenu")
+	assert_equal(hud.active_train_commands[0].get("type"), "open_build_menu", "building choice immediately restores action icons")
+	assert_true(hud.formation_buttons["LINE"].visible, "building choice immediately restores formations")
+	hud.update_dynamic_model(hud.current_model)
+	assert_equal(hud.active_train_commands[0].get("type"), "open_build_menu", "unchanged simulation refresh does not leave stale building icons")
 	var trade_resource_request := [-1]
 	hud.trade_resource_requested.connect(func(resource_type_id: int): trade_resource_request[0] = resource_type_id)
 	hud.set_view_model({"commands": [

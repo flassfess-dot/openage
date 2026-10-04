@@ -8,6 +8,7 @@ const Typography := preload("res://scripts/hud_typography.gd")
 signal building_selected(building_id: int)
 signal formation_requested(formation_name: String)
 signal build_requested(building_kind: String)
+signal build_menu_opened
 signal train_requested(unit_kind: String, building_id: int)
 signal research_requested(technology_id: int, building_id: int)
 signal cancel_production_requested(building_id: int, queue_index: int)
@@ -218,10 +219,12 @@ func set_view_model(model: Dictionary) -> void:
 		active_train_commands.clear()
 		if build_menu_open:
 			active_train_commands.append_array(build_commands)
-			active_train_commands.append({"type": "close_build_menu", "id": "close_build_menu", "label": "Назад", "enabled": true, "reason": ""})
+			active_train_commands.append({"type": "close_build_menu", "id": "close_build_menu", "label": "Назад", "hotkey": "Esc", "enabled": true, "reason": ""})
 		else:
-			active_train_commands.append({"type": "open_build_menu", "id": "open_build_menu", "label": "Строить", "enabled": true, "reason": ""})
-			active_train_commands.append_array(unit_actions)
+			# The original first hammer opens Build; the second command is Repair.
+			active_train_commands.append({"type": "open_build_menu", "id": "open_build_menu", "label": "Строить", "hotkey": "B", "enabled": true, "reason": ""})
+			active_train_commands.append_array(unit_actions.filter(func(command): return command.get("id") == "repair"))
+			active_train_commands.append_array(unit_actions.filter(func(command): return command.get("id") != "repair"))
 	available_formation_buttons.clear()
 	for formation_name in formation_buttons:
 		var button: Button = formation_buttons[formation_name]
@@ -306,26 +309,33 @@ func layout_controls() -> void:
 	commands.append_array(available_formation_buttons)
 	var grid := command_grid(local_rect.size)
 	var capacity: int = grid["capacity"]
-	var paged := commands.size() > capacity
-	var pinned_back: Button = null
-	if paged and build_menu_open and not active_train_commands.is_empty() and active_train_commands.back().get("type") == "close_build_menu":
-		pinned_back = train_buttons[active_train_commands.size() - 1]
-		commands.erase(pinned_back)
-	command_page_size = capacity - 2 - (1 if pinned_back != null else 0) if paged else capacity
+	var pinned_cancel: Button = null
+	if build_menu_open and not active_train_commands.is_empty() and active_train_commands.back().get("type") == "close_build_menu":
+		pinned_cancel = train_buttons[active_train_commands.size() - 1]
+		commands.erase(pinned_cancel)
+	elif not build_menu_open:
+		for index in range(active_train_commands.size()):
+			if active_train_commands[index].get("type") == "unit_action" and active_train_commands[index].get("id") == "delete":
+				pinned_cancel = train_buttons[index]
+				commands.erase(pinned_cancel)
+				break
+	var paged := commands.size() > capacity - (1 if pinned_cancel != null else 0)
+	command_page_size = capacity - (2 if paged else 0) - (1 if pinned_cancel != null else 0)
 	command_page_size = maxi(1, command_page_size)
 	command_page_count = maxi(1, ceili(float(commands.size()) / command_page_size)) if paged else 1
 	command_page = clampi(command_page, 0, command_page_count - 1)
 	var displayed: Array[Button] = []
 	for index in range(command_page * command_page_size, mini(commands.size(), (command_page + 1) * command_page_size)):
 		displayed.append(commands[index])
-	if paged:
-		# Keep navigation (and Back in construction) in the same cells on every page.
+	if paged or pinned_cancel != null:
+		# The original red cross stays in the final cell for Delete and Back.
 		while displayed.size() < command_page_size:
 			displayed.append(null)
-		if pinned_back != null:
-			displayed.append(pinned_back)
-		displayed.append(previous_commands_button)
-		displayed.append(next_commands_button)
+		if paged:
+			displayed.append(previous_commands_button)
+			displayed.append(next_commands_button)
+		if pinned_cancel != null:
+			displayed.append(pinned_cancel)
 	previous_commands_button.visible = paged
 	next_commands_button.visible = paged
 	previous_commands_button.disabled = command_page == 0
@@ -410,13 +420,13 @@ func command_icon(command: Dictionary) -> Texture2D:
 		return interface_skin.resource_icon(resource_name, interface_style_index)
 	if interface_skin != null and command_type == "open_build_menu":
 		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
-		return glyphs[0] if not glyphs.is_empty() else null
+		return glyphs[2] if glyphs.size() > 2 else null
 	if interface_skin != null and command_type == "cancel_production":
 		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
 		return glyphs[10] if glyphs.size() > 10 else null
 	if interface_skin != null and command_type == "close_build_menu":
-		var arrows: Array = interface_skin.command_arrow_frames(interface_style_index)
-		return arrows[2] if arrows.size() > 2 else null
+		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
+		return glyphs[10] if glyphs.size() > 10 else null
 	return icon_registry.texture(String(command.get("icon_kind", "")), int(command.get("icon_id", -1))) if icon_registry != null else null
 
 func make_style(fill: Color, border: Color) -> StyleBoxFlat:
@@ -440,13 +450,11 @@ func _on_action_pressed(index: int) -> void:
 	var command: Dictionary = active_train_commands[index]
 	match String(command.get("type", "")):
 		"open_build_menu":
-			build_menu_open = true
-			set_view_model(current_model)
+			set_build_menu_open(true)
 		"close_build_menu":
-			build_menu_open = false
-			set_view_model(current_model)
+			set_build_menu_open(false)
 		"build":
-			build_menu_open = false
+			set_build_menu_open(false)
 			build_requested.emit(String(command.get("id", "")))
 		"train":
 			for request_index in range(training_batch_size(command, Input.is_key_pressed(KEY_SHIFT))):
@@ -455,6 +463,16 @@ func _on_action_pressed(index: int) -> void:
 		"cancel_production": cancel_production_requested.emit(int(command.get("building_id", -1)), int(command.get("queue_index", 0)))
 		"trade_resource": trade_resource_requested.emit(int(command.get("resource_type_id", -1)))
 		"unit_action": unit_action_requested.emit(String(command.get("id", "")))
+
+
+func set_build_menu_open(open: bool) -> bool:
+	if open and not current_model.get("commands", []).any(func(command): return command.get("type") == "build"):
+		return false
+	build_menu_open = open
+	set_view_model(current_model)
+	if open:
+		build_menu_opened.emit()
+	return build_menu_open == open
 
 
 func _on_action_gui_input(event: InputEvent, index: int) -> void:

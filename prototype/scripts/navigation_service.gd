@@ -1,6 +1,9 @@
 class_name RoRNavigationService
 extends RefCounted
 
+const MAX_OBSERVED_RESULTS := 1024
+var first_observed_request_id: int = 1
+
 var pathfinder: Variant
 var next_request_id: int = 1
 var results_by_request: Dictionary = {}
@@ -16,20 +19,32 @@ func set_pathfinder(pathfinder_instance: Variant) -> void:
 
 func reset() -> void:
 	next_request_id = 1
-	results_by_request.clear()
+	clear_observations()
 
 
 func clear_observations() -> void:
 	results_by_request.clear()
+	first_observed_request_id = next_request_id
 
 
-func request_path(entity_id: int, start: Vector2, requested_goal: Vector2, movement_domain: String = "land", restriction_id: int = -1, purpose: String = "move", clearance_radius: float = 0.0) -> Dictionary:
+func _observe(result: Dictionary) -> void:
+	# Request IDs remain authoritative and monotonic; old diagnostic payloads
+	# are a bounded window, not an ever-growing copy of all simulation paths.
+	if results_by_request.is_empty(): first_observed_request_id = int(result["request_id"])
+	while results_by_request.size() >= MAX_OBSERVED_RESULTS:
+		results_by_request.erase(first_observed_request_id)
+		first_observed_request_id += 1
+	results_by_request[int(result["request_id"])] = result.duplicate(true)
+
+
+func request_path(entity_id: int, start: Vector2, requested_goal: Vector2, movement_domain: String = "land", restriction_id: int = -1, purpose: String = "move", clearance_radius: float = 0.0, known_planner: Variant = null) -> Dictionary:
 	var request_id := next_request_id
 	next_request_id += 1
 	var grid_revision := int(pathfinder.grid.revision) if pathfinder != null and pathfinder.grid != null else -1
 	var path: Array[Vector2] = []
-	if pathfinder != null:
-		path = pathfinder.find_path(start, requested_goal, movement_domain, restriction_id, clearance_radius)
+	var planner: Variant = known_planner if known_planner != null else pathfinder
+	if planner != null:
+		path = planner.find_path(start, requested_goal, movement_domain, restriction_id, clearance_radius)
 	var status := "resolved" if not path.is_empty() else "unreachable"
 	var result := {
 		"request_id": request_id,
@@ -46,7 +61,7 @@ func request_path(entity_id: int, start: Vector2, requested_goal: Vector2, movem
 		"reason": "" if status == "resolved" else "no_path",
 		"path": path.duplicate(),
 	}
-	results_by_request[request_id] = result.duplicate(true)
+	_observe(result)
 	return result
 
 
@@ -70,7 +85,7 @@ func register_prevalidated_direct_path(entity_id: int, start: Vector2, requested
 		"reason": "",
 		"path": path.duplicate(),
 	}
-	results_by_request[request_id] = result.duplicate(true)
+	_observe(result)
 	if pathfinder != null and pathfinder.performance_probe != null:
 		pathfinder.performance_probe.increment("navigation.prevalidated_group_segments")
 	return result

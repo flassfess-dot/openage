@@ -7,6 +7,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	test_stack_uses_render_order_and_deduplicates_composites()
+	test_mobile_composite_sail_is_pickable()
 	test_transparent_sprite_falls_back_to_footprint()
 	test_zero_health_berry_is_pickable()
 	test_box_prioritizes_mobile_units()
@@ -39,6 +40,22 @@ func test_stack_uses_render_order_and_deduplicates_composites() -> void:
 	assert_equal(hits[1].get("entity_type"), "foundation", "building state maps to foundation context")
 	assert_equal(hits[2].get("entity_type"), "resource", "lower resource remains in hit stack")
 	assert_equal(service.context_entity(hits[1]).get("entity_type"), "foundation", "context copy preserves logical type")
+
+
+func test_mobile_composite_sail_is_pickable() -> void:
+	var service := PickingService.new()
+	var ship := entity(9, 1, "transport", Vector2(50, 50))
+	var hull := drawable("unit", ship, solid_texture(Color.WHITE), 1)
+	var sail := drawable("unit_part", ship, solid_texture(Color.WHITE), 2)
+	sail["frame_info"]["screen_offset"] = Vector2(0, -40)
+	var hits := service.hit_stack(Vector2(50, 10), [hull, sail], Callable(self, "identity_projection"), 1.0)
+	assert_equal(hits.size(), 1, "opaque sail outside the hull and footprint picks its ship")
+	if not hits.is_empty():
+		assert_equal(hits[0]["id"], 9, "sail belongs to the transport's logical entity")
+		assert_equal(hits[0]["entity_type"], "unit", "mobile composite part keeps unit context")
+	var overlapping := drawable("unit_part", ship, solid_texture(Color.WHITE), 3)
+	hits = service.hit_stack(Vector2(50, 50), [hull, overlapping], Callable(self, "identity_projection"), 1.0)
+	assert_equal(hits.size(), 1, "mobile hull and part deduplicate to one selectable ship")
 
 
 func test_transparent_sprite_falls_back_to_footprint() -> void:

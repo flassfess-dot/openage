@@ -109,6 +109,8 @@ func cancel(trader: Dictionary, reason: String = "cancelled") -> void:
 	var trade: Dictionary = trader["components"]["trade"]
 	if String(trade.get("stage", "idle")) == "idle":
 		return
+	world.release_building_approach_slot(trader)
+	trader["target_building_id"] = -1
 	trade["stage"] = "holding_gold" if int(trade.get("cargo_gold", 0)) > 0 else "idle"
 	trade["approach_position"] = Vector2(trader.get("pos", Vector2.ZERO))
 	world.emit_domain_event("trade_route_stopped", {
@@ -270,6 +272,9 @@ func _begin_leg(trader: Dictionary, dock: Dictionary, stage: String) -> bool:
 	var trade: Dictionary = trader["components"]["trade"]
 	trade["stage"] = stage
 	trade["approach_position"] = world.dropoff_approach_position(trader, dock)
+	if not trade["approach_position"] is Vector2:
+		_finish(trader, "trade_route_unreachable")
+		return false
 	trader["task"] = "trade"
 	trader["target_id"] = int(dock.get("id", -1))
 	OrderPipeline.begin(trader, "trade", int(dock.get("id", -1)), trade["approach_position"], true)

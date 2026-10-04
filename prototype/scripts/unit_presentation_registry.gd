@@ -300,6 +300,8 @@ func _load_team(alias: String, texture_key: String, team: int, archetype: Dictio
 		if graphic_id < 0:
 			graphic_id = _source_graphic_id(archetype, String(state_spec.get("graphic_field", state)), team, source_unit_id)
 		var graphic_spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
+		graphic_spec = graphic_spec.duplicate()
+		graphic_spec.merge(state_spec.get("graphic_override", {}), true)
 		var graphic_descriptor := GraphicDescriptor.new(asset_name, graphic_spec, frames.size(), bool(state_spec.get("loop", true)))
 		graphic_descriptor.set_hotspots(hotspots)
 		textures[texture_key][state] = frames

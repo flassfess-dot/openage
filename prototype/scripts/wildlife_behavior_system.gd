@@ -17,6 +17,7 @@ const FLEE_TURN_STEPS := [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8]
 const HASH_MODULUS := 2_147_483_647
 
 var cached_wildlife: Array = []
+var cached_due_wildlife: Array = []
 var cached_unit_count := -1
 var cached_roster_tick := -1
 var cached_world_roster_revision := -1
@@ -25,6 +26,7 @@ var coastal_homes: Dictionary = {}
 
 func reset() -> void:
 	cached_wildlife.clear()
+	cached_due_wildlife.clear()
 	cached_unit_count = -1
 	cached_roster_tick = -1
 	cached_world_roster_revision = -1
@@ -35,7 +37,12 @@ func collect_commands(world, tick: int) -> Array:
 	if world == null or world.battle_over:
 		return []
 	var commands: Array = []
-	for animal_value in _wildlife_roster(world, tick):
+	var roster := _wildlife_roster(world, tick)
+	var due: Array = roster if tick == 1 else cached_due_wildlife[posmod(tick, PREDATOR_SCAN_INTERVAL_TICKS)]
+	var probe: Variant = world.tick_pipeline.performance_probe
+	if probe != null:
+		probe.increment("wildlife.scheduled_visits", due.size())
+	for animal_value in due:
 		var animal: Dictionary = animal_value
 		if float(animal.get("hp", 0.0)) <= 0.0:
 			continue
@@ -288,6 +295,7 @@ func _wildlife_roster(world, tick: int) -> Array:
 				and (String(unit.get("kind", "")) == "gazelle" or world.entity_has_behavior_tag(unit, "predator"))
 		)
 		cached_wildlife.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+		_rebuild_due_schedule(world)
 		var active_ids: Dictionary = {}
 		for animal in cached_wildlife:
 			active_ids[int(animal.get("id", -1))] = true
@@ -300,3 +308,18 @@ func _wildlife_roster(world, tick: int) -> Array:
 		cached_roster_tick = tick
 		cached_world_roster_revision = world_roster_revision
 	return cached_wildlife
+
+
+func _rebuild_due_schedule(world) -> void:
+	cached_due_wildlife.clear()
+	for phase in range(PREDATOR_SCAN_INTERVAL_TICKS):
+		cached_due_wildlife.append([])
+	for animal in cached_wildlife:
+		var entity_id := int(animal.get("id", 0))
+		var gazelle := String(animal.get("kind", "")) == "gazelle"
+		var predator: bool = world.entity_has_behavior_tag(animal, "predator")
+		var coastal := _is_coastal_predator(animal)
+		for phase in range(PREDATOR_SCAN_INTERVAL_TICKS):
+			var representative_tick := phase + PREDATOR_SCAN_INTERVAL_TICKS
+			if (gazelle and _decision_due(representative_tick, entity_id, GAZELLE_FLEE_SCAN_INTERVAL_TICKS, 53)) or (predator and _decision_due(representative_tick, entity_id, PREDATOR_SCAN_INTERVAL_TICKS, 19)) or (coastal and _decision_due(representative_tick, entity_id, COAST_RETURN_INTERVAL_TICKS, 41)):
+				cached_due_wildlife[phase].append(animal)

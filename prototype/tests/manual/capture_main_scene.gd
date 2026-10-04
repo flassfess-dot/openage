@@ -16,6 +16,7 @@ func _initialize() -> void:
 	var output_path := DEFAULT_OUTPUT
 	var scene_path := DEFAULT_SCENE
 	var selection_kind := ""
+	var selection_count := 1
 	var open_build_menu := false
 	var hud_modal := ""
 	var random_map_type := ""
@@ -29,6 +30,8 @@ func _initialize() -> void:
 			scene_path = argument.trim_prefix("--scene=")
 		elif argument.begins_with("--selection-kind="):
 			selection_kind = argument.trim_prefix("--selection-kind=")
+		elif argument.begins_with("--selection-count="):
+			selection_count = maxi(1, int(argument.trim_prefix("--selection-count=")))
 		elif argument == "--open-build-menu":
 			open_build_menu = true
 		elif argument.begins_with("--hud-modal="):
@@ -68,13 +71,13 @@ func _initialize() -> void:
 			for _frame in range(3):
 				await process_frame
 	if not selection_kind.is_empty():
-		apply_selection_kind(instance, selection_kind)
+		apply_selection_kind(instance, selection_kind, selection_count)
 		for _frame in range(2):
 			await process_frame
 	if open_build_menu:
 		var hud_controls = instance.get("hud_controls")
-		if hud_controls != null and hud_controls.train_button != null:
-			hud_controls.train_button.emit_signal("pressed")
+		if hud_controls != null:
+			hud_controls.set_build_menu_open(true)
 			for _frame in range(2):
 				await process_frame
 	if not hud_modal.is_empty():
@@ -103,7 +106,7 @@ func parse_size(value: String) -> Vector2i:
 	return parsed if parsed.x >= 320 and parsed.y >= 240 else DEFAULT_SIZE
 
 
-func apply_selection_kind(instance: Node, kind: String) -> void:
+func apply_selection_kind(instance: Node, kind: String, count: int = 1) -> void:
 	var control_state = instance.get("player_control_state")
 	if control_state == null:
 		return
@@ -113,16 +116,20 @@ func apply_selection_kind(instance: Node, kind: String) -> void:
 		entities.append_array(presented_units)
 	var snapshot: Dictionary = instance.get("presentation_snapshot")
 	entities.append_array(snapshot.get("buildings", []))
+	var selected_ids: Array[int] = []
 	for entity_value in entities:
 		var entity: Dictionary = entity_value
 		if String(entity.get("kind", "")) != kind or int(entity.get("team", 0)) != 1:
 			continue
-		var selected_ids: Array[int] = [int(entity.get("id", -1))]
-		control_state.replace_or_add(selected_ids, false)
-		if instance.has_method("refresh_hud_model"):
-			instance.call("refresh_hud_model")
-		print("Presentation capture selected %s #%d" % [kind, int(entity.get("id", -1))])
+		selected_ids.append(int(entity.get("id", -1)))
+		if selected_ids.size() >= count:
+			break
+	if selected_ids.is_empty():
 		return
+	control_state.replace_or_add(selected_ids, false)
+	if instance.has_method("refresh_hud_model"):
+		instance.call("refresh_hud_model")
+	print("Presentation capture selected %s %s" % [kind, selected_ids])
 
 
 func nearest_coast_position(instance: Node) -> Vector2:

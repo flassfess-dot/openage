@@ -97,6 +97,30 @@ func _initialize() -> void:
 	hud.set_view_model(model)
 	assert_equal(hud.training_batch_size({"cost": {0: 50}}, true), 2, "Shift adds only affordable units")
 	assert_true(not panel.cancel_button.visible and not panel.job_label.visible, "empty queue shows no filler messages")
+	assert_true(panel.production_visible, "selected building keeps its empty production recess")
+	var active_model := fixture_model()
+	hud.set_view_model(active_model)
+	assert_true(panel.production_visible and panel.job_label.visible, "building research shows the production panel")
+	for category in ["unit", "none", "resource", "mixed"]:
+		var hidden_model := active_model.duplicate(true)
+		hidden_model["selection"]["category"] = category
+		if category == "none":
+			hidden_model["selection"]["leader"] = {}
+			hidden_model["selection"]["count"] = 0
+		hud.set_view_model(hidden_model)
+		assert_true(not panel.production_visible, "%s selection hides the entire production recess" % category)
+		for control in [panel.job_icon, panel.job_label, panel.percent_label, panel.time_label, panel.cancel_button, panel.previous_button, panel.next_button] + panel.pending_buttons:
+			assert_true(not control.visible, "%s selection hides every production control even with a stale queue" % category)
+		assert_true(panel.global_buttons[0].visible, "production overview remains available after hiding the selected queue")
+		hidden_model["queue"][0]["progress"] = 0.75
+		hud.update_dynamic_model(hidden_model)
+		hud.set_layout(Layout.for_viewport(hud.size))
+		assert_true(not panel.production_visible and not panel.job_icon.visible and not panel.next_button.visible, "dynamic and layout refreshes cannot restore production for %s" % category)
+	hud.set_view_model(active_model)
+	assert_true(panel.production_visible and panel.job_label.visible and panel.pending_buttons[0].visible, "returning to a building restores research and waiting orders")
+	active_model["queue"][0] = {"type": "unit", "kind": "villager", "icon_kind": "unit", "icon_id": 0, "label": "Крестьянин", "progress": 0.4, "remaining_seconds": 12, "status": "training"}
+	hud.set_view_model(active_model)
+	assert_true(panel.production_visible and panel.job_label.text == "Крестьянин" and panel.percent_label.text == "40%", "unit production in a selected building remains visible")
 	var mask_count := 0
 	for row in Aperture.mask_rows(): mask_count += int(row[1])
 	assert_equal(mask_count, 11991, "mask retains every measured native minimap pixel")

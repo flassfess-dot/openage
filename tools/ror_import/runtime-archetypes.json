@@ -666,7 +666,7 @@
           "presentation_variants": {
             "20": {
               "idle": {"asset_name": "war_galley_hull", "enemy_asset_name": "enemy_war_galley_hull", "graphic_id": 61, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
-              "move": {"asset_name": "war_galley_hull", "enemy_asset_name": "enemy_war_galley_hull", "graphic_id": 61, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
+              "move": {"asset_name": "war_galley_rowing", "enemy_asset_name": "enemy_war_galley_rowing", "graphic_id": 61, "graphic_override": {"frames_per_angle": 8, "frame_rate": 0.14, "replay_delay": 0.0}, "loop": true, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": true}]},
               "attack": {"asset_name": "war_galley_hull", "enemy_asset_name": "enemy_war_galley_hull", "graphic_id": 61, "audio_graphic_field": "attack", "loop": false, "composite_parts": [{"asset_name": "transport_sail", "enemy_asset_name": "enemy_transport_sail", "graphic_id": 45, "loop": false}]},
               "death": {"asset_name": "heavy_transport_death", "enemy_asset_name": "enemy_heavy_transport_death", "graphic_field": "death", "loop": false}
             },

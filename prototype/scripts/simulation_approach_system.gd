@@ -65,7 +65,14 @@ func resume(worker: Dictionary, slot: Vector2) -> bool:
 	if Vector2(worker.get("destination", worker.get("pos", Vector2.ZERO))).distance_squared_to(slot) <= 0.0001 and not worker.get("path", []).is_empty():
 		return true
 	var simulation_world = world
-	return simulation_world.movement_system.assign_unit_destination(worker, slot, false)
+	# The grid may resolve an inaccessible subcell goal to a neighbouring cell.
+	# Such a route cannot service this exact work slot and must not be reserved.
+	var route: Array[Vector2] = simulation_world.pathfinder.find_path(Vector2(worker["pos"]), slot, String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1)), float(worker.get("footprint_radius", 0.3)))
+	if route.is_empty() or route.back().distance_squared_to(slot) > 0.0144:
+		return false
+	if not simulation_world.movement_system.assign_unit_destination(worker, slot, false):
+		return false
+	return not worker["path"].is_empty() and Vector2(worker["path"].back()).distance_squared_to(slot) <= 0.0144
 
 
 func resource_slot_occupied(worker: Dictionary, candidate: Vector2) -> bool:

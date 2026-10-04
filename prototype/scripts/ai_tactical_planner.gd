@@ -10,8 +10,8 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 	var candidates: Array = snapshot.get("units", []).filter(func(entity):
 		return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0 and not reserved_unit_ids.has(int(entity.get("id", -1))) and (include_workers or not bool(entity.get("components", {}).get("worker", {}).get("enabled", false))) and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", [])) and String(entity.get("task", "idle")) in ["idle", "hold"]
 	)
-	var stranded: Array = candidates.filter(func(entity): return String(entity.get("diagnostic_reason", "")) == "no_path")
-	var fighters: Array = candidates.filter(func(entity): return String(entity.get("diagnostic_reason", "")) != "no_path")
+	var stranded: Array = candidates.filter(func(entity): return String(entity.get("diagnostic_reason", "")) in ["no_path", "no_group_route"])
+	var fighters: Array = candidates.filter(func(entity): return String(entity.get("diagnostic_reason", "")) not in ["no_path", "no_group_route"])
 	var result := _recovery_commands(snapshot, tick, stranded)
 	if refresh_stalled_attack and String(goal.get("type", "")) == "attack":
 		result.append_array(_stalled_attack_commands(snapshot, tick, team, goal, include_workers, reserved_unit_ids))
@@ -32,14 +32,15 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 	var groups: Dictionary = {}
 	for fighter in fighters:
 		var domain := String(fighter.get("movement_domain", fighter.get("components", {}).get("movement", {}).get("domain", "land")))
-		if not groups.has(domain):
-			groups[domain] = []
-		groups[domain].append(fighter)
+		var region := String(snapshot.get("navigation", {}).get("unit_regions", {}).get(int(fighter["id"]), domain))
+		if not groups.has(region):
+			groups[region] = []
+		groups[region].append(fighter)
 	var domains: Array = groups.keys()
 	domains.sort()
 	for domain_value in domains:
-		var domain := String(domain_value)
-		var group: Array = groups[domain]
+		var group: Array = groups[domain_value]
+		var domain := String(group[0].get("movement_domain", "land"))
 		group.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 		if group.size() > maxi(1, maximum_group_size):
 			group = group.slice(0, maxi(1, maximum_group_size))
@@ -61,7 +62,11 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 						result.append(Commands.AttackCommand.new(tick, ids, int(goal.get("target_id", -1))))
 				continue
 		if goal_type in ["attack", "explore"]:
-			var positions: Dictionary = goal.get("positions_by_domain", {})
+			var positions: Dictionary = goal.get("positions_by_domain", {}).duplicate()
+			if snapshot.get("navigation", {}).has("unit_regions"):
+				var frontier: Array = snapshot["navigation"].get("frontier_by_region", {}).get(domain_value, [])
+				if frontier.is_empty(): continue
+				positions[domain] = preload("res://scripts/ai_strategic_planner.gd").exploration_target(frontier, center, tick / 20)
 			if positions.has(domain):
 				var destination := Vector2(positions[domain])
 				if ids.size() > 1:
@@ -147,6 +152,10 @@ static func _recovery_commands(snapshot: Dictionary, tick: int, stranded: Array)
 	stranded.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	for fighter_value in stranded:
 		var fighter: Dictionary = fighter_value
+		if snapshot.get("navigation", {}).has("recovery_positions"):
+			var recovery: Variant = snapshot["navigation"]["recovery_positions"].get(int(fighter["id"]))
+			if recovery is Vector2: result.append(Commands.AttackMoveCommand.new(tick, [int(fighter["id"])], recovery))
+			continue
 		var domain := String(fighter.get("movement_domain", "land"))
 		var origin := Vector2(fighter.get("pos", Vector2.ZERO))
 		var best: Variant = null

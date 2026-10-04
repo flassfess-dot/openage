@@ -64,6 +64,11 @@ class MoveCommand extends Command:
 		return "move"
 
 
+class SetRallyPointCommand extends MoveCommand:
+	func command_type() -> String:
+		return "set_rally_point"
+
+
 class FormationMoveCommand extends MoveCommand:
 	var formation: String
 	var forward: Vector2

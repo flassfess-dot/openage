@@ -38,15 +38,31 @@ $arguments = @(
     "-DGODOT_CPP_PATH=$($GodotCppPath.Replace('\', '/'))"
 )
 
-if ($Reconfigure -or -not (Test-Path -LiteralPath (Join-Path $buildPath "CMakeCache.txt"))) {
-    & $cmakePath @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Native pathfinding configuration failed with exit code $LASTEXITCODE"
-    }
-}
+# Configure on every invocation so changed build rules cannot leave stale outputs.
+& $cmakePath @arguments
+if ($LASTEXITCODE -ne 0) { throw "Native pathfinding configuration failed with exit code $LASTEXITCODE" }
+
 & $cmakePath --build $buildPath --config $BuildType --parallel 8
 if ($LASTEXITCODE -ne 0) {
     throw "Native pathfinding build failed with exit code $LASTEXITCODE"
 }
 
-Write-Host "Built prototype/bin/ror_pathfinding.windows.template_release.x86_64.dll"
+$libraryName = "ror_pathfinding.windows.template_release.x86_64.dll"
+$builtLibrary = Join-Path $buildPath "bin\$libraryName"
+$targetLibrary = Join-Path $projectRoot "prototype\bin\$libraryName"
+if (-not (Test-Path -LiteralPath $builtLibrary)) { throw "Native build output missing: $builtLibrary" }
+# Stage before replacing: a running preview may still map the previous DLL.
+$previousLibrary = $null
+$stagedLibrary = "$targetLibrary.new"
+Copy-Item -LiteralPath $builtLibrary -Destination $stagedLibrary -Force
+if (Test-Path -LiteralPath $targetLibrary) {
+    $previousLibrary = "$targetLibrary.previous.$([Guid]::NewGuid().ToString('N'))"
+    Move-Item -LiteralPath $targetLibrary -Destination $previousLibrary
+}
+try { Move-Item -LiteralPath $stagedLibrary -Destination $targetLibrary }
+catch {
+    if ($previousLibrary -and (Test-Path -LiteralPath $previousLibrary)) { Move-Item -LiteralPath $previousLibrary -Destination $targetLibrary }
+    throw
+}
+if ($previousLibrary) { Remove-Item -LiteralPath $previousLibrary -Force -ErrorAction SilentlyContinue }
+Write-Host "Built $targetLibrary"

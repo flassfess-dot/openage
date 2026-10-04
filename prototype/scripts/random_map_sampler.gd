@@ -2,9 +2,10 @@ class_name RoRRandomMapSampler
 extends RefCounted
 
 
-static func sample_zone_cells(strategic_zones: Dictionary, size: Vector2i, allowed_zone_ids: Array, target_count: int, minimum_distance: float, seed: int, blocked_cells: Dictionary = {}, existing_anchors: Array[Vector2i] = [], zone_weights: Dictionary = {}, coast_mode: String = "", minimum_start_distance: int = 0) -> Array[Vector2i]:
+static func sample_zone_cells(strategic_zones: Dictionary, size: Vector2i, allowed_zone_ids: Array, target_count: int, minimum_distance: float, seed: int, blocked_cells: Dictionary = {}, existing_anchors: Array[Vector2i] = [], zone_weights: Dictionary = {}, coast_mode: String = "", minimum_start_distance: int = 0, minimum_per_start: int = 0) -> Array[Vector2i]:
 	var zone_ids: PackedInt32Array = strategic_zones.get("zone_ids", PackedInt32Array())
 	var coastal_mask: PackedByteArray = strategic_zones.get("coastal_land_mask", PackedByteArray())
+	var start_owners: PackedInt32Array = strategic_zones.get("nearest_start_indices", PackedInt32Array())
 	var start_distances: PackedInt32Array = strategic_zones.get("nearest_start_distances", PackedInt32Array())
 	if zone_ids.size() != size.x * size.y or target_count <= 0:
 		return []
@@ -39,19 +40,26 @@ static func sample_zone_cells(strategic_zones: Dictionary, size: Vector2i, allow
 	for anchor in existing_anchors:
 		_add_to_bucket(buckets, anchor, bucket_size)
 	var result: Array[Vector2i] = []
-	for pass_index in range(3):
-		for candidate_index in candidates:
-			if result.size() >= target_count:
-				return result
-			var cell := Vector2i(int(candidate_index) % size.x, int(candidate_index) / size.x)
-			var zone_id := int(zone_ids[int(candidate_index)])
-			var base_weight := clampf(float(zone_weights.get(zone_id, 1.0)), 0.0, 1.0)
-			if rng.randf() > minf(1.0, base_weight * float(pass_index + 1)):
-				continue
-			if _has_nearby_anchor(buckets, cell, bucket_size, bucket_radius, minimum_distance):
-				continue
-			result.append(cell)
-			_add_to_bucket(buckets, cell, bucket_size)
+	var accepted_by_start: Dictionary = {}
+	# Give every reachable territory its quota before spending the global surplus.
+	for phase in range(0 if minimum_per_start > 0 else 1, 2):
+		for pass_index in range(3):
+			for candidate_index in candidates:
+				if result.size() >= target_count:
+					return result
+				var cell := Vector2i(int(candidate_index) % size.x, int(candidate_index) / size.x)
+				var owner := int(start_owners[int(candidate_index)]) if start_owners.size() == zone_ids.size() else -1
+				if phase == 0 and (owner < 0 or int(accepted_by_start.get(owner, 0)) >= minimum_per_start):
+					continue
+				var zone_id := int(zone_ids[int(candidate_index)])
+				var base_weight := clampf(float(zone_weights.get(zone_id, 1.0)), 0.0, 1.0)
+				if rng.randf() > minf(1.0, base_weight * float(pass_index + 1)):
+					continue
+				if _has_nearby_anchor(buckets, cell, bucket_size, bucket_radius, minimum_distance):
+					continue
+				result.append(cell)
+				accepted_by_start[owner] = int(accepted_by_start.get(owner, 0)) + 1
+				_add_to_bucket(buckets, cell, bucket_size)
 	return result
 
 

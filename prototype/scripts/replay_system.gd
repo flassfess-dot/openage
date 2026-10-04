@@ -206,6 +206,8 @@ func command_from_record(record: Dictionary):
 			command = Commands.TradeCommand.new(tick, ids, int(params.get("target_dock_id", -1)))
 		"build":
 			command = Commands.BuildCommand.new(tick, ids, String(params.get("building_type", "")), params.get("target", Vector2.ZERO))
+		"set_rally_point":
+			command = Commands.SetRallyPointCommand.new(tick, ids, params.get("target", Vector2.ZERO))
 		"train":
 			command = Commands.TrainCommand.new(tick, ids, String(params.get("unit_type", "")), int(params.get("team", 1)), params.get("target", Vector2.ZERO))
 		"research":
@@ -229,6 +231,8 @@ func command_from_record(record: Dictionary):
 		"population_limit":
 			command = Commands.PopulationLimitCommand.new(tick, int(params.get("limit", 0)))
 	if command != null:
+		if bool(params.get("plan_only", false)):
+			command.params["plan_only"] = true
 		if bool(params.get("queue_order", false)):
 			command.params["queue_order"] = true
 		command.assign_envelope(int(record.get("issuer_id", 0)), int(record.get("sequence_id", 0)))

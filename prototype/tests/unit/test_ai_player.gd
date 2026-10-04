@@ -225,6 +225,7 @@ func _initialize() -> void:
 	assert_equal(dock_commands[0].building_type, "dock", "mixed-domain build site selects Dock")
 	assert_equal(dock_commands[0].target, Vector2(2.5, 10.5), "AI uses only authoritative explored placement candidate")
 
+	test_age_saving_keeps_prerequisite_income()
 	test_fleet_production_and_trade_routes()
 	test_transport_planner_phases()
 	test_skirmish_policy_attack_control()
@@ -317,6 +318,18 @@ func test_transport_planner_phases() -> void:
 	commands = TransportPlanner.plan(sailing, 6, 2, goal, "LINE")
 	assert_equal(commands[0].command_type(), "move", "loaded transport sails before attempting unload")
 	assert_equal(commands[0].target, Vector2(9.5, 10.5), "sailing approach comes from known water adjacent to target coast")
+
+	var loading := boarding.duplicate(true)
+	var approaching := fighter(202, 2, Vector2(4.5, 2.5))
+	approaching["task"] = "board"
+	approaching["target_id"] = 200
+	loading["units"] = [transport(200, Vector2(2.5, 2.5), [201]), approaching]
+	assert_equal(TransportPlanner.plan(loading, 7, 2, goal, "LINE").size(), 0, "loaded Transport waits for accepted boarding approaches")
+	approaching["task"] = "idle"
+	approaching["pos"] = Vector2(5.5, 2.5)
+	commands = TransportPlanner.plan(loading, 7, 2, goal, "LINE")
+	assert_equal(commands[0].command_type(), "board", "partly loaded Transport lets nearby troops approach instead of sailing into an unsafe coastal cell")
+	assert_equal(commands[0].unit_ids, [202], "nearby passenger uses the public asynchronous boarding order")
 
 	var landing := boarding.duplicate(true)
 	landing["units"] = [transport(200, Vector2(9.5, 10.5), [201])]
@@ -425,6 +438,30 @@ func test_skirmish_policy_attack_control() -> void:
 	armed_worker["behavior_tags"] = ["combatant", "worker"]
 	worker_only["units"] = [armed_worker, fighter(10, 1, Vector2(6, 4))]
 	assert_equal(configured_player.collect_commands(worker_only, 1).size(), 0, "skirmish tactical policy never pulls an economic worker into its attack group")
+
+
+func test_age_saving_keeps_prerequisite_income() -> void:
+	for age in [100,102]:
+		var snapshot := snapshot_base()
+		snapshot["player_state"].merge({"age":age,"food":1100,"wood":45,"stone":150,"gold":900},true)
+		snapshot["resources"] = [
+			{"id":80,"kind":"berries","pos":Vector2(6,6),"amount":500,"resource_type_id":0},
+			{"id":81,"kind":"tree","pos":Vector2(7,6),"amount":250,"resource_type_id":1},
+		]
+		for id in range(100,106):
+			var gatherer := worker(id,2,Vector2(id-96,4))
+			gatherer["task"] = "gather"
+			gatherer["resource_id"] = 80
+			snapshot["units"].append(gatherer)
+		var cost := {0:500} if age == 100 else {0:1000,3:800}
+		snapshot["buildings"] = [{"id":92,"team":2,"kind":"town_center","pos":Vector2(4,4),"hp":600.0,"state":"complete","production_queue":[],"command_options":{"train":[train_option("villager",["worker"],{0:50})],"research":[{"technology_id":age+1,"accepted":false,"reason":"missing_prerequisites","cost":cost}]}}]
+		var policy := {"minimum_workers_before_age_up":6,"land_worker_target":6,"age_advance_technology_ids":[101,102,103]}
+		var commands := EconomicPlanner.plan(snapshot,1,2,policy)
+		assert_equal(commands.size(),1,"saving for age %s retains gathering without spending reserved resources" % (age+1))
+		var gather = first_command_of_type(commands,"gather")
+		assert_true(gather != null,"wood for prerequisite buildings remains a legal age-saving assignment")
+		if gather != null:
+			assert_equal(gather.resource_id,81,"age-saving workers may switch from food to prerequisite wood")
 
 
 func train_option(kind: String, tags: Array, cost: Dictionary = {}) -> Dictionary:

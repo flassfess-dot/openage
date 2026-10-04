@@ -1,4 +1,5 @@
 extends SceneTree
+const CliffChain := preload("res://scripts/cliff_chain.gd")
 const Settings := preload("res://scripts/skirmish_settings.gd")
 const Landscape := preload("res://scripts/random_map_landscape.gd")
 const Catalog := preload("res://scripts/resource_catalog.gd")
@@ -25,6 +26,10 @@ func _initialize() -> void:
 			var info: Dictionary = catalog.environment_frame_info(item)
 			check(info.get("texture") != null and info["texture"].get_width() > 100, "cliff uses a real populated original frame, not a blank direction")
 			var center := Vector2i(item["position"])
+			check(Landscape.flat_cell(center, size, map_data["vertex_levels"]), "source cliff segments have one flat base")
+			check(is_equal_approx(float(item["source_elevation"]), float(map_data["vertex_levels"][center.y * (size.x + 1) + center.x])), "cliff image is anchored at the generated terrain height")
+			var ports := int(item["cliff_connections"])
+			check(int(item["source_frame"]) in CliffChain.PIECES.get(ports, {"frames": [24]})["frames"], "cliff art follows actual connections, including ends and corners")
 			for dy in range(-1, 2):
 				for dx in range(-1, 2): check(map_data["cliff_cells"].has(center + Vector2i(dx, dy)), "cliff's complete native footprint blocks navigation")
 		for y in range(size.y):

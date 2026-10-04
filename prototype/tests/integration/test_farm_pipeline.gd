@@ -129,7 +129,7 @@ func verify_farm_build_gather_reseed(catalog) -> void:
 	assert_equal(drop_site_ids, [109, 68], "Farmer uses Town Center and Granary drop sites")
 	var farm_frame: Dictionary = catalog.building_frame_info(farm)
 	assert_equal(farm_frame.get("graphic_id"), 273, "Farm resolves original completed graphic")
-	assert_equal(farm_frame.get("asset_name"), "graphic_273_p1", "Farm resolves owner palette")
+	assert_equal(farm_frame.get("asset_name"), "graphic_273_field_p1", "Farm field resolves owner palette")
 	assert_true(farm_frame.get("texture") != null, "Farm completed graphic is loadable")
 	assert_true(farm_frame.get("composite_parts", []).any(func(part): return int(part.get("graphic_id", -1)) == 274), "Farm imports original composite crop layer")
 	worker["anim_state"] = AnimationController.GATHER
@@ -173,7 +173,7 @@ func verify_farm_build_gather_reseed(catalog) -> void:
 
 	var second_farm: Dictionary = world.add_building(953, "farm", Vector2(25.0, 16.0), 1)
 	assert_equal(second_farm.get("amount"), 400, "future Roman Farm inherits every available yield technology")
-	assert_equal(catalog.building_frame_info({"kind": "farm", "source_unit_id": 50, "team": 2, "state": "complete", "amount": 400, "harvestable": true, "components": {"ownership": {"civilization_id": 13}}}).get("asset_name"), "graphic_273_p2", "Farm resolves player-two palette")
+	assert_equal(catalog.building_frame_info({"kind": "farm", "source_unit_id": 50, "team": 2, "state": "complete", "amount": 400, "harvestable": true, "components": {"ownership": {"civilization_id": 13}}}).get("asset_name"), "graphic_273_field_p2", "Farm field resolves player-two palette")
 	var second_worker: Dictionary = world.add_unit(1, "villager", Vector2(23.0, 16.0), false)
 	world.assign_command_gather([second_worker], int(second_farm["id"]))
 	assert_equal(second_worker.get("task"), "gather", "second worker can work a separate Farm")

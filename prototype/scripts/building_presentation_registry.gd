@@ -17,6 +17,7 @@ var resolved_graphic_keys: Dictionary = {}
 var source_records_by_key: Dictionary = {}
 var presentation_facing_by_key: Dictionary = {}
 var civilization_icon_sets: Dictionary = {}
+var farm_layer_frames: Dictionary = {}
 
 
 func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, metadata: Dictionary, indexed_frame_records: Dictionary = {}) -> void:
@@ -27,6 +28,7 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 	source_records_by_key.clear()
 	presentation_facing_by_key.clear()
 	civilization_icon_sets.clear()
+	farm_layer_frames.clear()
 	for civilization_value in object_catalog.get("civilizations", []):
 		var civilization: Dictionary = civilization_value
 		civilization_icon_sets[int(civilization.get("civilization_id", -1))] = int(civilization.get("icon_set", 0))
@@ -83,8 +85,24 @@ func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary
 	var result := _resolved_frame(base_graphic, player, presentation_facing, presentation_time)
 	result["graphic_id"] = base_graphic
 	var parts := _composite_parts(base_graphic, player, presentation_facing, presentation_time)
+	if base_graphic == 273 and String(building.get("kind", "")) == "farm":
+		var field := _farm_layer_frame("field", player)
+		var hut := _farm_layer_frame("hut", player)
+		if not field.is_empty() and not hut.is_empty():
+			result.merge(field, true)
+			hut["presentation_layer"] = "upright"
+			# Front foot of the hut is (117, 51), relative to source pivot (94, 48).
+			hut["depth_world_offset"] = Vector2(0.453125, -0.265625)
+			parts.append(hut)
+			for part in parts:
+				part["presentation_layer"] = "upright"
+				if not part.has("depth_world_offset"):
+					part["depth_world_offset"] = Vector2(0.75, -0.5)
 	var damage_part := _damage_part(building, source, player, presentation_time)
 	if not damage_part.is_empty():
+		if base_graphic == 273 and String(result.get("asset_name", "")).contains("_field_"):
+			damage_part["presentation_layer"] = "upright"
+			damage_part["depth_world_offset"] = Vector2(0.453125, -0.265625)
 		parts.append(damage_part)
 	result["composite_parts"] = parts
 	return result
@@ -123,6 +141,9 @@ func prewarm_buildings(buildings: Array) -> void:
 	for key_value in ordered_keys:
 		var key: Vector2i = key_value
 		_ensure_loaded(key.x, key.y)
+		if key.x == 273:
+			_farm_layer_frame("field", key.y)
+			_farm_layer_frame("hut", key.y)
 		# Composite overlays have independent graphics and otherwise remain a
 		# hidden first-frame cost even when the base building is already resident.
 		var logical_angle_count := maxi(1, int(graphics_catalog.get("graphics", {}).get(String.num_int64(key.x), {}).get("angle_count", 1)))
@@ -349,3 +370,21 @@ func _graphic_layer(graphic_id: int) -> int:
 
 func _player_asset_id(team: int) -> int:
 	return 2 if team == 2 else 1
+
+
+func _farm_layer_frame(part: String, player: int) -> Dictionary:
+	var name := "graphic_273_%s_p%d" % [part, player]
+	if farm_layer_frames.has(name):
+		return farm_layer_frames[name].duplicate()
+	var records: Array = frame_records_by_name.get(name, [])
+	if records.is_empty():
+		return {}
+	var record: Dictionary = records[0]
+	var texture: Texture2D = load("res://assets/generated/%s" % record["file"])
+	if texture == null:
+		return {}
+	var hotspot: Array = record.get("hotspot", [94, 48])
+	var info := {"texture": texture, "asset_name": name, "frame_index": 0,
+		"graphic_id": 273, "graphic_layer": 20, "hotspot": Vector2(hotspot[0], hotspot[1]), "mirrored": false}
+	farm_layer_frames[name] = info
+	return info.duplicate()

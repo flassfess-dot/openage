@@ -1,11 +1,16 @@
 class_name RoRSimulationMovementSystem
 extends RefCounted
 
+const NavigationKnowledge := preload("res://scripts/navigation_knowledge.gd")
+
 const Coordinates := preload("res://scripts/coordinates.gd")
 const FacingConvention := preload("res://scripts/facing_convention.gd")
+const MobileCollision := preload("res://scripts/mobile_collision.gd")
 const LocalMovement := preload("res://scripts/local_movement.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const StuckRecovery := preload("res://scripts/stuck_recovery.gd")
+
+var knowledge := NavigationKnowledge.new()
 
 var world_ref: WeakRef
 var world:
@@ -24,6 +29,15 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	var simulation_world = world
 	var probe: Variant = simulation_world.tick_pipeline.performance_probe
 	var movement_phase_started := Time.get_ticks_usec() if probe != null else 0
+	var planner = knowledge.planner(simulation_world, int(unit.get("team", 0)))
+	var old_revision := int(unit.get("path_knowledge_revision", planner.grid.revision))
+	if old_revision != planner.grid.revision and not unit.get("path", []).is_empty():
+		var changed_region: Variant = planner.grid.change_region_since(old_revision)
+		var segment_bounds := Rect2(Vector2(unit["pos"]), Vector2.ZERO).expand(Vector2(unit["target"])).grow(float(unit["footprint_radius"]) + 1.0)
+		if changed_region == null or segment_bounds.intersects(changed_region):
+			if planner.direct_cell_path(Vector2i(Vector2(unit["pos"]).floor()), Vector2i(Vector2(unit["target"]).floor()), String(unit["movement_domain"]), int(unit["terrain_restriction"]), float(unit["footprint_radius"])).is_empty():
+				assign_unit_destination(unit, unit["destination"], false)
+		unit["path_knowledge_revision"] = planner.grid.revision
 	var difference: Vector2 = unit["target"] - unit["pos"]
 	if difference.length_squared() < 0.001225:
 		var arrival_displacement := difference
@@ -43,6 +57,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		if next_index < path.size():
 			unit["path_index"] = next_index
 			unit["target"] = path[next_index]
+			unit["path_knowledge_revision"] = -1
 			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
 			if probe != null:
 				simulation_world.movement_arrival_microseconds += Time.get_ticks_usec() - movement_phase_started
@@ -114,6 +129,10 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	if probe != null:
 		simulation_world.movement_local_calculation_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
+	if shared_motion and not bool(unit["formation_shared_isolated"]):
+		unit["actual_velocity"] = MobileCollision.constrain(unit, unit["actual_velocity"], simulation_world.movement_neighbor_buffer, delta)
+		if not simulation_world.navigation_grid.is_position_walkable_for(Vector2(unit["pos"]) + Vector2(unit["actual_velocity"]) * delta, float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])):
+			unit["actual_velocity"] = Vector2.ZERO
 	if Vector2(unit["desired_velocity"]).length_squared() > 0.000001:
 		unit["desired_facing"] = facing_for_vector(unit["desired_velocity"])
 	if movement_reason != "":
@@ -206,7 +225,7 @@ func assign_command_move(selected: Array, target: Vector2) -> bool:
 	var reserved_by_id: Dictionary = {}
 	for unit in selected:
 		var requested := Coordinates.clamp_world(target, world.map_size)
-		var reserved: Vector2 = world.destination_reservations.reserve(int(unit["id"]), requested, float(unit.get("footprint_radius", 0.3)), world.navigation_grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+		var reserved: Vector2 = world.destination_reservations.reserve(int(unit["id"]), requested, float(unit.get("footprint_radius", 0.3)), knowledge.planner(world, int(unit.get("team", 0))).grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
 		unit["reserved_destination"] = reserved
 		reserved_by_id[int(unit["id"])] = reserved
 	var prevalidated_direct := _group_move_envelope_is_open(selected, reserved_by_id)
@@ -285,9 +304,10 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 	if not OrderPipeline.is_active(unit):
 		OrderPipeline.begin(unit, String(unit.get("task", "move")), int(unit.get("target_id", -1)), destination, String(unit.get("task", "")) in ["attack", "gather"])
 	OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
+	var planner = knowledge.planner(world, int(unit.get("team", 0)))
 	var clamped_destination := Coordinates.clamp_world(destination, world.map_size)
 	if reserve_destination:
-		clamped_destination = world.destination_reservations.reserve(int(unit["id"]), clamped_destination, float(unit.get("footprint_radius", 0.3)), world.navigation_grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+		clamped_destination = world.destination_reservations.reserve(int(unit["id"]), clamped_destination, float(unit.get("footprint_radius", 0.3)), planner.grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
 		unit["reserved_destination"] = clamped_destination
 	unit["destination"] = clamped_destination
 	var path_purpose := "replan" if not unit.get("path", []).is_empty() else String(unit.get("task", "move"))
@@ -295,7 +315,8 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 	if prevalidated_direct:
 		path_result = world.navigation_service.register_prevalidated_direct_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)))
 	else:
-		path_result = world.navigation_service.request_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)))
+		path_result = world.navigation_service.request_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)), planner)
+	unit["path_knowledge_revision"] = planner.grid.revision
 	unit["path_request_id"] = int(path_result["request_id"])
 	unit["path_status"] = String(path_result["status"])
 	unit["path_grid_revision"] = int(path_result["grid_revision"])
@@ -318,8 +339,9 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 	if not OrderPipeline.is_active(unit, "move"):
 		OrderPipeline.begin(unit, "move", -1, destination, false)
 	OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
+	var planner = knowledge.planner(world, int(unit.get("team", 0)))
 	var requested_destination := Coordinates.clamp_world(destination, world.map_size)
-	var reserved_destination: Vector2 = world.destination_reservations.reserve(int(unit["id"]), requested_destination, float(unit.get("footprint_radius", 0.3)), world.navigation_grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+	var reserved_destination: Vector2 = world.destination_reservations.reserve(int(unit["id"]), requested_destination, float(unit.get("footprint_radius", 0.3)), planner.grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
 	var direct_segments_allowed: bool = prevalidated_direct and reserved_destination.is_equal_approx(requested_destination)
 	unit["reserved_destination"] = reserved_destination
 	unit["destination"] = reserved_destination
@@ -336,7 +358,8 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 		if direct_segments_allowed and cursor.distance_squared_to(clamped_target) > 0.0001:
 			path_result = world.navigation_service.register_prevalidated_direct_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
 		else:
-			path_result = world.navigation_service.request_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
+			path_result = world.navigation_service.request_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)), planner)
+		unit["path_knowledge_revision"] = planner.grid.revision
 		unit["path_request_id"] = int(path_result["request_id"])
 		unit["path_status"] = String(path_result["status"])
 		unit["path_grid_revision"] = int(path_result["grid_revision"])

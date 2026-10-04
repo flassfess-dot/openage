@@ -17,6 +17,10 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 	var only_traders := not selected_units.is_empty() and selected_units.all(func(unit):
 		return bool(unit.get("components", {}).get("trade", {}).get("enabled", false))
 	)
+	if not selected_units.is_empty() and selected_units.all(func(entity): return entity.has("production_queue") or String(entity.get("entity_type", "")) == "building"):
+		if selected_units.all(func(entity): return not entity.get("command_options", {}).get("train", []).is_empty() and int(entity.get("team", 0)) == player_team and String(entity.get("state", "complete")) == "complete"):
+			return {"type": "set_rally_point", "target": ground_target}
+		return {"type": "unsupported", "message": "Выберите здание, производящее юнитов"}
 	if clicked_entity is Dictionary:
 		if bool(clicked_entity.get("last_known", false)):
 			return {"type": "move", "target": clicked_entity.get("pos", ground_target)}
@@ -33,6 +37,9 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 				if "capturable" in clicked_entity.get("behavior_tags", []):
 					return {"type": "move", "target": clicked_entity.get("pos", ground_target)}
 				var unit_team := int(clicked_entity.get("team", player_team))
+				var cargo: Dictionary = clicked_entity.get("components", {}).get("cargo", {})
+				if unit_team in allied_teams and bool(cargo.get("enabled", false)) and selected_units.any(func(unit): return String(unit.get("movement_domain", "land")) in cargo.get("allowed_domains", ["land"])):
+					return {"type": "board", "target_id": int(clicked_entity["id"])}
 				if has_worker and unit_team in allied_teams and String(clicked_entity.get("movement_domain", "land")) == "water" and float(clicked_entity.get("hp", 0.0)) > 0.0 and float(clicked_entity.get("hp", 0.0)) < float(clicked_entity.get("max_hp", 0.0)):
 					return {"type": "repair", "target_id": int(clicked_entity["id"])}
 				if unit_team not in allied_teams:
@@ -41,8 +48,6 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 					return {"type": "attack", "target_id": int(clicked_entity["id"])}
 				if only_healers and float(clicked_entity.get("hp", 0.0)) > 0.0 and float(clicked_entity.get("hp", 0.0)) < float(clicked_entity.get("max_hp", 0.0)):
 					return {"type": "heal", "target_id": int(clicked_entity["id"])}
-				if bool(clicked_entity.get("components", {}).get("cargo", {}).get("enabled", false)) and not selected_units.is_empty():
-					return {"type": "board", "target_id": int(clicked_entity["id"])}
 			"resource":
 				if has_worker:
 					return {"type": "gather", "target_id": int(clicked_entity["id"])}
@@ -86,3 +91,9 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 static func _is_trade_dock_for(trader: Dictionary, building: Dictionary) -> bool:
 	var source_id := int(trader.get("components", {}).get("trade", {}).get("target_building_source_id", -1))
 	return source_id >= 0 and building.get("unit_lineage", []).any(func(value): return int(value) == source_id)
+
+
+static func feedback_marker(resolution: Dictionary, clicked_entity: Variant, ground_target: Vector2) -> Variant:
+	if clicked_entity is Dictionary:
+		return {"entity_id": int(clicked_entity.get("id", -1))}
+	return ground_target if String(resolution.get("type", "")) in ["move", "set_rally_point"] else null

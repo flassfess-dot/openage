@@ -43,7 +43,7 @@ func _initialize() -> void:
 	var accents: Array = data["resources"].filter(func(r): return r.has("tree_condition"))
 	check(not accents.is_empty() and accents.size() < trees * 0.025, "autumn and dry accents remain rare among green woods")
 	for accent in accents:
-		check(not accent.has("environment_asset") and accent["source_graphic_id"] in [613, 627, 630], "rare conditions resolve to the selected native art")
+		check(not accent.has("environment_asset") and accent["source_graphic_id"] in [607, 613, 627, 630], "rare conditions resolve to the selected native art")
 		for other in accents:
 			if other != accent: check(Vector2(accent["position"]).distance_to(other["position"]) >= 6.0, "rare specimens never form yellow or dry clumps")
 		if accent.get("ecology_role", "") == "solitary_tree":
@@ -128,7 +128,7 @@ func _test_tree_palettes() -> void:
 			else:
 				native_count += 1
 				native_graphics[tree["source_graphic_id"]] = true
-				check(tree["source_graphic_id"] in ([607, 623, 655] if pine else [601, 603, 609, 611, 614]), "native species follows the same habitat")
+				check(tree["source_graphic_id"] in ([603, 623, 655] if pine else [601, 603, 609, 611, 614]), "native species follows the same habitat")
 		check(native_count > 100 and imported_count > 100 and native_graphics.size() >= 3, "both sources provide varied trees in each habitat")
 
 func _test_alliances() -> void:

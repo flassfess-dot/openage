@@ -1176,5 +1176,12 @@
   {"archive":"graphics","id":144,"name":"graphic_456_p1","player":1,"frameRange":[0,2]},
   {"archive":"graphics","id":144,"name":"graphic_456_p2","player":2,"frameRange":[0,2]},
   {"archive":"graphics","id":121,"name":"graphic_458_p1","player":1,"frameRange":[0,0]},
-  {"archive":"graphics","id":121,"name":"graphic_458_p2","player":2,"frameRange":[0,0]}
+  {"archive":"graphics","id":121,"name":"graphic_458_p2","player":2,"frameRange":[0,0]},
+  {"archive":"graphics","id":447,"name":"graphic_273_field_p1","player":1,"derivative":"farm_field"},
+  {"archive":"graphics","id":447,"name":"graphic_273_hut_p1","player":1,"derivative":"farm_hut"},
+  {"archive":"graphics","id":447,"name":"graphic_273_field_p2","player":2,"derivative":"farm_field"},
+  {"archive":"graphics","id":447,"name":"graphic_273_hut_p2","player":2,"derivative":"farm_hut"},
+  {"archive":"graphics","id":691,"name":"war_galley_rowing","player":1,"frameRange":[0,39],"derivative":"galley_rowing","derivedFramesPerAngle":8},
+  {"archive":"graphics","id":691,"name":"enemy_war_galley_rowing","player":2,"frameRange":[0,39],"derivative":"galley_rowing","derivedFramesPerAngle":8},
+  {"archive":"graphics","id":283,"name":"cliff_grounded","frameRange":[0,24],"derivative":"cliff_foot"}
 ]

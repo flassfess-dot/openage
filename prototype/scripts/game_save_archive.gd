@@ -4,6 +4,7 @@ extends RefCounted
 const ReplaySystem := preload("res://scripts/replay_system.gd")
 const SoundCueHistory := preload("res://scripts/sound_cue_history.gd")
 const FORMAT_VERSION := 3
+const CHECKPOINT_FORMAT_VERSION := 4
 const SAVE_PATH := "user://saves/quicksave.json"
 const NAMED_SAVE_DIRECTORY := "user://saves/named"
 const MAX_SLOT_NAME_LENGTH := 64
@@ -11,15 +12,15 @@ const MAX_TICK := 20_000_000
 const REQUIRED_FEATURES := ["population_points", "order_queues", "fog_memory", "sound_cue_history", "match_rules"]
 
 
-static func create(match_path: String, match_definition: Dictionary, tick: int, state_hash: String, replay: Dictionary, ai_states: Array, view_state: Dictionary, controller_state: Dictionary, slot_name: String = "Быстрое сохранение") -> Dictionary:
+static func create(match_path: String, match_definition: Dictionary, tick: int, state_hash: String, replay: Dictionary, ai_states: Array, view_state: Dictionary, controller_state: Dictionary, slot_name: String = "Быстрое сохранение", checkpoint: Dictionary = {}) -> Dictionary:
 	var codec := ReplaySystem.new()
 	var saved_view := view_state.duplicate(true)
 	if not saved_view.has("sound_cue_history"):
 		saved_view["sound_cue_history"] = SoundCueHistory.empty_state()
 	var settings: Dictionary = match_definition.get("skirmish_settings", {})
 	var map: Dictionary = match_definition.get("map", {})
-	return {
-		"format_version": FORMAT_VERSION,
+	var result := {
+		"format_version": CHECKPOINT_FORMAT_VERSION if not checkpoint.is_empty() else FORMAT_VERSION,
 		"schema_features": REQUIRED_FEATURES.duplicate(),
 		"metadata": {
 			"slot_name": normalized_slot_name(slot_name),
@@ -36,6 +37,10 @@ static func create(match_path: String, match_definition: Dictionary, tick: int, 
 		"view_state": codec.encode_variant(saved_view),
 		"controller_state": codec.encode_variant(controller_state),
 	}
+	if not checkpoint.is_empty():
+		result["checkpoint"] = checkpoint
+		result["schema_features"].append("world_checkpoint")
+	return result
 
 
 static func fingerprint(match_definition: Dictionary) -> String:
@@ -51,11 +56,15 @@ static func validate(data: Dictionary) -> String:
 	var version := int(data.get("format_version", -1))
 	if version == 2:
 		return "legacy_version_2_unsupported"
-	if version != FORMAT_VERSION:
+	if version not in [FORMAT_VERSION, CHECKPOINT_FORMAT_VERSION]:
 		return "unsupported_version"
 	var features: Variant = data.get("schema_features", [])
 	if not features is Array or not REQUIRED_FEATURES.all(func(feature): return feature in features):
 		return "schema_features_missing"
+	if version == CHECKPOINT_FORMAT_VERSION:
+		var blob: Variant = data.get("checkpoint")
+		if not blob is Dictionary or int(blob.get("version", -1)) != 1 or String(blob.get("sha256", "")).length() != 64 or String(blob.get("data", "")).is_empty():
+			return "checkpoint_invalid"
 	var metadata: Variant = data.get("metadata")
 	if not metadata is Dictionary or not valid_slot_name(String(metadata.get("slot_name", ""))) or int(metadata.get("saved_at_unix", 0)) <= 0:
 		return "metadata_invalid"
@@ -156,6 +165,8 @@ static func error_message(error: String) -> String:
 	if error.begins_with("state_hash_mismatch"):
 		return "Состояние сохранения не совпало с записью команд"
 	match error:
+		"checkpoint_invalid":
+			return "Сохранение повреждено: не удалось восстановить состояние мира"
 		"save_not_found": return "Сохранение не найдено"
 		"legacy_version_2_unsupported": return "Сохранение старого формата: начните новую игру или используйте сохранение версии 3"
 		"unsupported_version": return "Версия сохранения не поддерживается"

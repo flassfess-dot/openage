@@ -4,6 +4,10 @@ extends RefCounted
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const Footprint := preload("res://scripts/footprint.gd")
 
+var site_map_cache: Dictionary = {}
+var site_footprint_profiles: Dictionary = {}
+var site_map_revision := -1
+var site_map_source: Variant = null
 var world_ref: WeakRef
 var world:
 	get:
@@ -237,3 +241,45 @@ func reachable_builder_ids(building: Dictionary) -> Array[int]:
 				break
 	result.sort()
 	return result
+
+
+func cached_map_supports_foundation(kind: String, position: Vector2) -> bool:
+	if site_map_source != world.navigation_grid or site_map_revision != int(world.navigation_grid.revision):
+		site_map_cache.clear()
+		site_footprint_profiles.clear()
+		site_map_source = world.navigation_grid
+		site_map_revision = int(world.navigation_grid.revision)
+	if not site_footprint_profiles.has(kind):
+		site_footprint_profiles[kind] = {
+			"footprint": Footprint.building(world.unit_stats(kind), Vector2(0.5, 0.5)),
+			"placement": world.data_repository.runtime_metadata(kind).get("placement", {}),
+		}
+		site_map_cache[kind] = {}
+	var cached: Dictionary = site_map_cache[kind]
+	if cached.has(position):
+		return bool(cached[position])
+	# Bound retained cell audits even when workers cross an enormous map.
+	if cached.size() >= 8192:
+		cached.clear()
+	var cell := Vector2i(floori(position.x), floori(position.y))
+	var supported: bool
+	if position != Vector2(cell) + Vector2(0.5, 0.5):
+		supported = map_supports_foundation(kind, position)
+	else:
+		var profile: Dictionary = site_footprint_profiles[kind]
+		var occupied: Array = []
+		for offset in profile["footprint"].get("occupied_cells", []):
+			occupied.append(cell + Vector2i(offset))
+		var placement: Dictionary = profile["placement"]
+		supported = world.navigation_grid.can_build_for(occupied, String(placement.get("domain", "land")), int(placement.get("terrain_restriction_id", -1))) and foundation_has_required_domain_access({"occupied_cells": occupied}, placement)
+	cached[position] = supported
+	if world.tick_pipeline.performance_probe != null:
+		world.tick_pipeline.performance_probe.increment("ai.build_site_static_evaluations")
+	return supported
+
+
+func invalidate_site_cache() -> void:
+	site_map_cache.clear()
+	site_footprint_profiles.clear()
+	site_map_source = null
+	site_map_revision = -1

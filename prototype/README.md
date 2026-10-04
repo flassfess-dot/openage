@@ -28,8 +28,10 @@ Controls:
 - `,` / `.`: slower/faster game speed (1.0x, 1.5x, 2.0x)
 - `F3`: toggle diagnostics (IDs, footprints, grid, paths, slots, velocities, facing and render keys)
 - `F10`: open the eight-direction animation calibration scene
-- `R`: restart battle
-- `Esc`: quit
+- `B`: open construction choices for selected villagers
+- `R`: choose a repair target for selected villagers; restart when no villager is selected or the battle has ended
+- `Del`: delete selected own objects
+- `Esc`: cancel targeting or return from construction; quit when no command or submenu is active
 
 Generated files in `assets/generated` and copied original music are for local
 use only and must not be redistributed.
@@ -60,6 +62,8 @@ cancellation. The small production overview selects the corresponding building.
 Command buttons retain their 50-pixel size as buildings and technologies unlock.
 The grid reserves up to ten columns and two rows independently of the current
 selection. The production recess is left-aligned beside it and capped at 360 pixels.
+It uses the native selection-window frame and appears only when a building is
+selected, showing its unit production or research queue.
 Smaller windows page commands instead of shrinking them; construction keeps Back
 accessible on every page. Narrow windows reflow the HUD without stretching the
 original minimap frame.
@@ -73,6 +77,12 @@ preserve the scene cache. Regression tests cover cache bounds, camera projection
 terrain prefetch and exact geometry; the default map size and artwork are unchanged.
 Worker and inspection behavior
 ------------------------------
+The villager action layer has Build on the first plain-hammer button and Repair
+on the second original icon, with
+formations beside ordinary actions. Build replaces this layer with building icons;
+the red cross returns to actions. Repair targets damaged own or allied buildings
+and ships explicitly, including Transports without boarding them. The root red
+cross deletes selected objects.
 Workers can resume an existing owned foundation through the same context build
 command without reserving its cost again. Farm placement uses its native 3x3
 obstruction footprint rather than the larger selection outline. A manual cargo

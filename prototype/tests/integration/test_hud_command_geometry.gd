@@ -62,7 +62,7 @@ func _initialize() -> void:
 				var context := "civilization %d / age %d / width %d" % [civilization_id, age_technology, width]
 				check(production.size.x <= Layout.PRODUCTION_MAX_WIDTH, context + ": progress region stays bounded")
 				if not hud.build_menu_open:
-					hud.train_button.emit_signal("pressed")
+					hud.set_build_menu_open(true)
 				check(hud.build_menu_open, context + ": worker opens construction")
 				check(hud.current_layout["command"] == reserved and hud.current_layout["production"] == production, context + ": opening construction does not squeeze either area")
 				if width >= 1280:
@@ -79,9 +79,11 @@ func _initialize() -> void:
 						reached[index] = true
 						check(button.size == Vector2(50, 50), context + ": command size remains 50px")
 						check(reserved.encloses(button.get_rect()), context + ": command fits its reserved grid")
-						check(button.icon != null, context + ": native building or Back artwork loads")
+						check(button.icon != null, context + ": native building or cancel-cross artwork loads")
 						check(not production.intersects(button.get_rect()), context + ": progress cannot overlap a command")
 					check(hud.train_buttons[build_count].visible, context + ": Back remains accessible")
+					check(hud.train_buttons[build_count].icon == catalog.interface_icons.texture("command", 10), context + ": Back uses the original red cross")
+					check(hud.train_buttons[build_count].get_rect().end.y <= reserved.end.y, context + ": cancel cross stays inside the command grid")
 					for button in [hud.previous_commands_button, hud.next_commands_button]:
 						if button.visible:
 							check(reserved.encloses(button.get_rect()), context + ": page button fits its reserved grid")

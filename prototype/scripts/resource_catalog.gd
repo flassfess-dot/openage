@@ -383,6 +383,8 @@ func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Di
 		return environment_pack.frame_info(item)
 	var graphic_id := int(item.get("graphic_id", -1))
 	var asset_name := String(item.get("asset_name", ""))
+	if graphic_id == 107 and String(item.get("kind", "")) == "cliff":
+		asset_name = "cliff_grounded"
 	var ambient_actor := String(item.get("presentation_layer", "scenery")) == "ambient_actor"
 	if ambient_actor:
 		var source_unit_id := int(item.get("source_unit_id", -1))
@@ -434,6 +436,7 @@ func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Di
 		"hotspot": hotspot,
 		"mirrored": mirrored,
 		"graphic_layer": int(spec.get("layer", 0)),
+		"screen_offset": Vector2(item.get("cliff_screen_offset", Vector2.ZERO)) if graphic_id == 107 and String(item.get("kind", "")) == "cliff" else Vector2.ZERO,
 	}
 
 

@@ -3,6 +3,7 @@ extends RefCounted
 
 const Landscape := preload("res://scripts/random_map_landscape.gd")
 const LandscapeNavigation := preload("res://scripts/random_map_navigation.gd")
+const Topology := preload("res://scripts/random_map_topology.gd")
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const RandomMapZones := preload("res://scripts/random_map_zones.gd")
@@ -206,8 +207,8 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 		48: {"kind": "elephant", "category": "unit", "group_scale": 0.45, "group_cap": 18},
 		59: {"kind": "berries", "amount": 150, "group_scale": 0.75, "group_cap": 60},
 		65: {"kind": "gazelle", "category": "unit", "group_scale": 0.55, "group_cap": 36},
-		66: {"kind": "gold_mine", "amount": 400, "group_scale": 0.75, "group_cap": 48},
-		102: {"kind": "stone_mine", "amount": 250, "group_scale": 0.75, "group_cap": 48},
+		66: {"kind": "gold_mine", "amount": 400, "group_scale": 0.75, "group_cap": 128},
+		102: {"kind": "stone_mine", "amount": 250, "group_scale": 0.75, "group_cap": 96},
 		126: {"kind": "lion", "category": "unit", "group_scale": 0.35, "group_cap": 14},
 	}
 	var zone_ids: PackedInt32Array = strategic_zones.get("zone_ids", PackedInt32Array())
@@ -217,7 +218,16 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 	var used_anchors: Array[Vector2i] = []
 	var size_factor := clampf(sqrt(float(size.x * size.y) / (72.0 * 72.0)), 0.65, 2.4)
 	var sanctuary_radius := int(strategic_zones.get("sanctuary_radius_cells", 7))
-	for group_value in source_profile.get("unit_groups", []):
+	var source_groups: Array = source_profile.get("unit_groups", []).duplicate(true)
+	# Island profiles contain only owned mines. They still need independent
+	# deposits for exploration after the starting economy is exhausted.
+	for source_id in [66, 102]:
+		if not source_groups.any(func(group): return int(group.get("unit_id", -1)) == source_id and int(group.get("set_place_for_all_players", 0)) == -2):
+			source_groups.append({"unit_id": source_id, "set_place_for_all_players": -2, "groups_per_player": 0, "objects_per_group": 6 if source_id == 66 else 7, "group_radius": 2, "min_distance_to_players": 20, "expansion_policy": true})
+	# Reserve deposits before wildlife and berries use the sparse frontier anchors.
+	source_groups.sort_custom(func(left, right): return int(left.get("unit_id", -1) in [66, 102]) > int(right.get("unit_id", -1) in [66, 102]))
+	var land_cells := zone_ids.size() - zone_ids.count(RandomMapZones.ZONE_BLOCKED)
+	for group_value in source_groups:
 		var group: Dictionary = group_value
 		var source_id := int(group.get("unit_id", -1))
 		if not rules.has(source_id) or int(group.get("set_place_for_all_players", 0)) != -2:
@@ -225,6 +235,10 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 		var rule: Dictionary = rules[source_id]
 		var raw_group_count := float(group.get("groups_per_player", 0)) * float(maxi(1, starts.size()))
 		var group_count := clampi(roundi(raw_group_count * size_factor * float(rule.get("group_scale", 1.0))), 0, int(rule.get("group_cap", 48)))
+		var mineral := source_id in [66, 102]
+		if mineral:
+			var expansion_count := ceili(float(land_cells) / (1800.0 if source_id == 66 else 2400.0)) + starts.size() * (2 if source_id == 66 else 1)
+			group_count = mini(int(rule["group_cap"]), maxi(group_count, expansion_count))
 		if group_count <= 0:
 			continue
 		var allowed_zones: Array = [RandomMapZones.ZONE_FRONTIER, RandomMapZones.ZONE_CONTESTED]
@@ -247,6 +261,11 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 		var anchor_spacing := maxf(5.0, group_radius * 2.0 + (3.0 if source_id in [1, 126] else 1.0))
 		var raw_start_distance := maxf(0.0, float(group.get("min_distance_to_players", 0)))
 		var minimum_start_distance := maxi(sanctuary_radius + 1, roundi(raw_start_distance * minf(1.0, float(mini(size.x, size.y)) / 96.0)))
+		if mineral:
+			# Keep the start sanctuary free while allowing frontier mines on crowded maps.
+			minimum_start_distance = mini(minimum_start_distance, sanctuary_radius + 5)
+			allowed_zones = [RandomMapZones.ZONE_TERRITORY, RandomMapZones.ZONE_FRONTIER, RandomMapZones.ZONE_CONTESTED]
+			zone_weights = {RandomMapZones.ZONE_TERRITORY: 0.65, RandomMapZones.ZONE_FRONTIER: 1.0, RandomMapZones.ZONE_CONTESTED: 0.90}
 		var anchors := RandomMapSampler.sample_zone_cells(
 			strategic_zones,
 			size,
@@ -258,7 +277,8 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 			used_anchors,
 			zone_weights,
 			coast_mode,
-			minimum_start_distance
+			minimum_start_distance,
+			1 if mineral else 0
 		)
 		for anchor_value in anchors:
 			var anchor := Vector2i(anchor_value)
@@ -281,6 +301,77 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 				"enforce_spacing": String(rule.get("category", "resource")) == "resource",
 			})
 	return result
+
+
+static func _complete_mineral_expansions(map_data: Dictionary, starts: Array[Vector2], reserved: Dictionary, components: Dictionary, seed: int) -> void:
+	# A planned deposit can lose cells to prior resources on crowded maps.
+	# Reconcile actual placement, preserving existing access and start sanctuaries.
+	var size: Vector2i = map_data["size"]
+	var terrain: Array[int] = map_data["terrain_ids"]
+	var zones: Dictionary = map_data["strategic_zones"]
+	var zone_ids: PackedInt32Array = zones["zone_ids"]
+	var owners: PackedInt32Array = zones["nearest_start_indices"]
+	var distances: PackedInt32Array = zones["nearest_start_distances"]
+	var resources: Array = map_data["resources"]
+	var counts: Dictionary = {"gold_mine": {}, "stone_mine": {}}
+	var occupied := reserved.duplicate()
+	for resource in resources:
+		var cell := Vector2i(Vector2(resource["position"]))
+		occupied[cell] = true
+		var kind := String(resource.get("kind", ""))
+		if counts.has(kind) and resource.get("owner_start", []).is_empty():
+			var owner := int(owners[cell.y * size.x + cell.x])
+			counts[kind][owner] = int(counts[kind].get(owner, 0)) + 1
+	var missing := false
+	for kind in counts:
+		for owner in range(starts.size()):
+			missing = missing or int(counts[kind].get(owner, 0)) < 4
+	if not missing:
+		return
+	for resource in resources:
+		if String(resource.get("placement_domain", "land")) == "land":
+			var approach: Variant = _free_land_approach_cell(Vector2i(Vector2(resource["position"])), size, terrain, occupied, components, -1)
+			if approach is Vector2i:
+				occupied[approach] = true
+	var candidates := PackedInt32Array()
+	var minimum_distance := int(zones["sanctuary_radius_cells"]) + 1
+	for index in range(zone_ids.size()):
+		if zone_ids[index] != RandomMapZones.ZONE_BLOCKED and owners[index] >= 0 and distances[index] >= minimum_distance:
+			candidates.append(index)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	for index in range(candidates.size() - 1, 0, -1):
+		var swap := rng.randi_range(0, index)
+		var value := candidates[index]
+		candidates[index] = candidates[swap]
+		candidates[swap] = value
+	for kind in counts:
+		var total := 0
+		for owner in counts[kind]:
+			if int(owner) >= 0:
+				total += int(counts[kind][owner])
+		# A coast can leave one territorial zone too small; use accessible inland surplus.
+		for phase in range(2):
+			for index in candidates:
+				if phase == 1 and total >= starts.size() * 4:
+					break
+				var owner := int(owners[index])
+				if phase == 0 and int(counts[kind].get(owner, 0)) >= 4:
+					continue
+				var cell := Vector2i(index % size.x, index / size.x)
+				if not _cell_matches_domain(cell, size, terrain, "land") or occupied.has(cell):
+					continue
+				var owner_component := int(components.get(Vector2i(starts[owner]), -2))
+				if int(components.get(cell, -1)) != owner_component:
+					continue
+				var approach: Variant = _free_land_approach_cell(cell, size, terrain, occupied, components, owner_component)
+				if not approach is Vector2i:
+					continue
+				occupied[cell] = true
+				occupied[approach] = true
+				resources.append({"category": "resource", "kind": kind, "position": Vector2(cell) + Vector2(0.5, 0.5), "amount": 400 if kind == "gold_mine" else 250, "placement_domain": "land", "owner_start": [], "guarantee_team": 0, "source_unit_id": 66 if kind == "gold_mine" else 102, "source_global": true, "expansion_policy": true, "strategic_zone": String(RandomMapZones.ZONE_NAMES.get(int(zone_ids[index]), "frontier"))})
+				counts[kind][owner] = int(counts[kind].get(owner, 0)) + 1
+				total += 1
 
 
 static func _land_component_lookup(size: Vector2i, terrain_ids: Array[int], cliff_cells: Array[Vector2i]) -> Dictionary:
@@ -311,37 +402,7 @@ static func _land_component_lookup(size: Vector2i, terrain_ids: Array[int], clif
 
 
 static func _seeded_water_cell(cell: Vector2i, size: Vector2i, starts: Array[Vector2], topology: String, generator: Dictionary, seed: int) -> bool:
-	if topology in ["inland", "highlands", "hill_country", "narrows"]:
-		return false
-	var point := Vector2(cell) + Vector2(0.5, 0.5)
-	var jitter := (_smooth_noise(point, 22.0, seed ^ 0x341AF) * 0.50 + _smooth_noise(point, 9.0, seed) * 0.40 + _smooth_noise(point, 3.0, seed ^ 0x317AC) * 0.10) * mini(size.x, size.y) * 0.075
-	if topology == "coastal":
-		var width := mini(size.x, size.y) * float(generator.get("coast_fraction", 0.21))
-		return point.x < width + jitter or point.y < width - jitter * 0.5
-	if topology == "continental":
-		var border_width := mini(size.x, size.y) * float(generator.get("coast_fraction", 0.16))
-		return point.x < border_width + jitter or point.y < border_width - jitter or point.x >= size.x - border_width + jitter or point.y >= size.y - border_width - jitter
-	if topology == "mediterranean":
-		var half_sea_width := size.y * float(generator.get("sea_fraction", 0.23)) * 0.5
-		var sea_center := size.y * 0.5 + _smooth_noise(Vector2(point.x, 0.0), 12.0, seed ^ 0x4E017) * size.y * 0.055
-		return absf(point.y - sea_center) < half_sea_width + jitter * 0.2
-	if topology == "islands":
-		var source_profile: Dictionary = generator.get("source_profile", {})
-		var target_land_fraction := clampf(float(source_profile.get("land_coverage", 40)) / 100.0, 0.2, 0.65)
-		var radius := sqrt(target_land_fraction * float(size.x * size.y) / (PI * float(maxi(1, starts.size())))) * 0.95
-		var minimum_start_distance := INF
-		for left in range(starts.size()):
-			for right in range(left + 1, starts.size()):
-				minimum_start_distance = minf(minimum_start_distance, starts[left].distance_to(starts[right]))
-		if minimum_start_distance < INF:
-			# Preserve a channel wide enough for large ship footprints between
-			# neighboring islands, including the noisy shoreline band.
-			radius = minf(radius, minimum_start_distance * 0.43)
-		for start in starts:
-			if point.distance_to(start) <= radius + jitter * 0.35:
-				return false
-		return true
-	return false
+	return Topology.water_at(Vector2(cell) + Vector2(0.5, 0.5), Topology.prepare(size, starts, topology, generator, seed))
 
 
 static func _smooth_water_mask(terrain_ids: Array[int], size: Vector2i) -> void:
@@ -491,6 +552,8 @@ static func _generate_naval_start_zones(players: Array, size: Vector2i, terrain_
 			"dock_position": dock_position,
 			"land_staging": staging_pair["land"],
 			"water_staging": staging_pair["water"],
+			"water_egress_cells": _dock_water_egress_cells(dock_position, size, terrain_ids, footprint_radius_cells, reserved_cells) if int(water_guarantee["staging_clearance_cells"]) > 0 else [],
+			"water_staging_clearance_cells": int(water_guarantee["staging_clearance_cells"]),
 		}
 		result.append(zone)
 		_reserve_zone_cells(reserved_cells, zone, footprint_radius_cells)
@@ -517,6 +580,10 @@ static func _nearest_dock_anchor(origin: Vector2, size: Vector2i, terrain_ids: A
 
 static func _dock_anchor_valid(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, allowed_surface_ids: Array, reserved_cells: Dictionary, water_guarantee: Dictionary = {}) -> bool:
 	var cell := Vector2i(floori(origin.x), floori(origin.y))
+	if int(water_guarantee.get("staging_clearance_cells", 0)) > 0:
+		var edge_margin := footprint_radius_cells + 2
+		if cell.x < edge_margin or cell.y < edge_margin or cell.x >= size.x - edge_margin or cell.y >= size.y - edge_margin:
+			return false
 	for y in range(cell.y - footprint_radius_cells, cell.y + footprint_radius_cells + 1):
 		for x in range(cell.x - footprint_radius_cells, cell.x + footprint_radius_cells + 1):
 			var footprint_cell := Vector2i(x, y)
@@ -526,7 +593,28 @@ static func _dock_anchor_valid(origin: Vector2, size: Vector2i, terrain_ids: Arr
 				return false
 			if not _array_has_int(allowed_surface_ids, int(terrain_ids[footprint_cell.y * size.x + footprint_cell.x])):
 				return false
+	if int(water_guarantee.get("staging_clearance_cells", 0)) > 0 and _dock_water_egress_cells(origin, size, terrain_ids, footprint_radius_cells, reserved_cells).is_empty():
+		return false
 	return not _nearest_staging_pair(origin, size, terrain_ids, footprint_radius_cells, water_guarantee, reserved_cells).is_empty()
+
+
+# Keep a ship-sized exit beside the foundation, including room to turn.
+# The outer map row cannot provide radius clearance for a mobile ship.
+static func _dock_water_egress_cells(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, reserved_cells: Dictionary) -> Array:
+	var center := Vector2i(origin)
+	for direction in [Vector2i.LEFT, Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN]:
+		var tangent := Vector2i(-direction.y, direction.x)
+		var candidate: Array = []
+		var valid := true
+		for depth in range(footprint_radius_cells + 1, footprint_radius_cells + 3):
+			for side in range(-1, 2):
+				var cell: Vector2i = center + direction * depth + tangent * side
+				if cell.x < 1 or cell.y < 1 or cell.x >= size.x - 1 or cell.y >= size.y - 1 or reserved_cells.has(cell) or not _cell_matches_domain_with_clearance(cell, size, terrain_ids, "water", 0):
+					valid = false
+				candidate.append(cell)
+		if valid:
+			return candidate
+	return []
 
 
 static func _array_has_int(values: Array, expected: int) -> bool:
@@ -539,6 +627,9 @@ static func _array_has_int(values: Array, expected: int) -> bool:
 static func _nearest_staging_pair(origin: Vector2, size: Vector2i, terrain_ids: Array[int], footprint_radius_cells: int, water_guarantee: Dictionary = {}, reserved_cells: Dictionary = {}) -> Dictionary:
 	var land_candidates := _perimeter_domain_candidates(origin, size, terrain_ids, footprint_radius_cells, "land", reserved_cells)
 	var water_candidates := _perimeter_domain_candidates(origin, size, terrain_ids, footprint_radius_cells, "water", reserved_cells, maxi(0, int(water_guarantee.get("staging_clearance_cells", 0))))
+	if int(water_guarantee.get("staging_clearance_cells", 0)) > 0:
+		# A stationary starting scout must leave the production ring free.
+		water_candidates = water_candidates.filter(func(candidate): return Vector2(candidate).distance_to(origin) >= float(footprint_radius_cells) + 2.5)
 	var required_cells := maxi(0, int(water_guarantee.get("required_cells", 0)))
 	if required_cells > 0:
 		water_candidates = water_candidates.filter(func(candidate):
@@ -629,6 +720,13 @@ static func _reserve_zone_cells(result: Dictionary, zone_value: Variant, footpri
 			result[Vector2i(x, y)] = true
 	for key in ["land_staging", "water_staging"]:
 		result[Vector2i(Vector2(zone.get(key, Vector2.ZERO)))] = true
+	for cell in zone.get("water_egress_cells", []):
+		result[Vector2i(cell)] = true
+	var staging := Vector2i(Vector2(zone.get("water_staging", Vector2.ZERO)))
+	var clearance := maxi(0, int(zone.get("water_staging_clearance_cells", 0)))
+	for y in range(staging.y - clearance, staging.y + clearance + 1):
+		for x in range(staging.x - clearance, staging.x + clearance + 1):
+			result[Vector2i(x, y)] = true
 
 
 static func _base_terrain_id(cell: Vector2i, size: Vector2i, border: Dictionary, shore_width: int) -> int:
@@ -906,11 +1004,12 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	var starts: Array[Vector2] = []
 	for player in definition.get("players", []): starts.append(Vector2(player["start"]))
 	var topology := String(generator.get("topology", "inland"))
+	var layout := Topology.prepare(size, starts, topology, generator, seed)
 	var terrain: Array[int] = []
 	terrain.resize(size.x * size.y)
 	for y in range(size.y):
 		for x in range(size.x):
-			terrain[y * size.x + x] = 1 if _seeded_water_cell(Vector2i(x, y), size, starts, topology, generator, seed) else 0
+			terrain[y * size.x + x] = 1 if Topology.water_at(Vector2(x + 0.5, y + 0.5), layout) else 0
 		_report_row_progress(progress, y, size.y, 0.02, 0.15, "Создание суши и морей")
 	_smooth_water_mask(terrain, size)
 	var water_features := RandomMapWater.apply(terrain, size, seed, topology)
@@ -923,7 +1022,9 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	var rock_ridges := Landscape.rock_ridges(size, terrain, starts, fields, cliffs, seed ^ 0xCF67)
 	cliffs = rock_ridges["cells"]
 	_apply_cliff_elevation(levels, size, cliffs)
-	Landscape.relax_heights(levels, size)
+	var cliff_flat: Dictionary = {}
+	for cell in cliffs: cliff_flat[cell] = true
+	Landscape.relax_heights(levels, size, cliff_flat)
 	var zone_contract: Dictionary = generator.get("strategic_zone_contract", {}).duplicate(true)
 	zone_contract["alliance_aware"] = true
 	var zones := RandomMapZones.build(definition.get("players", []), size, terrain, cliffs, zone_contract)
@@ -957,6 +1058,7 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	clusters.append_array(_naval_resource_clusters(naval_zones, generator.get("naval_resource_clusters", [])))
 	var components := _land_component_lookup(size, terrain, cliffs)
 	result["resources"] = _generate_resource_clusters(clusters, size, seed ^ 0x53AB19, terrain, reserved, components)
+	_complete_mineral_expansions(result, starts, reserved, components, seed ^ 0x346C9)
 	# Marine ecology depends on available water, not on the starting-dock flag.
 	# Use a separate random stream so changes at sea do not reroll land resources.
 	var marine_clusters := _neutral_fish_clusters(size, terrain, seed ^ 0x26731, reserved, result["resources"])
@@ -972,12 +1074,17 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	var grove_cells: Dictionary = {}
 	for resource in result["resources"]:
 		if String(resource.get("kind", "")) == "tree": grove_cells[Vector2i(resource["position"])] = true
+	grove_cells.merge(cliff_flat, true)
 	Landscape.relax_heights(levels, size, grove_cells)
+	for item in rock_ridges["scenery"]:
+		var center := Vector2i(item["position"])
+		item["source_elevation"] = float(levels[center.y * (size.x + 1) + center.x])
 	Landscape.paint_ground(result, fields)
 	checkpoint = _landscape_checkpoint(diagnostics, "economy", checkpoint)
 	_report_progress(progress, 0.77, "Создание лесных массивов и опушек")
 	Landscape.forests(result, fields, reserved, seed ^ 0x561332)
 	Landscape.paint_resource_grounds(result)
+	Landscape.paint_cliff_grounds(result)
 	checkpoint = _landscape_checkpoint(diagnostics, "forests", checkpoint)
 	_report_progress(progress, 0.91, "Размещение камней и лесных деталей")
 	result["scenery"] = Landscape.scenery(result, fields, reserved, seed ^ 0x665ACA, float(generator.get("decoration_density", 1.0)), _starting_entity_exclusion_cells(definition, size))

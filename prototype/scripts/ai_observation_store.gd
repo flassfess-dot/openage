@@ -162,10 +162,12 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 			_add_population_point_costs(world, projected, observer_team)
 			if not restrict_command_options or command_option_entity_lookup.has(building_id):
 				projected["builder_count"] = building.get("builders", {}).size()
-				if String(building.get("state", "complete")) == "foundation":
+				if String(building.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or SimulationSnapshot.foundation_needs_recovery(building, units)):
 					projected["reachable_builder_ids"] = world.reachable_builder_ids(building)
 				if requested_production_only:
 					projected["command_options"] = SimulationSnapshot.requested_production_options(world, building, observer_team, production_requests)
+				elif bool(options.get("economic_production_options_only", false)):
+					projected["command_options"] = SimulationSnapshot.economic_production_options(world, building, observer_team)
 				else:
 					projected["command_options"] = {
 						"train": world.get_unit_production_options(building_id, observer_team),
@@ -202,16 +204,22 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 
 	var player_state: Dictionary = SimulationSnapshot.presentation_player_state(world, observer_team)
 	player_state["blocked_population_queues"] = blocked_population_queues
+	var include_navigation := bool(options.get("include_navigation", true))
+	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, fog, observer_team, probe) if include_navigation else {}
 	var build_site_filter: Callable = options.get("build_site_filter", Callable())
 	if build_site_filter.is_valid() and not available_requested_build_site_kinds.is_empty():
-		available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state)
-	var build_sites := _build_sites(world, tick, observer_team, available_requested_build_site_kinds, options)
+		if bool(options.get("build_site_filter_navigation", false)):
+			available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state, navigation)
+		else:
+			available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state)
+	var site_options := options.duplicate()
+	site_options["planning_units"] = units
+	site_options["planning_buildings"] = buildings
+	var build_sites := _build_sites(world, tick, observer_team, available_requested_build_site_kinds, site_options)
 	_observe_stage(probe, prefix + ".build_sites", stage_started)
 	stage_started = Time.get_ticks_usec() if probe != null else 0
 
-	var include_navigation := bool(options.get("include_navigation", true))
 	var include_fog_cells := bool(options.get("include_fog_cells", false))
-	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, fog, observer_team, probe) if include_navigation else {}
 	var presented_fog: Dictionary = SimulationSnapshot.presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []}
 	_observe_stage(probe, prefix + ".state", stage_started)
 	return {
@@ -285,10 +293,10 @@ func _refresh_entity_projection(result: Dictionary, source: Dictionary, observer
 			result[field] = source[field]
 		else:
 			result.erase(field)
-	if (observer_team <= 0 or int(source.get("team", 0)) == observer_team) and source.has("resource_id"):
-		result["resource_id"] = int(source["resource_id"])
-	else:
-		result.erase("resource_id")
+	for field in ["resource_id", "path_request_id"]:
+		if (observer_team <= 0 or int(source.get("team", 0)) == observer_team) and source.has(field):
+			result[field] = int(source[field])
+		else: result.erase(field)
 	for field in AI_ARRAY_FIELDS:
 		_sync_array_field(result, source, field)
 	_sync_components(result, source, observer_team)
@@ -458,15 +466,7 @@ func _add_population_point_costs(world, projected: Dictionary, observer_team: in
 
 func _build_sites(world, tick: int, observer_team: int, available_kinds: Array, options: Dictionary) -> Dictionary:
 	if not available_kinds.is_empty():
-		var maximum_per_kind := maxi(1, int(options.get("maximum_build_sites_per_kind", 4)))
-		var search_radius := maxi(1, int(options.get("build_site_search_radius", 12)))
-		var cache_ticks := maxi(0, int(options.get("build_site_cache_ticks", 0)))
-		var preferred_sites: Dictionary = options.get("preferred_build_sites", {})
-		var strict_kinds: Array = options.get("strict_preferred_build_site_kinds", [])
-		var minimum_gap := maxf(0.0, float(options.get("minimum_structure_gap", 0.0)))
-		if cache_ticks > 0 and world.has_method("get_cached_local_build_sites"):
-			return world.get_cached_local_build_sites(observer_team, available_kinds, tick, cache_ticks, maximum_per_kind, search_radius, preferred_sites, strict_kinds, minimum_gap)
-		return world.get_local_build_sites(observer_team, available_kinds, maximum_per_kind, search_radius, preferred_sites, strict_kinds, minimum_gap)
+		return SimulationSnapshot.requested_build_sites(world, tick, observer_team, available_kinds, options, options.get("planning_units", []), options.get("planning_buildings", []))
 	if bool(options.get("include_build_sites", false)):
 		return world.get_mixed_domain_build_sites(observer_team)
 	return {}

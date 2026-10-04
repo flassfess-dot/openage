@@ -5,6 +5,8 @@ const AnimationController := preload("res://scripts/animation_controller.gd")
 const CombatRules := preload("res://scripts/combat_rules.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
 const EntityComponents := preload("res://scripts/entity_components.gd")
+const NavigationGrid := preload("res://scripts/navigation_grid.gd")
+const MobileCollision := preload("res://scripts/mobile_collision.gd")
 const Footprint := preload("res://scripts/footprint.gd")
 const SimulationEconomySystem := preload("res://scripts/simulation_economy_system.gd")
 
@@ -156,6 +158,7 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		world.capturable_units.append(unit)
 	world.configure_unit_combat_awareness(unit)
 	EntityComponents.sync_dynamic(unit)
+	unit["solid_animal"] = MobileCollision.is_solid_animal(unit)
 	world.units.append(unit)
 	world.units_by_id[entity_id] = unit
 	world.mark_combat_roster_dirty()
@@ -185,7 +188,7 @@ func add_resource(kind: String, position: Vector2, amount: int, resolve_placemen
 	var footprint: Dictionary = Footprint.resource(kind, source)
 	var runtime_metadata: Dictionary = world.data_repository.runtime_metadata(kind)
 	var behavior_tags: Array = world.data_repository.behavior_tags(kind)
-	var blocks_navigation := bool(runtime_metadata.get("blocks_navigation", "carcass" not in behavior_tags))
+	var blocks_navigation := bool(runtime_metadata.get("blocks_navigation", NavigationGrid.default_resource_blocks_navigation(behavior_tags)))
 	var terrain_restriction := int(runtime_metadata.get("placement_terrain_restriction_id", source.get("links", {}).get("terrain_restriction", -1)))
 	var placement_domain := String(runtime_metadata.get("placement_domain", "water" if terrain_restriction == 3 else "land"))
 	if resolve_placement:

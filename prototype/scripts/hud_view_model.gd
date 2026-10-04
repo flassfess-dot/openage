@@ -22,6 +22,8 @@ const UNIT_ACTION_ICON_IDS := {
 	"stop": 3,
 	"hold": 12,
 	"stance": 7,
+	"repair": 0,
+	"delete": 10,
 }
 const HIDDEN_COMMAND_REASONS := {
 	"building_unavailable": true,
@@ -138,6 +140,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 		for action_value in [
 			{"id": "attack_move", "label": "Атаковать по пути", "short_label": "АТАКА", "hotkey": "Q"},
 			{"id": "stop", "label": "Остановиться", "short_label": "СТОП", "hotkey": "X"},
+			{"id": "delete", "label": "Удалить выбранные объекты", "short_label": "УДАЛИТЬ", "hotkey": "Del"},
 			{"id": "hold", "label": "Держать позицию", "short_label": "ДЕРЖ", "hotkey": "H"},
 			{"id": "stance", "label": "Стойка: %s" % String(STANCE_LABELS_RU.get(next_stance, next_stance)), "short_label": "СТОЙКА", "hotkey": "V", "stance": next_stance},
 		]:
@@ -200,11 +203,24 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 	var selected_worker: Dictionary = {}
 	for entity_value in selected:
 		var entity: Dictionary = entity_value
-		if _category(entity) == "unit" and _is_worker(entity):
+		if _category(entity) == "unit" and _is_worker(entity) and String(entity.get("movement_domain", "land")) == "land":
 			selected_worker = entity
 			break
 	if not selected_worker.is_empty():
 		var worker: Dictionary = selected_worker
+		if String(worker.get("movement_domain", "land")) == "land":
+			model["commands"].append({
+				"type": "unit_action",
+				"id": "repair",
+				"label": "Ремонтировать здание или судно",
+				"short_label": "РЕМОНТ",
+				"hotkey": "R",
+				"icon_kind": "command",
+				"icon_id": int(UNIT_ACTION_ICON_IDS["repair"]),
+				"enabled": disabled_reason.is_empty(),
+				"active": false,
+				"reason": disabled_reason,
+			})
 		for option_value in worker.get("command_options", {}).get("build", []):
 			var option: Dictionary = option_value
 			if not _command_option_is_visible(option):

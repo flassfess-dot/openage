@@ -4,7 +4,7 @@ extends RefCounted
 const SelectionResolver := preload("res://scripts/selection_resolver.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 
-const SELECTABLE_DRAWABLES := ["unit", "building", "building_part", "resource"]
+const SELECTABLE_DRAWABLES := ["unit", "unit_part", "building", "building_part", "resource"]
 
 
 func hit_stack(screen_position: Vector2, drawables: Array, world_to_screen: Callable, zoom: float) -> Array:
@@ -77,6 +77,8 @@ func context_entity(hit: Dictionary) -> Dictionary:
 
 
 func entity_type_for(drawable_kind: String, entity: Dictionary) -> String:
+	if drawable_kind == "unit_part":
+		return "unit"
 	if drawable_kind in ["building", "building_part"]:
 		return "foundation" if String(entity.get("state", "complete")) == "foundation" else "building"
 	return drawable_kind

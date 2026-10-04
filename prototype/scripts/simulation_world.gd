@@ -79,6 +79,7 @@ var known_resources_by_player: Dictionary = {}
 var ai_navigation_knowledge = AiNavigationKnowledge.new()
 var known_ai_resources_by_player: Dictionary = {}
 const RESOURCE_MEMORY_CHUNK_SIZE := 8
+const MAX_MINIMAP_RESOURCE_CHANGES := 4096
 var last_known_buildings_by_player: Dictionary = {}
 var local_build_site_cache: Dictionary = {}
 const MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES := 64
@@ -249,6 +250,8 @@ func set_performance_probe(probe: Variant) -> void:
 	visibility_system.set_performance_probe(probe)
 
 func set_gamespec(data: Dictionary) -> void:
+	local_build_site_cache.clear()
+	building_placement_system.invalidate_site_cache()
 	gamespec_data = data
 	data_repository.configure_compatibility_gamespec(data)
 	production_system.invalidate_option_catalogs()
@@ -263,6 +266,8 @@ func set_terrain_catalog(data: Dictionary) -> void:
 
 
 func set_object_catalog(data: Dictionary) -> void:
+	local_build_site_cache.clear()
+	building_placement_system.invalidate_site_cache()
 	object_catalog_data = data
 	data_repository.configure_objects(data)
 	production_system.invalidate_option_catalogs()
@@ -278,6 +283,8 @@ func set_graphics_catalog(data: Dictionary) -> void:
 
 
 func set_runtime_catalog(data: Dictionary) -> void:
+	local_build_site_cache.clear()
+	building_placement_system.invalidate_site_cache()
 	data_repository.configure_runtime(data)
 	production_system.invalidate_option_catalogs()
 	attack_animation_spec_cache.clear()
@@ -424,6 +431,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	render_entity_projection_cache.clear()
 	capture_radius_by_kind.clear()
 	static_obstructions.clear()
+	movement_system.knowledge.clear()
 	forest_resource_counts.clear()
 	buildings.clear()
 	buildings_by_id.clear()
@@ -1199,6 +1207,11 @@ func update_fog_of_war() -> void:
 func _tick_fog(context: Dictionary) -> void:
 	visibility_system.advance(context)
 	var fog = get_fog_of_war()
+	# Sample sight even while units are idle. A planner first created much later
+	# must not learn hidden changes to terrain the player saw earlier.
+	for observer_value in fog.states_by_player:
+		if int(observer_value) > 0:
+			movement_system.knowledge.planner(self, int(observer_value))
 	# Resource memory is sampled at the exact visibility transition. This keeps
 	# hidden state frozen even when an AI snapshot is requested less often than
 	# the simulation tick.
@@ -1273,6 +1286,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	var presentation_microseconds := 0
 	var animation_microseconds := 0
 	var component_sync_microseconds := 0
+	var boarding_ready: Array = []
 	var task_order_update := {
 		"moving": false,
 		"animation_state": AnimationController.IDLE,
@@ -1318,6 +1332,8 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		var attack_target: Variant = null
 		var gather_stage_name := String(unit.get("gather_stage", "none")) if task_name == "gather" else ""
 		match task_name:
+			"board":
+				moving = transport_system.advance_board_order(unit, delta, boarding_ready)
 			"trade":
 				var trade_update := trade_system.advance_unit(unit, delta)
 				moving = bool(trade_update.get("moving", false))
@@ -1408,6 +1424,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		probe.observe_microseconds("simulation.navigation.path_queries", pathfinder.path_query_tick_microseconds())
 		probe.increment("movement.native_unit_updates", movement_native_unit_updates)
 		probe.increment("movement.native_neighbor_candidates", movement_native_neighbor_candidates)
+	transport_system.finish_boarding_tick(boarding_ready)
 	unit_activity_registry.finish_tick()
 
 
@@ -1782,7 +1799,7 @@ func find_building(id: int) -> Variant:
 	return buildings_by_id.get(id)
 
 
-func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Vector2:
+func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Variant:
 	return gathering_system.dropoff_approach_position(worker, building)
 
 
@@ -1967,6 +1984,8 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 	workers.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 	if workers.is_empty():
 		return result
+	if tick_pipeline.performance_probe != null:
+		tick_pipeline.performance_probe.increment("ai.build_site_searches")
 	# One synchronous query sees fixed unit positions. Index the exact five
 	# occupancy probes once, instead of scanning every unit for every site.
 	var mobile_occupied_cells := _mobile_foundation_obstructions()
@@ -1984,7 +2003,7 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 			seen_cells[preferred_cell] = true
 			if visibility_system.state_at_world(team, preferred_position) == FogOfWar.UNKNOWN:
 				continue
-			if _can_place_foundation(team, kind, preferred_position, mobile_occupied_cells) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
+			if building_placement_system.cached_map_supports_foundation(kind, preferred_position) and _can_place_foundation(team, kind, preferred_position, mobile_occupied_cells) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
 				if foundation_preserves_structure_gap(team, kind, preferred_position, minimum_structure_gap):
 					sites.append(preferred_position)
 					if sites.size() >= maximum_per_kind:
@@ -2009,7 +2028,7 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 							continue
 						seen_cells[cell] = true
 						var position := Vector2(cell) + Vector2(0.5, 0.5)
-						if _can_place_foundation(team, kind, position, mobile_occupied_cells) and worker_can_reach_foundation(worker, kind, position):
+						if building_placement_system.cached_map_supports_foundation(kind, position) and _can_place_foundation(team, kind, position, mobile_occupied_cells) and worker_can_reach_foundation(worker, kind, position):
 							if foundation_preserves_structure_gap(team, kind, position, minimum_structure_gap):
 								sites.append(position)
 								if sites.size() >= maximum_per_kind:
@@ -2030,30 +2049,47 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 
 
 func get_cached_local_build_sites(team: int, kinds: Array, tick: int, maximum_age_ticks: int, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
-	var cache_key := hash([team, kinds, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap])
-	var cached: Dictionary = local_build_site_cache.get(cache_key, {})
-	var navigation_revision := int(navigation_grid.revision) if navigation_grid != null else -1
-	var worker_component_signature := _build_site_worker_component_signature(team)
-	if (
-		not cached.is_empty()
-		and tick >= int(cached.get("tick", -1))
-		and tick - int(cached.get("tick", -1)) <= maxi(0, maximum_age_ticks)
-		and int(cached.get("navigation_revision", -2)) == navigation_revision
-		and int(cached.get("worker_component_signature", -1)) == worker_component_signature
-	):
-		# Foundation validity depends on the static navigation/obstruction map.
-		# Revalidating every returned cell repeated the full placement audit for
-		# every campaign AI even when that authoritative map had not changed.
-		return cached.get("sites", {})
-	var sites := get_local_build_sites(team, kinds, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
-	_prune_local_build_site_cache(tick, maximum_age_ticks)
-	local_build_site_cache[cache_key] = {
-		"tick": tick,
-		"navigation_revision": navigation_revision,
-		"worker_component_signature": worker_component_signature,
-		"sites": sites.duplicate(true),
-	}
-	return sites
+	if kinds.is_empty():
+		return {}
+	# Retain each kind independently, including empty searches. Other priorities
+	# entering/leaving the request must not discard an unchanged failed dock search.
+	var dependencies := _build_site_query_dependencies(team)
+	var result: Dictionary = {}
+	for kind_value in kinds:
+		var kind := String(kind_value)
+		var preferred: Dictionary = {kind: preferred_sites.get(kind, [])}
+		var strict: Array = [kind] if kind in strict_preferred_kinds else []
+		var cache_key := hash([team, kind, maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap])
+		var signature := hash([dependencies, can_afford_resource_cost(team, building_cost(kind, team))])
+		var cached: Dictionary = local_build_site_cache.get(cache_key, {})
+		var sites: Dictionary
+		if not cached.is_empty() and tick >= int(cached.get("tick", -1)) and tick - int(cached.get("tick", -1)) <= maxi(0, maximum_age_ticks) and int(cached.get("query_signature", -1)) == signature:
+			sites = cached.get("sites", {})
+			if tick_pipeline.performance_probe != null:
+				tick_pipeline.performance_probe.increment("ai.build_site_cache_hits")
+		else:
+			sites = get_local_build_sites(team, [kind], maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap)
+			_prune_local_build_site_cache(tick, maximum_age_ticks)
+			local_build_site_cache[cache_key] = {"tick": tick, "query_signature": signature, "sites": sites.duplicate(true)}
+		if sites.has(kind):
+			result[kind] = sites[kind].duplicate()
+	return result
+
+
+func _build_site_query_dependencies(team: int) -> Array:
+	var workers: Array = []
+	for unit_value in units:
+		var unit: Dictionary = unit_value
+		if int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land":
+			workers.append([int(unit.get("id", -1)), unit.get("pos", Vector2.ZERO), unit.get("footprint_radius", 0.3), unit.get("terrain_restriction", -1)])
+	var mobile_cells: Array = _mobile_foundation_obstructions().keys()
+	mobile_cells.sort_custom(func(left, right): return left.y < right.y or (left.y == right.y and left.x < right.x))
+	var structures: Array = []
+	for building_value in buildings:
+		var building: Dictionary = building_value
+		if float(building.get("hp", 0.0)) > 0.0:
+			structures.append([building.get("id", -1), building.get("team", 0), building.get("pos", Vector2.ZERO), building.get("footprint", {}), building.get("occupied_cells", []), building.get("footprint_radius", 1.0)])
+	return [navigation_grid.get_instance_id(), navigation_grid.revision, technology_system.revision(team), fog_of_war.exploration_revision_for_player(team), workers, mobile_cells, structures]
 
 
 func _prune_local_build_site_cache(tick: int, maximum_age_ticks: int) -> void:
@@ -2071,21 +2107,6 @@ func _prune_local_build_site_cache(tick: int, maximum_age_ticks: int) -> void:
 				oldest_key = key
 				oldest_tick = cached_tick
 		local_build_site_cache.erase(oldest_key)
-
-
-func _build_site_worker_component_signature(team: int) -> int:
-	var components: Dictionary = {}
-	for unit_value in units:
-		var unit: Dictionary = unit_value
-		if int(unit.get("team", 0)) != team or float(unit.get("hp", 0.0)) <= 0.0 or not entity_is_worker(unit) or String(unit.get("movement_domain", "land")) != "land":
-			continue
-		var position := Vector2(unit.get("pos", Vector2.ZERO))
-		var component_id := navigation_grid.surface_component_id(Vector2i(floori(position.x), floori(position.y)), "land")
-		if component_id >= 0:
-			components[component_id] = true
-	var ids: Array = components.keys()
-	ids.sort()
-	return hash(ids)
 
 
 func _append_bounded_sites(sites: Array, fallback_sites: Array, maximum: int) -> void:
@@ -2469,6 +2490,8 @@ func halt_unit(unit: Dictionary, reason: String = "stopped") -> void:
 	conversion_system.cancel(unit, reason)
 	healing_system.cancel(unit, reason)
 	trade_system.cancel(unit, reason)
+	for field in ["boarding_position", "boarding_transport_position", "boarding_navigation_revision", "boarding_failed_positions", "boarding_detour_attempts"]:
+		unit.erase(field)
 	release_resource_approach_slot(unit)
 	release_building_approach_slot(unit)
 	unit["task"] = "idle"
@@ -3113,6 +3136,37 @@ func known_resource_revision(observer_team: int) -> int:
 	return int(known_resources_by_player.get(observer_team, {}).get("revision", 0))
 
 
+# One presentation consumer per observer. The queue contains only legal resource
+# memory changes that can alter a marker, not every decrement of a tree's wood.
+# null requests an initial/bulk rebuild; an empty dictionary means no work.
+func consume_known_resource_marker_changes(observer_team: int) -> Variant:
+	get_known_resources(observer_team)
+	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
+	if cached.is_empty():
+		return null
+	var rebuild := not bool(cached.get("marker_changes_tracked", false)) or bool(cached.get("marker_changes_overflow", false))
+	cached["marker_changes_tracked"] = true
+	cached["marker_changes_overflow"] = false
+	var pending: Dictionary = cached.get("marker_changes", {})
+	var changes: Dictionary = {}
+	if not rebuild:
+		var ids: Dictionary = cached.get("ids", {})
+		for resource_id in pending:
+			changes[resource_id] = ids.get(resource_id)
+	pending.clear()
+	return null if rebuild else changes
+
+
+func _mark_known_resource_marker_changed(cached: Dictionary, resource_id: int) -> void:
+	if not bool(cached.get("marker_changes_tracked", false)) or bool(cached.get("marker_changes_overflow", false)):
+		return
+	var pending: Dictionary = cached["marker_changes"]
+	pending[resource_id] = true
+	if pending.size() > MAX_MINIMAP_RESOURCE_CHANGES:
+		pending.clear()
+		cached["marker_changes_overflow"] = true
+
+
 func restore_known_resource_memory(encoded: Dictionary) -> void:
 	known_resources_by_player.clear()
 	known_ai_resources_by_player.clear()
@@ -3181,19 +3235,31 @@ func get_known_ai_resources(observer_team: int) -> Array:
 	if observer_team <= 0:
 		return known
 	var known_cache: Dictionary = known_resources_by_player.get(observer_team, {})
-	var known_revision := int(known_cache.get("revision", 0))
-	var cached: Dictionary = known_ai_resources_by_player.get(observer_team, {})
-	if int(cached.get("known_revision", -1)) == known_revision:
-		return cached.get("resources", [])
-	var result: Array = []
-	result.resize(known.size())
-	for index in range(known.size()):
-		result[index] = _compact_ai_resource(known[index])
-	known_ai_resources_by_player[observer_team] = {
-		"known_revision": known_revision,
-		"resources": result,
-	}
-	return result
+	if known_cache.has("ai_projection"):
+		return known_cache["ai_projection"]["resources"]
+	var projected := {"resources": [], "ids": {}}
+	for resource in known:
+		var item := _compact_ai_resource(resource)
+		projected["resources"].append(item)
+		projected["ids"][int(item["id"])] = item
+	known_cache["ai_projection"] = projected
+	known_ai_resources_by_player[observer_team] = projected
+	return projected["resources"]
+
+
+func _update_ai_resource_projection(cached: Dictionary, memory: Dictionary) -> void:
+	if not cached.has("ai_projection"):
+		return
+	var projection: Dictionary = cached["ai_projection"]
+	var id := int(memory["id"])
+	var item := _compact_ai_resource(memory)
+	if projection["ids"].has(id):
+		var existing: Dictionary = projection["ids"][id]
+		existing.clear()
+		existing.merge(item)
+	else:
+		projection["ids"][id] = item
+		_insert_known_resource_sorted(projection["resources"], item)
 
 
 func _compact_ai_resource(resource: Dictionary) -> Dictionary:
@@ -3219,6 +3285,9 @@ func _empty_known_resource_cache(alliance_signature: int) -> Dictionary:
 		"by_cell": {},
 		"by_chunk": {},
 		"dirty_ids": {},
+		"marker_changes": {},
+		"marker_changes_tracked": false,
+		"marker_changes_overflow": false,
 		"revision": 0,
 	}
 
@@ -3300,12 +3369,17 @@ func _remember_known_resource(cached: Dictionary, resource: Dictionary, compact_
 	if existing is Dictionary:
 		if existing == memory:
 			return false
+		if existing.get("pos") != memory.get("pos") or (int(existing.get("amount", 0)) > 0) != (int(memory.get("amount", 0)) > 0):
+			_mark_known_resource_marker_changed(cached, resource_id)
 		existing.clear()
 		existing.merge(memory, true)
+		_update_ai_resource_projection(cached, memory)
 		return true
 	var known: Array = cached.get("resources", [])
 	_insert_known_resource_sorted(known, memory)
 	ids[resource_id] = memory
+	_update_ai_resource_projection(cached, memory)
+	_mark_known_resource_marker_changed(cached, resource_id)
 	var cell_index := _resource_cell_index(memory)
 	var by_cell: Dictionary = cached.get("by_cell", {})
 	var cell_ids: Dictionary = by_cell.get(cell_index, {})
@@ -3330,7 +3404,12 @@ func _forget_known_resource(cached: Dictionary, resource_id: int) -> bool:
 		return false
 	var known: Array = cached.get("resources", [])
 	known.erase(memory)
+	if cached.has("ai_projection"):
+		var projected: Dictionary = cached["ai_projection"]
+		projected["resources"].erase(projected["ids"].get(resource_id))
+		projected["ids"].erase(resource_id)
 	ids.erase(resource_id)
+	_mark_known_resource_marker_changed(cached, resource_id)
 	var cell_index := _resource_cell_index(memory)
 	var by_cell: Dictionary = cached.get("by_cell", {})
 	var cell_ids: Dictionary = by_cell.get(cell_index, {})

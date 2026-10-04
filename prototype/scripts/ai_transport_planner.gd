@@ -34,6 +34,9 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 	var target_landing: Variant = null
 	for transport_value in transports:
 		var transport: Dictionary = transport_value
+		# Let accepted boarding approaches complete before sailing or restaging.
+		if own_units.any(func(unit): return String(unit.get("task", "")) == "board" and int(unit.get("target_id", -1)) == int(transport["id"])):
+			continue
 		var cargo: Dictionary = transport.get("components", {}).get("cargo", {})
 		var cargo_ids: Array = cargo.get("passenger_ids", [])
 		var own_transport := int(transport.get("team", 0)) == team
@@ -57,6 +60,12 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 				if Vector2(passenger.get("pos", Vector2.ZERO)).distance_to(Vector2(transport.get("pos", Vector2.ZERO))) <= maximum_distance + 0.0001 and in_range.size() < capacity:
 					in_range.append(int(passenger.get("id", -1)))
 			if not in_range.is_empty():
+				# Nearby troops can walk the last metres along a diagonal beach.
+				if own_transport:
+					for passenger in available:
+						var passenger_id := int(passenger["id"])
+						if in_range.size() < capacity and passenger_id not in in_range and Vector2(passenger["pos"]).distance_to(Vector2(transport["pos"])) <= MAX_UNLOAD_DISTANCE:
+							in_range.append(passenger_id)
 				for passenger_id in in_range:
 					committed_passengers[passenger_id] = true
 				result.append(Commands.BoardCommand.new(tick, in_range, int(transport.get("id", -1))))
@@ -87,10 +96,11 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 				if not in_range.is_empty():
 					result.append(Commands.BoardCommand.new(tick, in_range, int(transport.get("id", -1))))
 					continue
-				var boarding_water: Variant = _nearest_adjacent(Vector2(waiting[0].get("pos", Vector2.ZERO)), navigation.get("water", []))
-				if boarding_water is Vector2 and Vector2(transport.get("pos", Vector2.ZERO)).distance_to(boarding_water) > 0.2:
-					result.append(Commands.MoveCommand.new(tick, [int(transport.get("id", -1))], boarding_water))
-					continue
+				var boarding_ids: Array[int] = []
+				for passenger in waiting.slice(0, mini(capacity_left, waiting.size())):
+					boarding_ids.append(int(passenger["id"]))
+				result.append(Commands.BoardCommand.new(tick, boarding_ids, int(transport["id"])))
+				continue
 		if not landing_computed:
 			target_landing = _landing_near(Vector2(goal.get("position", Vector2.ZERO)), navigation, target_land)
 			landing_computed = true
@@ -100,16 +110,47 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 		if Vector2(transport.get("pos", Vector2.ZERO)).distance_to(landing) <= MAX_UNLOAD_DISTANCE + 0.0001:
 			result.append(Commands.UnloadCommand.new(tick, [int(transport.get("id", -1))], landing))
 			continue
-		var water_approach: Variant = _nearest_adjacent(Vector2(landing), snapshot.get("navigation", {}).get("water", []))
+		var water_approach: Variant = _water_approach(Vector2(landing), transport, navigation)
 		if water_approach is Vector2:
 			result.append(Commands.MoveCommand.new(tick, [int(transport.get("id", -1))], water_approach))
 	return result
 
 
-static func _nearest_coastal_land(origin: Vector2, navigation: Dictionary) -> Variant:
+static func _nearest_coastal_land(origin: Vector2, navigation: Dictionary, probe: Variant = null) -> Variant:
 	var land: Array = navigation.get("land", [])
 	var water: Array = navigation.get("water", [])
-	var candidates: Array = land.filter(func(point): return _nearest_adjacent(Vector2(point), water) is Vector2)
+	if land.is_empty() or water.is_empty():
+		return null
+	var water_buckets: Dictionary = {}
+	for point_value in water:
+		var point := Vector2(point_value)
+		var cell := Vector2i(floori(point.x), floori(point.y))
+		if not water_buckets.has(cell):
+			water_buckets[cell] = []
+		water_buckets[cell].append(point)
+	var candidates: Array = []
+	var comparisons := 0
+	for point_value in land:
+		var point := Vector2(point_value)
+		var cell := Vector2i(floori(point.x), floori(point.y))
+		var coastal := false
+		# ceil(sqrt(2.26)) also covers arbitrary points near cell boundaries.
+		for y in range(cell.y - 2, cell.y + 3):
+			for x in range(cell.x - 2, cell.x + 3):
+				for neighbor in water_buckets.get(Vector2i(x, y), []):
+					comparisons += 1
+					if point.distance_squared_to(neighbor) <= COAST_NEIGHBOR_DISTANCE_SQUARED:
+						coastal = true
+						break
+				if coastal:
+					break
+			if coastal:
+				break
+		if coastal:
+			candidates.append(point)
+	if probe != null:
+		probe.increment("ai.coast_water_indexed", water.size())
+		probe.increment("ai.coast_neighbor_comparisons", comparisons)
 	return _nearest(origin, candidates)
 
 
@@ -180,3 +221,34 @@ static func _nearest(origin: Vector2, points: Array) -> Variant:
 		return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and (left_point.x < right_point.x or (is_equal_approx(left_point.x, right_point.x) and left_point.y < right_point.y)))
 	)
 	return Vector2(ordered[0])
+
+
+static func _water_approach(landing: Vector2, transport: Dictionary, navigation: Dictionary) -> Variant:
+	var water: Array = navigation.get("water", [])
+	if not bool(navigation.get("cell_geometry", false)):
+		return _nearest_adjacent(landing, water)
+	var radius := maxf(0.0, float(transport.get("footprint_radius", 0.75)))
+	var known_water: Dictionary = {}
+	for point in water:
+		known_water[Vector2i(Vector2(point).floor())] = true
+	var center := Vector2i(landing.floor())
+	var candidates: Array = []
+	var reach := ceili(MAX_UNLOAD_DISTANCE)
+	for y in range(center.y - reach, center.y + reach + 1):
+		for x in range(center.x - reach, center.x + reach + 1):
+			var cell := Vector2i(x, y)
+			if not known_water.has(cell):
+				continue
+			var point := Vector2(cell) + Vector2(0.5, 0.5)
+			if point.distance_squared_to(landing) > MAX_UNLOAD_DISTANCE * MAX_UNLOAD_DISTANCE:
+				continue
+			# Match NavigationGrid's footprint probes. A coastal point alone is not
+			# a usable endpoint for a wide Transport; it may overlap land or a dock.
+			var clear := true
+			for offset in [Vector2(radius, 0.0), Vector2(-radius, 0.0), Vector2(0.0, radius), Vector2(0.0, -radius)]:
+				if not known_water.has(Vector2i((point + offset).floor())):
+					clear = false
+					break
+			if clear:
+				candidates.append(point)
+	return _nearest(landing, candidates)

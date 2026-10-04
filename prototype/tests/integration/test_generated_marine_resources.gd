@@ -100,6 +100,8 @@ func inspect_live_match() -> void:
 		var kind := String(resource["kind"])
 		if kind not in KINDS: continue
 		counts[kind] += 1
+		check(not bool(resource.get("blocks_navigation", true)), "live marine food is passable: " + kind)
+		check(not world.navigation_grid.occupied_cells.has(Vector2i(Vector2(resource["pos"]).floor())), "marine food does not occupy a water tile: " + kind)
 		check("water" in resource.get("allowed_gatherer_domains", []), "boats can harvest " + kind)
 		var projected := Snapshot._compact_render_entity(resource)
 		check(catalog.resource_frame_info(projected, 1.0).get("texture") != null, "live render snapshot retains marine art")

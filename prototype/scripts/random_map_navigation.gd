@@ -3,6 +3,7 @@ extends RefCounted
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const Footprint := preload("res://scripts/footprint.gd")
+const SceneryObstructions := preload("res://scripts/scenery_obstructions.gd")
 
 # Cell occupancy is the same conservative raster used for harvesting targets.
 # Moving wildlife is deliberately excluded: it is not a permanent obstruction.
@@ -15,6 +16,8 @@ static func mask(map_data: Dictionary, definition: Dictionary = {}, include_reso
 		result[i] = int(TerrainRules.is_land_walkable(TerrainRules.logical_for_terrain_id(int(terrain[i]))))
 	for cell in map_data.get("cliff_cells", []):
 		_block(result, size, Vector2i(cell))
+	for obstruction in SceneryObstructions.collect(map_data.get("scenery", [])):
+		for cell in obstruction["occupied_cells"]: _block(result, size, cell)
 	for item in definition.get("entities", []):
 		if String(item.get("category", "")) == "building":
 			# The generated town centre has a 3 x 3 obstruction footprint.
@@ -113,25 +116,55 @@ static func protect_economy(definition: Dictionary, map_data: Dictionary, reserv
 			if start.distance_to(resource["position"]) <= 20.0:
 				var kind := String(resource.get("kind", ""))
 				accessible_counts[kind] = int(accessible_counts.get(kind, 0)) + 1
+		# Relocating one tree can change access to another. Recount the current
+		# flood after each move instead of relying on a stale opening quota.
+		for repair_pass in range(32):
+			accessible_counts.clear()
+			for resource in map_data.get("resources", []):
+				var owner: Array = resource.get("owner_start", [])
+				if owner.size() < 2 or not start.is_equal_approx(Vector2(owner[0], owner[1])) or start.distance_to(resource["position"]) > 20.0: continue
+				if adjacent_reachable(size, field["distances"], Vector2i(resource["position"])) < 0: continue
+				var kind := String(resource.get("kind", ""))
+				accessible_counts[kind] = int(accessible_counts.get(kind, 0)) + 1
+			var repaired := false
+			for resource in map_data.get("resources", []):
+				var owner: Array = resource.get("owner_start", [])
+				if owner.size() < 2 or not start.is_equal_approx(Vector2(owner[0], owner[1])) or start.distance_to(resource["position"]) > 20.0: continue
+				var kind := String(resource.get("kind", ""))
+				if int(accessible_counts.get(kind, 0)) >= int(required.get(kind, 0)): continue
+				var original := Vector2i(resource["position"])
+				if adjacent_reachable(size, field["distances"], original) >= 0: continue
+				var replacement := _repair_cell(size, map_data["terrain_ids"], walkable, field["distances"], original, start, reserved, occupied)
+				if replacement < 0: continue
+				resource["position"] = Vector2(replacement % size.x + 0.5, replacement / size.x + 0.5)
+				occupied.erase(original)
+				occupied[Vector2i(resource["position"])] = true
+				walkable[original.y * size.x + original.x] = 1
+				walkable[replacement] = 0
+				field = flood(size, walkable, Vector2i(start))
+				var access := adjacent_reachable(size, field["distances"], Vector2i(resource["position"]))
+				if access >= 0: reserve_path(reserved, trace(field, access), size, walkable, 0)
+				repairs.append({"kind": resource["kind"], "team": int(player["team"]), "from": original, "to": Vector2i(resource["position"]), "reason": "blocked_gather_approach"})
+				repaired = true
+				break
+			if not repaired: break
 		for resource in map_data.get("resources", []):
 			var owner: Array = resource.get("owner_start", [])
 			if owner.size() < 2 or not start.is_equal_approx(Vector2(owner[0], owner[1])): continue
-			var index := adjacent_reachable(size, field["distances"], Vector2i(resource["position"]))
-			var kind := String(resource.get("kind", ""))
-			if index < 0 and int(accessible_counts.get(kind, 0)) < int(required.get(kind, 0)) and start.distance_to(resource["position"]) <= 20.0:
-				var original := Vector2i(resource["position"])
-				var replacement := _repair_cell(size, map_data["terrain_ids"], walkable, field["distances"], original, start, reserved, occupied)
-				if replacement >= 0:
-					resource["position"] = Vector2(replacement % size.x + 0.5, replacement / size.x + 0.5)
-					occupied.erase(original)
-					occupied[Vector2i(resource["position"])] = true
-					walkable[original.y * size.x + original.x] = 1
-					walkable[replacement] = 0
-					field = flood(size, walkable, Vector2i(start))
-					index = adjacent_reachable(size, field["distances"], Vector2i(resource["position"]))
-					if index >= 0: accessible_counts[kind] = int(accessible_counts.get(kind, 0)) + 1
-					repairs.append({"kind": resource["kind"], "team": int(player["team"]), "from": original, "to": Vector2i(resource["position"]), "reason": "blocked_gather_approach"})
-			if index >= 0: reserve_path(reserved, trace(field, index), size, walkable, 0)
+			var access := adjacent_reachable(size, field["distances"], Vector2i(resource["position"]))
+			if access >= 0: reserve_path(reserved, trace(field, access), size, walkable, 0)
+		# Keep routes to the closest expansion mines open when the forest is planted.
+		var expansions: Array = map_data.get("resources", []).filter(func(resource): return resource.get("owner_start", []).is_empty() and String(resource.get("kind", "")) in ["gold_mine", "stone_mine"])
+		expansions.sort_custom(func(left, right): return start.distance_squared_to(Vector2(left["position"])) < start.distance_squared_to(Vector2(right["position"])))
+		var expansion_counts := {"gold_mine": 0, "stone_mine": 0}
+		for resource in expansions:
+			var kind := String(resource["kind"])
+			if int(expansion_counts[kind]) >= 4:
+				continue
+			var access := adjacent_reachable(size, field["distances"], Vector2i(resource["position"]))
+			if access >= 0:
+				reserve_path(reserved, trace(field, access), size, walkable, 0)
+				expansion_counts[kind] = int(expansion_counts[kind]) + 1
 		for zone in map_data.get("naval_start_zones", []):
 			if int(zone.get("team", -1)) != int(player["team"]): continue
 			var index := nearest_open(size, walkable, Vector2i(zone["land_staging"]))

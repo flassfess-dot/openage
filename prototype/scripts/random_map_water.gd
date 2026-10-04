@@ -22,7 +22,14 @@ static func apply(terrain_ids: Array[int], size: Vector2i, seed: int, topology: 
 		if distance <= 2:
 			terrain_ids[index] = COASTAL_WATER_TERRAIN_ID
 		elif distance >= 5:
-			terrain_ids[index] = DEEP_WATER_TERRAIN_ID
+			var cell := Vector2i(index % size.x, index / size.x)
+			# Map-scale shelves and sparse offshore banks, with regional detail.
+			# Large seas must not become one uniform deep-water rectangle.
+			var shelf := _smooth_noise(Vector2(cell), maxf(12.0, mini(size.x, size.y) * 0.16), seed ^ 0x625AD)
+			var detail := _smooth_noise(Vector2(cell), maxf(6.0, mini(size.x, size.y) * 0.04), seed ^ 0x841F2)
+			var shelf_width := 5.0 + (shelf + 1.0) * minf(8.0, mini(size.x, size.y) * 0.02)
+			var offshore_bank := distance >= 8 and shelf > 0.58 and detail > 0.10
+			terrain_ids[index] = COASTAL_WATER_TERRAIN_ID if distance < shelf_width or offshore_bank else DEEP_WATER_TERRAIN_ID
 		else:
 			var cell := Vector2i(index % size.x, index / size.x)
 			var noise := _smooth_noise(Vector2(cell), 11.0, seed ^ 0x2AF51) * 0.72 + _smooth_noise(Vector2(cell), 4.0, seed ^ 0x741C3) * 0.28

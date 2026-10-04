@@ -80,6 +80,14 @@ func test_priest_healing() -> void:
 func test_transport_boarding() -> void:
 	var transport := {"entity_type": "unit", "id": 30, "team": 1, "components": {"cargo": {"enabled": true, "capacity": 4, "passenger_ids": []}}}
 	assert_equal(ContextResolver.resolve(military, transport, Vector2.ZERO, 1), {"type": "board", "target_id": 30}, "right click on allied Transport resolves to boarding")
+	transport["hp"] = 60.0
+	transport["max_hp"] = 150.0
+	transport["movement_domain"] = "water"
+	assert_equal(ContextResolver.resolve(workers, transport, Vector2.ZERO, 1), {"type": "board", "target_id": 30}, "workers board damaged transports instead of starting repair")
+	transport["team"] = 2
+	assert_equal(ContextResolver.resolve(workers, transport, Vector2.ZERO, 1)["type"], "attack", "enemy cargo ship never accepts a contextual boarding order")
+	assert_equal(ContextResolver.resolve(workers, transport, Vector2.ZERO, 1, [1, 2])["type"], "board", "workers can board allied damaged cargo ships")
+
 
 
 func test_trade_route() -> void:

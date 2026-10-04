@@ -1,5 +1,7 @@
 class_name RoRLocalMovement
 
+const MobileCollision := preload("res://scripts/mobile_collision.gd")
+
 const Footprint := preload("res://scripts/footprint.gd")
 
 
@@ -51,6 +53,10 @@ static func calculate_into(unit: Dictionary, target: Vector2, neighbors: Array, 
 		velocity = _walkable_alternative(unit, desired, position, speed, delta, navigation_grid)
 		if velocity == Vector2.ZERO:
 			reason = "local_blocked"
+	var pre_collision_velocity := velocity
+	velocity = MobileCollision.constrain(unit, velocity, neighbors, delta)
+	if not velocity.is_equal_approx(pre_collision_velocity) and velocity.length_squared() > 0.0 and not _position_walkable(position + velocity * delta, own_radius, navigation_grid, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+		velocity = Vector2.ZERO
 	unit["desired_velocity"] = desired
 	unit["actual_velocity"] = velocity
 	return reason
@@ -103,6 +109,10 @@ static func calculate_runtime_unit_into(unit: Dictionary, target: Vector2, neigh
 		velocity = _walkable_alternative(unit, desired, position, speed, delta, navigation_grid)
 		if velocity == Vector2.ZERO:
 			reason = "local_blocked"
+	var pre_collision_velocity := velocity
+	velocity = MobileCollision.constrain(unit, velocity, neighbors, delta)
+	if not velocity.is_equal_approx(pre_collision_velocity) and velocity.length_squared() > 0.0 and not _position_walkable(position + velocity * delta, own_radius, navigation_grid, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+		velocity = Vector2.ZERO
 	unit["desired_velocity"] = desired
 	unit["actual_velocity"] = velocity
 	return reason

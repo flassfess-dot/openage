@@ -11,6 +11,7 @@ $distributionRoot = Join-Path $repositoryRoot "dist\Rise of Rome Prototype"
 $godotRoot = Join-Path $repositoryRoot ".tools\godot-4.7.2"
 $godotApplication = Join-Path $godotRoot "Godot_v4.7.2-stable_win64.exe"
 $godotHeadless = $godotApplication
+$releaseTemplate = Join-Path $godotRoot "windows_release_x86_64.exe"
 $application = Join-Path $distributionRoot "Rise of Rome Prototype.exe"
 $package = Join-Path $distributionRoot "Rise of Rome Prototype.pck"
 $nativeBuildScript = Join-Path $repositoryRoot "tools\build_native_pathfinding.ps1"
@@ -73,6 +74,17 @@ if (-not (Test-Path -LiteralPath $godotApplication)) {
     throw "Godot 4.7.2 was not found under $godotRoot"
 }
 
+if (-not (Test-Path -LiteralPath $releaseTemplate)) {
+    $templateArchive = Join-Path $godotRoot "Godot_v4.7.2-stable_export_templates.tpz"
+    if (-not (Test-Path -LiteralPath $templateArchive)) { throw "Godot Release export templates missing: $templateArchive" }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($templateArchive)
+    try {
+        $entry = $archive.GetEntry("templates/windows_release_x86_64.exe")
+        if ($null -eq $entry) { throw "Windows Release template missing from $templateArchive" }
+        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $releaseTemplate, $true)
+    } finally { $archive.Dispose() }
+}
 New-Item -ItemType Directory -Force -Path $distributionRoot | Out-Null
 
 & $nativeBuildScript
@@ -103,9 +115,8 @@ function Invoke-GodotBuildStep {
 }
 
 Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--import") -Description "Godot resource import"
-Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--export-pack", "Windows Desktop", $package) -Description "Godot package export"
+Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--export-release", "Windows Desktop", $application) -Description "Godot package export"
 
-Copy-Item -LiteralPath $godotApplication -Destination $application -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "bin") | Out-Null
 Copy-Item -LiteralPath $nativeLibrary -Destination (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "legal\MIT") | Out-Null

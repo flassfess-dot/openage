@@ -66,3 +66,9 @@
 2. Заполнить trade observations оригинального executable на фиксированных картах/дистанциях и заменить только `RoRTradeProfitPolicy`, не меняя lifecycle.
 
 Морские gameplay-линии уже имеют статус `integrated`. `naval_world_parity` остаётся в `deferred_lines` только как измеряемый executable-level gate; переносить его в завершённые и заявлять `PARITY` можно лишь после двух сравнений выше.
+
+## Automatic fishing continuation (2026-10-03)
+
+An active water worker searches for another food shoal when its current fish pool is depleted. The search uses that worker's own vision circle and the resource-cell index, considers Deep Fish, Shore Fish and Whale, and checks worker compatibility and a reachable approach. Distance and then entity ID determine the choice. It does not use another allied unit's vision or scan the full map.
+
+Partial cargo continues gathering; full cargo is delivered through the normal Dock pipeline before resuming the selected shoal. Queued player orders take priority, and stopped or moving boats are not restarted. Fishing Ship upgrades retain this behavior. `test_fishing_auto_continue.gd` covers actual depletion and delivery, mixed fish kinds, upgraded ships, full cargo, own sight, extended sight, deterministic ties, disconnected ponds and queued movement/Stop.

@@ -88,12 +88,6 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var production_requests: Array = options.get("production_requests", [])
 	var planning_technology_ids: Array = options.get("planning_technology_ids", [])
 	var requested_build_site_kinds: Array = options.get("requested_build_site_kinds", [])
-	var maximum_build_sites_per_kind := maxi(1, int(options.get("maximum_build_sites_per_kind", 4)))
-	var build_site_search_radius := maxi(1, int(options.get("build_site_search_radius", 12)))
-	var build_site_cache_ticks := maxi(0, int(options.get("build_site_cache_ticks", 0)))
-	var minimum_structure_gap := maxf(0.0, float(options.get("minimum_structure_gap", 0.0)))
-	var preferred_build_sites: Dictionary = options.get("preferred_build_sites", {})
-	var strict_preferred_build_site_kinds: Array = options.get("strict_preferred_build_site_kinds", [])
 	var compact_render_projector: Callable = Callable(world, "compact_render_projection") if compact_render_entities and world.has_method("compact_render_projection") else Callable()
 	var requested_build_options: Array = []
 	var worker_build_options: Array = []
@@ -229,8 +223,11 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		known_resources = world.get_resources()
 	if include_overview_resources:
 		var overview_source_resources: Array = world.get_known_resources(observer_team) if resources_are_preordered else world.get_resources()
-		for resource_value in overview_source_resources:
-			overview_resources.append(resource_value if borrow_overview_entities else _overview_entity(resource_value))
+		if borrow_overview_entities:
+			overview_resources = overview_source_resources
+		else:
+			for resource_value in overview_source_resources:
+				overview_resources.append(_overview_entity(resource_value))
 	for resource in known_resources:
 		var resource_id := int(resource.get("id", -1))
 		var presentation_resource: Dictionary
@@ -320,10 +317,12 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 						projected_order["population_points_cost"] = world.unit_population_points_cost(String(projected_order.get("kind", "")), observer_team)
 			if observer_team > 0 and int(building.get("team", 0)) == observer_team and (not restrict_command_options or command_option_entity_lookup.has(int(building.get("id", -1)))):
 				presentation_building["builder_count"] = building.get("builders", {}).size()
-				if String(building.get("state", "complete")) == "foundation":
+				if String(building.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(building, units)):
 					presentation_building["reachable_builder_ids"] = world.reachable_builder_ids(building)
 				if requested_production_only:
 					presentation_building["command_options"] = _requested_production_options(world, building, observer_team, production_requests)
+				elif bool(options.get("economic_production_options_only", false)):
+					presentation_building["command_options"] = economic_production_options(world, building, observer_team)
 				else:
 					presentation_building["command_options"] = {
 						"train": world.get_unit_production_options(int(building.get("id", -1)), observer_team),
@@ -375,39 +374,21 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		snapshot_stage_started = Time.get_ticks_usec()
 	# Optional policy filtering uses only the same observer-visible data supplied
 	# to the planner. It never reads hidden entities or caches placement validity.
+	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, fog, observer_team, snapshot_probe) if include_navigation and observer_team > 0 else {}
 	var build_site_filter: Callable = options.get("build_site_filter", Callable())
 	if build_site_filter.is_valid() and not available_requested_build_site_kinds.is_empty():
-		available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state)
+		if bool(options.get("build_site_filter_navigation", false)):
+			available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state, navigation)
+		else:
+			available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state)
 	var build_sites: Dictionary = {}
 	if observer_team > 0 and not requested_build_site_kinds.is_empty():
-		if build_site_cache_ticks > 0 and world.has_method("get_cached_local_build_sites"):
-			build_sites = world.get_cached_local_build_sites(
-				observer_team,
-				available_requested_build_site_kinds,
-				tick,
-				build_site_cache_ticks,
-				maximum_build_sites_per_kind,
-				build_site_search_radius,
-				preferred_build_sites,
-				strict_preferred_build_site_kinds,
-				minimum_structure_gap
-			)
-		else:
-			build_sites = world.get_local_build_sites(
-				observer_team,
-				available_requested_build_site_kinds,
-				maximum_build_sites_per_kind,
-				build_site_search_radius,
-				preferred_build_sites,
-				strict_preferred_build_site_kinds,
-				minimum_structure_gap
-			)
+		build_sites = requested_build_sites(world, tick, observer_team, available_requested_build_site_kinds, options, units, buildings)
 	elif observer_team > 0 and include_build_sites:
 		build_sites = world.get_mixed_domain_build_sites(observer_team)
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".build_sites", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
-	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, fog, observer_team, snapshot_probe) if include_navigation and observer_team > 0 else {}
 	var presented_fog: Dictionary = _presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []}
 	var scenario: Dictionary = world.scenario_system.presentation_state(observer_team) if include_scenario else {}
 	if snapshot_probe != null:
@@ -421,7 +402,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var sorted_buildings := _sort_entity_copies(buildings)
 	var sorted_projectiles := _sort_entity_copies(projectiles)
 	var sorted_overview_units := _sort_entity_copies(overview_units)
-	var sorted_overview_resources := _sort_entity_copies(overview_resources)
+	var sorted_overview_resources := overview_resources if resources_are_preordered else _sort_entity_copies(overview_resources)
 	var sorted_overview_buildings := _sort_entity_copies(overview_buildings)
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".sort", Time.get_ticks_usec() - snapshot_stage_started)
@@ -585,7 +566,7 @@ static func _compact_render_entity(entity: Dictionary) -> Dictionary:
 		"environment_asset", "environment_variant", "tree_condition", "tree_phase", "tree_fall_elapsed", "tree_fall_duration", "source_felled_graphic_id", "source_felled_asset_name", "display_graphic_id", "source_frame", "source_graphic_id", "source_graphic_asset_name",
 		"source_requested_graphic_asset_name", "source_asset_fallback_reason",
 		"source_depleted_graphic_id", "source_depleted_asset_name", "combat_enabled", "task", "target_id",
-		"target_building_id", "formation_forward", "carried_amount",
+		"target_building_id", "resource_id", "formation_forward", "carried_amount",
 	]:
 		if entity.has(key):
 			result[key] = entity[key]
@@ -715,8 +696,9 @@ static func _compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Di
 	]:
 		if entity.has(key):
 			result[key] = entity[key]
-	if (observer_team <= 0 or int(entity.get("team", 0)) == observer_team) and entity.has("resource_id"):
-		result["resource_id"] = int(entity["resource_id"])
+	if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
+		for field in ["resource_id", "path_request_id"]:
+			if entity.has(field): result[field] = int(entity[field])
 	if entity.has("unit_lineage"):
 		result["unit_lineage"] = entity.get("unit_lineage", []).duplicate()
 	if entity.has("behavior_tags"):
@@ -970,4 +952,48 @@ static func _production_overview(world, observer_team: int) -> Array:
 			"components": {"ownership": {"civilization_id": int(world.civilization_by_team.get(observer_team, 13))}},
 			"production_queue": [{"id": int(order.get("id", -1)), "order_type": String(order.get("order_type", "unit")), "kind": String(order.get("kind", "")), "technology_id": int(order.get("technology_id", -1)), "status": String(order.get("status", "queued")), "duration": float(order.get("duration", 0.05)), "progress": float(order.get("progress", 0))}],
 		})
+	return result
+
+
+static func foundation_needs_recovery(building: Dictionary, units: Array) -> bool:
+	if not building.get("builders", {}).is_empty():
+		return false
+	var building_id := int(building.get("id", -1))
+	var team := int(building.get("team", 0))
+	return not units.any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and String(unit.get("task", "")) == "build" and int(unit.get("target_building_id", -1)) == building_id)
+
+
+static func economic_production_options(world, building: Dictionary, team: int) -> Dictionary:
+	var empty := {"train": [], "research": []}
+	if String(building.get("state", "complete")) != "complete" or not world.data_repository.is_configured():
+		return empty
+	var queue: Array = building.get("production_queue", [])
+	if queue.size() >= 2 or (not queue.is_empty() and (String(queue[0].get("order_type", "unit")) != "unit" or String(queue[0].get("status", "")) == "blocked_population")):
+		return empty
+	var building_id := int(building.get("id", -1))
+	if not queue.is_empty():
+		# The economic planner can only extend a unit queue with the same kind.
+		var option: Dictionary = world.get_unit_production_availability(building_id, team, String(queue[0].get("kind", "")))
+		return {"train": [option] if String(option.get("reason", "")) not in ["unit_replaced", "unit_unavailable"] else [], "research": []}
+	return {"train": world.get_unit_production_options(building_id, team), "research": world.get_research_options(building_id, team)}
+
+
+static func requested_build_sites(world, tick: int, team: int, kinds: Array, options: Dictionary, units: Array = [], buildings: Array = []) -> Dictionary:
+	var maximum := maxi(1, int(options.get("maximum_build_sites_per_kind", 4)))
+	var radius := maxi(1, int(options.get("build_site_search_radius", 12)))
+	var age := maxi(0, int(options.get("build_site_cache_ticks", 0)))
+	var preferred: Dictionary = options.get("preferred_build_sites", {})
+	var strict: Array = options.get("strict_preferred_build_site_kinds", [])
+	var gap := maxf(0.0, float(options.get("minimum_structure_gap", 0.0)))
+	var candidate_filter: Callable = options.get("build_site_candidate_filter", Callable())
+	if not candidate_filter.is_valid():
+		return world.get_cached_local_build_sites(team, kinds, tick, age, maximum, radius, preferred, strict, gap) if age > 0 and world.has_method("get_cached_local_build_sites") else world.get_local_build_sites(team, kinds, maximum, radius, preferred, strict, gap)
+	var result: Dictionary = {}
+	for kind_value in kinds:
+		var kind := String(kind_value)
+		var sites: Dictionary = world.get_cached_local_build_sites(team, [kind], tick, age, maximum, radius, preferred, strict, gap) if age > 0 and world.has_method("get_cached_local_build_sites") else world.get_local_build_sites(team, [kind], maximum, radius, preferred, strict, gap)
+		if sites.has(kind):
+			result[kind] = sites[kind]
+			if bool(candidate_filter.call(kind, sites[kind], units, buildings)):
+				break
 	return result

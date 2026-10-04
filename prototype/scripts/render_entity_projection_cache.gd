@@ -97,7 +97,7 @@ func _update_projection(result: Dictionary, entity: Dictionary, category: String
 				"source_graphic_id", "source_graphic_asset_name", "anim", "anim_state",
 				"facing", "presentation_facing", "death_phase", "death_elapsed",
 				"combat_enabled", "task", "target_id", "target_building_id",
-				"formation_forward", "carried_amount",
+				"resource_id", "formation_forward", "carried_amount",
 			]
 	for key in keys:
 		if entity.has(key):

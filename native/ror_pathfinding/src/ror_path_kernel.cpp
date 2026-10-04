@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 #include <godot_cpp/core/class_db.hpp>
@@ -25,12 +26,14 @@ void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("update_walkable", "revision", "indices", "values"), &RoRPathKernel::update_walkable);
     ClassDB::bind_method(D_METHOD("find_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_cell_path, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("find_smoothed_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_smoothed_cell_path, DEFVAL(0.0));
-    ClassDB::bind_method(D_METHOD("configure_movement_snapshot", "ids", "positions", "radii", "clearances", "priorities", "health"), &RoRPathKernel::configure_movement_snapshot);
+    ClassDB::bind_method(D_METHOD("configure_movement_snapshot", "ids", "positions", "radii", "clearances", "priorities", "health", "solid_animals"), &RoRPathKernel::configure_movement_snapshot, DEFVAL(PackedByteArray()));
     ClassDB::bind_method(D_METHOD("calculate_movement", "unit_id", "target", "speed", "cohesion_scale", "delta"), &RoRPathKernel::calculate_movement);
     ClassDB::bind_method(D_METHOD("get_revision"), &RoRPathKernel::get_revision);
     ClassDB::bind_method(D_METHOD("get_last_expanded_nodes"), &RoRPathKernel::get_last_expanded_nodes);
     ClassDB::bind_method(D_METHOD("get_last_path_was_direct"), &RoRPathKernel::get_last_path_was_direct);
     ClassDB::bind_method(D_METHOD("is_configured"), &RoRPathKernel::is_configured);
+    ClassDB::bind_method(D_METHOD("component_id", "cell", "clearance_radius"), &RoRPathKernel::component_id, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("cells_connected", "start", "goal", "clearance_radius"), &RoRPathKernel::cells_connected, DEFVAL(0.0));
 }
 
 void RoRPathKernel::configure_movement_snapshot(
@@ -39,7 +42,8 @@ void RoRPathKernel::configure_movement_snapshot(
         const PackedFloat32Array &radii,
         const PackedFloat32Array &clearances,
         const PackedInt32Array &priorities,
-        const PackedFloat32Array &health) {
+        const PackedFloat32Array &health,
+        const PackedByteArray &solid_animals) {
     const int64_t count = std::min({ids.size(), positions.size(), radii.size(), clearances.size(), priorities.size(), health.size()});
     movement_ids_.resize(static_cast<size_t>(count));
     movement_positions_.resize(static_cast<size_t>(count));
@@ -47,6 +51,7 @@ void RoRPathKernel::configure_movement_snapshot(
     movement_clearances_.resize(static_cast<size_t>(count));
     movement_priorities_.resize(static_cast<size_t>(count));
     movement_health_.resize(static_cast<size_t>(count));
+    movement_solid_animals_.resize(static_cast<size_t>(count));
     movement_index_by_id_.clear();
     movement_buckets_.clear();
     maximum_movement_radius_ = 0.0f;
@@ -59,6 +64,7 @@ void RoRPathKernel::configure_movement_snapshot(
         movement_clearances_[stored] = std::max(0.0f, clearances[index]);
         movement_priorities_[stored] = priorities[index];
         movement_health_[stored] = health[index];
+        movement_solid_animals_[stored] = index < solid_animals.size() ? solid_animals[index] : 0;
         movement_index_by_id_[movement_ids_[stored]] = static_cast<int32_t>(index);
         if (movement_health_[stored] <= 0.0f) {
             continue;
@@ -154,6 +160,34 @@ Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target
             state = 2;
         }
     }
+    const Vector2 pre_collision_velocity = velocity;
+    const bool solid_self = movement_solid_animals_[static_cast<size_t>(own_index)] != 0;
+    const auto crosses = [](const Vector2 &gap, const Vector2 &step, double radius) {
+        const double length = step.length_squared();
+        if (length <= 0.000001) return false;
+        if (gap.length_squared() < radius * radius) return gap.dot(step) < -0.000001;
+        const double fraction = std::clamp(-static_cast<double>(gap.dot(step)) / length, 0.0, 1.0);
+        return (gap + step * fraction).length_squared() < radius * radius - 0.000001;
+    };
+    for (const int32_t candidate_index : movement_candidates_) {
+        const size_t candidate = static_cast<size_t>(candidate_index);
+        if (movement_health_[candidate] <= 0.0f || !(solid_self || movement_solid_animals_[candidate])) continue;
+        const Vector2 gap = position - movement_positions_[candidate];
+        const double radius = own_radius + movement_radii_[candidate] + 0.03;
+        if (!crosses(gap, velocity * delta, radius)) continue;
+        const Vector2 normal = gap.normalized();
+        velocity -= normal * std::min(0.0, static_cast<double>(velocity.dot(normal)));
+        if (crosses(gap, velocity * delta, radius)) velocity = Vector2();
+    }
+    if (!velocity.is_equal_approx(pre_collision_velocity)) {
+        for (const int32_t candidate_index : movement_candidates_) {
+            const size_t candidate = static_cast<size_t>(candidate_index);
+            if (movement_health_[candidate] <= 0.0f || !(solid_self || movement_solid_animals_[candidate])) continue;
+            if (crosses(position - movement_positions_[candidate], velocity * delta, own_radius + movement_radii_[candidate] + 0.03)) velocity = Vector2();
+        }
+        // A tangent chosen to avoid a body still obeys the physical terrain mask.
+        if (!position_walkable(position + velocity * delta, own_radius)) velocity = Vector2();
+    }
     return Vector4(velocity.x, velocity.y, static_cast<double>(state), static_cast<double>(movement_candidates_.size()));
 }
 
@@ -163,7 +197,13 @@ bool RoRPathKernel::update_walkable(int64_t revision, const PackedInt32Array &in
     for (int64_t i = 0; i < indices.size(); ++i) {
         if (indices[i] < 0 || static_cast<size_t>(indices[i]) >= walkable_.size()) return false;
     }
-    for (int64_t i = 0; i < indices.size(); ++i) walkable_[static_cast<size_t>(indices[i])] = values[i] != 0;
+    bool changed = false;
+    for (int64_t i = 0; i < indices.size(); ++i) {
+        const uint8_t value = values[i] != 0;
+        changed = changed || walkable_[static_cast<size_t>(indices[i])] != value;
+        walkable_[static_cast<size_t>(indices[i])] = value;
+    }
+    if (changed) components_by_radius_.clear();
     revision_ = revision;
     return true;
 }
@@ -174,6 +214,7 @@ void RoRPathKernel::configure(int32_t width, int32_t height, int64_t revision, c
     revision_ = revision;
     last_expanded_nodes_ = 0;
     search_generation_ = 0;
+    components_by_radius_.clear();
     const int64_t expected_size = static_cast<int64_t>(width_) * static_cast<int64_t>(height_);
     walkable_.assign(static_cast<size_t>(expected_size), 0);
     const int64_t copy_size = std::min<int64_t>(expected_size, walkable.size());
@@ -186,12 +227,70 @@ void RoRPathKernel::configure(int32_t width, int32_t height, int64_t revision, c
     frontier_.clear();
 }
 
+// Connectivity uses precisely the same radius and corner rules as A*. Unknown
+// terrain remains optimistic because this kernel only receives observer masks.
+const std::vector<int32_t> &RoRPathKernel::components(double radius) {
+    radius = radius < 0.5 ? 0.0 : radius;
+    uint64_t key = 0;
+    std::memcpy(&key, &radius, sizeof(key));
+    auto found = components_by_radius_.find(key);
+    if (found != components_by_radius_.end()) return found->second;
+    if (components_by_radius_.size() >= 16) components_by_radius_.clear();
+    std::vector<int32_t> labels(walkable_.size(), -1);
+    std::vector<uint8_t> passable(walkable_.size(), 0);
+    for (int32_t i = 0; i < static_cast<int32_t>(labels.size()); ++i)
+        passable[i] = cell_walkable_for(i % width_, i / width_, radius);
+    std::vector<int32_t> queue;
+    for (int32_t root = 0; root < static_cast<int32_t>(labels.size()); ++root) {
+        if (!passable[root] || labels[root] >= 0) continue;
+        queue.clear();
+        queue.push_back(root);
+        labels[root] = root;
+        for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
+            const int32_t current = queue[cursor], x = current % width_, y = current / width_;
+            for (const auto &d : DIRECTIONS) {
+                const int32_t nx = x + d[0], ny = y + d[1];
+                if (!contains(nx, ny)) continue;
+                const int32_t next = ny * width_ + nx;
+                if (!passable[next] || labels[next] >= 0) continue;
+                if (d[0] && d[1] && (!passable[y * width_ + nx] || !passable[ny * width_ + x])) continue;
+                labels[next] = root;
+                queue.push_back(next);
+            }
+        }
+    }
+    return components_by_radius_.emplace(key, std::move(labels)).first->second;
+}
+
+int32_t RoRPathKernel::component_id(const Vector2i &cell, double radius) {
+    if (!is_configured() || !contains(cell.x, cell.y)) return -1;
+    return components(radius)[cell.y * width_ + cell.x];
+}
+
+bool RoRPathKernel::cells_connected(const Vector2i &start, const Vector2i &goal, double radius) {
+    if (!is_configured() || !contains(start.x, start.y) || !contains(goal.x, goal.y)) return false;
+    const auto &labels = components(radius);
+    const int32_t target = labels[goal.y * width_ + goal.x];
+    if (target < 0) return false;
+    const int32_t origin = labels[start.y * width_ + start.x];
+    if (origin >= 0) return origin == target;
+    // A newly occupied start can still escape, as permitted by can_step.
+    for (const auto &d : DIRECTIONS) {
+        const int32_t x = start.x + d[0], y = start.y + d[1];
+        if (contains(x, y) && labels[y * width_ + x] == target &&
+                can_step(start.y * width_ + start.x, y * width_ + x, radius)) return true;
+    }
+    return false;
+}
+
 PackedInt32Array RoRPathKernel::find_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius) {
     PackedInt32Array result;
     last_expanded_nodes_ = 0;
     if (!is_configured() || !contains(start.x, start.y) || !contains(goal.x, goal.y) || !cell_walkable_for(goal.x, goal.y, clearance_radius)) {
         return result;
     }
+
+    if (!cells_connected(start, goal, clearance_radius)) return result;
 
     ++search_generation_;
     if (search_generation_ == 0) {
