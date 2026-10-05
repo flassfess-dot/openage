@@ -83,7 +83,7 @@ func verify_local_defeat(world) -> void:
 	assert_true(bool(controller.get_command_result(resign_rome.sequence_id).get("accepted", false)), "Roman resignation crosses the public command boundary")
 	assert_true(world.is_battle_over(), "Roman resignation ends the match")
 	assert_equal(int(world.get_victory_result().get("winner_team", -1)), 2, "remaining Carthaginian side wins deterministically")
-	var presentation: Dictionary = SimulationSnapshot.presentation(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
+	var presentation: Dictionary = SimulationSnapshot.with_queries(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
 	assert_true(bool(presentation.get("match_result", {}).get("over", false)), "defeat reaches local read-only presentation")
 	assert_true(int(presentation.get("match_result", {}).get("winner_team", 1)) != 1, "Roman observer receives a losing result")
 

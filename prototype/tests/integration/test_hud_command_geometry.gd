@@ -47,7 +47,7 @@ func _initialize() -> void:
 			if age_technology == 103:
 				world.grant_technology(1, 16)
 				world.grant_technology(1, 12)
-			var snapshot: Dictionary = Snapshot.presentation(world, 0, 1, {"always_include_entity_ids": ids, "command_option_entity_ids": ids})
+			var snapshot: Dictionary = Snapshot.with_queries(world, 0, 1, {"always_include_entity_ids": ids, "command_option_entity_ids": ids})
 			var model: Dictionary = view.build(snapshot, ids, "LINE", "ru")
 			var build_count: int = model["commands"].filter(func(command): return command.get("type") == "build").size()
 			if age_technology == 103:

@@ -2,6 +2,7 @@ class_name RoRTerrainElevation
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
+const ChangeJournal := preload("res://scripts/cell_change_journal.gd")
 
 const ELEVATION_PIXEL_STEP := 16.0
 
@@ -27,6 +28,9 @@ const SLOPE_BY_CORNER_MASK := {
 	CORNER_TOP | CORNER_RIGHT | CORNER_BOTTOM: 16,
 }
 
+var cache_epoch := 0
+var revision: int = 0
+var change_history: Array = []
 var size: Vector2i
 var vertex_levels: Dictionary = {}
 var nonzero_vertex_count: int = 0
@@ -40,6 +44,8 @@ func _init(map_size: Vector2i = Vector2i.ONE) -> void:
 
 
 func clear(level: int = 0) -> void:
+	ChangeJournal.record_full(change_history, revision, revision + 1)
+	revision += 1
 	vertex_levels.clear()
 	var safe_level := maxi(0, level)
 	nonzero_vertex_count = (size.x + 1) * (size.y + 1) if safe_level > 0 else 0
@@ -55,6 +61,13 @@ func set_vertex(vertex: Vector2i, level: int) -> void:
 		return
 	var previous := int(vertex_levels.get(vertex, 0))
 	var next := maxi(0, level)
+	if previous == next:
+		return
+	for offset in [Vector2i.ZERO, Vector2i.LEFT, Vector2i.UP, Vector2i(-1, -1)]:
+		var cell: Vector2i = vertex + offset
+		if cell.x >= 0 and cell.y >= 0 and cell.x < size.x and cell.y < size.y:
+			ChangeJournal.record_cell(change_history, revision, cell)
+	revision += 1
 	if previous <= 0 and next > 0:
 		nonzero_vertex_count += 1
 	elif previous > 0 and next <= 0:

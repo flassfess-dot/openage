@@ -71,7 +71,7 @@ func _initialize() -> void:
 		for ai in players:
 			if not ai.needs_decision(next_tick):
 				continue
-			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, int(ai.team), ai.presentation_options())
+			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, int(ai.team), ai.presentation_options())
 			for command in ai.collect_commands(knowledge, next_tick):
 				controller.enqueue_command(command, true, int(ai.team))
 				submitted.append({"team": int(ai.team), "command": command})

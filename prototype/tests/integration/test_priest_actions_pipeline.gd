@@ -69,7 +69,6 @@ func verify_healing_and_medicine(catalog) -> void:
 	var priest: Dictionary = world.add_unit(1, "priest", Vector2(8.0, 8.0), false)
 	var wounded: Dictionary = world.add_unit(1, "clubman", Vector2(10.0, 8.0), false)
 	wounded["hp"] = 10.0
-	wounded["components"]["health"]["current"] = 10.0
 	var controller = GameController.new(world)
 	var heal = Commands.HealCommand.new(0, [int(priest["id"])], int(wounded["id"]))
 	controller.enqueue_command(heal, false, 1)
@@ -94,7 +93,6 @@ func verify_healing_and_medicine(catalog) -> void:
 	assert_near(world.healing_system.rate_for(priest), 7.8, 0.0001, "Medicine and Astrology compose without alias-specific branches")
 
 	wounded["hp"] = 1.0
-	wounded["components"]["health"]["current"] = 1.0
 	var enhanced_heal = Commands.HealCommand.new(0, [int(priest["id"])], int(wounded["id"]))
 	controller.enqueue_command(enhanced_heal, false, 1)
 	controller.process_commands()

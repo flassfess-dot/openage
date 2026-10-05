@@ -80,12 +80,12 @@
 
 - Выполнено A-002: отдельная система ID.
   - Добавлен prototype/scripts/entity_id.gd с EntityIdSequence.
-  - В main.gd ID юнитов и ресурсов выдаются через ntity_id_sequence / 
+  - В main.gd ID юнитов и ресурсов выдаются через ntity_id_sequence /
 esource_id_sequence.
-  - Удалён глобальный старый счётчик 
+  - Удалён глобальный старый счётчик
 ext_unit_id.
-  - Сбрасывание/инициализация IDs выполнено через 
-eset() у последовательностей в 
+  - Сбрасывание/инициализация IDs выполнено через
+eset() у последовательностей в
 eset_game().
 
 - A-002 перепроверена после аудита:
@@ -1607,3 +1607,50 @@ eset_game().
   2. **Подгиб fog под склоны.** Вершины fog-решётки поднимаются точными шагами по 16 px, а спрайты террейна квантуют подъём в битмапы 17/33/49 px — на склонах край тумана может перекрывать видимую землю на несколько пикселей (чёрные клинья на видимых склонах у границы тумана; класс известной проблемы E1-FOW). Дешёвая мера: приподнятые вершины fog-геометрии подгибаются на ~3 px под painted-склон (`_world_to_fog_mesh`), плоские границы не тронуты. Точный per-cell контракт остаётся за E1-планом.
 - Точных условий исходного скриншота воспроизвести не удалось (baseline-сканы compact/large highlands вдоль границы тумана — 0 клиньев и до фиксов); при повторении дефекта нужны настройки матча (тип/размер/seed карты и место).
 - Гейты: terrain/fog/overlap/render-items/panned-projection impact-тесты PASS (terrain golden не изменился); полный suite — в прогоне; сборка: PCK `261 660 784` байт, SHA-256 `fb144284b0c37af1184c7b849e763dbc0bbad339b27de722b6a9e7d5725c378a`; packaged smoke skirmish+Mylae по 900 кадров — exit `0`, ошибок `0`.
+
+### Прогресс (2026-10-04, многопоточная оптимизация — реализация этапов 1–9)
+
+- По прямому указанию пользователя использованы существующие эталоны производительности; новые baseline, тестовые и игровые прогоны не выполнялись. Написаны девять новых unit-файлов; выполнена только компиляция скриптов.
+- Добавлены изолированный координатор задач, private build-site/AI planners, два retained publication slots, загрузочная подготовка native masks/connectivity, пакетные маршруты и ordinary native movement, фоновый ResourceLoader анимаций и FIFO упаковки/записи сохранений.
+- Native kernel разделяет immutable mask/components и private A* context; movement scratch стал thread_local. Owner/barrier сохраняют порядок команд, reservations и интеграции. Все подсистемы имеют независимые флаги и последовательный fallback.
+- Контракты, пределы очередей/памяти, состав тестов и статус сборки: [MULTITHREADING_IMPLEMENTATION_2026-10-04.md](ror-modern/MULTITHREADING_IMPLEMENTATION_2026-10-04.md).
+- Статус: реализовано без runtime/performance подтверждения. Парные результаты, FPS, canonical hashes и прохождение тестов не заявляются; исходные quality gates не помечены проверенными.
+
+- Итоговая Windows Release-сборка завершена (exit 0): EXE 109127680 байт, PCK 275721172 байт, DLL 686592 байт. PCK SHA-256: `393bfab80f7883f4a928c68452be2e6ab19426432a47905b38665fa15dfade87`. DLL в обоих distribution paths совпадает с собранной исходной библиотекой. Packaged smoke не запускался по указанию пользователя.
+
+### Прогресс (2026-10-04, проверка многопоточной оптимизации после реализации)
+
+- По новому указанию пользователя сначала выполнен полный suite без изменений кода во время прогона: 347 тестов, 325 passed / 22 failed (22:13–23:00 Europe/Moscow).
+- Исправлены недопустимый UI z_index, seal readonly DTO, статистика private path planners и выбор последовательного поиска стройплощадки после cache hits. Два интерактивных fixtures ждут фактической готовности навигации; PowerShell-оболочка корректно считает ERROR-prefixed failures.
+- Отдельный повтор всех 22 падений: 22 passed / 0 failed. Усиленный path-batch test и семь связанных новых unit-файлов: 8 passed / 0 failed. Все девять новых unit-файлов прошли на исправленном коде. Второй полный suite не запускался.
+- Replay/save hash matrix и generated deterministic AI victory прошли; golden files не обновлялись. Новые baseline и парные performance-замеры не собирались.
+- Точный список падений, исправления, журналы и обновлённая сборка: [MULTITHREADING_TEST_RESULTS_2026-10-04.md](ror-modern/MULTITHREADING_TEST_RESULTS_2026-10-04.md).
+
+- Обновлённая Windows Release-сборка после исправлений завершена в 23:20, exit 0. PCK 275724264 байт, SHA-256 `f3e27674bd7f8f623cccc4e3c3d40d638091841fed740e8a9898cdfc84c366d4`; packaged skirmish smoke (300 кадров) — exit 0, ошибок 0. Все distribution DLL совпадают с исходной пересобранной библиотекой.
+
+### Прогресс (2026-10-04/05, исправление игровых регрессий после оптимизации)
+
+- Воспроизведена потеря state/construction_stage при повторной проекции компактного building DTO. Publication теперь сохраняет весь переданный контракт, включая forest/fog поля.
+- Retained render projection сохраняет environment_asset/environment_variant/tree_condition; исправлено однообразие леса в памяти ресурсов и игровых снимках. Новый integration contract до исправления выявил 12 ошибок, после — 0.
+- Повторное копирование исследованного леса/overview оказалось причиной роста CPU-задержек: presentation=false по умолчанию, остальные этапы сохранены. Этап 4 требует другой реализации и не считается подтверждённой оптимизацией.
+- 16 targeted файлов прошли, новый desktop suite обнаруживает 348 тестов. Физическое количество/координаты деревьев сохранены через generation → bootstrap → remembered resources → render snapshot. Просмотрены реальные изображения трёх профилей карт и construction stages; 4800 ticks real-main coastal workload прошли. Это диагностика регрессий, новые performance baseline не создавались.
+- Подробности и итог сборки: [MULTITHREADING_TEST_RESULTS_2026-10-04.md](ror-modern/MULTITHREADING_TEST_RESULTS_2026-10-04.md).
+
+- Итоговая Windows Release-сборка 2026-10-05: exit 0; PCK 275727820 байт, SHA-256 7f540a78ab23f240e1249785478c2f48d9f06f6e9d942063991aec3eb0bb7a1f. Штатный EXE smoke на 600 кадров: exit 0, ошибок 0. Два целевых теста из PCK с корректным --path distribution прошли без ошибок загрузки DLL. Все distribution/native DLL идентичны.
+
+### Прогресс (2026-10-05, периодические фризы после оптимизации)
+
+- В source-campaign cadence 40 ticks воспроизведены паузы 2–5 секунд: FIFO sealed-root registry вытеснял активно используемую карту и повторял её полную валидацию на главном потоке перед каждой worker group. Добавлены LRU promotion, source construction demand filter и serial early exit для одного вида.
+- Отдельный оконный прогон выявил вторую причину: вырубка деревьев сбрасывала full fog mask и видимый terrain mesh даже при изменениях за экраном. Геометрия тумана отделена от материалов земли; terrain invalidation использует bounded cell deltas и retained native/legacy samples.
+- 40 разных impact-файлов, 43 выполнения: 0 failed / 0 engine errors, включая exact meshes, terrain golden, deterministic replay и checkpoint/save continuation. Три новых regression-файла автоматически включены в desktop suite; всего 351.
+- Повторные fog/terrain stalls 548–591 / 315–337 мс исчезли в повторном оконном прогоне. Source-campaign headless AI-decision max 5333 → 74 мс; первые cold-cache пики остаются отдельно от периодической регрессии.
+- Подробности и итог сборки: [MULTITHREADING_TEST_RESULTS_2026-10-04.md](ror-modern/MULTITHREADING_TEST_RESULTS_2026-10-04.md#периодические-фризы--2026-10-05).
+
+- Windows Release export завершён 2026-10-05 в 21:39, exit 0. PCK 275751352 байт, SHA-256 `674b6668e8ec324f81a9f98ffa2d3da477548634e44f79d910446da185ef7eda`. Все шесть целевых проверок нового PCK прошли; штатный Release EXE smoke на 600 кадров завершился без ошибок. Все три native DLL идентичны.
+
+### Прогресс (2026-10-05, первые четыре архитектурных пункта)
+
+- В исходниках отделены фактические снимки от запросов планирования; фоновые решения ИИ применяются через неблокирующий опрос на заданном такте с подготовкой не более одного игрока за кадр.
+- Добавлены общий контракт представлений сущностей, единственный источник динамических значений, неизменяемые записи памяти и общий журнал зависимостей кэшей. Холодная навигация ИИ готовится порциями.
+- Добавлены пять тестовых файлов; существующие потребители обновлены под явные API. По прямому указанию пользователя тесты, движок и сборка не запускались. Новое состояние исходников не входит в предыдущую Release-сборку и ещё не проверено в игре.
+- Детали и границы проверки: [ARCHITECTURE_BOUNDARIES_2026-10-05.md](ror-modern/ARCHITECTURE_BOUNDARIES_2026-10-05.md).

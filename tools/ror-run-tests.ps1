@@ -97,7 +97,7 @@ try {
             $percent = 5 + [int](90 * (($passed + $failed) / [double]$testCount))
             Write-Progress -Activity "Rise of Rome tests" -Status ("passed {0}/{1}" -f $passed, $testCount) -PercentComplete $percent
         }
-        elseif ($text -match '^FAILED ') {
+        elseif ($text -match '^(?:ERROR:\s*)?FAILED tests/') {
             $failed += 1
             $percent = 5 + [int](90 * (($passed + $failed) / [double]$testCount))
             Write-Progress -Activity "Rise of Rome tests" -Status ("failed {0}, passed {1}" -f $failed, $passed) -PercentComplete $percent

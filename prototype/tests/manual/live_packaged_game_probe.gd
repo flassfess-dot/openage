@@ -153,7 +153,7 @@ func _measure_snapshot_variants() -> Dictionary:
 		var samples: Array[int] = []
 		for _sample in range(4):
 			var started := Time.get_ticks_usec()
-			SimulationSnapshot.presentation(game.simulation_world, game.game_controller.tick_index, game.PLAYER_TEAM, options)
+			SimulationSnapshot.with_queries(game.simulation_world, game.game_controller.tick_index, game.PLAYER_TEAM, options)
 			samples.append(Time.get_ticks_usec() - started)
 		result[name] = PerformanceProbe.summarize(samples)
 	return result

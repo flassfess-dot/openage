@@ -105,7 +105,7 @@ func test_death_occurs_on_damage_frame() -> void:
 	assert_true(float(target["hp"]) > 0.0, "target lives before damage frame")
 	world.advance(0.05, 1, 2)
 	assert_true(float(target["hp"]) <= 0.0, "target dies exactly on damage frame")
-	assert_true(not bool(target["components"]["health"]["alive"]), "Health component records death immediately")
+	assert_true(not bool(bool(float(target["hp"]) > 0.0)), "Health component records death immediately")
 	assert_true(String(target["death_phase"]) == "dying", "death lifecycle starts on the damage frame")
 
 

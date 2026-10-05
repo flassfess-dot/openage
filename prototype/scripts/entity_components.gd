@@ -267,7 +267,46 @@ static func for_resource(entity_id: int, kind: String, position: Vector2, elevat
 	return components
 
 
+const DYNAMIC_MIRRORS := {
+	"transform": {"position":"pos","previous_position":"previous_pos","elevation":"elevation","facing":"facing","movement_facing":"movement_facing","desired_facing":"desired_facing","action_facing":"action_facing"},
+	"health": {"current":"hp","maximum":"max_hp","alive":"hp"},
+	"movement": {"target":"target","destination":"destination","path":"path","path_index":"path_index","desired_velocity":"desired_velocity","path_request_id":"path_request_id","path_status":"path_status","path_grid_revision":"path_grid_revision","actual_velocity":"actual_velocity","speed":"speed","terrain_restriction":"terrain_restriction","domain":"movement_domain"},
+	"combat": {"target_id":"target_id","cooldown":"cooldown","stance":"stance","acquisition_range":"acquisition_range","chase_range":"chase_range","retaliation_target_id":"retaliation_target_id"},
+	"resource_carrier": {"amount":"carried_amount","resource_type_id":"carried_resource_type_id"},
+	"worker": {"resource_id":"resource_id","action_cooldown":"work"},
+	"animation_state": {"state":"anim_state","elapsed":"anim","events_fired":"animation_events_fired"},
+}
+
+
+# Dynamic values live on the entity; components retain capabilities/configuration.
+# This boundary also removes historical mirrors after loading old checkpoints.
 static func sync_dynamic(entity: Dictionary) -> void:
+	var components: Dictionary = entity.get("components", {})
+	for name in DYNAMIC_MIRRORS:
+		var component: Dictionary = components.get(name, {})
+		for field in DYNAMIC_MIRRORS[name]:
+			if entity.has(DYNAMIC_MIRRORS[name][field]):
+				component.erase(field)
+		if name == "resource_carrier" and entity.has("amount"):
+			component.erase("amount")
+
+
+# Detached compatibility views are derived when requested, never every tick.
+static func view(entity: Dictionary) -> Dictionary:
+	var projected := entity.duplicate()
+	projected["components"] = entity.get("components", {}).duplicate(true)
+	project_dynamic(projected)
+	return projected["components"].duplicate(true)
+
+
+static func component_view(entity: Dictionary, name: String) -> Dictionary:
+	var projected := entity.duplicate()
+	projected["components"] = {name: entity.get("components", {}).get(name, {}).duplicate(true)}
+	project_dynamic(projected)
+	return projected["components"][name].duplicate(true)
+
+
+static func project_dynamic(entity: Dictionary) -> void:
 	var components: Dictionary = entity.get("components", {})
 	if components.is_empty():
 		return
@@ -286,9 +325,7 @@ static func sync_dynamic(entity: Dictionary) -> void:
 	health["alive"] = float(health["current"]) > 0.0
 
 	var movement: Dictionary = components.get("movement", {})
-	# This runs for every active entity on every fixed tick. Keep the mapping
-	# allocation-free; constructing the former nested Array table dominated the
-	# 4,000-entity animation/component-sync profile.
+	# Reconstruct compatibility fields only in detached views and serialization.
 	if entity.has("target"):
 		movement["target"] = entity["target"]
 	if entity.has("destination"):
@@ -341,126 +378,23 @@ static func sync_dynamic(entity: Dictionary) -> void:
 
 
 static func sync_resource_carrier(entity: Dictionary) -> void:
-	# Gathering mutates only the carried payload and action cooldown. Keep the
-	# live component facade coherent without paying for a complete transform,
-	# health, movement, combat and animation projection on every resource unit.
-	if not entity.has("components"):
-		return
-	var components: Dictionary = entity["components"]
-	var carrier: Dictionary = components["resource_carrier"]
-	carrier["amount"] = float(entity["carried_amount"])
-	carrier["resource_type_id"] = int(entity["carried_resource_type_id"])
-	var worker: Dictionary = components["worker"]
-	worker["action_cooldown"] = float(entity["work"])
+	# Runtime state has one authoritative owner on the entity.
+	pass
 
 
 static func sync_resource_amount(entity: Dictionary) -> void:
-	# Resource harvest changes only the amount mirrored by resource_carrier.
-	# Depletion state remains authoritative on the runtime entity and is copied
-	# by snapshot/presentation boundaries like the other derived fields.
-	if not entity.has("components"):
-		return
-	var carrier: Dictionary = entity["components"]["resource_carrier"]
-	carrier["amount"] = float(entity["amount"])
+	# Runtime state has one authoritative owner on the entity.
+	pass
 
 
 static func sync_runtime_unit(entity: Dictionary) -> void:
-	# SimulationWorld units are created with the complete runtime schema. Their
-	# hot per-tick projection can therefore avoid dozens of has/get/default
-	# lookups while writing exactly the same component fields as sync_dynamic.
-	var components: Dictionary = entity["components"]
-	var transform: Dictionary = components["transform"]
-	transform["position"] = entity["pos"]
-	transform["previous_position"] = entity["previous_pos"]
-	transform["elevation"] = float(entity["elevation"])
-	transform["facing"] = int(entity["facing"])
-	transform["movement_facing"] = int(entity["movement_facing"])
-	transform["desired_facing"] = int(entity["desired_facing"])
-	transform["action_facing"] = int(entity["action_facing"])
-
-	var health: Dictionary = components["health"]
-	health["current"] = float(entity["hp"])
-	health["maximum"] = float(entity["max_hp"])
-	health["alive"] = float(entity["hp"]) > 0.0
-
-	var movement: Dictionary = components["movement"]
-	movement["target"] = entity["target"]
-	movement["destination"] = entity["destination"]
-	movement["path"] = entity["path"]
-	movement["path_index"] = entity["path_index"]
-	movement["desired_velocity"] = entity["desired_velocity"]
-	movement["path_request_id"] = entity["path_request_id"]
-	movement["path_status"] = entity["path_status"]
-	movement["path_grid_revision"] = entity["path_grid_revision"]
-	movement["actual_velocity"] = entity["actual_velocity"]
-	movement["speed"] = entity["speed"]
-	movement["terrain_restriction"] = entity["terrain_restriction"]
-	movement["domain"] = entity["movement_domain"]
-
-	var combat: Dictionary = components["combat"]
-	combat["target_id"] = int(entity["target_id"])
-	combat["cooldown"] = float(entity["cooldown"])
-	combat["stance"] = String(entity["stance"])
-	combat["acquisition_range"] = float(entity["acquisition_range"])
-	combat["chase_range"] = float(entity["chase_range"])
-	combat["retaliation_target_id"] = int(entity["retaliation_target_id"])
-
-	var carrier: Dictionary = components["resource_carrier"]
-	carrier["amount"] = float(entity["carried_amount"])
-	carrier["resource_type_id"] = int(entity["carried_resource_type_id"])
-
-	var worker: Dictionary = components["worker"]
-	worker["resource_id"] = int(entity["resource_id"])
-	worker["action_cooldown"] = float(entity["work"])
-
-	var animation: Dictionary = components["animation_state"]
-	animation["state"] = String(entity["anim_state"])
-	animation["elapsed"] = float(entity["anim"])
-	animation["events_fired"] = entity["animation_events_fired"]
+	# Runtime state has one authoritative owner on the entity.
+	pass
 
 
 static func sync_stable_idle_tick(entity: Dictionary) -> void:
-	# A unit that entered and left the tick idle, without a route, cannot have
-	# changed its transform, movement plan or carried resources in that tick.
-	# Keep the few fields which may still advance (cooldowns, health and the
-	# animation clock) authoritative without rewriting every component map.
-	var components: Dictionary = entity.get("components", {})
-	if components.is_empty():
-		return
-	var transform: Dictionary = components.get("transform", {})
-	var previous_position: Vector2 = entity.get("previous_pos", transform.get("previous_position", entity.get("pos", Vector2.ZERO)))
-	if transform.get("previous_position", previous_position) != previous_position:
-		transform["previous_position"] = previous_position
-
-	var health: Dictionary = components.get("health", {})
-	health["current"] = float(entity.get("hp", health.get("current", 0.0)))
-	health["maximum"] = float(entity.get("max_hp", health.get("maximum", 0.0)))
-	health["alive"] = float(health["current"]) > 0.0
-
-	var combat: Dictionary = components.get("combat", {})
-	combat["target_id"] = int(entity.get("target_id", combat.get("target_id", -1)))
-	combat["cooldown"] = float(entity.get("cooldown", combat.get("cooldown", 0.0)))
-	combat["stance"] = String(entity.get("stance", combat.get("stance", "passive")))
-	combat["acquisition_range"] = float(entity.get("acquisition_range", combat.get("acquisition_range", 0.0)))
-	combat["chase_range"] = float(entity.get("chase_range", combat.get("chase_range", 0.0)))
-	combat["retaliation_target_id"] = int(entity.get("retaliation_target_id", combat.get("retaliation_target_id", -1)))
-
-	var movement: Dictionary = components.get("movement", {})
-	var path_index := int(entity.get("path_index", movement.get("path_index", 0)))
-	if int(movement.get("path_index", path_index)) != path_index:
-		movement["path_index"] = path_index
-	var actual_velocity: Vector2 = entity.get("actual_velocity", movement.get("actual_velocity", Vector2.ZERO))
-	if movement.get("actual_velocity", actual_velocity) != actual_velocity:
-		movement["actual_velocity"] = actual_velocity
-
-	var worker: Dictionary = components.get("worker", {})
-	worker["resource_id"] = int(entity.get("resource_id", worker.get("resource_id", -1)))
-	worker["action_cooldown"] = float(entity.get("work", worker.get("action_cooldown", 0.0)))
-
-	var animation: Dictionary = components.get("animation_state", {})
-	animation["state"] = String(entity.get("anim_state", animation.get("state", "Idle")))
-	animation["elapsed"] = float(entity.get("anim", animation.get("elapsed", 0.0)))
-	animation["events_fired"] = entity.get("animation_events_fired", animation.get("events_fired", {}))
+	# Runtime state has one authoritative owner on the entity.
+	pass
 
 
 static func has_complete_schema(entity: Dictionary) -> bool:

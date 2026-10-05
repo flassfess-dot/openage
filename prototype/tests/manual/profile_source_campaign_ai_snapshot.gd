@@ -19,10 +19,10 @@ func _initialize() -> void:
 		var options: Dictionary = ai_value.presentation_options()
 		options["performance_probe"] = probe
 		options["performance_prefix"] = "profile.team_%d" % int(ai_value.team)
-		var knowledge := SimulationSnapshot.presentation(game.simulation_world, game.game_controller.tick_index, int(ai_value.team), options)
+		var knowledge := SimulationSnapshot.with_queries(game.simulation_world, game.game_controller.tick_index, int(ai_value.team), options)
 		var snapshot_elapsed := Time.get_ticks_msec() - snapshot_started
 		var warm_snapshot_started := Time.get_ticks_msec()
-		SimulationSnapshot.presentation(game.simulation_world, game.game_controller.tick_index, int(ai_value.team), options)
+		SimulationSnapshot.with_queries(game.simulation_world, game.game_controller.tick_index, int(ai_value.team), options)
 		var warm_snapshot_elapsed := Time.get_ticks_msec() - warm_snapshot_started
 		var plan_started := Time.get_ticks_msec()
 		var commands: Array = ai_value.collect_commands(knowledge, game.game_controller.tick_index + 1)

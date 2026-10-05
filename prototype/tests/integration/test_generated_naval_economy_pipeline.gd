@@ -64,7 +64,7 @@ func _initialize() -> void:
 	assert_equal(fish_component, staging_component, "guaranteed fish shares the Dock water component")
 
 	var ai = AiPlayer.new(definition["players"][1])
-	var initial_knowledge := SimulationSnapshot.presentation(world, 0, AI_TEAM, ai.presentation_options())
+	var initial_knowledge := SimulationSnapshot.with_queries(world, 0, AI_TEAM, ai.presentation_options())
 	assert_true(initial_knowledge.get("resources", []).any(func(resource): return int(resource.get("id", -1)) == int(fish["id"])), "scouted generated fish reaches fog-safe AI knowledge")
 	var controller = GameController.new(world)
 	controller.set_speed_multiplier(3.0)
@@ -78,7 +78,7 @@ func _initialize() -> void:
 		var next_tick := int(controller.tick_index) + 1
 		var submitted: Array = []
 		if ai.needs_decision(next_tick):
-			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, AI_TEAM, ai.presentation_options())
+			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, AI_TEAM, ai.presentation_options())
 			for command in ai.collect_commands(knowledge, next_tick):
 				controller.enqueue_command(command, true, AI_TEAM)
 				submitted.append(command)

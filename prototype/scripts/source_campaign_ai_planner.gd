@@ -1369,14 +1369,68 @@ static func _idle_worker_commands(snapshot: Dictionary, tick: int, own_units: Ar
 	return commands
 
 
-static func _housing_command(snapshot: Dictionary, tick: int, own_units: Array, city_plan = null) -> Variant:
-	var player_state: Dictionary = snapshot.get("player_state", {})
+static func _needs_housing(player_state: Dictionary, buildings: Array, team: int) -> bool:
 	var cap := int(player_state.get("population_cap", 0))
 	var limit := int(player_state.get("population_limit", cap))
 	var used_points := int(player_state.get("population_points", int(player_state.get("population", 0)) * 2)) + int(player_state.get("population_reserved", 0)) * 2
+	var blocked_population: bool = buildings.any(func(building): return int(building.get("team", 0)) == team and not building.get("production_queue", []).is_empty() and String(building.get("production_queue", [])[0].get("status", "")) == "blocked_population")
+	return cap > 0 and cap < limit and (blocked_population or used_points >= (cap - 1) * 2)
+
+
+static func construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary, team: int, contract: Dictionary) -> Array:
+	# The source economy can use only idle land builders and one unmet build
+	# order entry. Preparing every future kind (or idle housing demand) is wasted
+	# work and cannot change the command chosen by plan_economy.
+	var builders: Array = units.filter(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and bool(unit.get("components", {}).get("worker", {}).get("enabled", false)) and String(unit.get("task", "idle")) == "idle" and String(unit.get("movement_domain", "land")) == "land")
+	if builders.is_empty():
+		return []
+	var own_units: Array = units.filter(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0)
+	var own_buildings: Array = buildings.filter(func(building): return int(building.get("team", 0)) == team and float(building.get("hp", 0.0)) > 0.0)
+	var result: Array = []
+	if "house" in kinds and _needs_housing(player_state, buildings, int(player_state.get("team", team))) and _builders_accept_kind(builders, "house"):
+		result.append("house")
+	var researched: Array = player_state.get("researched_technologies", [])
+	for entry_value in contract.get("build_order", []):
+		var entry: Dictionary = entry_value
+		var entry_type := String(entry.get("type", ""))
+		if entry_type not in ["building", "technology", "unit"] or _build_order_entry_satisfied(entry, own_units, own_buildings, researched):
+			continue
+		# Unfinished unit/research entries block subsequent construction even
+		# when they cannot currently be produced. Housing remains independent.
+		if entry_type == "building":
+			var alias := String(entry.get("runtime_alias", ""))
+			if alias in kinds and alias not in result and _builders_accept_kind(builders, alias):
+				result.append(alias)
+		break
+	return result
+
+
+static func _builders_accept_kind(builders: Array, kind: String) -> bool:
+	return builders.any(func(worker): return worker.get("command_options", {}).get("build", []).any(func(option): return String(option.get("kind", "")) == kind and bool(option.get("accepted", false))))
+
+
+static func _build_order_entry_satisfied(entry: Dictionary, own_units: Array, own_buildings: Array, researched: Array) -> bool:
+	var entry_type := String(entry.get("type", ""))
+	var source_id := int(entry.get("source_id", -1))
+	var alias := String(entry.get("runtime_alias", ""))
+	var target := maxi(0, int(entry.get("target_count", 0)))
+	if entry_type == "building":
+		return own_buildings.filter(func(building): return _building_matches_entry(building, source_id, alias)).size() >= target
+	if entry_type == "technology":
+		return source_id in researched
+	if entry_type == "unit":
+		var current_count := own_units.filter(func(unit): return _unit_matches_entry(unit, source_id, alias)).size()
+		var queued_count := 0
+		for building in own_buildings:
+			queued_count += building.get("production_queue", []).filter(func(order): return String(order.get("kind", "")) == alias).size()
+		return current_count + queued_count >= target
+	return false
+
+
+static func _housing_command(snapshot: Dictionary, tick: int, own_units: Array, city_plan = null) -> Variant:
+	var player_state: Dictionary = snapshot.get("player_state", {})
 	var team := int(player_state.get("team", snapshot.get("observer_team", 0)))
-	var blocked_population: bool = snapshot.get("buildings", []).any(func(building): return int(building.get("team", 0)) == team and not building.get("production_queue", []).is_empty() and String(building.get("production_queue", [])[0].get("status", "")) == "blocked_population")
-	if cap <= 0 or cap >= limit or (not blocked_population and used_points < (cap - 1) * 2):
+	if not _needs_housing(player_state, snapshot.get("buildings", []), team):
 		return null
 	var sites: Array = snapshot.get("build_sites", {}).get("house", [])
 	if city_plan != null:
@@ -1416,14 +1470,10 @@ static func _next_build_order_command(snapshot: Dictionary, tick: int, team: int
 		var entry_type: String = String(entry.get("type", ""))
 		var source_id: int = int(entry.get("source_id", -1))
 		var producer_source_id: int = int(entry.get("producer_source_unit_id", -1))
+		if _build_order_entry_satisfied(entry, own_units, own_buildings, researched):
+			continue
 		if entry_type == "building":
 			var building_alias: String = String(entry.get("runtime_alias", ""))
-			var building_target_count: int = maxi(0, int(entry.get("target_count", 0)))
-			var current_building_count: int = own_buildings.filter(func(building):
-				return _building_matches_entry(building, source_id, building_alias)
-			).size()
-			if current_building_count >= building_target_count:
-				continue
 			var sites: Array = _source_distance_filtered_sites(snapshot.get("build_sites", {}).get(building_alias, []), building_alias, own_buildings, numbers)
 			if city_plan != null:
 				sites = city_plan.filter_sites(sites, building_alias)
@@ -1456,8 +1506,6 @@ static func _next_build_order_command(snapshot: Dictionary, tick: int, team: int
 		)
 		producers.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
 		if entry_type == "technology":
-			if researched.has(source_id):
-				continue
 			for producer_value in producers:
 				var producer: Dictionary = producer_value
 				for option_value in producer.get("command_options", {}).get("research", []):
@@ -1468,13 +1516,6 @@ static func _next_build_order_command(snapshot: Dictionary, tick: int, team: int
 		if entry_type != "unit":
 			continue
 		var alias: String = String(entry.get("runtime_alias", ""))
-		var target_count: int = maxi(0, int(entry.get("target_count", 0)))
-		var current_count: int = own_units.filter(func(unit): return _unit_matches_entry(unit, source_id, alias)).size()
-		var queued_count: int = 0
-		for building in own_buildings:
-			queued_count += building.get("production_queue", []).filter(func(order): return String(order.get("kind", "")) == alias).size()
-		if current_count + queued_count >= target_count:
-			continue
 		for producer_value in producers:
 			var producer: Dictionary = producer_value
 			for option_value in producer.get("command_options", {}).get("train", []):

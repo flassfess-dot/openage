@@ -50,7 +50,7 @@ func _initialize() -> void:
 	assert_true(world.navigation_grid.occupants(first_cliff_cell).any(func(item): return String(item.get("category", "")) == "static_obstruction"), "navigation grid retains the cliff owner category")
 	print("I12-020D full campaign phases: definition=%d ms, catalog=%d ms, map=%d ms, world=%d ms, bootstrap=%d ms, total=%d ms" % [definition_loaded - started, catalog_loaded - definition_loaded, map_generated - catalog_loaded, world_configured - map_generated, Time.get_ticks_msec() - world_configured, elapsed])
 	var player_snapshot_started := Time.get_ticks_msec()
-	SimulationSnapshot.presentation(world, 0, 1, {"include_navigation": false, "include_build_sites": false})
+	SimulationSnapshot.with_queries(world, 0, 1, {"include_navigation": false, "include_build_sites": false})
 	print("I12-020D player presentation snapshot: %d ms" % (Time.get_ticks_msec() - player_snapshot_started))
 	verify_imported_source_victory(world, definition)
 	MatchBootstrap.apply(world, definition, map_data)
@@ -110,7 +110,7 @@ func verify_imported_source_victory(world, definition: Dictionary) -> void:
 	assert_equal(world.get_victory_result().get("winner_team"), 1, "imported objective vertical awards victory to Rome")
 	assert_equal(world.get_victory_result().get("reason"), "scenario", "imported objective victory retains its source scenario reason")
 	assert_equal(events.filter(func(event): return String(event.get("type", "")) == "scenario_condition_changed" and bool(event.get("payload", {}).get("achieved", false))).size(), 12, "full imported vertical emits all twelve source condition events")
-	var presentation: Dictionary = SimulationSnapshot.presentation(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
+	var presentation: Dictionary = SimulationSnapshot.with_queries(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
 	assert_equal(presentation.get("scenario", {}).get("result", {}).get("winner_team"), 1, "victory reaches the read-only scenario presentation snapshot")
 
 
@@ -123,7 +123,7 @@ func verify_imported_source_defeat(world) -> void:
 	assert_true(world.is_battle_over(), "Roman resignation completes the imported source defeat vertical")
 	assert_equal(world.get_victory_result().get("winner_team"), 2, "first deterministic source opponent wins after Roman resignation")
 	assert_equal(world.get_victory_result().get("reason"), "scenario", "imported defeat is resolved by source DestroyPlayer semantics")
-	var presentation: Dictionary = SimulationSnapshot.presentation(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
+	var presentation: Dictionary = SimulationSnapshot.with_queries(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
 	assert_true(bool(presentation.get("match_result", {}).get("over", false)), "defeat reaches the read-only match presentation snapshot")
 	assert_true(int(presentation.get("match_result", {}).get("winner_team", 1)) != 1, "local Roman observer receives a losing result")
 	assert_true(controller.events_after().any(func(event): return String(event.get("type", "")) == "player_resigned" and int(event.get("payload", {}).get("team", 0)) == 1), "imported defeat retains the typed resignation event")

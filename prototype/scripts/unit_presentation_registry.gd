@@ -1,5 +1,11 @@
 class_name RoRUnitPresentationRegistry
 extends RefCounted
+const ThreadedTextureQueue := preload("res://scripts/threaded_texture_queue.gd")
+var texture_queue := ThreadedTextureQueue.new()
+var pending_states: Dictionary = {}
+var loading_generation := 1
+var background_loading_enabled := false
+var prewarming := false
 
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
 const DamageSelector := preload("res://scripts/presentation_damage_selector.gd")
@@ -21,6 +27,7 @@ var effect_presentations
 
 
 func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, records: Array, effect_registry = null, indexed_frame_records: Dictionary = {}) -> void:
+	shutdown_loading()
 	runtime_catalog = runtime_data
 	object_catalog = object_data
 	graphics_catalog = graphics_data
@@ -90,6 +97,7 @@ func animation_frames(texture_key: String, state: String) -> Array:
 
 
 func prewarm_units(units: Array) -> void:
+	prewarming = true
 	# Loading is deliberately performed during match setup. A unit's first move,
 	# attack, work or death must not synchronously decode a new clip in the middle
 	# of a live presentation frame.
@@ -149,6 +157,9 @@ func prewarm_units(units: Array) -> void:
 		effect_presentations.frame_info_for(key.x, key.y, 0.0)
 
 
+	prewarming = false
+
+
 func texture_key_for_unit(unit: Dictionary) -> String:
 	var alias := String(unit.get("kind", ""))
 	var owner_team := int(unit.get("team", 1))
@@ -161,7 +172,95 @@ func texture_key_for_unit(unit: Dictionary) -> String:
 	return variant_key if definitions.has(variant_key) else prefix
 
 
+func _state_paths(definition: Dictionary, state_spec: Dictionary) -> Array[String]:
+	var team := int(definition.get("team", 1))
+	var parts: Array = [state_spec]
+	parts.append_array(state_spec.get("composite_parts", []))
+	var paths: Array[String] = []
+	var seen: Dictionary = {}
+	for index in range(parts.size()):
+		var part: Dictionary = parts[index]
+		var base_name := String(part.get("asset_name", ""))
+		var asset_name := String(part.get("neutral_asset_name", base_name)) if team <= 0 and index == 0 else String(part.get("enemy_asset_name", base_name)) if team == 2 else base_name
+		var records: Array = records_by_name.get(asset_name, [])
+		if records.is_empty() and team == 2:
+			records = records_by_name.get(base_name, [])
+		for record in records:
+			var path := "res://assets/generated/%s" % String(record.get("file", ""))
+			if not seen.has(path):
+				seen[path] = true
+				paths.append(path)
+	return paths
+
+func poll_background_loading() -> void:
+	texture_queue.poll()
+	for key in pending_states.keys():
+		var request: Dictionary = pending_states[key]
+		texture_queue.request(request["paths"])
+		if not texture_queue.is_complete(request["paths"]):
+			continue
+		var texture_key := String(request["texture_key"])
+		var state := String(request["state"])
+		var definition: Dictionary = definitions.get(texture_key, {})
+		if int(request["generation"]) != loading_generation or definition.is_empty():
+			pending_states.erase(key)
+			continue
+		var attempted: Dictionary = loaded_states.get(texture_key, {})
+		attempted[state] = true
+		loaded_states[texture_key] = attempted
+		# All base and composite frame paths have finished before any state is
+		# published. No partial composite becomes visible between frames.
+		_load_team(String(definition.get("alias", "")), texture_key, int(definition.get("team", 1)), definition.get("archetype", {}), {state: request["spec"]}, int(definition.get("source_unit_id", -1)))
+		pending_states.erase(key)
+		# Several clips may share the same frame. Keep a completed resource until
+		# every pending clip that references it has published its whole state.
+		var releasable: Array[String] = []
+		for path in request["paths"]:
+			var still_needed := false
+			for pending in pending_states.values():
+				if path in pending["paths"]:
+					still_needed = true
+					break
+			if not still_needed:
+				releasable.append(path)
+		texture_queue.release(releasable)
+
 func ensure_loaded(texture_key: String, requested_state: String = "") -> void:
+	if prewarming or not background_loading_enabled:
+		_ensure_loaded_synchronous(texture_key, requested_state)
+		return
+	poll_background_loading()
+	var definition: Dictionary = definitions.get(texture_key, {})
+	var specs: Dictionary = definition.get("state_specs", {})
+	var requested: Array = specs.keys() if requested_state.is_empty() else [requested_state]
+	for state_value in requested:
+		var state := String(state_value)
+		if loaded_states.get(texture_key, {}).has(state):
+			continue
+		if not specs.has(state):
+			var attempted: Dictionary = loaded_states.get(texture_key, {})
+			attempted[state] = true
+			loaded_states[texture_key] = attempted
+			continue
+		var key := texture_key + ":" + state
+		if pending_states.has(key) or pending_states.size() >= 32:
+			continue
+		var paths := _state_paths(definition, specs[state])
+		pending_states[key] = {"generation": loading_generation, "texture_key": texture_key, "state": state, "spec": specs[state], "paths": paths}
+		texture_queue.request(paths)
+	poll_background_loading()
+
+func _texture_for_path(path: String) -> Texture2D:
+	if prewarming or not background_loading_enabled:
+		return load(path) as Texture2D
+	return texture_queue.texture(path)
+
+func shutdown_loading() -> void:
+	loading_generation += 1
+	pending_states.clear()
+	texture_queue.shutdown()
+
+func _ensure_loaded_synchronous(texture_key: String, requested_state: String = "") -> void:
 	var attempted: Dictionary = loaded_states.get(texture_key, {})
 	if not requested_state.is_empty() and attempted.has(requested_state):
 		return
@@ -286,7 +385,7 @@ func _load_team(alias: String, texture_key: String, team: int, archetype: Dictio
 		var hotspots: Array[Vector2] = []
 		for record_value in frame_records:
 			var record: Dictionary = record_value
-			var texture: Texture2D = load("res://assets/generated/%s" % String(record.get("file", "")))
+			var texture: Texture2D = _texture_for_path("res://assets/generated/%s" % String(record.get("file", "")))
 			if texture == null:
 				continue
 			frames.append(texture)
@@ -326,7 +425,7 @@ func _load_composite_parts(texture_key: String, state: String, team: int, state_
 		var hotspots: Array[Vector2] = []
 		for record_value in frame_records:
 			var record: Dictionary = record_value
-			var texture: Texture2D = load("res://assets/generated/%s" % String(record.get("file", "")))
+			var texture: Texture2D = _texture_for_path("res://assets/generated/%s" % String(record.get("file", "")))
 			if texture == null:
 				continue
 			frames.append(texture)

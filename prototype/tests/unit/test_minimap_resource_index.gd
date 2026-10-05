@@ -91,9 +91,9 @@ func test_borrowed_ordered_overview() -> void:
 	world.add_resource("tree",Vector2(6.5,6.5),75)
 	world.update_fog_of_war()
 	var known: Array = world.get_known_resources(1)
-	var snapshot := Snapshot.presentation(world,0,1,{"include_overview":true,"borrow_overview_entities":true,"include_navigation":false,"include_build_sites":false})
-	_check(is_same(snapshot["overview"]["resources"],known),"trusted renderer borrows the already sorted legal resource overview")
-	var detached := Snapshot.presentation(world,0,1,{"include_overview":true,"include_navigation":false,"include_build_sites":false})
+	var snapshot := Snapshot.with_queries(world,0,1,{"include_overview":true,"borrow_overview_entities":true,"include_navigation":false,"include_build_sites":false})
+	_check(not is_same(snapshot["overview"]["resources"],known) and is_same(snapshot["overview"]["resources"][0], known[0]) and known[0].is_read_only(), "overview shares immutable rows and owns its sorted list container")
+	var detached := Snapshot.with_queries(world,0,1,{"include_overview":true,"include_navigation":false,"include_build_sites":false})
 	detached["overview"]["resources"][0]["amount"] = -999
 	_check(known[0]["amount"] == 75,"ordinary snapshot callers retain detached overview records")
 func _check(condition: bool, message: String) -> void:

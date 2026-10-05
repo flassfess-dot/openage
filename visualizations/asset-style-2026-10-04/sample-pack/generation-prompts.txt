@@ -1,0 +1,51 @@
+Небольшой пробный набор — 2026-10-04
+Графика создана встроенным image_gen по выбранному пользователем третьему стилевому концепту. Чужие игровые изображения для изготовления этого набора не передавались.
+grass.png — поверхность земли; house.png — отдельный дом; oak.png — отдельное дерево; worker-walk-sheet.png — пробный лист ходьбы рабочего в одном направлении.
+Сцена и анимация собираются обычной отрисовкой этих PNG, без генерации итогового кадра.
+Набор предназначен для отдельного просмотра; игровые ресурсы и конфигурация проекта не меняются.
+
+Промпт земли:
+
+Use case: stylized-concept.
+Asset type: a single seamless ground texture for an original isometric strategy-game asset test.
+Input image 1 is STYLE reference only. Use the fine warm-brown pen-and-color-wash rendering of the chosen third variant, not its scene layout or objects.
+Create ONE square, edge-to-edge, seamlessly tileable grass-and-earth surface texture viewed DIRECTLY FROM ABOVE. Flat diffuse color, no perspective. Calm Mediterranean olive-green low grass with a little light ochre earth visible between understated small grass clusters. Fine hand-inked strokes and very light paper-tooth material character, matching the reference, while keeping low microcontrast. Texture must be quiet enough behind small game units.
+Edges must repeat seamlessly horizontally and vertically; uniform average brightness across all four sides. No large directional light gradients, cast shadows, trees, stones, buildings, flowers, coast, paths, characters, sky, border, labels or text. No yellow sepia wash and no photographic noise. Opaque square texture, preferably 1024x1024. No collage, no multiple variants.
+
+Промпт дома:
+
+Use case: stylized-concept.
+Asset type: ONE reusable isolated isometric house sprite for an original ancient Mediterranean strategy game.
+Input image 1 is a STYLE reference only: match the user's third variant's delicate warm dark-brown ink contours, sparse hatching, full natural color and restrained parchment material character. Do not copy any building from that image.
+Subject: An original modest one-storey ancient Mediterranean dwelling, a compact rectangular plaster-and-limestone house with timber roof supports, weathered terracotta pitched roof, a recessed wooden doorway, two small shuttered windows, and a very small side awning. One blue cloth over the door supplies a readable player-color accent. A couple of clay storage jars and a neat short timber pile belong closely against the wall. Thoughtful fine detail, original silhouette and arrangement, historically plausible everyday dwelling, no modern chimney.
+Camera: Orthographic isometric RTS asset camera. Ground axes at plus/minus 26.565 degrees to horizontal (the 2:1 isometric diamond), vertical walls straight vertical, no perspective convergence; camera elevation about 30 degrees. Show roof, front and side faces, light from upper-left. Whole house comfortably inside image with transparent margins on all sides. The house occupies a compact 3-by-3 ground-cell footprint.
+Style: Colored pen-and-wash illustration, clear readable roof tiles, masonry, wood joints, very fine brown pen lines and restrained shadow hatching. Warm off-white limestone, terracotta, brown wood, blue faction cloth. Material detail stays crisp and organized; no yellow tint.
+Output: One house only, preferably a square canvas, genuinely transparent RGBA background. Ground beneath and around it must be transparent: no lawn, scenic background, rectangular paper sheet, sky, checkerboard artwork, terrain patch or large foundation island. A subtle semitransparent contact shadow tight to the house is allowed. No people, trees, other buildings, UI, text, captions, grid lines, border, watermark, photo realism or thick cartoon outlines. No recognizable proprietary game asset design.
+
+Промпт дерева:
+
+Use case: stylized-concept.
+Asset type: ONE isolated deciduous tree sprite for an original ancient Mediterranean isometric strategy game.
+Input image 1 is STYLE reference only: delicate warm-brown pen contours, controlled sparse hatching, colored wash and tiny parchment tooth, the user's selected third variant.
+Subject: One mature but modest oak tree, a natural broad slightly asymmetric leafy canopy, a visible gnarled branching trunk and a few roots at its base. Dense foliage drawn in organized clusters with fine leaf detail that remains readable at small sprite size. Olive green and sage leaves with deeper green shadows, warm brown bark. Tree should fit the scale of a one-storey ancient house, roughly 1.5 times the house height. No fruit and no forest of separate trees.
+Camera: Orthographic strategy-game isometric view, ground axes at plus/minus 26.565 degrees (2:1 isometric projection), about 30-degree camera elevation, vertical trunk straight vertically on the image. Light from upper-left; full tree and root base visible, transparent margins.
+Style: Full-color pen-and-wash game artwork, delicate brown selective contours, restrained parallel hatching on bark and darker foliage, no thick comic outline, no painterly blur. Match the reference's natural hues rather than sepia.
+Output: ONE tree on genuinely transparent RGBA background, no scenery, no lawn circle, no soil patch, no paper rectangle, no sky, no checkerboard illustration, no other objects, no humans, no text, labels, border or watermark. Only a tight subtle semitransparent contact shadow may accompany the roots. Do not copy any existing game's tree sprite.
+
+Промпт рабочего:
+
+Use case: stylized-concept.
+Asset type: ONE four-frame walking animation sprite sheet for an original ancient Mediterranean isometric strategy game.
+Input image 1 is STYLE reference only. Match the chosen third variant's colored pen-and-wash finish, selective fine brown ink lines, natural colors, restrained hatching.
+Subject: The same single adult male village worker repeated in four successive phases of ONE walking cycle. Short brown hair, plain pale linen knee-length tunic, blue waist sash with a short blue cloth panel, leather belt and sandals, a small wooden-handled iron axe resting consistently over his right shoulder. Historically plausible modest clothes. Human proportions, not a hero portrait and not chibi.
+Camera: identical orthographic isometric 3/4 view in all frames, about 30 degrees above the ground, worker walking toward lower-right of the screen. We see the same front and left side throughout, absolutely no changing direction or rotating the body.
+Sheet layout: EXACTLY FOUR full-body sprites in a strict 2-column by 2-row equal-cell grid on a square canvas, preferably 2048x2048. NO drawn grid. Reading order top-left, top-right, bottom-left, bottom-right. Generous transparent gutters between sprites. Every figure has the same head size, height, center within its cell, and foot-contact baseline within its cell. Keep the entire figure and axe inside each cell. Pose 1: left leg forward, right leg back. Pose 2: passing pose, feet closer together, right leg swinging forward. Pose 3: right leg forward, left leg back. Pose 4: passing pose, feet closer together, left leg swinging forward. Subtle alternating arm movement, stable shoulder axe, very small vertical bob. Clothes, face, equipment, colors and body proportions must remain identical. This is a sprite animation sheet, not a group of four different people.
+Fine clear materials and readable silhouette. Upper-left lighting identical across the four frames. Delicate warm-brown pen lines, sparse cloth-fold hatching, natural pale linen and clear blue sash. No black comic outlines and no sepia wash.
+Output: genuinely transparent RGBA background across the whole canvas and all gutters. No ground, shadows, scenery, frame boxes, checkerboard illustration, UI, text, labels, numbers, captions, watermark, extra fifth figure, separate props or cropped feet.
+
+Промпт очистки листа:
+
+Use case: precise-object-edit.
+Input image 1 is the four-frame worker walking sprite-sheet edit target.
+Remove the accidental pale white/gray brush-cloud shape behind the axe in the TOP-LEFT sprite, and any similar detached background artifacts elsewhere. That area must become genuine transparency. Keep the axe itself, its fine blade edge, wooden shaft, shoulder hand and all character details intact.
+Preserve the exact 2-by-2 four-frame sheet layout, canvas dimensions, every character position, pose, clothing, identity, blue sash, proportions, feet, rendering, colors and transparent background. Do not move sprites or add any new objects. This is only a cleanup of stray background pixels; no restyling, no text, no checkerboard artwork, no borders. Output genuinely transparent RGBA.

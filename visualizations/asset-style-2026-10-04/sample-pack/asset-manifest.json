@@ -1,0 +1,123 @@
+{
+  "animation": {
+    "direction": "screen lower-right",
+    "fps": 6,
+    "frames": 4,
+    "pivots": [
+      [
+        0.373776286840439,
+        1.0
+      ],
+      [
+        0.384994029998779,
+        1.0
+      ],
+      [
+        0.434970885515213,
+        1.0
+      ],
+      [
+        0.422645390033722,
+        1.0
+      ]
+    ],
+    "regions": [
+      [
+        239.0,
+        79.0,
+        279.0,
+        471.0
+      ],
+      [
+        818.0,
+        79.0,
+        275.0,
+        477.0
+      ],
+      [
+        243.0,
+        702.0,
+        275.0,
+        473.0
+      ],
+      [
+        816.0,
+        702.0,
+        277.0,
+        459.0
+      ]
+    ],
+    "status": "draft, one direction"
+  },
+  "assets": {
+    "grass": {
+      "alpha_type": 0,
+      "corner_alpha": 1.0,
+      "file": "grass.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "used_rect": [
+        0.0,
+        0.0,
+        1254.0,
+        1254.0
+      ]
+    },
+    "house": {
+      "alpha_type": 2,
+      "corner_alpha": 0.0,
+      "file": "house.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "used_rect": [
+        91.0,
+        197.0,
+        1071.0,
+        885.0
+      ]
+    },
+    "oak": {
+      "alpha_type": 2,
+      "corner_alpha": 0.0,
+      "file": "oak.png",
+      "size": [
+        1370,
+        1148
+      ],
+      "used_rect": [
+        29.0,
+        39.0,
+        1317.0,
+        1045.0
+      ]
+    },
+    "worker": {
+      "alpha_type": 2,
+      "corner_alpha": 0.0,
+      "file": "worker-walk-sheet.png",
+      "size": [
+        1254,
+        1254
+      ],
+      "used_rect": [
+        239.0,
+        79.0,
+        853.0,
+        1097.0
+      ]
+    }
+  },
+  "projection": {
+    "cell": [
+      64,
+      32
+    ],
+    "zoom": 2
+  },
+  "purpose": "standalone sample only",
+  "renderer": "Godot 4.7.2"
+}

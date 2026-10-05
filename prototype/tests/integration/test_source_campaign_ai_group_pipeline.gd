@@ -45,7 +45,7 @@ func _initialize() -> void:
 		},
 	})
 	var controller = GameController.new(world)
-	var snapshot := SimulationSnapshot.presentation(world, 0, 2, ai.presentation_options())
+	var snapshot := SimulationSnapshot.with_queries(world, 0, 2, ai.presentation_options())
 	var commands: Array = ai.collect_commands(snapshot, 1)
 	assert_equal(commands.size(), 1, "source AI creates one initial attack-group command")
 	assert_equal(commands[0].command_type(), "attack", "initial group enters the public attack pipeline")
@@ -55,7 +55,7 @@ func _initialize() -> void:
 
 	first["hp"] = 15.0
 	world.sync_all_components()
-	snapshot = SimulationSnapshot.presentation(world, controller.tick_index, 2, ai.presentation_options())
+	snapshot = SimulationSnapshot.with_queries(world, controller.tick_index, 2, ai.presentation_options())
 	commands = ai.collect_commands(snapshot, controller.tick_index + 1)
 	assert_equal(commands.size(), 1, "group health loss emits one retreat without a conflicting replacement attack")
 	assert_equal(commands[0].command_type(), "formation_move", "retreat uses the authoritative formation movement command")

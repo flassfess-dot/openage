@@ -338,6 +338,5 @@ func perform_martyrdom(converter: Dictionary) -> String:
 		"new_team": new_team,
 	})
 	converter["hp"] = 0.0
-	converter.get("components", {}).get("health", {})["current"] = 0.0
 	world.begin_death(converter)
 	return ""

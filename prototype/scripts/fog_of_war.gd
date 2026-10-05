@@ -1,5 +1,7 @@
 class_name RoRFogOfWar
 
+const ChangeJournal := preload("res://scripts/cell_change_journal.gd")
+
 const UNKNOWN := 0
 const EXPLORED := 1
 const VISIBLE := 2
@@ -9,6 +11,9 @@ var states_by_player: Dictionary = {}
 var personally_explored_by_player: Dictionary = {}
 var visible_counts_by_player: Dictionary = {}
 var revisions_by_player: Dictionary = {}
+var visibility_change_history: Dictionary = {}
+var exploration_change_history: Dictionary = {}
+var cache_epoch := 0
 var exploration_revisions_by_player: Dictionary = {}
 var newly_explored_cells_by_player: Dictionary = {}
 var newly_visible_cells_by_player: Dictionary = {}
@@ -40,6 +45,9 @@ func _init(world_size: Vector2i = Vector2i.ONE) -> void:
 
 
 func reset() -> void:
+	cache_epoch += 1
+	visibility_change_history.clear()
+	exploration_change_history.clear()
 	states_by_player.clear()
 	personally_explored_by_player.clear()
 	visible_counts_by_player.clear()
@@ -151,11 +159,14 @@ func merge_exploration(observer_player: int, source_player: int) -> void:
 	var newly_explored: Array = newly_explored_cells_by_player[observer_player]
 	var presentation_dirty: Variant = presentation_dirty_cells_by_player[observer_player] if presentation_dirty_tracked_players.has(observer_player) else null
 	var navigation_newly: Variant = navigation_newly_explored_by_player.get(observer_player)
+	var changes := _visibility_context(observer_player)
 	var changed := false
 	for index_value in source:
 		var index := int(index_value)
 		if observer[index] == UNKNOWN:
+			_record_exploration_index(changes, index)
 			observer[index] = EXPLORED
+			_record_visibility_index(changes, index)
 			if presentation_dirty is Dictionary:
 				presentation_dirty[index] = true
 			newly_explored.append(index)
@@ -179,7 +190,10 @@ func reveal_explored_cell(player_id: int, cell: Vector2i) -> void:
 	var states: PackedByteArray = states_by_player[player_id]
 	if states[index] != UNKNOWN:
 		return
+	var changes := _visibility_context(player_id)
+	_record_exploration_index(changes, index)
 	states[index] = EXPLORED
+	_record_visibility_index(changes, index)
 	if presentation_dirty_tracked_players.has(player_id):
 		presentation_dirty_cells_by_player[player_id][index] = true
 	states_by_player[player_id] = states
@@ -543,16 +557,18 @@ func _rebuild_visibility(current_sources: Dictionary) -> Dictionary:
 		var newly_visible: Dictionary = newly_visible_cells_by_player[observer]
 		var presentation_dirty: Variant = presentation_dirty_cells_by_player[observer] if presentation_dirty_tracked_players.has(observer) else null
 		var navigation_newly: Variant = navigation_newly_explored_by_player.get(observer)
+		var changes := _visibility_context(observer)
 		for index in range(states.size()):
 			if states[index] == VISIBLE:
 				states[index] = EXPLORED
+				_record_visibility_index(changes, index)
 				if presentation_dirty is Dictionary:
 					presentation_dirty[index] = true
 				observer_changed = true
 		var allies: Dictionary = shared_vision_by_player.get(observer, {})
 		for source in current_sources.values():
 			if bool(allies.get(int(source["team"]), false)):
-				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer))
+				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer), changes)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		states_by_player[observer] = states
@@ -585,12 +601,13 @@ func _apply_source_deltas(
 		var newly_visible: Dictionary = newly_visible_cells_by_player[observer]
 		var presentation_dirty: Variant = presentation_dirty_cells_by_player[observer] if presentation_dirty_tracked_players.has(observer) else null
 		var navigation_newly: Variant = navigation_newly_explored_by_player.get(observer)
+		var changes := _visibility_context(observer)
 		for source in removed_sources:
 			if bool(allies.get(int(source["team"]), false)):
-				observer_changed = _apply_remove_visible_cells(states, counts, source["cells"], presentation_dirty) or observer_changed
+				observer_changed = _apply_remove_visible_cells(states, counts, source["cells"], presentation_dirty, changes) or observer_changed
 		for source in added_sources:
 			if bool(allies.get(int(source["team"]), false)):
-				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer))
+				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer), changes)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		for replacement_index in range(previous_replacements.size()):
@@ -600,14 +617,14 @@ func _apply_source_deltas(
 			var current_team := int(current["team"])
 			if previous_team == current_team:
 				if bool(allies.get(current_team, false)):
-					var flags := _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer))
+					var flags := _apply_replace_visible_cells(states, counts, previous["cells"], current["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer), changes)
 					observer_changed = (flags & 1) != 0 or observer_changed
 					exploration_changed = (flags & 2) != 0 or exploration_changed
 				continue
 			if bool(allies.get(previous_team, false)):
-				observer_changed = _apply_remove_visible_cells(states, counts, previous["cells"], presentation_dirty) or observer_changed
+				observer_changed = _apply_remove_visible_cells(states, counts, previous["cells"], presentation_dirty, changes) or observer_changed
 			if bool(allies.get(current_team, false)):
-				var flags := _apply_add_visible_cells(states, counts, current["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer))
+				var flags := _apply_add_visible_cells(states, counts, current["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer), changes)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
 		states_by_player[observer] = states
@@ -633,14 +650,15 @@ func _add_visible_cells(observer: int, cells: PackedInt32Array) -> bool:
 	var counts: PackedInt32Array = visible_counts_by_player[observer]
 	var newly_explored: Array = newly_explored_cells_by_player[observer]
 	var presentation_dirty: Variant = presentation_dirty_cells_by_player[observer] if presentation_dirty_tracked_players.has(observer) else null
-	var flags := _apply_add_visible_cells(states, counts, cells, newly_explored, navigation_newly_explored_by_player.get(observer), newly_visible_cells_by_player[observer], presentation_dirty, path_dirty_by_player.get(observer))
+	var changes := _visibility_context(observer)
+	var flags := _apply_add_visible_cells(states, counts, cells, newly_explored, navigation_newly_explored_by_player.get(observer), newly_visible_cells_by_player[observer], presentation_dirty, path_dirty_by_player.get(observer), changes)
 	states_by_player[observer] = states
 	visible_counts_by_player[observer] = counts
 	if (flags & 2) != 0:
 		exploration_revisions_by_player[observer] = int(exploration_revisions_by_player.get(observer, 0)) + 1
 	return (flags & 1) != 0
 
-func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null, newly_visible: Variant = null, presentation_dirty: Variant = null, path_dirty: Variant = null) -> int:
+func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null, newly_visible: Variant = null, presentation_dirty: Variant = null, path_dirty: Variant = null, changes: Dictionary = {}) -> int:
 	var flags := 0
 	for index in cells:
 		if counts[index] == 0 and states[index] != VISIBLE:
@@ -649,12 +667,14 @@ func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array,
 			if path_dirty is Dictionary:
 				path_dirty[index] = true
 			if states[index] == UNKNOWN:
+				_record_exploration_index(changes, index)
 				flags |= 2
 				if newly_explored is Array:
 					newly_explored.append(index)
 				if navigation_newly is Array:
 					navigation_newly.append(index)
 			states[index] = VISIBLE
+			_record_visibility_index(changes, index)
 			if presentation_dirty is Dictionary:
 				presentation_dirty[index] = true
 			flags |= 1
@@ -662,19 +682,20 @@ func _apply_add_visible_cells(states: PackedByteArray, counts: PackedInt32Array,
 	return flags
 
 
-func _apply_remove_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array, presentation_dirty: Variant = null) -> bool:
+func _apply_remove_visible_cells(states: PackedByteArray, counts: PackedInt32Array, cells: PackedInt32Array, presentation_dirty: Variant = null, changes: Dictionary = {}) -> bool:
 	var changed := false
 	for index in cells:
 		counts[index] = maxi(0, counts[index] - 1)
 		if counts[index] == 0 and states[index] == VISIBLE:
 			states[index] = EXPLORED
+			_record_visibility_index(changes, index)
 			if presentation_dirty is Dictionary:
 				presentation_dirty[index] = true
 			changed = true
 	return changed
 
 
-func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Array, previous_cells: PackedInt32Array, current_cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null, newly_visible: Variant = null, presentation_dirty: Variant = null, path_dirty: Variant = null) -> int:
+func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Array, previous_cells: PackedInt32Array, current_cells: PackedInt32Array, newly_explored: Variant = null, navigation_newly: Variant = null, newly_visible: Variant = null, presentation_dirty: Variant = null, path_dirty: Variant = null, changes: Dictionary = {}) -> int:
 	var previous_index := 0
 	var current_index := 0
 	var flags := 0
@@ -688,6 +709,7 @@ func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Ar
 			counts[previous_cell] = maxi(0, counts[previous_cell] - 1)
 			if counts[previous_cell] == 0 and states[previous_cell] == VISIBLE:
 				states[previous_cell] = EXPLORED
+				_record_visibility_index(changes, previous_cell)
 				if presentation_dirty is Dictionary:
 					presentation_dirty[previous_cell] = true
 				flags |= 1
@@ -699,12 +721,14 @@ func _apply_replace_visible_cells(states: PackedByteArray, counts: PackedInt32Ar
 				if path_dirty is Dictionary:
 					path_dirty[current_cell] = true
 				if states[current_cell] == UNKNOWN:
+					_record_exploration_index(changes, current_cell)
 					flags |= 2
 					if newly_explored is Array:
 						newly_explored.append(current_cell)
 					if navigation_newly is Array:
 						navigation_newly.append(current_cell)
 				states[current_cell] = VISIBLE
+				_record_visibility_index(changes, current_cell)
 				if presentation_dirty is Dictionary:
 					presentation_dirty[current_cell] = true
 				flags |= 1
@@ -728,3 +752,31 @@ func consume_path_knowledge(player_id: int) -> Array:
 	var result: Array = dirty.keys()
 	dirty.clear()
 	return result
+
+
+func _visibility_context(observer: int) -> Dictionary:
+	if not visibility_change_history.has(observer):
+		visibility_change_history[observer] = []
+	if not exploration_change_history.has(observer):
+		exploration_change_history[observer] = []
+	return {"history": visibility_change_history[observer], "revision": int(revisions_by_player.get(observer, 0)), "exploration_history": exploration_change_history[observer], "exploration_revision": int(exploration_revisions_by_player.get(observer, 0))}
+
+
+func _record_visibility_index(changes: Dictionary, index: int) -> void:
+	if not changes.is_empty():
+		ChangeJournal.record_cell(changes["history"], int(changes["revision"]), Vector2i(index % map_size.x, index / map_size.x))
+
+
+func visibility_changes_since(observer: int, previous: int) -> Dictionary:
+	ensure_player(observer)
+	return ChangeJournal.delta(visibility_change_history.get(observer, []), previous, revision_for_player(observer))
+
+
+func _record_exploration_index(changes: Dictionary, index: int) -> void:
+	if changes.is_empty():
+		return
+	ChangeJournal.record_cell(changes["exploration_history"], int(changes["exploration_revision"]), Vector2i(index % map_size.x, index / map_size.x))
+
+
+func exploration_changes_since(observer: int, previous_revision: int) -> Dictionary:
+	return ChangeJournal.delta(exploration_change_history.get(observer, []), previous_revision, exploration_revision_for_player(observer))

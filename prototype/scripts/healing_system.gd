@@ -201,7 +201,6 @@ func advance_healing(healer: Dictionary, target: Dictionary, delta: float) -> St
 	target["hp"] = minf(maximum, previous + rate_for(healer) * maxf(0.0, delta))
 	var restored := maxf(0.0, float(target["hp"]) - previous)
 	healing["restored_amount"] = float(healing.get("restored_amount", 0.0)) + restored
-	target.get("components", {}).get("health", {})["current"] = target["hp"]
 	return "complete" if float(target["hp"]) + 0.0001 >= maximum else "pending"
 
 

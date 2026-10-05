@@ -27,7 +27,7 @@ func _initialize() -> void:
 	for entity in [animal, enemy, enemy_building]:
 		var entity_id := int(entity["id"])
 		for compact in [false, true]:
-			var snapshot := Snapshot.presentation(world, 1, 1, {"compact_render_entities": compact, "always_include_entity_ids": [entity_id]})
+			var snapshot := Snapshot.with_queries(world, 1, 1, {"compact_render_entities": compact, "always_include_entity_ids": [entity_id]})
 			var hud: Dictionary = model.build(snapshot, [entity_id] as Array[int], "RECTANGLE")
 			check(hud["selection"]["count"] == 1, "visible foreign object is inspectable")
 			check(hud["selection"]["leader"].get("hp") == roundi(entity["hp"]), "inspection shows real observed HP")
@@ -36,7 +36,7 @@ func _initialize() -> void:
 			for building in snapshot["buildings"]:
 				if building["id"] == 901: check(not building.has("production_queue") and not building.has("command_options"), "snapshot does not disclose enemy production")
 	var own: Dictionary = world.add_unit(1, "villager", Vector2(10, 12), false)
-	var own_model: Dictionary = model.build(Snapshot.presentation(world, 2, 1), [int(own["id"])] as Array[int], "RECTANGLE")
+	var own_model: Dictionary = model.build(Snapshot.with_queries(world, 2, 1), [int(own["id"])] as Array[int], "RECTANGLE")
 	check(not own_model["read_only"] and not own_model["commands"].is_empty(), "own worker retains command UI")
 	# Main scene selection uses the same real click/picking path as the game.
 	var viewport := SubViewport.new()

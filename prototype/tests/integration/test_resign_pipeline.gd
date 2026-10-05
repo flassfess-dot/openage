@@ -27,7 +27,7 @@ func _initialize() -> void:
 	assert_equal(world.player_registry.status(2), "victorious", "remaining player wins conquest")
 	assert_equal(world.get_victory_result().get("winner_team"), 2, "victory system resolves remaining active player")
 	assert_equal(world.get_victory_result().get("reason"), "conquest", "resign reaches the common conquest outcome")
-	var presentation: Dictionary = SimulationSnapshot.presentation(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
+	var presentation: Dictionary = SimulationSnapshot.with_queries(world, controller.tick_index, 1, {"include_navigation": false, "include_build_sites": false})
 	assert_equal(presentation.get("player_state", {}).get("status"), "resigned", "local observer retains the resigned spectator status")
 	assert_equal(presentation.get("match_result", {}).get("winner_team"), 2, "read-only presentation receives the same authoritative result")
 	assert_true(controller.events_after().any(func(event): return String(event.get("type", "")) == "player_resigned" and int(event.get("payload", {}).get("team", 0)) == 1), "resign emits typed domain event")

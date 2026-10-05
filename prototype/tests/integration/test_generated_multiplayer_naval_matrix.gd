@@ -98,7 +98,7 @@ func verify_case(case_value: Dictionary, catalog) -> void:
 		if String(player.get("controller", "ai")) != "ai":
 			continue
 		var ai = AiPlayer.new(player)
-		var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, int(ai.team), ai.presentation_options())
+		var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, int(ai.team), ai.presentation_options())
 		var commands: Array = ai.collect_commands(knowledge, 1)
 		issued_by_team[int(ai.team)] = commands.size()
 		for command in commands:

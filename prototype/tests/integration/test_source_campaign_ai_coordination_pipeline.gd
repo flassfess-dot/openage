@@ -49,7 +49,7 @@ func _initialize() -> void:
 		},
 	})
 	var controller = GameController.new(world)
-	var snapshot := SimulationSnapshot.presentation(world, 0, 2, ai.presentation_options())
+	var snapshot := SimulationSnapshot.with_queries(world, 0, 2, ai.presentation_options())
 	var commands: Array = ai.collect_commands(snapshot, 1)
 	assert_equal(commands.size(), 2, "two spread groups receive two independent rally commands")
 	assert_equal(commands[0].command_type(), "move", "first group enters the authoritative move pipeline")
@@ -68,7 +68,7 @@ func _initialize() -> void:
 	world.sync_all_components()
 	world.update_fog_of_war()
 
-	snapshot = SimulationSnapshot.presentation(world, controller.tick_index, 2, ai.presentation_options())
+	snapshot = SimulationSnapshot.with_queries(world, controller.tick_index, 2, ai.presentation_options())
 	commands = ai.collect_commands(snapshot, controller.tick_index + 1)
 	assert_equal(commands.size(), 1, "coordination mode 1 releases one gathered group")
 	var group_ids: Array = ai.source_attack_groups.keys()
@@ -86,7 +86,7 @@ func _initialize() -> void:
 	controller.advance_frame(0.05, 1, 2)
 	first_group.transition(AttackGroup.COMPLETE, "integration_first_group_complete", controller.tick_index)
 
-	snapshot = SimulationSnapshot.presentation(world, controller.tick_index, 2, ai.presentation_options())
+	snapshot = SimulationSnapshot.with_queries(world, controller.tick_index, 2, ai.presentation_options())
 	commands = ai.collect_commands(snapshot, controller.tick_index + 1)
 	assert_equal(commands.size(), 1, "queued group is released after the active group completes")
 	if commands.is_empty():

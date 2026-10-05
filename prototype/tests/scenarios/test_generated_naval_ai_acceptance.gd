@@ -52,7 +52,7 @@ func _initialize() -> void:
 		var next_tick := int(controller.tick_index) + 1
 		var submitted: Array = []
 		if ai.needs_decision(next_tick):
-			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, AI_TEAM, ai.presentation_options())
+			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, AI_TEAM, ai.presentation_options())
 			fish_discovered = fish_discovered or knowledge.get("resources", []).any(func(resource): return String(resource.get("kind", "")) == "deep_fish" and int(resource.get("amount", 0)) > 0)
 			for command in ai.collect_commands(knowledge, next_tick):
 				var command_type := String(command.command_type())
@@ -90,7 +90,7 @@ func _initialize() -> void:
 	if failures.is_empty():
 		print("E5-006C naval exploration reached at tick %d: dock=%d scouts=%d fish_discovered=%s water_orders=%d" % [controller.tick_index, completed_docks.size(), scout_ships.size(), fish_discovered, accepted_water_orders])
 	else:
-		var final_knowledge := SimulationSnapshot.presentation(world, controller.tick_index, AI_TEAM, ai.presentation_options())
+		var final_knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, AI_TEAM, ai.presentation_options())
 		var visible_enemy_count: int = final_knowledge.get("units", []).filter(func(unit): return int(unit.get("team", 0)) > 0 and int(unit.get("team", 0)) != AI_TEAM).size()
 		visible_enemy_count += final_knowledge.get("buildings", []).filter(func(building): return int(building.get("team", 0)) > 0 and int(building.get("team", 0)) != AI_TEAM).size()
 		var water_navigation: Dictionary = final_knowledge.get("navigation", {})

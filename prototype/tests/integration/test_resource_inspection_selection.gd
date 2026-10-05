@@ -1,5 +1,7 @@
 extends SceneTree
 
+const MatchReady := preload("res://tests/support/match_ready.gd")
+
 const MATCH_PATH := "res://tests/fixtures/e3_save_state_matrix_match.json"
 
 
@@ -13,6 +15,10 @@ func _initialize() -> void:
 	viewport.add_child(game)
 	await process_frame
 	await process_frame
+	if not await MatchReady.wait_for_ready(self, game):
+		viewport.free()
+		quit(1)
+		return
 	game.set_process(false)
 	var resource: Dictionary = game.simulation_world.add_resource("tree", Vector2(21.5, 10.5), 75)
 	game.center_view_on_world(Vector2(resource["pos"]))
@@ -88,6 +94,9 @@ func verify_mineral_pointer_flow(kind: String) -> bool:
 	viewport.add_child(game)
 	await process_frame
 	await process_frame
+	if not await MatchReady.wait_for_ready(self, game):
+		viewport.free()
+		return false
 	game.set_process(false)
 	var resource: Dictionary = game.simulation_world.add_resource(kind, Vector2(21.5, 10.5), 75)
 	game.center_view_on_world(Vector2(resource["pos"]))

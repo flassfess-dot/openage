@@ -1170,16 +1170,22 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	accumulator_seconds += minf(frame_delta, 0.25) * get_speed_multiplier()
 	var steps := 0
 	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
-		_run_fixed_tick(player_team, enemy_team)
+		if not _run_fixed_tick(player_team, enemy_team):
+			break
 		accumulator_seconds -= FIXED_STEP_SECONDS
 		steps += 1
 	return simulation_world.get_last_battle_message()
 
 func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 	var fixed_tick_started := Time.get_ticks_usec() if performance_probe != null else 0
-	var expensive_planning_tick := false
 	if replay_source == null and before_fixed_tick.is_valid():
-		expensive_planning_tick = bool(before_fixed_tick.call(tick_index + 1))
+		var preparation: Variant = before_fixed_tick.call(tick_index + 1)
+		# Legacy boolean callbacks are informational. An explicit readiness
+		# envelope may yield before tick/state/command queues are consumed.
+		if preparation is Dictionary and not bool(preparation.get("ready", false)):
+			if performance_probe != null:
+				performance_probe.increment("controller.preparation_yields")
+			return false
 	_inject_replay_commands_for_current_tick()
 	tick_index += 1
 	simulation_world.begin_event_capture()
@@ -1236,7 +1242,7 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 		performance_probe.observe_microseconds("controller.formation_reconcile", formation_microseconds)
 		performance_probe.observe_microseconds("controller.events_replay", Time.get_ticks_usec() - event_started)
 		performance_probe.observe_microseconds("controller.fixed_tick", Time.get_ticks_usec() - fixed_tick_started)
-	return expensive_planning_tick
+	return true
 
 
 func _inject_replay_commands_for_current_tick() -> void:

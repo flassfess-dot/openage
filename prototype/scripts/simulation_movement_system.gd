@@ -269,8 +269,23 @@ func assign_command_move(selected: Array, target: Vector2) -> bool:
 		unit["reserved_destination"] = reserved
 		reserved_by_id[int(unit["id"])] = reserved
 	var prevalidated_direct := _group_move_envelope_is_open(selected, reserved_by_id)
+	var prepared: Array = []
+	if not prevalidated_direct and selected.size() >= 4 and world.task_coordinator.is_enabled("navigation_paths"):
+		var planner = knowledge.planner(world, int(selected[0].get("team", 0)))
+		var same_planner := true
+		var requests: Array = []
+		for unit in selected:
+			if knowledge.planner(world, int(unit.get("team", 0))) != planner:
+				same_planner = false
+				break
+			requests.append({"entity_id": int(unit["id"]), "start": unit["pos"], "goal": Vector2(reserved_by_id[int(unit["id"])]), "domain": String(unit.get("movement_domain", "land")), "restriction": int(unit.get("terrain_restriction", -1)), "clearance": float(unit.get("footprint_radius", 0.3)), "purpose": "replan" if not unit.get("path", []).is_empty() else String(unit.get("task", "move"))})
+		if same_planner:
+			prepared = world.navigation_service.request_paths(requests, planner, world.task_coordinator)
+	var selected_index := 0
 	for unit in selected:
-		if not assign_unit_destination(unit, Vector2(reserved_by_id[int(unit["id"])]), false, prevalidated_direct):
+		var prepared_result: Dictionary = prepared[selected_index] if not prepared.is_empty() else {}
+		selected_index += 1
+		if not assign_unit_destination(unit, Vector2(reserved_by_id[int(unit["id"])]), false, prevalidated_direct, prepared_result):
 			OrderPipeline.complete(unit, "no_path")
 		else:
 			resolved_count += 1
@@ -339,7 +354,7 @@ func assign_command_attack_move(selected: Array, target: Vector2) -> bool:
 	return resolved_count > 0
 
 
-func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_destination: bool = true, prevalidated_direct: bool = false) -> bool:
+func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_destination: bool = true, prevalidated_direct: bool = false, prepared_result: Dictionary = {}) -> bool:
 	world.open_movement_envelopes_by_id.erase(int(unit["id"]))
 	if not OrderPipeline.is_active(unit):
 		OrderPipeline.begin(unit, String(unit.get("task", "move")), int(unit.get("target_id", -1)), destination, String(unit.get("task", "")) in ["attack", "gather"])
@@ -352,7 +367,9 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 	unit["destination"] = clamped_destination
 	var path_purpose := "replan" if not unit.get("path", []).is_empty() else String(unit.get("task", "move"))
 	var path_result: Dictionary
-	if prevalidated_direct:
+	if not prepared_result.is_empty():
+		path_result = prepared_result
+	elif prevalidated_direct:
 		path_result = world.navigation_service.register_prevalidated_direct_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)))
 	else:
 		path_result = world.navigation_service.request_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)), planner)

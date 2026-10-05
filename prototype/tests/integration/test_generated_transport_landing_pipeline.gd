@@ -83,7 +83,7 @@ func _initialize() -> void:
 		var next_tick := int(controller.tick_index) + 1
 		var submitted: Array = []
 		if ai.needs_decision(next_tick):
-			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, AI_TEAM, ai.presentation_options())
+			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, AI_TEAM, ai.presentation_options())
 			for command in ai.collect_commands(knowledge, next_tick):
 				controller.enqueue_command(command, true, AI_TEAM)
 				submitted.append(command)

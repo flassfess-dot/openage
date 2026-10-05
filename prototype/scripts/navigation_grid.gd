@@ -1,7 +1,9 @@
 class_name RoRNavigationGrid
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
+const ChangeJournal := preload("res://scripts/cell_change_journal.gd")
 
+var cache_epoch := 0
 var size: Vector2i
 var terrain_cells: Dictionary = {}
 var terrain_ids: Dictionary = {}
@@ -20,69 +22,21 @@ var _change_log: Array = []
 
 
 func _record_change(cell: Vector2i) -> void:
-	# Invariant: the open entry stores the pre-bump revision and the single bump
-	# its batch performs, so consecutive entries chain entry.from == prev.to.
-	var region := Rect2(Vector2(cell), Vector2.ONE)
-	if not _change_log.is_empty():
-		var entry: Dictionary = _change_log[_change_log.size() - 1]
-		if int(entry["from"]) == revision:
-			entry["region"] = entry["region"].merge(region) if bool(entry["has_region"]) else region
-			entry["has_region"] = true
-			if bool(entry.get("cells_complete", false)):
-				var cells: Array = entry["cells"]
-				if cells.size() < 512:
-					cells.append(cell)
-				else:
-					cells.clear()
-					entry["cells_complete"] = false
-			return
-	_change_log.append({"from": revision, "to": revision + 1, "region": region, "has_region": true, "cells": [cell], "cells_complete": true})
-	if _change_log.size() > 96:
-		_change_log = _change_log.slice(_change_log.size() - 48)
+	ChangeJournal.record_cell(_change_log, revision, cell, 96, 48)
+
+
+func _record_full_change() -> void:
+	ChangeJournal.record_full(_change_log, revision, revision + 1, 96)
 
 
 func change_region_since(old_revision: int) -> Variant:
-	# Rect2 covering every recorded change after old_revision, an empty Rect2
-	# when nothing changed, or null when history no longer bounds the region.
-	if old_revision == revision:
-		return Rect2()
-	if old_revision > revision:
-		return null
-	var covered_to := revision
-	var region := Rect2()
-	var have_region := false
-	for index in range(_change_log.size() - 1, -1, -1):
-		var entry: Dictionary = _change_log[index]
-		if int(entry["to"]) != covered_to:
-			return null
-		if bool(entry["has_region"]):
-			region = entry["region"].merge(region) if have_region else entry["region"]
-			have_region = true
-		covered_to = int(entry["from"])
-		if covered_to <= old_revision:
-			return region
-	return null
+	var change := ChangeJournal.delta(_change_log, old_revision, revision)
+	return null if bool(change["full"]) else change["region"]
 
 
 func changed_cells_since(old_revision: int) -> Variant:
-	# Exact local delta for AI knowledge. An expired journal or a large bulk edit
-	# returns null so callers safely rebuild once instead of trusting a gap.
-	if old_revision == revision:
-		return []
-	if old_revision > revision:
-		return null
-	var covered_to := revision
-	var changed: Dictionary = {}
-	for index in range(_change_log.size() - 1, -1, -1):
-		var entry: Dictionary = _change_log[index]
-		if int(entry["to"]) != covered_to or not bool(entry.get("cells_complete", false)):
-			return null
-		for cell in entry["cells"]:
-			changed[cell] = true
-		covered_to = int(entry["from"])
-		if covered_to <= old_revision:
-			return changed.keys()
-	return null
+	var change := ChangeJournal.delta(_change_log, old_revision, revision)
+	return change["cells"] if not bool(change["full"]) and bool(change["exact"]) else null
 
 
 func _init(grid_size: Vector2i = Vector2i.ONE) -> void:
@@ -101,6 +55,7 @@ func configure_terrain(provider: Callable = Callable()) -> void:
 			var terrain_kind := String(provider.call(cell)) if provider.is_valid() else TerrainRules.terrain_at(cell)
 			terrain_cells[cell] = terrain_kind
 			terrain_ids[cell] = TerrainRules.terrain_id_for_logical(terrain_kind)
+	_record_full_change()
 	revision += 1
 	surface_revision += 1
 
@@ -123,6 +78,7 @@ func configure_terrain_ids(provider: Callable = Callable()) -> void:
 func configure_restrictions(restrictions: Array) -> void:
 	terrain_restrictions = restrictions.duplicate(true)
 	surface_component_cache.clear()
+	_record_full_change()
 	revision += 1
 	surface_revision += 1
 
@@ -132,6 +88,7 @@ func set_terrain(cell: Vector2i, terrain_kind: String) -> void:
 		return
 	terrain_cells[cell] = terrain_kind
 	terrain_ids[cell] = TerrainRules.terrain_id_for_logical(terrain_kind)
+	_record_change(cell)
 	surface_component_cache.clear()
 	revision += 1
 	surface_revision += 1
@@ -168,6 +125,7 @@ func configure_elevation(provider: Callable = Callable()) -> void:
 			else:
 				elevation_cells[cell] = int(value)
 				slope_cells[cell] = false
+	_record_full_change()
 	revision += 1
 
 

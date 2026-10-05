@@ -48,7 +48,7 @@ func _initialize() -> void:
 	})
 	var options := ai.presentation_options()
 	assert_true(bool(options.get("include_navigation", false)), "naval attack requests the domain projection required to legalize source markers")
-	var snapshot := SimulationSnapshot.presentation(world, 0, 2, options)
+	var snapshot := SimulationSnapshot.with_queries(world, 0, 2, options)
 	var commands: Array = ai.collect_commands(snapshot, 1)
 	assert_equal(commands.size(), 1, "one source-sized boat group emits one command")
 	assert_equal(commands[0].command_type(), "attack_move", "boat group uses the shared authoritative attack-move path")

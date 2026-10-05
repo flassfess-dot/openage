@@ -35,7 +35,7 @@ func _initialize() -> void:
 			unit["carried_amount"] = 10
 			unit["carried_resource_type_id"] = 0
 		var ids: Array[int] = [int(unit["id"])]
-		var snapshot: Dictionary = Snapshot.presentation(world, 0, 1, {"always_include_entity_ids": ids, "command_option_entity_ids": ids})
+		var snapshot: Dictionary = Snapshot.with_queries(world, 0, 1, {"always_include_entity_ids": ids, "command_option_entity_ids": ids})
 		var model: Dictionary = view.build(snapshot, ids, "LINE", "ru")
 		hud.set_view_model(model)
 		await process_frame

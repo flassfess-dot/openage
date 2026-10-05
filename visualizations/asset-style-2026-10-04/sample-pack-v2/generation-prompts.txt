@@ -1,0 +1,22 @@
+Исправление масштаба и поверхности земли — 2026-10-04
+Новые grass.png и earth.png изготовлены встроенным image_gen. Дом, дуб и лист рабочего — из предыдущего отдельного набора.
+Сцена отрисована из отдельных PNG. Дом: ширина 240 вместо 360; рабочий: высота 84 вместо 62; дуб: базовая высота 248 вместо 292.
+Тропинки и дворы используют earth.png. Исходные игровые ресурсы не подключаются.
+Промпты исходных дома, дерева и рабочего: source-sprite-prompts.txt.
+
+Новая трава:
+
+Use case: stylized-concept.
+Asset type: ONE seamless square low-contrast grass ground texture for a 2D isometric real-time strategy game.
+Primary request: A genuinely calm, readable grass surface. The previous attempt was rejected because it was a busy yellow carpet of tiny drawn grass blades. This new surface must be substantially quieter and greener.
+View directly from above, flat diffuse illumination. Muted natural meadow green: sage, moss and olive-green mids, with only very gentle broad softly blended variations. At least 90 percent of the surface reads as smooth continuous short turf at normal game zoom. A few extremely subtle small tufts only, with no prominent individual leaves. Fine warm-brown pen influence is nearly imperceptible in the terrain itself; the style should come mostly from objects drawn over it.
+Material: softly painted color masses with restrained paper-tooth, but NO stippling, grain, dot patterns, crosshatching carpet, dry yellow straw or dense blades. Local luminance contrast is very low. Avoid bright beige holes and dark flecks. No pronounced repeating motif.
+Seamless wrap on all four edges, consistent average color and brightness at the borders. One square opaque texture, preferably 1024x1024, edge to edge. No trees, rocks, flowers, buildings, paths, characters, perspective, landscape scene, border, labels, checkerboard or watermark. No photographic detail, no sepia or overall yellow tint. It should be a quiet green background behind readable small sprites.
+
+Утоптанная земля:
+
+Use case: stylized-concept.
+Asset type: ONE seamless square quiet bare-earth ground texture for a 2D isometric strategy-game asset sample.
+Create a flat TOP-DOWN view of well-worn compacted earth used for footpaths and small yards in an ancient Mediterranean village. Soft desaturated light taupe, gray-brown and muted beige, not yellow sand. Broad very gentle color variations, extremely low contrast and only a trace of fine material texture. No visible grass blades, leaves, large pebbles, rocks, cracks, outlines, footprints, drawn path shape or pattern. Fine pen-and-wash character should be understated, with no crosshatching carpet, stippling or grain.
+This is a background surface beneath detailed sprites, so keep it very calm. The compositor will choose the shape of the paths; fill the whole image with uniform earth material.
+Square opaque texture, edge to edge, seamless wrap on all four sides, neutral diffuse lighting and no cast shadows. No objects, buildings, people, scenery, perspective, checkerboard, borders, captions or watermark. No photographic gritty detail.

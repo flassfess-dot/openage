@@ -22,6 +22,9 @@ constexpr int32_t DIRECTIONS[8][2] = {
 }
 
 void RoRPathKernel::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("create_search_context"), &RoRPathKernel::create_search_context);
+    ClassDB::bind_method(D_METHOD("connectivity_labels", "radius"), &RoRPathKernel::connectivity_labels, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("install_connectivity", "labels", "radius"), &RoRPathKernel::install_connectivity, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("configure", "width", "height", "revision", "walkable"), &RoRPathKernel::configure);
     ClassDB::bind_method(D_METHOD("update_walkable", "revision", "indices", "values"), &RoRPathKernel::update_walkable);
     ClassDB::bind_method(D_METHOD("find_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_cell_path, DEFVAL(0.0));
@@ -34,6 +37,43 @@ void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("is_configured"), &RoRPathKernel::is_configured);
     ClassDB::bind_method(D_METHOD("component_id", "cell", "clearance_radius"), &RoRPathKernel::component_id, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("cells_connected", "start", "goal", "clearance_radius"), &RoRPathKernel::cells_connected, DEFVAL(0.0));
+}
+
+Ref<RoRPathKernel> RoRPathKernel::create_search_context() const {
+    Ref<RoRPathKernel> context;
+    context.instantiate();
+    context->width_ = width_;
+    context->height_ = height_;
+    context->revision_ = revision_;
+    context->walkable_ = walkable_;
+    context->costs_.resize(walkable_->size());
+    context->parents_.resize(walkable_->size());
+    context->seen_generation_.assign(walkable_->size(), 0);
+    context->components_by_radius_ = components_by_radius_;
+    // Completed connectivity labels are immutable and shared by contexts.
+    return context;
+}
+
+PackedInt32Array RoRPathKernel::connectivity_labels(double radius) {
+    PackedInt32Array packed;
+    if (!is_configured()) return packed;
+    const auto &labels = components(radius);
+    packed.resize(static_cast<int64_t>(labels.size()));
+    std::copy(labels.begin(), labels.end(), packed.ptrw());
+    return packed;
+}
+
+bool RoRPathKernel::install_connectivity(const PackedInt32Array &labels, double radius) {
+    if (!is_configured() || static_cast<size_t>(labels.size()) != walkable_->size()) return false;
+    for (int64_t i = 0; i < labels.size(); ++i) {
+        if (labels[i] < -1 || labels[i] >= labels.size()) return false;
+    }
+    radius = radius < 0.5 ? 0.0 : radius;
+    uint64_t key = 0;
+    std::memcpy(&key, &radius, sizeof(key));
+    if (components_by_radius_.size() >= 16 && components_by_radius_.find(key) == components_by_radius_.end()) components_by_radius_.clear();
+    components_by_radius_[key] = std::make_shared<const std::vector<int32_t>>(labels.ptr(), labels.ptr() + labels.size());
+    return true;
 }
 
 void RoRPathKernel::configure_movement_snapshot(
@@ -77,7 +117,10 @@ void RoRPathKernel::configure_movement_snapshot(
     }
 }
 
-Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) {
+Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) const {
+    // One scratch vector per executing thread. Snapshot/mask configuration
+    // is prohibited until the owner has joined the entire movement batch.
+    thread_local std::vector<int32_t> movement_candidates_;
     const auto own_entry = movement_index_by_id_.find(unit_id);
     if (own_entry == movement_index_by_id_.end() || !is_configured()) {
         return Vector4(0.0, 0.0, -1.0, 0.0);
@@ -195,13 +238,14 @@ bool RoRPathKernel::update_walkable(int64_t revision, const PackedInt32Array &in
     if (!is_configured() || revision < revision_ || indices.size() != values.size()) return false;
     // Validate the entire patch before changing the authoritative mask.
     for (int64_t i = 0; i < indices.size(); ++i) {
-        if (indices[i] < 0 || static_cast<size_t>(indices[i]) >= walkable_.size()) return false;
+        if (indices[i] < 0 || static_cast<size_t>(indices[i]) >= walkable_->size()) return false;
     }
+    if (!walkable_.unique()) walkable_ = std::make_shared<std::vector<uint8_t>>(*walkable_);
     bool changed = false;
     for (int64_t i = 0; i < indices.size(); ++i) {
         const uint8_t value = values[i] != 0;
-        changed = changed || walkable_[static_cast<size_t>(indices[i])] != value;
-        walkable_[static_cast<size_t>(indices[i])] = value;
+        changed = changed || (*walkable_)[static_cast<size_t>(indices[i])] != value;
+        (*walkable_)[static_cast<size_t>(indices[i])] = value;
     }
     if (changed) components_by_radius_.clear();
     revision_ = revision;
@@ -216,10 +260,10 @@ void RoRPathKernel::configure(int32_t width, int32_t height, int64_t revision, c
     search_generation_ = 0;
     components_by_radius_.clear();
     const int64_t expected_size = static_cast<int64_t>(width_) * static_cast<int64_t>(height_);
-    walkable_.assign(static_cast<size_t>(expected_size), 0);
+    walkable_ = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(expected_size), 0);
     const int64_t copy_size = std::min<int64_t>(expected_size, walkable.size());
     for (int64_t index = 0; index < copy_size; ++index) {
-        walkable_[static_cast<size_t>(index)] = walkable[index] == 0 ? 0 : 1;
+        (*walkable_)[static_cast<size_t>(index)] = walkable[index] == 0 ? 0 : 1;
     }
     costs_.resize(static_cast<size_t>(expected_size));
     parents_.resize(static_cast<size_t>(expected_size));
@@ -234,10 +278,10 @@ const std::vector<int32_t> &RoRPathKernel::components(double radius) {
     uint64_t key = 0;
     std::memcpy(&key, &radius, sizeof(key));
     auto found = components_by_radius_.find(key);
-    if (found != components_by_radius_.end()) return found->second;
+    if (found != components_by_radius_.end()) return *found->second;
     if (components_by_radius_.size() >= 16) components_by_radius_.clear();
-    std::vector<int32_t> labels(walkable_.size(), -1);
-    std::vector<uint8_t> passable(walkable_.size(), 0);
+    std::vector<int32_t> labels(walkable_->size(), -1);
+    std::vector<uint8_t> passable(walkable_->size(), 0);
     for (int32_t i = 0; i < static_cast<int32_t>(labels.size()); ++i)
         passable[i] = cell_walkable_for(i % width_, i / width_, radius);
     std::vector<int32_t> queue;
@@ -259,7 +303,7 @@ const std::vector<int32_t> &RoRPathKernel::components(double radius) {
             }
         }
     }
-    return components_by_radius_.emplace(key, std::move(labels)).first->second;
+    return *components_by_radius_.emplace(key, std::make_shared<const std::vector<int32_t>>(std::move(labels))).first->second;
 }
 
 int32_t RoRPathKernel::component_id(const Vector2i &cell, double radius) {
@@ -423,7 +467,7 @@ bool RoRPathKernel::get_last_path_was_direct() const {
 }
 
 bool RoRPathKernel::is_configured() const {
-    return width_ > 0 && height_ > 0 && walkable_.size() == static_cast<size_t>(width_) * static_cast<size_t>(height_);
+    return width_ > 0 && height_ > 0 && walkable_->size() == static_cast<size_t>(width_) * static_cast<size_t>(height_);
 }
 
 bool RoRPathKernel::contains(int32_t x, int32_t y) const {
@@ -431,7 +475,7 @@ bool RoRPathKernel::contains(int32_t x, int32_t y) const {
 }
 
 bool RoRPathKernel::cell_walkable(int32_t x, int32_t y) const {
-    return contains(x, y) && walkable_[static_cast<size_t>(y * width_ + x)] != 0;
+    return contains(x, y) && (*walkable_)[static_cast<size_t>(y * width_ + x)] != 0;
 }
 
 bool RoRPathKernel::cell_walkable_for(int32_t x, int32_t y, double clearance_radius) const {

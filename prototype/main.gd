@@ -37,6 +37,21 @@ const GameCheckpoint := preload("res://scripts/game_checkpoint.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 const LockstepSession := preload("res://scripts/lockstep_session.gd")
 const LockstepTcpRelay := preload("res://scripts/lockstep_tcp_relay.gd")
+const NavigationLoading := preload("res://scripts/navigation_loading.gd")
+var navigation_loading := NavigationLoading.new()
+var navigation_loading_label: Label
+const PresentationPublication := preload("res://scripts/presentation_publication.gd")
+var presentation_publication := PresentationPublication.new()
+const BackgroundSaveTask := preload("res://scripts/background_save_task.gd")
+const BackgroundSaveQueue := preload("res://scripts/background_save_queue.gd")
+const TaskData := preload("res://scripts/isolated_task_data.gd")
+var background_saves := BackgroundSaveQueue.new()
+const TaskCoordinator := preload("res://scripts/isolated_task_coordinator.gd")
+const AiPlanningTask := preload("res://scripts/ai_planning_task.gd")
+const CacheDependency := preload("res://scripts/cache_dependency.gd")
+const AiDecisionQueue := preload("res://scripts/ai_decision_queue.gd")
+var ai_decision_queue := AiDecisionQueue.new()
+var task_coordinator := TaskCoordinator.new()
 const AiPlayer := preload("res://scripts/ai_player.gd")
 const AiObservationStore := preload("res://scripts/ai_observation_store.gd")
 const SpriteGeometry := preload("res://scripts/sprite_geometry.gd")
@@ -178,6 +193,7 @@ var cached_world_fog_mesh_terrain_revision: int = -1
 var cached_world_fog_texture: ImageTexture
 var cached_world_fog_texture_data := PackedByteArray()
 var cached_world_fog_texture_revision: int = -1
+var cached_world_fog_stamp: Dictionary = {}
 var cached_fog_slope_neighbor_cells := PackedByteArray()
 var cached_fog_slope_neighbor_terrain_revision: int = -1
 var cached_map_edge_chains: Array[PackedVector2Array] = []
@@ -216,6 +232,7 @@ func _ready() -> void:
 	font = ThemeDB.fallback_font
 	resource_catalog = ResourceCatalog.new()
 	resource_catalog.load()
+	resource_catalog.unit_presentations.background_loading_enabled = task_coordinator.is_enabled("animation_loading")
 	for frame_index in range(7):
 		source_cursor_frames.append(load("res://assets/generated/ror_cursor_%02d.png" % frame_index))
 	for frame_index in range(1, 7):
@@ -310,6 +327,12 @@ func _ready() -> void:
 	scenario_overlay.restart_requested.connect(_restart_from_scenario_overlay)
 	scenario_overlay.menu_requested.connect(_return_to_launcher)
 
+	navigation_loading_label = Label.new()
+	navigation_loading_label.text = "Подготовка карты…"
+	navigation_loading_label.position = Vector2(20, 80)
+	navigation_loading_label.z_index = 4096
+	navigation_loading_label.hide()
+	add_child(navigation_loading_label)
 	reset_game()
 	if not network_role.is_empty():
 		_start_network_match()
@@ -406,9 +429,17 @@ func center_initial_view() -> void:
 	queue_redraw()
 
 func reset_game() -> void:
+	navigation_loading.shutdown()
+	background_saves.drain()
+	presentation_publication.clear()
+	ai_decision_queue.cancel(task_coordinator)
+	task_coordinator.shutdown()
+	if simulation_world != null:
+		simulation_world.task_coordinator.shutdown()
 	if simulation_world == null:
 		return
 	var bootstrap: Dictionary = MatchBootstrap.apply(simulation_world, match_definition, map_definition)
+	resource_catalog.unit_presentations.shutdown_loading()
 	resource_catalog.prewarm_match_entities(simulation_world.get_units(), simulation_world.get_buildings())
 	game_controller.reset_timing()
 	game_controller.start_recording(map_seed, false)
@@ -416,9 +447,7 @@ func reset_game() -> void:
 	configure_ai_players()
 	# Full-map masks and surface connectivity are loading work, not work for
 	# the first AI decision or the first unit movement after the match opens.
-	simulation_world.pathfinder.prepare_native_kernels_for_units(simulation_world.get_units())
-	for ai in ai_players:
-		simulation_world.ai_navigation_knowledge.snapshot(simulation_world, simulation_world.get_fog_of_war(), int(ai.team))
+	navigation_loading.begin(simulation_world, match_definition.get("players", []))
 	game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
 	control_groups.clear()
 	player_control_state.clear()
@@ -479,7 +508,7 @@ func reset_game() -> void:
 	sync_world_state()
 	# The initial fog mask scans the whole map; prepare it while the match is
 	# loading, so the first visible frame only submits cached presentation.
-	cached_fog_slope_neighbor_terrain_revision = int(simulation_world.terrain_revision)
+	cached_fog_slope_neighbor_terrain_revision = _terrain_geometry_revision()
 	_sync_world_fog_texture(presentation_snapshot.get("fog", {}).get("cells", []), int(presentation_snapshot.get("fog_revision", -1)))
 	if scenario_overlay != null:
 		scenario_overlay.reset_presentation()
@@ -503,6 +532,19 @@ func add_resource(kind: String, position: Vector2, amount: int) -> void:
 		return
 	simulation_world.add_resource(kind, position, amount)
 func _process(delta: float) -> void:
+	if navigation_loading.is_loading():
+		if navigation_loading_label != null:
+			navigation_loading_label.show()
+		if not navigation_loading.poll(simulation_world):
+			queue_redraw()
+			return
+
+		if navigation_loading_label != null:
+			navigation_loading_label.hide()
+	task_coordinator.reap_abandoned()
+	_poll_save_jobs()
+	if resource_catalog != null:
+		resource_catalog.unit_presentations.poll_background_loading()
 	var probe: Variant = game_controller.performance_probe if game_controller != null else null
 	var frame_started := Time.get_ticks_usec() if probe != null else 0
 	var stage_started := frame_started
@@ -776,42 +818,76 @@ func _new_ai_players(definition: Dictionary = {}) -> Array:
 	return result
 
 
-func queue_ai_commands(next_tick: int = -1) -> bool:
+func _capture_ai_decision(ai, next_tick: int) -> Dictionary:
+	var probe: Variant = game_controller.performance_probe
+	var started := Time.get_ticks_usec()
+	var options: Dictionary = ai.presentation_options()
+	if bool(options.get("include_navigation", true)):
+		var ready: bool = simulation_world.ai_navigation_knowledge.prepare_snapshot(simulation_world, simulation_world.get_fog_of_war(), int(ai.team))
+		if not ready:
+			return {"pending": true}
+	if probe != null:
+		options["performance_probe"] = probe
+		options["performance_prefix"] = "presentation.ai.snapshot"
+	var knowledge := ai_observation_store.observe_with_queries(simulation_world, game_controller.tick_index, int(ai.team), options)
+	if probe != null:
+		probe.observe_microseconds("presentation.ai.snapshot", Time.get_ticks_usec() - started)
+	return AiPlanningTask.capture(ai, knowledge, next_tick)
+
+
+func queue_ai_commands(next_tick: int = -1) -> Variant:
 	if next_tick < 0:
 		next_tick = game_controller.tick_index + 1
-	var probe: Variant = game_controller.performance_probe
-	var planned := false
-	for ai_value in ai_players:
-		var ai = ai_value
+	if ai_decision_queue.active:
+		return _poll_ai_decisions()
+	var due: Array = []
+	for ai in ai_players:
 		if not ai.needs_decision(next_tick):
 			continue
-		# Fresh AIs used to perform their expensive first economy and military
-		# plans on the same simulation tick. Give every team a stable phase so
-		# campaign starts do not turn six independent planners into one frame
-		# spike. The phase depends only on authoritative data, never render time.
-		if int(ai.last_economic_tick) < 0 and int(ai.last_military_tick) < 0:
-			var initial_decision_tick: int = AiPlayer.initial_decision_tick(ai, ai_players)
-			if next_tick < initial_decision_tick:
-				continue
-		planned = true
-		var stage_started := Time.get_ticks_usec() if probe != null else 0
-		var snapshot_options: Dictionary = ai.presentation_options()
-		if probe != null:
-			snapshot_options["performance_probe"] = probe
-			snapshot_options["performance_prefix"] = "presentation.ai.snapshot"
-		var knowledge := ai_observation_store.observe(simulation_world, game_controller.tick_index, int(ai.team), snapshot_options)
-		if probe != null:
-			probe.observe_microseconds("presentation.ai.snapshot", Time.get_ticks_usec() - stage_started)
-			stage_started = Time.get_ticks_usec()
-		var commands: Array = ai.collect_commands(knowledge, next_tick)
-		if probe != null:
-			probe.observe_microseconds("presentation.ai.plan", Time.get_ticks_usec() - stage_started)
-			stage_started = Time.get_ticks_usec()
-		for command in commands:
+		if int(ai.last_economic_tick) < 0 and int(ai.last_military_tick) < 0 and next_tick < AiPlayer.initial_decision_tick(ai, ai_players):
+			continue
+		due.append(ai)
+	if due.is_empty():
+		return false
+	if task_coordinator.is_enabled("ai_planning"):
+		ai_decision_queue.begin(due, game_controller.tick_index, next_tick, Callable(self, "_capture_ai_decision"))
+		return _poll_ai_decisions()
+	# Explicit sequential/reference mode retains the same tick and command order.
+	for ai in due:
+		var options: Dictionary = ai.presentation_options()
+		var knowledge := ai_observation_store.observe_with_queries(simulation_world, game_controller.tick_index, int(ai.team), options)
+		for command in ai.collect_commands(knowledge, next_tick):
 			game_controller.enqueue_command(command, true, int(ai.team))
-		if probe != null:
-			probe.observe_microseconds("presentation.ai.enqueue", Time.get_ticks_usec() - stage_started)
-	return planned
+	return true
+
+
+func _poll_ai_decisions() -> Dictionary:
+	var status: Dictionary = ai_decision_queue.poll(task_coordinator, game_controller.tick_index, Engine.get_process_frames())
+	if status.has("error"):
+		game_message = "Ошибка расчёта ИИ: %s" % String(status["error"])
+		message_time = 8.0
+		game_controller.set_paused(true)
+		ai_decision_queue.cancel(task_coordinator)
+		return {"ready": false}
+	if not bool(status.get("ready", false)):
+		return status
+	var decisions := ai_decision_queue.take_ready()
+	# Decode and validate every proposal before changing any live player state.
+	for decision in decisions:
+		decision["commands"] = AiPlanningTask.decode_commands(decision["output"])
+		if decision["commands"].size() != decision["output"].get("commands", []).size() or decision["ai"].canonical_state() != decision["input"]["state"]:
+			game_message = "Ошибка согласования состояния ИИ"
+			message_time = 8.0
+			game_controller.set_paused(true)
+			return {"ready": false}
+	for decision in decisions:
+		var ai = decision["ai"]
+		if not ai.restore_state(decision["output"]["state"]):
+			game_controller.set_paused(true)
+			return {"ready": false}
+		for command in decision["commands"]:
+			game_controller.enqueue_command(command, true, int(ai.team))
+	return {"ready": true, "planned": not decisions.is_empty()}
 
 
 func enqueue_with_feedback(command: Variant, accepted_message: String, sound_name: String, marker: Variant = null) -> void:
@@ -914,6 +990,8 @@ func screen_to_world(screen: Vector2) -> Vector2:
 	return Coordinates.screen_to_world(screen, view_zoom, view_offset)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if navigation_loading.is_loading():
+		return
 	if network_chat_input != null and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ENTER and not network_chat_input.visible:
 		network_chat_input.show()
 		network_chat_input.grab_focus()
@@ -1133,9 +1211,9 @@ func _resign_from_hud_modal() -> void:
 
 
 func _save_quick_game() -> void:
-	if save_game_to_path(GameSaveArchive.SAVE_PATH):
+	if request_save_game_to_path(GameSaveArchive.SAVE_PATH):
 		hud_modal_overlay.set_save_available(true)
-		hud_modal_overlay.set_menu_status("Игра сохранена")
+		hud_modal_overlay.set_menu_status("Сохранение…")
 	else:
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
@@ -1151,9 +1229,9 @@ func _save_named_game(name: String) -> void:
 	if path.is_empty():
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message("slot_name_invalid"), true)
 		return
-	if save_game_to_path(path, GameSaveArchive.normalized_slot_name(name)):
+	if request_save_game_to_path(path, GameSaveArchive.normalized_slot_name(name)):
 		hud_modal_overlay.set_named_saves(GameSaveArchive.list_named_saves())
-		hud_modal_overlay.set_menu_status("Именованное сохранение создано")
+		hud_modal_overlay.set_menu_status("Сохранение…")
 	else:
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
@@ -1163,17 +1241,17 @@ func _load_named_game(path: String) -> void:
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
 
-func save_game_to_path(path: String, slot_name: String = "Быстрое сохранение") -> bool:
+func _capture_save_input(path: String, slot_name: String = "Быстрое сохранение") -> Dictionary:
 	last_save_error = ""
 	if network_session != null:
 		last_save_error = "network_save_unsupported"
-		return false
+		return {}
 	if not GameSaveArchive.valid_slot_name(slot_name):
 		last_save_error = "slot_name_invalid"
-		return false
+		return {}
 	if game_controller == null or simulation_world == null or game_controller.replay_recorder == null:
 		last_save_error = "runtime_not_ready"
-		return false
+		return {}
 	var ai_states: Array = []
 	for ai in ai_players:
 		ai_states.append(ai.canonical_state())
@@ -1194,26 +1272,66 @@ func save_game_to_path(path: String, slot_name: String = "Быстрое сох�
 		"paused": modal_restore_paused if hud_modal_overlay != null and hud_modal_overlay.is_blocking() else game_controller.paused,
 	}
 	var verifier := ReplaySystem.new()
-	var archive := GameSaveArchive.create(
-		match_path,
-		match_definition,
-		game_controller.tick_index,
-		verifier.world_state_hash(simulation_world, game_controller.tick_index, game_controller),
-		game_controller.replay_recorder.to_dictionary(),
-		ai_states,
-		view_state,
-		controller_state,
-		slot_name,
-		GameCheckpoint.pack(GameCheckpoint.capture(simulation_world, game_controller, match_definition, map_definition))
-	)
-	var write_error := GameSaveArchive.write(path, archive)
-	if write_error != OK:
-		last_save_error = "write_failed:%d" % int(write_error)
+	# Capture and hash happen at one completed-tick boundary, before the world
+	# continues. Packing/compression/JSON/temp-file replacement belong to worker.
+	var checkpoint: Dictionary = TaskData.copy(GameCheckpoint.capture(simulation_world, game_controller, match_definition, map_definition))
+	var input := {
+		"path": path,
+		"slot_name": slot_name,
+		"match_path": match_path,
+		"definition": TaskData.copy(match_definition),
+		"tick": game_controller.tick_index,
+		"state_hash": verifier.world_state_hash(simulation_world, game_controller.tick_index, game_controller),
+		"replay": TaskData.copy(game_controller.replay_recorder.to_dictionary()),
+		"ai_states": TaskData.copy(ai_states),
+		"view": TaskData.copy(view_state),
+		"controller": TaskData.copy(controller_state),
+		"checkpoint": checkpoint,
+	}
+	if not TaskData.is_detached(input):
+		last_save_error = "capture_not_isolated"
+		return {}
+	return input
+
+func request_save_game_to_path(path: String, slot_name: String = "Быстрое сохранение") -> bool:
+	if background_saves.waiting.size() >= BackgroundSaveQueue.MAX_WAITING:
+		last_save_error = "save_busy"
+		return false
+	var input := _capture_save_input(path, slot_name)
+	if input.is_empty():
+		return false
+	if not background_saves.enqueue(input):
+		last_save_error = "save_busy"
 		return false
 	return true
 
+# Retain the synchronous public API used by tools and explicit callers.
+func save_game_to_path(path: String, slot_name: String = "Быстрое сохранение") -> bool:
+	background_saves.drain()
+	var input := _capture_save_input(path, slot_name)
+	if input.is_empty():
+		return false
+	var result := BackgroundSaveTask.run(input)
+	if int(result["error"]) != OK:
+		last_save_error = "write_failed:%d" % int(result["error"])
+		return false
+	return true
+
+func _poll_save_jobs() -> void:
+	for result in background_saves.poll():
+		if int(result["error"]) != OK:
+			last_save_error = "write_failed:%d" % int(result["error"])
+			if hud_modal_overlay != null:
+				hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
+			continue
+		last_save_error = ""
+		if hud_modal_overlay != null:
+			hud_modal_overlay.set_save_available(true)
+			hud_modal_overlay.set_named_saves(GameSaveArchive.list_named_saves())
+			hud_modal_overlay.set_menu_status("Игра сохранена" if String(result["path"]) == GameSaveArchive.SAVE_PATH else "Именованное сохранение создано")
 
 func load_game_from_path(path: String) -> bool:
+	background_saves.drain()
 	last_save_error = ""
 	if network_session != null:
 		return _load_failed("network_load_unsupported")
@@ -1286,11 +1404,18 @@ func load_game_from_path(path: String) -> bool:
 	cached_environment_items.clear()
 	cached_environment_bounds = Rect2()
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
+	ai_decision_queue.cancel(task_coordinator)
+	task_coordinator.shutdown()
+	if simulation_world != null:
+		simulation_world.task_coordinator.shutdown()
+	navigation_loading.shutdown()
 	simulation_world = restored_world
 	game_controller = restored_controller
 	game_controller.set_command_result_limit(1024)
 	ai_observation_store.clear()
+	presentation_publication.clear()
 	ai_players = restored_ai_players
+	resource_catalog.unit_presentations.shutdown_loading()
 	resource_catalog.prewarm_match_entities(simulation_world.get_units(), simulation_world.get_buildings())
 	game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
 	var saved_controller: Dictionary = archive.get("controller_state", {})
@@ -1299,6 +1424,7 @@ func load_game_from_path(path: String) -> bool:
 	modal_restore_paused = game_controller.paused
 	simulation_world.restore_last_known_buildings(saved_view.get("last_known_buildings", {}))
 	simulation_world.restore_known_resource_memory(saved_view.get("last_known_resources", {}))
+	navigation_loading.begin(simulation_world, match_definition.get("players", []))
 	view_offset = saved_view.get("view_offset", view_offset)
 	view_zoom = float(saved_view.get("view_zoom", view_zoom))
 	formation = String(saved_view.get("formation", "RECTANGLE"))
@@ -1344,7 +1470,7 @@ func load_game_from_path(path: String) -> bool:
 	sync_world_state()
 	# The initial fog mask scans the whole map; prepare it while the match is
 	# loading, so the first visible frame only submits cached presentation.
-	cached_fog_slope_neighbor_terrain_revision = int(simulation_world.terrain_revision)
+	cached_fog_slope_neighbor_terrain_revision = _terrain_geometry_revision()
 	_sync_world_fog_texture(presentation_snapshot.get("fog", {}).get("cells", []), int(presentation_snapshot.get("fog_revision", -1)))
 	if scenario_overlay != null:
 		scenario_overlay.reset_presentation()
@@ -2144,7 +2270,7 @@ func sync_world_state(force: bool = true) -> void:
 		"compact_render_entities": not diagnostics_enabled,
 		"include_production_overview": true,
 		"borrow_visible_render_entities": not diagnostics_enabled,
-		"borrow_overview_entities": not diagnostics_enabled,
+		"borrow_overview_entities": not diagnostics_enabled and not task_coordinator.is_enabled("presentation"),
 		"entity_bounds": Rect2(Vector2(snapshot_bounds.position), Vector2(snapshot_bounds.size)),
 		"always_include_entity_ids": selected_ids,
 		"command_option_entity_ids": selected_ids,
@@ -2152,7 +2278,8 @@ func sync_world_state(force: bool = true) -> void:
 	if probe != null:
 		snapshot_options["performance_probe"] = probe
 		snapshot_options["performance_prefix"] = "presentation.local.snapshot"
-	presentation_snapshot = SimulationSnapshot.presentation(simulation_world, current_tick, local_player_team, snapshot_options)
+	var captured_snapshot := SimulationSnapshot.with_queries(simulation_world, current_tick, local_player_team, snapshot_options)
+	presentation_snapshot = presentation_publication.publish(captured_snapshot, selected_ids, task_coordinator) if not diagnostics_enabled else captured_snapshot
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.snapshot", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -2233,6 +2360,14 @@ func _return_to_launcher() -> void:
 
 
 func _exit_tree() -> void:
+	navigation_loading.shutdown()
+	background_saves.shutdown()
+	if resource_catalog != null:
+		resource_catalog.unit_presentations.shutdown_loading()
+	ai_decision_queue.cancel(task_coordinator)
+	task_coordinator.shutdown()
+	if simulation_world != null:
+		simulation_world.task_coordinator.shutdown()
 	for shape in [Input.CURSOR_ARROW, Input.CURSOR_POINTING_HAND, Input.CURSOR_CAN_DROP, Input.CURSOR_MOVE, Input.CURSOR_CROSS, Input.CURSOR_FORBIDDEN]:
 		Input.set_custom_mouse_cursor(null, shape)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
@@ -2441,6 +2576,26 @@ func draw_foundation_preview_at(kind: String, center: Vector2) -> void:
 		draw_anchored_texture(texture, String(frame_info.get("asset_name", "")), int(frame_info.get("frame_index", 0)), PixelScaling.snap_screen(world_to_screen(center)), view_zoom, bool(frame_info.get("mirrored", false)), 0.55, frame_info.get("hotspot"))
 
 
+func _terrain_geometry_revision() -> int:
+	if simulation_world == null:
+		return -1
+	var elevation = simulation_world.terrain_elevation
+	return CacheDependency.geometry_key(map_size, elevation)
+
+
+func _sync_fog_geometry_revision() -> void:
+	var geometry_revision := _terrain_geometry_revision()
+	if cached_fog_slope_neighbor_terrain_revision != geometry_revision:
+		cached_fog_slope_neighbor_cells.resize(0)
+		cached_fog_slope_neighbor_terrain_revision = geometry_revision
+		cached_world_fog_meshes.clear()
+		cached_world_fog_mesh_terrain_revision = -1
+		cached_world_fog_texture_revision = -1
+	if cached_world_fog_mesh_terrain_revision != geometry_revision:
+		cached_world_fog_meshes.clear()
+		cached_world_fog_mesh_terrain_revision = geometry_revision
+
+
 func draw_fog_overlay() -> void:
 	if presentation_snapshot.is_empty():
 		return
@@ -2449,17 +2604,8 @@ func draw_fog_overlay() -> void:
 	if cells.size() < map_size.x * map_size.y:
 		return
 	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
-	var terrain_revision := int(simulation_world.terrain_revision) if simulation_world != null else -1
-	if cached_fog_slope_neighbor_terrain_revision != terrain_revision:
-		cached_fog_slope_neighbor_cells.resize(0)
-		cached_fog_slope_neighbor_terrain_revision = terrain_revision
-		cached_world_fog_meshes.clear()
-		cached_world_fog_mesh_terrain_revision = -1
-		cached_world_fog_texture_revision = -1
 	var prepare_started := Time.get_ticks_usec() if probe != null else 0
-	if cached_world_fog_mesh_terrain_revision != terrain_revision:
-		cached_world_fog_meshes.clear()
-		cached_world_fog_mesh_terrain_revision = terrain_revision
+	_sync_fog_geometry_revision()
 	_sync_world_fog_texture(cells, fog_revision, probe)
 	var visible_meshes: Array[ArrayMesh] = []
 	var bounds := _expanded_tile_bounds(visible_tile_bounds(), 12)
@@ -2580,32 +2726,30 @@ func _sync_world_fog_texture(cells: Variant, fog_revision: int, probe: Variant =
 		return
 	var mask_started := Time.get_ticks_usec() if probe != null else 0
 	_ensure_fog_slope_neighbor_cache()
-	var full_refresh := cached_world_fog_texture == null or cached_world_fog_texture_data.size() != expected_cells * 4 or cached_world_fog_texture_revision < 0
+	var change: Dictionary = {"full": true, "exact": false, "cells": [], "stamp": {}}
+	if simulation_world != null and simulation_world.has_method("cache_changes"):
+		change = CacheDependency.changes(simulation_world, CacheDependency.FOG_VISIBILITY, cached_world_fog_stamp, local_player_team)
+	var full_refresh: bool = cached_world_fog_texture == null or cached_world_fog_texture_data.size() != expected_cells * 4 or cached_world_fog_texture_revision < 0 or bool(change["full"]) or not bool(change["exact"])
 	var affected: Dictionary = {}
 	if full_refresh:
 		cached_world_fog_texture_data.resize(expected_cells * 4)
 		for index in range(expected_cells):
 			affected[index] = true
-		if simulation_world != null and simulation_world.has_method("consume_fog_presentation_dirty_cells"):
-			simulation_world.consume_fog_presentation_dirty_cells(local_player_team)
-	elif fog_revision != cached_world_fog_texture_revision:
-		var dirty_cells: Array = simulation_world.consume_fog_presentation_dirty_cells(local_player_team) if simulation_world != null and simulation_world.has_method("consume_fog_presentation_dirty_cells") else []
-		# A revision without a queue is possible after loading an older save or in
-		# isolated presentation fixtures. Fall back to a complete mask refresh so
-		# correctness never depends on the incremental producer being present.
-		if dirty_cells.is_empty():
-			for index in range(expected_cells):
-				affected[index] = true
-		else:
-			for cell_index_value in dirty_cells:
-				var cell_index := int(cell_index_value)
-				var cell := Vector2i(cell_index % map_size.x, cell_index / map_size.x)
-				for y_offset in range(-1, 2):
-					for x_offset in range(-1, 2):
-						var affected_cell := cell + Vector2i(x_offset, y_offset)
-						if affected_cell.x >= 0 and affected_cell.y >= 0 and affected_cell.x < map_size.x and affected_cell.y < map_size.y:
-							affected[affected_cell.y * map_size.x + affected_cell.x] = true
-	elif cached_world_fog_texture != null:
+	else:
+		for cell_value in change["cells"]:
+			var cell := Vector2i(cell_value)
+			for y_offset in range(-1, 2):
+				for x_offset in range(-1, 2):
+					var affected_cell := cell + Vector2i(x_offset, y_offset)
+					if affected_cell.x >= 0 and affected_cell.y >= 0 and affected_cell.x < map_size.x and affected_cell.y < map_size.y:
+						affected[affected_cell.y * map_size.x + affected_cell.x] = true
+	cached_world_fog_stamp = change["stamp"]
+	cached_world_fog_texture_revision = fog_revision
+	# Keep the compatibility queue bounded. Independent caches use journals,
+	# so consuming this queue no longer steals their invalidations.
+	if simulation_world != null and simulation_world.has_method("consume_fog_presentation_dirty_cells"):
+		simulation_world.consume_fog_presentation_dirty_cells(local_player_team)
+	if affected.is_empty():
 		return
 	for cell_index_value in affected.keys():
 		_write_world_fog_pixel(int(cell_index_value), cells)
@@ -2614,11 +2758,9 @@ func _sync_world_fog_texture(cells: Variant, fog_revision: int, probe: Variant =
 		cached_world_fog_texture = ImageTexture.create_from_image(image)
 	else:
 		cached_world_fog_texture.update(image)
-	cached_world_fog_texture_revision = fog_revision
 	if probe != null:
 		probe.observe_microseconds("presentation.fog.mask_update", Time.get_ticks_usec() - mask_started)
 		probe.increment("presentation.fog.mask_cells_updated", affected.size())
-
 
 func _write_world_fog_pixel(index: int, cells: Variant) -> void:
 	var cell := Vector2i(index % map_size.x, index / map_size.x)
@@ -2704,7 +2846,7 @@ func _tile_bounds_contains(outer: Rect2i, inner: Rect2i) -> bool:
 
 
 func draw_map_edge_guard() -> void:
-	var terrain_revision := int(simulation_world.terrain_revision) if simulation_world != null else -1
+	var terrain_revision := _terrain_geometry_revision()
 	if cached_map_edge_chains.is_empty() or not is_equal_approx(cached_map_edge_zoom, view_zoom) or cached_map_edge_terrain_revision != terrain_revision:
 		cached_map_edge_chains = FogPresentation.map_edge_guard_chains(map_size, Callable(self, "_world_to_fog_mesh"))
 		cached_map_edge_zoom = view_zoom
@@ -3186,9 +3328,9 @@ func draw_map_edge_fog_overlay() -> void:
 	# cell's fog there, without tinting the black void or drawing across sprites.
 	if simulation_world == null or cached_world_fog_texture == null:
 		return
-	if cached_map_edge_fog_revision != int(simulation_world.terrain_revision):
+	if cached_map_edge_fog_revision != _terrain_geometry_revision():
 		cached_map_edge_fog_meshes.clear()
-		cached_map_edge_fog_revision = int(simulation_world.terrain_revision)
+		cached_map_edge_fog_revision = _terrain_geometry_revision()
 	var visible := visible_tile_bounds()
 	var skirt := 6
 	var regions := {

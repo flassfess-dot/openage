@@ -42,7 +42,7 @@ func _initialize() -> void:
 	game.game_controller = Controller.new(world)
 	game.local_player_team = 1
 	game.map_size = world.map_size
-	game.presentation_snapshot = Snapshot.presentation(world, 0, 1)
+	game.presentation_snapshot = Snapshot.with_queries(world, 0, 1)
 	game.units = game.presentation_snapshot["units"]
 	var ids: Array[int] = [int(worker["id"]), int(soldier["id"])]
 	game.player_control_state.replace_or_add(ids, false)

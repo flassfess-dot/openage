@@ -1,4 +1,10 @@
 class_name RoRPathfinder
+const NativeMovementTask := preload("res://scripts/native_movement_task.gd")
+var native_batch_results: Dictionary = {}
+const PathBatchTask := preload("res://scripts/path_batch_task.gd")
+const PerformanceProbe := preload("res://scripts/performance_probe.gd")
+const NavigationTaskData := preload("res://scripts/navigation_task_data.gd")
+const NavigationPreparationTask := preload("res://scripts/navigation_preparation_task.gd")
 
 const MobileCollision := preload("res://scripts/mobile_collision.gd")
 
@@ -11,6 +17,9 @@ const DIRECTIONS := [
 	Vector2i(-1, 1),  Vector2i(0, 1),  Vector2i(1, 1),
 ]
 
+var task_topology_source: Variant = null
+var task_topology_revision := -1
+var task_topology: Dictionary = {}
 var grid
 var cache: Dictionary = {}
 var cell_cache: Dictionary = {}
@@ -80,6 +89,71 @@ func uses_native_kernel() -> bool:
 	return native_enabled and native_available
 
 
+func detached_task_topology() -> Dictionary:
+	if task_topology_source != grid or task_topology_revision != int(grid.revision):
+		task_topology = NavigationTaskData.capture(grid)
+		task_topology_source = grid
+		task_topology_revision = int(grid.revision)
+	return task_topology
+
+func create_task_context(topology: Dictionary, configurations: Array, route_snapshot: Dictionary = {}):
+	var private_grid = NavigationTaskData.create_grid(topology)
+	var planner = get_script().new(private_grid)
+	planner.native_enabled = native_enabled
+	planner.route_cache_revision = int(private_grid.revision)
+	# Completed cache geometry is copied once by the owner, then shared read-only.
+	# Each context owns the dictionaries it inserts into or trims.
+	planner.cache = route_snapshot.get("cache", {}).duplicate()
+	planner.cell_cache = route_snapshot.get("cells", {}).duplicate()
+	planner.smoothed_cell_cache = route_snapshot.get("smoothed", {}).duplicate()
+	for category in planner.geometry_metadata:
+		planner.geometry_metadata[category] = route_snapshot.get("geometry", {}).get(category, {}).duplicate()
+	if uses_native_kernel():
+		for configuration in configurations:
+			var domain := String(configuration[0])
+			var restriction := int(configuration[1])
+			var kernel = _native_kernel_for(domain, restriction)
+			if kernel.has_method("create_search_context"):
+				planner.native_kernels["%s:%d" % [domain, restriction]] = kernel.create_search_context()
+	return planner
+
+func detached_route_caches() -> Dictionary:
+	var data := {"cache": cache, "cells": cell_cache, "smoothed": smoothed_cell_cache, "geometry": geometry_metadata}
+	return RoRIsolatedTaskData.seal(RoRIsolatedTaskData.copy(data))
+
+func prepare_threaded_navigation(units: Array, coordinator) -> void:
+	if grid == null or not coordinator.is_enabled("navigation_prepare"):
+		prepare_native_kernels_for_units(units)
+		return
+	var configurations: Dictionary = {}
+	for unit in units:
+		var domain := String(unit.get("movement_domain", "land"))
+		var restriction := int(unit.get("terrain_restriction", -1))
+		configurations["%s:%d" % [domain, restriction]] = [domain, restriction]
+	var keys: Array = configurations.keys()
+	keys.sort()
+	if keys.is_empty():
+		return
+	var topology := detached_task_topology()
+	var inputs: Array = []
+	for key in keys:
+		inputs.append({"grid": topology, "domain": configurations[key][0], "restriction": configurations[key][1]})
+	var outputs: Array = coordinator.run_ordered("navigation_prepare", inputs, NavigationPreparationTask.run, -1, true)
+	# Publication is atomic with respect to the owner: no active simulation
+	# consumer runs until the whole collection has been checked.
+	for output in outputs:
+		if int(output["revision"]) != grid.revision or int(output["surface_revision"]) != grid.surface_revision:
+			prepare_native_kernels_for_units(units)
+			return
+	for output in outputs:
+		grid.surface_component_cache[output["key"]] = output["components"]
+		if uses_native_kernel():
+			var kernel = ClassDB.instantiate("RoRPathKernel")
+			kernel.configure(grid.size.x, grid.size.y, grid.revision, output["mask"])
+			for component in output.get("native_components", []):
+				kernel.install_connectivity(component["labels"], float(component["radius"]))
+			native_kernels[output["key"]] = kernel
+
 func prepare_native_kernels_for_units(units: Array) -> void:
 	if not uses_native_kernel():
 		return
@@ -96,6 +170,7 @@ func prepare_native_kernels_for_units(units: Array) -> void:
 
 
 func prepare_native_movement_snapshot(units: Array) -> void:
+	native_batch_results.clear()
 	native_movement_kernels_by_unit_id.clear()
 	native_shared_movement_kernel = null
 	if not uses_native_kernel() or units.is_empty():
@@ -171,7 +246,57 @@ func has_native_movement_for(unit_id: int) -> bool:
 	return native_shared_movement_kernel != null or native_movement_kernels_by_unit_id.has(unit_id)
 
 
+func prepare_native_movement_batch(units: Array, delta: float, coordinator, excluded_ids: Dictionary = {}) -> void:
+	native_batch_results.clear()
+	if not coordinator.is_enabled("movement") or units.size() < 64:
+		return
+	var groups: Dictionary = {}
+	for unit in units:
+		var unit_id := int(unit["id"])
+		if String(unit.get("task", "")) != "move" or float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("formation_shared_motion", false)) or int(unit.get("formation_group_id", -1)) >= 0 or excluded_ids.has(unit_id) or Vector2(unit["target"]).distance_squared_to(Vector2(unit["pos"])) < 0.001225:
+			continue
+		var kernel = native_shared_movement_kernel if native_shared_movement_kernel != null else native_movement_kernels_by_unit_id.get(unit_id)
+		if kernel == null:
+			continue
+		var key: int = kernel.get_instance_id()
+		if not groups.has(key):
+			groups[key] = {"kernel": kernel, "requests": []}
+		groups[key]["requests"].append({"id": unit_id, "target": unit["target"], "speed": unit["speed"], "scale": unit["cohesion_speed_scale"], "delta": delta, "revision": kernel.get_revision()})
+	var candidate_count := 0
+	for group in groups.values():
+		candidate_count += group["requests"].size()
+	if candidate_count < 64:
+		return
+	var jobs: Array = []
+	var inputs: Array = []
+	var requests: Array[int] = []
+	for group in groups.values():
+		var chunk_size := maxi(32, ceili(float(group["requests"].size()) / 4.0))
+		for first in range(0, group["requests"].size(), chunk_size):
+			var job := NativeMovementTask.new()
+			job.kernel = group["kernel"]
+			var input := {"requests": group["requests"].slice(first, mini(first + chunk_size, group["requests"].size()))}
+			jobs.append(job)
+			inputs.append(input)
+			requests.append(coordinator.submit("movement", input, job.run, -1, -1, {}, true))
+	# One barrier before the original ordered unit loop. Query signatures are
+	# checked again at the actual movement call; changed orders/targets fall back.
+	for index in range(requests.size()):
+		var collected: Dictionary = coordinator.collect(requests[index], true) if requests[index] >= 0 else {}
+		if collected.is_empty():
+			continue
+		var output: Array = collected["data"]["results"]
+		for request_index in range(inputs[index]["requests"].size()):
+			var request: Dictionary = inputs[index]["requests"][request_index]
+			native_batch_results[request["id"]] = {"request": request, "result": output[request_index]}
+
 func calculate_native_movement(unit: Dictionary, target: Vector2, delta: float) -> Vector4:
+	var batch: Dictionary = native_batch_results.get(int(unit["id"]), {})
+	if not batch.is_empty():
+		var request: Dictionary = batch["request"]
+		var current_kernel = native_shared_movement_kernel if native_shared_movement_kernel != null else native_movement_kernels_by_unit_id.get(int(unit["id"]))
+		if current_kernel != null and int(request["revision"]) == int(current_kernel.get_revision()) and request["target"] == target and float(request["speed"]) == float(unit["speed"]) and float(request["scale"]) == float(unit["cohesion_speed_scale"]) and float(request["delta"]) == delta:
+			return batch["result"]
 	var kernel = native_shared_movement_kernel
 	if kernel == null:
 		kernel = native_movement_kernels_by_unit_id.get(int(unit["id"]))
@@ -185,6 +310,80 @@ func calculate_native_movement(unit: Dictionary, target: Vector2, delta: float) 
 		delta
 	)
 
+
+func find_paths_batch(requests: Array, coordinator) -> Array:
+	if requests.size() < 4 or not coordinator.is_enabled("navigation_paths") or not uses_native_kernel() or cache.size() + requests.size() >= MAX_ROUTE_CACHE_ENTRIES or cell_cache.size() + requests.size() >= MAX_ROUTE_CACHE_ENTRIES or smoothed_cell_cache.size() + requests.size() >= MAX_ROUTE_CACHE_ENTRIES:
+		var sequential: Array = []
+		for request in requests:
+			sequential.append(find_path(request["start"], request["goal"], String(request["domain"]), int(request["restriction"]), float(request["clearance"])))
+		return sequential
+	_sync_route_revision()
+	# Limit the base A* arrays across all requested domain/restriction contexts.
+	# Frontier and bounded connectivity caches are additional allocations.
+	var cells: int = grid.size.x * grid.size.y
+	var configurations: Dictionary = {}
+	for request in requests:
+		configurations["%s:%d" % [request["domain"], request["restriction"]]] = true
+	var arrays_per_worker := maxi(1, configurations.size())
+	var width := mini(4, mini(maxi(1, OS.get_processor_count() - 2), maxi(1, int(67108864 / maxi(1, cells * 16 * arrays_per_worker)))))
+	if cells * 16 * arrays_per_worker > 67108864:
+		var sequential: Array = []
+		for request in requests:
+			sequential.append(find_path(request["start"], request["goal"], String(request["domain"]), int(request["restriction"]), float(request["clearance"])))
+		return sequential
+	var batch_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var previous_observed := observed_path_query_microseconds
+	var topology := detached_task_topology()
+	var route_snapshot := detached_route_caches()
+	var chunks: Array = []
+	var ids: Array[int] = []
+	var jobs: Array = []
+	var chunk_size := maxi(1, ceili(float(requests.size()) / float(width)))
+	for first in range(0, requests.size(), chunk_size):
+		var input := {"requests": requests.slice(first, mini(requests.size(), first + chunk_size))}
+		var needed: Dictionary = {}
+		for request in input["requests"]:
+			needed["%s:%d" % [request["domain"], request["restriction"]]] = [request["domain"], request["restriction"]]
+		var private_planner = create_task_context(topology, needed.values(), route_snapshot)
+		if performance_probe != null:
+			private_planner.set_performance_probe(PerformanceProbe.new(performance_probe.sample_limit))
+		var job := PathBatchTask.new()
+		job.planner = private_planner
+		jobs.append(job)
+		chunks.append(input)
+		ids.append(coordinator.submit("navigation_paths", input, job.run, -1, -1, {"topology": grid.revision}, true))
+	var result: Array = []
+	for index in range(ids.size()):
+		var collected: Dictionary = coordinator.collect(ids[index], true, {"topology": grid.revision}) if ids[index] >= 0 else {}
+		var output: Dictionary = collected.get("data", {})
+		if output.is_empty():
+			var fallback: Array = []
+			for request in chunks[index]["requests"]:
+				fallback.append(find_path(request["start"], request["goal"], String(request["domain"]), int(request["restriction"]), float(request["clearance"])))
+			result.append_array(fallback)
+			continue
+		result.append_array(output["paths"])
+		cache_hits += int(output.get("hits", 0))
+		cache.merge(output["cache"], true)
+		cell_cache.merge(output["cells"], true)
+		smoothed_cell_cache.merge(output["smoothed"], true)
+		for category in geometry_metadata:
+			geometry_metadata[category].merge(output["geometry"][category], true)
+			while _geometry_bucket(String(category)).size() > MAX_ROUTE_CACHE_ENTRIES:
+				_trim_geometry_cache(String(category))
+		if performance_probe != null:
+			# Only detached numbers cross the barrier. Workers never update the
+			# owner's probe; merge individual observations in request order.
+			for metric in output.get("samples", {}):
+				for duration in output["samples"][metric]:
+					performance_probe.observe_microseconds(String(metric), int(duration))
+			for counter in output.get("counters", {}):
+				performance_probe.increment(String(counter), int(output["counters"][counter]))
+			performance_probe.observe_microseconds("navigation.path_batch.worker", int(collected.get("worker_us", 0)))
+	if performance_probe != null:
+		# Tick accounting uses elapsed owner time, not concurrent CPU sums.
+		observed_path_query_microseconds = previous_observed + Time.get_ticks_usec() - batch_started
+	return result
 
 func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2]:
 	var started := Time.get_ticks_usec() if performance_probe != null else 0

@@ -53,6 +53,38 @@ func _initialize() -> void:
 				check(info.get("asset_name", "") == tree["source_graphic_asset_name"], "enabled pack preserves native tree art")
 				check(catalog.resource_frame_info(depleted).get("asset_name", "") == "tree_stump", "native trees use native stumps")
 		check(trees == before, "resolving mixed presentation cannot mutate simulation identity")
+
+	# Exercise the gameplay path, including retained fog memory and optional
+	# publication. Testing _compact_render_entity alone missed the forest loss.
+	var generated_trees: Array = built["map_data"]["resources"].filter(func(r): return r.get("category", "") == "resource" and r.get("kind", "") == "tree")
+	check(trees.size() == generated_trees.size(), "generation and bootstrap retain exactly the same tree density")
+	var fog = world.get_fog_of_war()
+	fog.ensure_player(1)
+	fog.states_by_player[1].fill(2)
+	fog.revisions_by_player[1] += 1
+	fog.exploration_revisions_by_player[1] += 1
+	fog.revision += 1
+	var coordinator = preload("res://scripts/isolated_task_coordinator.gd").new()
+	var publication = preload("res://scripts/presentation_publication.gd").new()
+	var by_id := {}
+	for tree in trees: by_id[tree["id"]] = tree
+	for threaded in [false, true]:
+		coordinator.subsystem_enabled["presentation"] = threaded
+		for tick in range(3):
+			var captured := Snapshot.with_queries(world, tick, 1, {"compact_render_entities": true, "borrow_visible_render_entities": true, "include_navigation": false, "include_build_sites": false})
+			var published: Dictionary = publication.publish(captured, [], coordinator)
+			var visible_trees: Array = published["resources"].filter(func(r): return r.get("kind", "") == "tree")
+			check(visible_trees.size() == trees.size(), "full explored forest reaches gameplay presentation without thinning")
+			for tree in visible_trees:
+				var original: Dictionary = by_id[tree["id"]]
+				check(tree["pos"] == original["pos"], "gameplay preserves generated forest placement")
+				for field in ["environment_asset", "environment_variant", "tree_condition"]:
+					check(tree.get(field) == original.get(field), "retained fog memory preserves tree metadata: " + field)
+				var expected := catalog.resource_frame_info(original)
+				var actual := catalog.resource_frame_info(tree)
+				check(actual.get("asset_name") == expected.get("asset_name") and actual.get("frame_index") == expected.get("frame_index"), "every published tree uses the exact generated artwork")
+	coordinator.shutdown()
+	world.task_coordinator.shutdown()
 	finish()
 
 func check(value: bool, context: String) -> void:

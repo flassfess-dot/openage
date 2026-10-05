@@ -1,6 +1,7 @@
 class_name RoRTerrainCanvas
 extends Node2D
 
+const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const NativeTerrainMesh := preload("res://scripts/native_terrain_mesh.gd")
 const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
@@ -17,6 +18,9 @@ var view_zoom := 1.0
 var view_offset := Vector2.ZERO
 var viewport_size := Vector2.ZERO
 var terrain_revision := -1
+var surface_stamp: Dictionary = {}
+var cached_geometry_key := -1
+var terrain_drawable_cache: Dictionary = {}
 var terrain_atlas: Texture2D
 var terrain_atlas_size := Vector2.ZERO
 var terrain_atlas_regions: Dictionary = {}
@@ -47,6 +51,7 @@ func _ready() -> void:
 
 func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable, visible_bounds_provider: Callable) -> void:
 	_finish_refinement()
+	terrain_drawable_cache.clear()
 	native_sample_cache.clear()
 	native_sample_revision = -1
 	queued_refinement = null
@@ -54,6 +59,9 @@ func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable,
 	map_seed = seed
 	resource_catalog = catalog
 	simulation_world = world
+	surface_stamp = {}
+	terrain_revision = -1
+	cached_geometry_key = _terrain_geometry_key()
 	terrain_id_provider = id_provider
 	bounds_provider = visible_bounds_provider
 	_build_terrain_atlas()
@@ -63,14 +71,37 @@ func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable,
 
 func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, next_terrain_revision: int) -> void:
 	var zoom_changed := not is_equal_approx(view_zoom, zoom)
-	var projection_changed := (zoom_changed and not _uses_world_mesh()) or terrain_revision != next_terrain_revision
-	var view_changed := zoom_changed or projection_changed or not view_offset.is_equal_approx(offset) or not viewport_size.is_equal_approx(next_viewport_size)
+	var geometry_key := _terrain_geometry_key()
+	var geometry_changed := cached_geometry_key != geometry_key
+	var surface_changed := terrain_revision != next_terrain_revision
+	var surface_rebuild := false
+	if geometry_changed or (zoom_changed and not _uses_world_mesh()):
+		terrain_drawable_cache.clear()
+		native_sample_cache.clear()
+	if surface_changed:
+		var changed: Variant = null
+		if simulation_world is Object and simulation_world.has_method("cache_changes"):
+			var change := CacheDependency.changes(simulation_world, CacheDependency.TERRAIN_SURFACE, surface_stamp)
+			changed = change["cells"] if not bool(change["full"]) and bool(change["exact"]) else null
+			surface_stamp = change["stamp"]
+		if changed is Array and not geometry_changed:
+			_invalidate_terrain_cells(changed)
+			_advance_unchanged_refinement(changed, next_terrain_revision)
+			surface_rebuild = changed.any(func(cell): return terrain_mesh_bounds.grow(1).has_point(cell))
+		else:
+			terrain_drawable_cache.clear()
+			native_sample_cache.clear()
+			surface_rebuild = true
+		native_sample_revision = next_terrain_revision
+	var projection_changed := geometry_changed or surface_rebuild or (zoom_changed and not _uses_world_mesh())
+	var view_changed := zoom_changed or projection_changed or surface_changed or not view_offset.is_equal_approx(offset) or not viewport_size.is_equal_approx(next_viewport_size)
 	if not view_changed:
 		return
 	view_zoom = zoom
 	view_offset = offset
 	viewport_size = next_viewport_size
 	terrain_revision = next_terrain_revision
+	cached_geometry_key = geometry_key
 	var visible_bounds: Rect2i = bounds_provider.call() if bounds_provider.is_valid() else Rect2i()
 	if projection_changed or terrain_mesh == null or not _bounds_contains(terrain_mesh_bounds, visible_bounds):
 		_rebuild_terrain_mesh(async_rebuilds)
@@ -79,7 +110,33 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 	queue_redraw()
 
 
+func _terrain_geometry_key() -> int:
+	if simulation_world == null:
+		return -1
+	var elevation = simulation_world.terrain_elevation
+	return CacheDependency.geometry_key(map_size, elevation)
+
+
+func _advance_unchanged_refinement(cells: Array, next_revision: int) -> void:
+	if refinement_task_id >= 0 and not cells.any(func(cell): return refinement_bounds.grow(1).has_point(cell)):
+		refinement_revision = next_revision
+	if queued_refinement != null and not cells.any(func(cell): return Rect2i(queued_refinement["bounds"]).grow(1).has_point(cell)):
+		queued_refinement["revision"] = next_revision
+
+
+func _invalidate_terrain_cells(cells: Array) -> void:
+	var samples: Dictionary = native_sample_cache.get("cells", {})
+	for cell_value in cells:
+		var cell := Vector2i(cell_value)
+		samples.erase(cell)
+		# Borders and blends also depend on adjacent cells.
+		for y in range(-1, 2):
+			for x in range(-1, 2):
+				terrain_drawable_cache.erase(cell + Vector2i(x, y))
+
+
 func invalidate_content() -> void:
+	terrain_drawable_cache.clear()
 	native_sample_cache.clear()
 	native_sample_revision = -1
 	_rebuild_terrain_mesh()
@@ -226,11 +283,20 @@ func _rebuild_terrain_mesh(refine_async: bool = false) -> void:
 	var mesh_zoom := 1.0 if _uses_world_mesh() else view_zoom
 	var bounds := _expanded_bounds(bounds_provider.call(), MESH_OVERSCAN_CELLS)
 	terrain_mesh_bounds = bounds
+	var next_drawables: Dictionary = {}
+	var cached_tiles := 0
+	var built_tiles := 0
 	for y in range(bounds.position.y, bounds.end.y):
 		for x in range(bounds.position.x, bounds.end.x):
 			var cell := Vector2i(x, y)
 			var terrain_id := int(terrain_id_provider.call(cell))
-			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_id_provider, resource_catalog, simulation_world.terrain_elevation, mesh_zoom, Vector2.ZERO, map_seed)
+			var drawable: Dictionary = terrain_drawable_cache.get(cell, {})
+			if terrain_drawable_cache.has(cell):
+				cached_tiles += 1
+			else:
+				drawable = TerrainRenderer.tile_drawable(cell, terrain_id, terrain_id_provider, resource_catalog, simulation_world.terrain_elevation, mesh_zoom, Vector2.ZERO, map_seed)
+				built_tiles += 1
+			next_drawables[cell] = drawable
 			if drawable.is_empty():
 				continue
 			for underlay in drawable.get("underlays", []):
@@ -253,6 +319,9 @@ func _rebuild_terrain_mesh(refine_async: bool = false) -> void:
 				_append_texture_quad(vertices, uvs, indices, colors, texture, position, texture.get_size() * mesh_zoom)
 	if vertices.is_empty():
 		return
+	terrain_drawable_cache = next_drawables
+	last_mesh_build_metrics["legacy_cached_tiles"] = cached_tiles
+	last_mesh_build_metrics["legacy_tiles_built"] = built_tiles
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = vertices

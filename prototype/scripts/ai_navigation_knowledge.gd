@@ -1,14 +1,20 @@
 class_name RoRAiNavigationKnowledge
 extends RefCounted
 
+const CacheDependency := preload("res://scripts/cache_dependency.gd")
+const DEFAULT_PREPARE_CELLS := 2048
 const OFFSETS := [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
 const BUCKET_NAMES := ["land", "water", "frontier_land", "frontier_water", "reachable_land", "reachable_water", "reachable_frontier_land", "reachable_frontier_water"]
 
 var entries: Dictionary = {}
+var pending_preparations: Dictionary = {}
+var last_prepared_cells := 0
 
 
 func clear() -> void:
 	entries.clear()
+	pending_preparations.clear()
+	last_prepared_cells = 0
 
 
 func snapshot(world, fog, team: int, probe: Variant = null) -> Dictionary:
@@ -16,11 +22,11 @@ func snapshot(world, fog, team: int, probe: Variant = null) -> Dictionary:
 	var size: Vector2i = world.map_size
 	var reach: Dictionary = _reachable_components(world, team)
 	var entry: Dictionary = entries.get(team, {})
-	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or not fog.navigation_newly_explored_by_player.has(team)
-	var changed_cells: Variant = []
-	if not full_rebuild and int(entry.get("grid_revision", -1)) != int(grid.revision):
-		changed_cells = grid.changed_cells_since(int(entry["grid_revision"]))
-		full_rebuild = changed_cells == null
+	fog.ensure_player(team)
+	var topology := CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
+	var exploration := CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
+	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
+	var changed_cells: Array = topology["cells"]
 	if full_rebuild:
 		entry = _new_entry(size)
 		entry["building_full"] = true
@@ -37,10 +43,10 @@ func snapshot(world, fog, team: int, probe: Variant = null) -> Dictionary:
 		for changed_cell_value in changed_cells:
 			var changed_cell: Vector2i = changed_cell_value
 			dirty[changed_cell.y * size.x + changed_cell.x] = true
-		for index_value in fog.consume_navigation_exploration(team):
-			var index := int(index_value)
+		for cell_value in exploration["cells"]:
+			var cell := Vector2i(cell_value)
+			var index := cell.y * size.x + cell.x
 			dirty[index] = true
-			var cell := Vector2i(index % size.x, index / size.x)
 			for offset in OFFSETS:
 				var neighbor: Vector2i = cell + offset
 				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y:
@@ -59,9 +65,77 @@ func snapshot(world, fog, team: int, probe: Variant = null) -> Dictionary:
 	entry["surface_revision"] = int(grid.surface_revision)
 	entry["exploration_revision"] = int(fog.exploration_revision_for_player(team))
 	entry["reach_signature"] = reach["signature"]
+	entry["topology_stamp"] = topology["stamp"]
+	entry["exploration_stamp"] = exploration["stamp"]
+	# The legacy queue remains bounded; cache correctness uses non-consuming journals.
+	fog.consume_navigation_exploration(team)
+	_refresh_result_buckets(entry)
 	_region_targets(world, team, entry)
+	_freeze_publication(entry["result"])
 	entries[team] = entry
 	return entry["result"]
+
+
+# Cold or widespread invalidations are prepared while the simulation tick is
+# held. Camera and UI keep rendering, and every frame scans a bounded slice.
+func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPARE_CELLS) -> bool:
+	last_prepared_cells = 0
+	fog.ensure_player(team)
+	var grid = world.navigation_grid
+	var size: Vector2i = world.map_size
+	var entry: Dictionary = entries.get(team, {})
+	var topology := CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
+	var exploration := CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
+	var reach := _reachable_components(world, team)
+	var cold: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"]) or entry.get("reach_signature") != reach["signature"] or topology["cells"].size() + exploration["cells"].size() * 5 > maxi(1, maximum_cells)
+	if not cold:
+		pending_preparations.erase(team)
+		return true
+	var signature := [topology["stamp"], CacheDependency.stamp(world, CacheDependency.NAVIGATION_SURFACE), exploration["stamp"], reach["signature"]]
+	var pending: Dictionary = pending_preparations.get(team, {})
+	if pending.is_empty() or pending.get("signature") != signature:
+		entry = _new_entry(size)
+		entry["building_full"] = true
+		pending = {"signature": signature, "cursor": 0, "entry": entry, "reach": reach}
+		pending_preparations[team] = pending
+	entry = pending["entry"]
+	var states: PackedByteArray = fog.states_by_player[team]
+	var start := int(pending["cursor"])
+	var finish := mini(states.size(), start + maxi(1, maximum_cells))
+	for index in range(start, finish):
+		if states[index] != 0:
+			_refresh_cell(entry, index, size, states, grid, pending["reach"])
+	last_prepared_cells = finish - start
+	pending["cursor"] = finish
+	if finish < states.size():
+		return false
+	entry.erase("building_full")
+	entry["grid_revision"] = int(grid.revision)
+	entry["surface_revision"] = int(grid.surface_revision)
+	entry["exploration_revision"] = int(fog.exploration_revision_for_player(team))
+	entry["reach_signature"] = reach["signature"]
+	entry["topology_stamp"] = topology["stamp"]
+	entry["exploration_stamp"] = exploration["stamp"]
+	fog.track_navigation_exploration(team)
+	_refresh_result_buckets(entry)
+	_region_targets(world, team, entry)
+	_freeze_publication(entry["result"])
+	entries[team] = entry
+	pending_preparations.erase(team)
+	return true
+
+
+func _refresh_result_buckets(entry: Dictionary) -> void:
+	# Published navigation arrays are immutable. Changed buckets use copy on
+	# write, and each publication receives a new root with current references.
+	var result: Dictionary = entry["result"].duplicate()
+	var buckets: Dictionary = entry["buckets"]
+	result["land"] = buckets["land"]
+	result["water"] = buckets["water"]
+	result["frontier"] = {"land": buckets["frontier_land"], "water": buckets["frontier_water"]}
+	result["reachable"] = {"land": buckets["reachable_land"], "water": buckets["reachable_water"]}
+	result["reachable_frontier"] = {"land": buckets["reachable_frontier_land"], "water": buckets["reachable_frontier_water"]}
+	entry["result"] = result
 
 
 func _new_entry(size: Vector2i) -> Dictionary:
@@ -116,6 +190,9 @@ func _set_bucket(entry: Dictionary, name: String, index: int, point: Vector2, in
 	var slot := _bucket_position(bucket, point)
 	if (slot < bucket.size() and bucket[slot] == point) == included:
 		return
+	if bucket.is_read_only():
+		bucket = bucket.duplicate()
+		entry["buckets"][name] = bucket
 	if included:
 		bucket.insert(slot, point)
 		return
@@ -222,3 +299,20 @@ func _region_targets(world, team: int, entry: Dictionary) -> void:
 		if best != null: recovery[int(unit["id"])] = best
 	entry["result"]["unit_regions"] = unit_regions
 	entry["result"]["recovery_positions"] = recovery
+
+
+static func _freeze_publication(value: Variant) -> void:
+	# These containers are owned by this cache. Previously published buckets
+	# were recursively frozen here, so unchanged branches need no new scan.
+	if value is Dictionary:
+		if value.is_read_only():
+			return
+		for child in value.values():
+			_freeze_publication(child)
+		value.make_read_only()
+	elif value is Array:
+		if value.is_read_only():
+			return
+		for child in value:
+			_freeze_publication(child)
+		value.make_read_only()

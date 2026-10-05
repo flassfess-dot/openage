@@ -1,10 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include <godot_cpp/classes/ref_counted.hpp>
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -18,6 +20,9 @@ class RoRPathKernel : public RefCounted {
     GDCLASS(RoRPathKernel, RefCounted)
 
 public:
+    Ref<RoRPathKernel> create_search_context() const;
+    PackedInt32Array connectivity_labels(double radius = 0.0);
+    bool install_connectivity(const PackedInt32Array &labels, double radius = 0.0);
     void configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable);
     bool update_walkable(int64_t revision, const PackedInt32Array &indices, const PackedByteArray &values);
     PackedInt32Array find_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
@@ -30,7 +35,7 @@ public:
         const PackedInt32Array &priorities,
         const PackedFloat32Array &health,
         const PackedByteArray &solid_animals = PackedByteArray());
-    Vector4 calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta);
+    Vector4 calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) const;
     int64_t get_revision() const;
     int32_t get_last_expanded_nodes() const;
     bool get_last_path_was_direct() const;
@@ -54,12 +59,12 @@ private:
     int32_t last_expanded_nodes_ = 0;
     bool last_path_was_direct_ = false;
     uint32_t search_generation_ = 0;
-    std::vector<uint8_t> walkable_;
+    std::shared_ptr<std::vector<uint8_t>> walkable_ = std::make_shared<std::vector<uint8_t>>();
     std::vector<double> costs_;
     std::vector<int32_t> parents_;
     std::vector<uint32_t> seen_generation_;
     std::vector<FrontierEntry> frontier_;
-    std::unordered_map<uint64_t, std::vector<int32_t>> components_by_radius_;
+    std::unordered_map<uint64_t, std::shared_ptr<const std::vector<int32_t>>> components_by_radius_;
     const std::vector<int32_t> &components(double clearance_radius);
     std::vector<int32_t> movement_ids_;
     std::vector<Vector2> movement_positions_;
@@ -70,7 +75,7 @@ private:
     std::vector<uint8_t> movement_solid_animals_;
     std::unordered_map<int32_t, int32_t> movement_index_by_id_;
     std::unordered_map<int64_t, std::vector<int32_t>> movement_buckets_;
-    std::vector<int32_t> movement_candidates_;
+
     float maximum_movement_radius_ = 0.0f;
     float maximum_movement_clearance_ = 0.0f;
 

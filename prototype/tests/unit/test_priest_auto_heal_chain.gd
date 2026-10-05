@@ -20,8 +20,6 @@ func _initialize() -> void:
 	world.add_unit(2, "clubman", Vector2(20, 20), false)
 	first["hp"] = float(first["max_hp"]) - 0.2
 	second["hp"] = float(second["max_hp"]) - 2.0
-	first["components"]["health"]["current"] = first["hp"]
-	second["components"]["health"]["current"] = second["hp"]
 	world.update_fog_of_war()
 	assert_equal(world.assign_command_heal([priest], int(first["id"])), "", "first explicit healing order is accepted")
 	var chained := false

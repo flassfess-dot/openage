@@ -26,7 +26,7 @@ func _initialize() -> void:
 
 	var controller = GameController.new(world)
 	var ai = AiPlayer.new({"team": 2, "ai": {"formation": "WEDGE"}})
-	var legal_snapshot := SimulationSnapshot.presentation(world, 0, 2)
+	var legal_snapshot := SimulationSnapshot.with_queries(world, 0, 2)
 	var commands: Array = ai.collect_commands(legal_snapshot, 1)
 	assert_equal(commands.size(), 1, "AI produces one non-conflicting tactical command")
 	for command in commands:

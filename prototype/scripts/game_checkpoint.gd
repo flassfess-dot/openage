@@ -1,6 +1,7 @@
 class_name RoRGameCheckpoint
 extends RefCounted
 
+const EntityComponents := preload("res://scripts/entity_components.gd")
 const Snapshot := preload("res://scripts/simulation_snapshot.gd")
 const Replay := preload("res://scripts/replay_system.gd")
 const Formation := preload("res://scripts/formation_group.gd")
@@ -194,6 +195,12 @@ static func validate(data: Dictionary) -> bool:
 static func restore(data: Dictionary, world, controller) -> bool:
 	if not validate(data) or world.map_size != data["world"]["map_size"]: return false
 	_restore_fields(world, data["world"], WORLD_FIELDS)
+	# Derived cache cursors never survive a state replacement, including a
+	# restore into the same objects with coincident saved revisions.
+	world.cache_epoch += 1
+	world.terrain_change_history.clear()
+	world.navigation_grid.cache_epoch += 1
+	world.terrain_elevation.cache_epoch += 1
 	for name in SYSTEM_FIELDS: _restore_fields(world.get(name), data["systems"][name], SYSTEM_FIELDS[name])
 	# Reconnect shared records: serialized values never retain object aliases.
 	world.destination_reservations.restore_state(world.destination_reservations.reservations)
@@ -210,9 +217,12 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	var entities := {}
 	for pair in [[world.units, world.units_by_id], [world.buildings, world.buildings_by_id], [world.resource_nodes, world.resource_nodes_by_id]]:
 		for entity in pair[0]:
+			EntityComponents.sync_dynamic(entity)
 			var id := int(entity["id"])
 			pair[1][id] = entity
 			entities[id] = entity
+	for entity in world.get_embarked_units():
+		EntityComponents.sync_dynamic(entity)
 	for entity in world.victory_objectives:
 		if not entities.has(int(entity["id"])): entities[int(entity["id"])] = entity
 	for resource in world.resource_nodes:
@@ -236,6 +246,7 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	world.ai_navigation_knowledge.clear()
 	world.local_build_site_cache.clear()
 	world.render_entity_projection_cache.clear()
+	world.terrain_elevation.revision += 1
 	world.terrain_elevation.nonzero_vertex_count = 0
 	world.terrain_elevation.maximum_vertex_level = 0
 	for level in world.terrain_elevation.vertex_levels.values():
@@ -250,6 +261,9 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	world.pathfinder.clear_cache()
 	world.movement_system.knowledge.clear()
 	var fog = world.fog_of_war
+	fog.cache_epoch += 1
+	fog.visibility_change_history.clear()
+	fog.exploration_change_history.clear()
 	_restore_fields(fog, data["fog"], FOG_FIELDS)
 	fog.vision_sources.clear()
 	for key in data["fog"]["sources"]:

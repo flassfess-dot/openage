@@ -1,5 +1,7 @@
 extends SceneTree
 
+const MatchReady := preload("res://tests/support/match_ready.gd")
+
 var failures: Array[String] = []
 
 
@@ -9,6 +11,10 @@ func _initialize() -> void:
 	root.add_child(game)
 	await process_frame
 	await process_frame
+	if not await MatchReady.wait_for_ready(self, game):
+		game.free()
+		quit(1)
+		return
 
 	var worker: Dictionary = {}
 	for unit_value in game.units:

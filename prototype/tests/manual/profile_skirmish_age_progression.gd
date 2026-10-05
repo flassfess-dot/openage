@@ -44,11 +44,11 @@ func run() -> void:
 	for tick in range(max_ticks):
 		var next_tick := controller.tick_index+1
 		if ai.needs_decision(next_tick):
-			var snapshot := Snapshot.presentation(world,controller.tick_index,2,ai.presentation_options())
+			var snapshot := Snapshot.with_queries(world,controller.tick_index,2,ai.presentation_options())
 			for command in ai.collect_commands(snapshot,next_tick): controller.enqueue_command(command,true,2)
 		controller.advance_frame(.05,1,2)
 		if tick%1000 == 999 or tick == max_ticks-1:
-			var snapshot := Snapshot.presentation(world,controller.tick_index,2,ai.presentation_options())
+			var snapshot := Snapshot.with_queries(world,controller.tick_index,2,ai.presentation_options())
 			var own_workers: Array = world.get_units().filter(func(u):return u["team"] == 2 and world.entity_is_worker(u))
 			var record := {"tick":controller.tick_index,"age":world.get_current_age(2),"resources":snapshot["player_state"],"workers":own_workers.map(func(u):return {"id":u["id"],"pos":u["pos"],"task":u["task"],"stage":u.get("gather_stage"),"resource_id":u.get("resource_id"),"reason":u.get("diagnostic_reason"),"carry":u.get("carried_amount")}),"buildings":snapshot["buildings"].filter(func(b):return b["team"]==2).map(func(b):return {"kind":b["kind"],"state":b["state"],"queue":b.get("production_queue"),"research":b.get("command_options",{}).get("research",[])})}
 			trace.append(record)

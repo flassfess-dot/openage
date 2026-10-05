@@ -56,7 +56,7 @@ func _initialize() -> void:
 		var next_tick: int = int(controller.tick_index) + 1
 		var submitted: Array = []
 		for ai in players:
-			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, int(ai.team))
+			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, int(ai.team))
 			var commands: Array = ai.collect_commands(knowledge, next_tick)
 			if step == 0:
 				first_observations[int(ai.team)] = {"units": knowledge.get("units", []).map(func(unit): return {"id": int(unit.get("id", -1)), "team": int(unit.get("team", 0)), "kind": String(unit.get("kind", "")), "domain": String(unit.get("movement_domain", ""))}), "commands": commands.map(func(command): return String(command.command_type()))}

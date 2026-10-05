@@ -165,6 +165,8 @@ static func error_message(error: String) -> String:
 	if error.begins_with("state_hash_mismatch"):
 		return "Состояние сохранения не совпало с записью команд"
 	match error:
+		"save_busy": return "Дождитесь завершения текущего сохранения"
+		"capture_not_isolated": return "Не удалось подготовить согласованное сохранение"
 		"checkpoint_invalid":
 			return "Сохранение повреждено: не удалось восстановить состояние мира"
 		"save_not_found": return "Сохранение не найдено"

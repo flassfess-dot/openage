@@ -2,6 +2,8 @@ class_name RoRSimulationSnapshot
 extends RefCounted
 
 const EntityComponents := preload("res://scripts/entity_components.gd")
+const ObservationQueries := preload("res://scripts/simulation_observation_queries.gd")
+const ReadContract := preload("res://scripts/entity_read_contract.gd")
 
 const FORMAT_VERSION: int = 1
 
@@ -44,6 +46,12 @@ static func presentation_fog(fog, observer_team: int) -> Dictionary:
 	return _presentation_fog(fog, observer_team)
 
 
+# Explicit compatibility entry point for tools and consumers that require
+# planning/command queries. The ordinary presentation() entry point only reads.
+static func with_queries(world, tick: int, observer_team: int = 0, options: Dictionary = {}) -> Dictionary:
+	return ObservationQueries.enrich(world, presentation(world, tick, observer_team, options), options)
+
+
 static func presentation(world, tick: int, observer_team: int = 0, options: Dictionary = {}) -> Dictionary:
 	var snapshot_probe: Variant = options.get("performance_probe")
 	var snapshot_prefix := String(options.get("performance_prefix", "presentation.snapshot"))
@@ -63,12 +71,9 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var compact_render_entities := bool(options.get("compact_render_entities", false))
 	var borrow_visible_render_entities := bool(options.get("borrow_visible_render_entities", false))
 	var borrow_overview_entities := bool(options.get("borrow_overview_entities", false))
-	var include_navigation := bool(options.get("include_navigation", true))
-	var include_build_sites := bool(options.get("include_build_sites", true))
 	var include_fog_cells := bool(options.get("include_fog_cells", true))
 	var include_projectiles := bool(options.get("include_projectiles", true))
 	var include_scenario := bool(options.get("include_scenario", true))
-	var include_worker_command_options := bool(options.get("include_worker_command_options", true))
 	var include_overview := bool(options.get("include_overview", false))
 	var include_overview_resources := bool(options.get("include_overview_resources", include_overview))
 	var entity_bounds: Variant = options.get("entity_bounds")
@@ -84,23 +89,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	for entity_id_value in command_option_entity_ids:
 		command_option_entity_lookup[int(entity_id_value)] = true
 	var restrict_command_options := options.has("command_option_entity_ids")
-	var requested_production_only := bool(options.get("requested_production_only", false))
-	var production_requests: Array = options.get("production_requests", [])
-	var planning_technology_ids: Array = options.get("planning_technology_ids", [])
-	var requested_build_site_kinds: Array = options.get("requested_build_site_kinds", [])
 	var compact_render_projector: Callable = Callable(world, "compact_render_projection") if compact_render_entities and world.has_method("compact_render_projection") else Callable()
-	var requested_build_options: Array = []
-	var worker_build_options: Array = []
-	var worker_build_options_ready := false
-	var available_requested_build_site_kinds: Array = []
-	if observer_team > 0 and not requested_build_site_kinds.is_empty():
-		var build_options: Array = world.get_build_options_for_kinds(observer_team, requested_build_site_kinds) if world.has_method("get_build_options_for_kinds") else world.get_build_options(observer_team)
-		for option_value in build_options:
-			var option: Dictionary = option_value
-			if String(option.get("kind", "")) in requested_build_site_kinds:
-				requested_build_options.append(option)
-				if bool(option.get("accepted", false)):
-					available_requested_build_site_kinds.append(String(option.get("kind", "")))
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".setup", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
@@ -139,7 +128,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		for unit_value in world.get_units():
 			var overview_unit: Dictionary = unit_value
 			if _entity_visible_to_observer(overview_unit, observer_team, observer_states, observer_allies, fog_map_size):
-				overview_units.append(overview_unit if borrow_overview_entities else _overview_entity(overview_unit))
+				overview_units.append(_overview_entity(overview_unit))
 	if snapshot_probe != null:
 		unit_overview_microseconds = Time.get_ticks_usec() - unit_substage_started
 		unit_substage_started = Time.get_ticks_usec()
@@ -158,7 +147,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				# The in-process renderer is a trusted read-only consumer on the same
 				# thread. Borrow unchanged visible records rather than copying dozens
 				# of fields every fixed tick. Selected/control entities stay detached.
-				presentation_unit = unit
+				presentation_unit = compact_render_projector.call(unit) if compact_render_projector.is_valid() else ReadContract.render(unit)
 			else:
 				var projection_started := Time.get_ticks_usec() if snapshot_probe != null else 0
 				presentation_unit = _presentation_entity(
@@ -171,23 +160,10 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				if snapshot_probe != null:
 					unit_render_projection_microseconds += Time.get_ticks_usec() - projection_started
 			if compact_entities and observer_team > 0 and int(unit.get("team", 0)) != observer_team and world.are_teams_allied(observer_team, int(unit.get("team", 0))):
+				presentation_unit = presentation_unit.duplicate(true)
 				var allied_cargo: Dictionary = presentation_unit.get("components", {}).get("cargo", {})
 				if bool(allied_cargo.get("enabled", false)):
 					allied_cargo["count"] = unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).size()
-			if observer_team > 0 and int(unit.get("team", 0)) == observer_team and world.entity_is_worker(unit) and (not restrict_command_options or command_option_entity_lookup.has(int(unit.get("id", -1)))):
-				var worker_options_started := Time.get_ticks_usec() if snapshot_probe != null else 0
-				if not requested_build_options.is_empty():
-					presentation_unit["command_options"] = {"build": requested_build_options}
-				elif include_worker_command_options:
-					# Build availability belongs to the player/tick, not to an
-					# individual worker. A multi-worker selection must not rebuild
-					# the same detached option list once per selected villager.
-					if not worker_build_options_ready:
-						worker_build_options = world.get_build_options(observer_team)
-						worker_build_options_ready = true
-					presentation_unit["command_options"] = {"build": worker_build_options}
-				if snapshot_probe != null:
-					unit_worker_options_microseconds += Time.get_ticks_usec() - worker_options_started
 			units.append(presentation_unit)
 			if always_include_entity_lookup.has(unit_id):
 				control_units.append(presentation_unit)
@@ -224,14 +200,14 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	if include_overview_resources:
 		var overview_source_resources: Array = world.get_known_resources(observer_team) if resources_are_preordered else world.get_resources()
 		if borrow_overview_entities:
-			overview_resources = overview_source_resources
+			overview_resources = overview_source_resources.duplicate()
 		else:
 			for resource_value in overview_source_resources:
 				overview_resources.append(_overview_entity(resource_value))
 	for resource in known_resources:
 		var resource_id := int(resource.get("id", -1))
 		var presentation_resource: Dictionary
-		if resources_use_shared_ai_projection or (compact_render_entities and borrow_visible_render_entities and not always_include_entity_lookup.has(resource_id)):
+		if resources_use_shared_ai_projection:
 			presentation_resource = resource
 		else:
 			presentation_resource = _presentation_entity(
@@ -289,12 +265,13 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 			continue
 		if not knowledge.is_empty():
 			if include_overview:
-				overview_buildings.append(knowledge if borrow_overview_entities and visible_now else _overview_entity(knowledge))
+				overview_buildings.append(_overview_entity(knowledge))
 			if not building_in_detail_bounds:
 				continue
 			var presentation_building: Dictionary
 			if not visible_now:
 				presentation_building = _compact_ai_entity(knowledge, observer_team) if compact_entities else _compact_render_entity(knowledge)
+				presentation_building = presentation_building.duplicate()
 				presentation_building["last_known"] = true
 			elif compact_render_entities and always_include_entity_lookup.has(building_id):
 				presentation_building = _compact_control_entity(building, observer_team, compact_render_projector)
@@ -307,29 +284,18 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 					compact_render_projector
 				)
 			if visible_now:
+				presentation_building = presentation_building.duplicate()
 				presentation_building["target_domains"] = world.combat_target_domains(building)
 			if visible_now and world.trade_system.is_trade_dock(building):
 				presentation_building["trade"] = world.trade_system.presentation_for_dock(building)
 			if compact_entities and observer_team > 0 and int(building.get("team", 0)) == observer_team:
+				presentation_building["production_queue"] = presentation_building.get("production_queue", []).duplicate(true)
 				for order_value in presentation_building.get("production_queue", []):
 					var projected_order: Dictionary = order_value
 					if String(projected_order.get("order_type", "unit")) == "unit":
 						projected_order["population_points_cost"] = world.unit_population_points_cost(String(projected_order.get("kind", "")), observer_team)
 			if observer_team > 0 and int(building.get("team", 0)) == observer_team and (not restrict_command_options or command_option_entity_lookup.has(int(building.get("id", -1)))):
 				presentation_building["builder_count"] = building.get("builders", {}).size()
-				if String(building.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(building, units)):
-					presentation_building["reachable_builder_ids"] = world.reachable_builder_ids(building)
-				if requested_production_only:
-					presentation_building["command_options"] = _requested_production_options(world, building, observer_team, production_requests)
-				elif bool(options.get("economic_production_options_only", false)):
-					presentation_building["command_options"] = economic_production_options(world, building, observer_team)
-				else:
-					presentation_building["command_options"] = {
-						"train": world.get_unit_production_options(int(building.get("id", -1)), observer_team),
-						"research": world.get_research_options(int(building.get("id", -1)), observer_team),
-					}
-				if not planning_technology_ids.is_empty():
-					_append_planning_research_options(world, presentation_building, building, observer_team, planning_technology_ids)
 			buildings.append(presentation_building)
 			if always_include_entity_lookup.has(building_id):
 				control_buildings.append(presentation_building)
@@ -352,6 +318,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				overview_buildings.append(_overview_entity(memory))
 			if not has_entity_bounds or _entity_in_bounds(memory, entity_bounds) or always_include_entity_lookup.has(missing_id):
 				var last_known: Dictionary = _compact_ai_entity(memory, observer_team) if compact_entities else _compact_render_entity(memory)
+				last_known = last_known.duplicate()
 				last_known["last_known"] = true
 				buildings.append(last_known)
 		world.last_known_buildings_by_player[observer_team] = remembered_buildings
@@ -371,23 +338,6 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		player_state["blocked_population_queues"] = blocked_population_queues
 	if snapshot_probe != null:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".player_state", Time.get_ticks_usec() - snapshot_stage_started)
-		snapshot_stage_started = Time.get_ticks_usec()
-	# Optional policy filtering uses only the same observer-visible data supplied
-	# to the planner. It never reads hidden entities or caches placement validity.
-	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, fog, observer_team, snapshot_probe) if include_navigation and observer_team > 0 else {}
-	var build_site_filter: Callable = options.get("build_site_filter", Callable())
-	if build_site_filter.is_valid() and not available_requested_build_site_kinds.is_empty():
-		if bool(options.get("build_site_filter_navigation", false)):
-			available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state, navigation)
-		else:
-			available_requested_build_site_kinds = build_site_filter.call(available_requested_build_site_kinds, units, buildings, player_state)
-	var build_sites: Dictionary = {}
-	if observer_team > 0 and not requested_build_site_kinds.is_empty():
-		build_sites = requested_build_sites(world, tick, observer_team, available_requested_build_site_kinds, options, units, buildings)
-	elif observer_team > 0 and include_build_sites:
-		build_sites = world.get_mixed_domain_build_sites(observer_team)
-	if snapshot_probe != null:
-		snapshot_probe.observe_microseconds(snapshot_prefix + ".build_sites", Time.get_ticks_usec() - snapshot_stage_started)
 		snapshot_stage_started = Time.get_ticks_usec()
 	var presented_fog: Dictionary = _presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []}
 	var scenario: Dictionary = world.scenario_system.presentation_state(observer_team) if include_scenario else {}
@@ -426,8 +376,8 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 			"buildings": sorted_overview_buildings,
 		},
 		"ai_distress_signals": world.get_attack_distress_signals(observer_team) if observer_team > 0 else [],
-		"navigation": navigation,
-		"build_sites": build_sites,
+		"navigation": {},
+		"build_sites": {},
 		# Rendering only depends on this observer's grid. Enemy and neutral fog
 		# changes must not invalidate the local player's cached fog mesh.
 		"fog_revision": int(fog.revision_for_player(observer_team)),
@@ -505,7 +455,7 @@ static func _sorted_entities(source: Array) -> Array:
 	var result: Array = []
 	for entity in source:
 		var canonical_entity: Dictionary = entity.duplicate(true)
-		EntityComponents.sync_dynamic(canonical_entity)
+		EntityComponents.project_dynamic(canonical_entity)
 		# Selection belongs to player-control/presentation state and must not
 		# change deterministic simulation hashes.
 		canonical_entity.erase("selected")
@@ -524,7 +474,7 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 			return compact_render_projector.call(entity)
 		return _compact_render_entity(entity)
 	var result: Dictionary = entity.duplicate(true)
-	EntityComponents.sync_dynamic(result)
+	EntityComponents.project_dynamic(result)
 	result.erase("selected")
 	result.erase("formation_shared_motion")
 	result.erase("formation_shared_isolated")
@@ -547,63 +497,7 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 
 
 static func _compact_render_entity(entity: Dictionary) -> Dictionary:
-	# A frame does not need authoritative movement paths, combat tables,
-	# technology state or production internals for every visible object. Keep a
-	# detached projection with the stable fields consumed by rendering, picking
-	# and right-click context resolution. Selected entities bypass this path and
-	# retain the complete presentation contract for HUD actions and commands.
-	var result: Dictionary = {}
-	for key in [
-		"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
-		"health_unknown", "location_only",
-		"pos", "previous_pos", "elevation", "source_elevation", "visual_height",
-		"hp", "max_hp", "amount", "max_amount", "active", "logical_only",
-		"state", "resource_state", "depletion_stage", "visible_when_depleted",
-		"harvestable", "resource_type_id", "building_type", "movement_domain",
-		"footprint_radius", "selection_radius", "selection_height",
-		"anim", "anim_state", "facing", "presentation_facing",
-		"death_phase", "death_elapsed", "construction_stage",
-		"environment_asset", "environment_variant", "tree_condition", "tree_phase", "tree_fall_elapsed", "tree_fall_duration", "source_felled_graphic_id", "source_felled_asset_name", "display_graphic_id", "source_frame", "source_graphic_id", "source_graphic_asset_name",
-		"source_requested_graphic_asset_name", "source_asset_fallback_reason",
-		"source_depleted_graphic_id", "source_depleted_asset_name", "combat_enabled", "task", "target_id",
-		"target_building_id", "resource_id", "formation_forward", "carried_amount",
-	]:
-		if entity.has(key):
-			result[key] = entity[key]
-	for array_key in ["behavior_tags", "unit_lineage", "allowed_gatherer_domains"]:
-		if entity.has(array_key):
-			result[array_key] = entity.get(array_key, []).duplicate()
-	if entity.has("footprint"):
-		result["footprint"] = entity.get("footprint", {}).duplicate(true)
-	if entity.has("presentation_state_overrides"):
-		result["presentation_state_overrides"] = entity.get("presentation_state_overrides", {}).duplicate()
-	var source_components: Dictionary = entity.get("components", {})
-	var components: Dictionary = {}
-	var ownership: Dictionary = source_components.get("ownership", {})
-	if not ownership.is_empty():
-		components["ownership"] = {
-			"civilization_id": int(ownership.get("civilization_id", 13)),
-		}
-	for component_name in ["worker", "conversion", "healing"]:
-		var source_component: Dictionary = source_components.get(component_name, {})
-		if not source_component.is_empty():
-			components[component_name] = {
-				"enabled": bool(source_component.get("enabled", false)),
-			}
-	var cargo: Dictionary = source_components.get("cargo", {})
-	if not cargo.is_empty():
-		components["cargo"] = {
-			"enabled": bool(cargo.get("enabled", false)),
-			"capacity": maxi(0, int(cargo.get("capacity", 0))),
-		}
-	var trade: Dictionary = source_components.get("trade", {})
-	if not trade.is_empty():
-		components["trade"] = {
-			"enabled": bool(trade.get("enabled", false)),
-			"target_building_source_id": int(trade.get("target_building_source_id", -1)),
-		}
-	result["components"] = components
-	return result
+	return ReadContract.render(entity)
 
 
 static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, compact_render_projector: Callable = Callable()) -> Dictionary:
@@ -611,13 +505,8 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 	# destination reservations, AI bookkeeping or the full technology payload.
 	# Keeping this explicit contract avoids two deep copies of large unit records
 	# every presentation tick while preserving every player-facing control field.
-	var result: Dictionary = compact_render_projector.call(entity).duplicate(true) if compact_render_projector.is_valid() else _compact_render_entity(entity)
-	for key in [
-		"stance", "attack_damage", "attack_range", "attack_range_min", "attack_period",
-		"carry_capacity", "carried_resource_type_id", "resource_id", "gather_stage",
-		"worker_role_source_unit_id", "dropoff_id", "diagnostic_reason",
-		"construction_progress", "production_progress", "rally_point",
-	]:
+	var result: Dictionary = compact_render_projector.call(entity).duplicate(true) if compact_render_projector.is_valid() else _compact_render_entity(entity).duplicate(true)
+	for key in ReadContract.CONTROL_FIELDS:
 		if entity.has(key):
 			result[key] = entity[key]
 	if entity.has("production_queue") and (observer_team <= 0 or int(entity.get("team", 0)) == observer_team):
@@ -625,7 +514,7 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 	var source_components: Dictionary = entity.get("components", {})
 	var components: Dictionary = result.get("components", {}).duplicate(true)
 	for component_name in ["combat", "conversion", "healing", "resource_carrier"]:
-		var component: Dictionary = source_components.get(component_name, {})
+		var component: Dictionary = EntityComponents.component_view(entity, component_name)
 		if not component.is_empty():
 			components[component_name] = component.duplicate(true)
 	var cargo: Dictionary = source_components.get("cargo", {})
@@ -686,118 +575,15 @@ static func _overview_entity(entity: Dictionary) -> Dictionary:
 
 
 static func _compact_ai_entity(entity: Dictionary, observer_team: int = 0) -> Dictionary:
-	var result: Dictionary = {}
-	for key in [
-		"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
-		"pos", "hp", "max_hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
-		"resource_type_id", "harvestable", "footprint_radius", "rally_point", "attack_range",
-		"projectile_id", "blast_range",
-		"reachable_builder_ids",
-	]:
-		if entity.has(key):
-			result[key] = entity[key]
-	if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
-		for field in ["resource_id", "path_request_id"]:
-			if entity.has(field): result[field] = int(entity[field])
-	if entity.has("unit_lineage"):
-		result["unit_lineage"] = entity.get("unit_lineage", []).duplicate()
-	if entity.has("behavior_tags"):
-		result["behavior_tags"] = entity.get("behavior_tags", []).duplicate()
-	if entity.has("allowed_gatherer_domains"):
-		result["allowed_gatherer_domains"] = entity.get("allowed_gatherer_domains", []).duplicate()
-	var worker: Dictionary = entity.get("components", {}).get("worker", {})
-	var components := {"worker": {"enabled": bool(worker.get("enabled", false))}}
-	if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
-		var order: Dictionary = entity.get("components", {}).get("order", {})
-		if not order.is_empty():
-			components["order"] = {
-				"type": String(order.get("type", "none")),
-				"target_entity_id": int(order.get("target_entity_id", -1)),
-				"completed": bool(order.get("completed", true)),
-				"completion_reason": String(order.get("completion_reason", "")),
-			}
-	var healing: Dictionary = entity.get("components", {}).get("healing", {})
-	if bool(healing.get("enabled", false)):
-		components["healing"] = {"enabled": true}
-	var combat: Dictionary = entity.get("components", {}).get("combat", {})
-	if not combat.is_empty():
-		components["combat"] = {
-			"projectile_id": int(combat.get("projectile_id", entity.get("projectile_id", -1))),
-			"blast_range": float(combat.get("blast_range", entity.get("blast_range", 0.0))),
-		}
-	var cargo: Dictionary = entity.get("components", {}).get("cargo", {})
-	if bool(cargo.get("enabled", false)):
-		components["cargo"] = {
-			"enabled": true,
-			"capacity": maxi(0, int(cargo.get("capacity", 0))),
-			"allow_allied": bool(cargo.get("allow_allied", true)),
-			"allow_artifacts": bool(cargo.get("allow_artifacts", true)),
-		}
-		if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
-			components["cargo"]["passenger_ids"] = cargo.get("passenger_ids", []).duplicate()
-	var trade: Dictionary = entity.get("components", {}).get("trade", {})
-	if bool(trade.get("enabled", false)):
-		components["trade"] = {"enabled": true}
-		if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:
-			for field in ["target_dock_id", "home_dock_id", "selected_input_resource_type_id", "approach_position", "cargo_goods", "cargo_gold", "trip_count"]:
-				if trade.has(field):
-					components["trade"][field] = trade[field]
-	result["components"] = components
-	if entity.has("production_queue") and (observer_team <= 0 or int(entity.get("team", 0)) == observer_team):
-		var queue: Array = []
-		for order_value in entity.get("production_queue", []):
-			var order: Dictionary = order_value
-			queue.append({
-				"order_type": String(order.get("order_type", "unit")),
-				"kind": String(order.get("kind", "")),
-				"technology_id": int(order.get("technology_id", -1)),
-				"status": String(order.get("status", "queued")),
-				"population_cost": int(order.get("population_cost", 0)),
-			})
-		result["production_queue"] = queue
-	return result
+	return ReadContract.ai(entity, observer_team)
 
 
 static func _requested_production_options(world, building: Dictionary, team: int, requests: Array) -> Dictionary:
-	var result := {"train": [], "research": []}
-	var lineage: Array = building.get("unit_lineage", [int(building.get("source_unit_id", -1))])
-	var building_id := int(building.get("id", -1))
-	var seen_units: Dictionary = {}
-	var seen_technologies: Dictionary = {}
-	for request_value in requests:
-		var request: Dictionary = request_value
-		if not lineage.has(int(request.get("producer_source_unit_id", -1))):
-			continue
-		if String(request.get("type", "")) == "unit":
-			var kind := String(request.get("runtime_alias", ""))
-			if not kind.is_empty() and not seen_units.has(kind):
-				result["train"].append(world.get_unit_production_availability(building_id, team, kind))
-				seen_units[kind] = true
-		elif String(request.get("type", "")) == "technology":
-			var technology_id := int(request.get("source_id", -1))
-			if technology_id >= 0 and not seen_technologies.has(technology_id):
-				result["research"].append(world.get_research_availability(building_id, team, technology_id))
-				seen_technologies[technology_id] = true
-	return result
+	return ObservationQueries.requested_production_options(world, building, team, requests)
 
 
 static func _append_planning_research_options(world, presentation_building: Dictionary, source_building: Dictionary, team: int, technology_ids: Array) -> void:
-	var command_options: Dictionary = presentation_building.get("command_options", {})
-	var research_options: Array = command_options.get("research", [])
-	var known: Dictionary = {}
-	for option_value in research_options:
-		known[int(option_value.get("technology_id", -1))] = true
-	for technology_id_value in technology_ids:
-		var technology_id := int(technology_id_value)
-		if technology_id <= 0 or known.has(technology_id):
-			continue
-		var option: Dictionary = world.get_research_availability(int(source_building.get("id", -1)), team, technology_id)
-		if String(option.get("reason", "")) in ["wrong_research_location", "invalid_research_building", "technology_disabled", "already_researched", "already_researching"]:
-			continue
-		research_options.append(option)
-		known[technology_id] = true
-	command_options["research"] = research_options
-	presentation_building["command_options"] = command_options
+	ObservationQueries.append_planning_research_options(world, presentation_building, source_building, team, technology_ids)
 
 
 static func _sort_entity_copies(source: Array) -> Array:
@@ -956,44 +742,12 @@ static func _production_overview(world, observer_team: int) -> Array:
 
 
 static func foundation_needs_recovery(building: Dictionary, units: Array) -> bool:
-	if not building.get("builders", {}).is_empty():
-		return false
-	var building_id := int(building.get("id", -1))
-	var team := int(building.get("team", 0))
-	return not units.any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and String(unit.get("task", "")) == "build" and int(unit.get("target_building_id", -1)) == building_id)
+	return ObservationQueries.foundation_needs_recovery(building, units)
 
 
 static func economic_production_options(world, building: Dictionary, team: int) -> Dictionary:
-	var empty := {"train": [], "research": []}
-	if String(building.get("state", "complete")) != "complete" or not world.data_repository.is_configured():
-		return empty
-	var queue: Array = building.get("production_queue", [])
-	if queue.size() >= 2 or (not queue.is_empty() and (String(queue[0].get("order_type", "unit")) != "unit" or String(queue[0].get("status", "")) == "blocked_population")):
-		return empty
-	var building_id := int(building.get("id", -1))
-	if not queue.is_empty():
-		# The economic planner can only extend a unit queue with the same kind.
-		var option: Dictionary = world.get_unit_production_availability(building_id, team, String(queue[0].get("kind", "")))
-		return {"train": [option] if String(option.get("reason", "")) not in ["unit_replaced", "unit_unavailable"] else [], "research": []}
-	return {"train": world.get_unit_production_options(building_id, team), "research": world.get_research_options(building_id, team)}
+	return ObservationQueries.economic_production_options(world, building, team)
 
 
 static func requested_build_sites(world, tick: int, team: int, kinds: Array, options: Dictionary, units: Array = [], buildings: Array = []) -> Dictionary:
-	var maximum := maxi(1, int(options.get("maximum_build_sites_per_kind", 4)))
-	var radius := maxi(1, int(options.get("build_site_search_radius", 12)))
-	var age := maxi(0, int(options.get("build_site_cache_ticks", 0)))
-	var preferred: Dictionary = options.get("preferred_build_sites", {})
-	var strict: Array = options.get("strict_preferred_build_site_kinds", [])
-	var gap := maxf(0.0, float(options.get("minimum_structure_gap", 0.0)))
-	var candidate_filter: Callable = options.get("build_site_candidate_filter", Callable())
-	if not candidate_filter.is_valid():
-		return world.get_cached_local_build_sites(team, kinds, tick, age, maximum, radius, preferred, strict, gap) if age > 0 and world.has_method("get_cached_local_build_sites") else world.get_local_build_sites(team, kinds, maximum, radius, preferred, strict, gap)
-	var result: Dictionary = {}
-	for kind_value in kinds:
-		var kind := String(kind_value)
-		var sites: Dictionary = world.get_cached_local_build_sites(team, [kind], tick, age, maximum, radius, preferred, strict, gap) if age > 0 and world.has_method("get_cached_local_build_sites") else world.get_local_build_sites(team, [kind], maximum, radius, preferred, strict, gap)
-		if sites.has(kind):
-			result[kind] = sites[kind]
-			if bool(candidate_filter.call(kind, sites[kind], units, buildings)):
-				break
-	return result
+	return ObservationQueries.requested_build_sites(world, tick, team, kinds, options, units, buildings)

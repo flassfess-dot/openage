@@ -41,7 +41,7 @@ func _initialize() -> void:
 		"ai": {"enabled": true, "profile": "source_campaign_v1", "economic_interval_ticks": 20, "military_interval_ticks": 20},
 	})
 	var options: Dictionary = ai.presentation_options()
-	var snapshot: Dictionary = SimulationSnapshot.presentation(world, 0, 2, options)
+	var snapshot: Dictionary = SimulationSnapshot.with_queries(world, 0, 2, options)
 	assert_true(not snapshot.get("build_sites", {}).get("barracks", []).is_empty(), "compact source-AI snapshot exposes a legal Barracks site")
 	var commands: Array = ai.collect_commands(snapshot, 1)
 	assert_equal(commands.size(), 1, "source AI emits one non-conflicting build-list command")
@@ -106,11 +106,11 @@ func verify_city_wall_plan_pipeline(catalog) -> void:
 		"source_ai": contract,
 		"ai": {"enabled": true, "profile": "source_campaign_v1", "economic_interval_ticks": 20, "military_interval_ticks": 20},
 	})
-	var first_snapshot: Dictionary = SimulationSnapshot.presentation(world, 0, 2, ai.presentation_options())
+	var first_snapshot: Dictionary = SimulationSnapshot.with_queries(world, 0, 2, ai.presentation_options())
 	assert_true(ai.collect_commands(first_snapshot, 1).is_empty(), "first decision initializes the persistent wall geometry before requesting distant planned sites")
 	var options: Dictionary = ai.presentation_options()
 	assert_true("wall" in options.get("strict_preferred_build_site_kinds", []), "initialized AI requests strict planned wall cells")
-	var planned_snapshot: Dictionary = SimulationSnapshot.presentation(world, 0, 2, options)
+	var planned_snapshot: Dictionary = SimulationSnapshot.with_queries(world, 0, 2, options)
 	assert_true(not planned_snapshot.get("build_sites", {}).get("wall", []).is_empty(), "authoritative snapshot validates at least one visible planned wall cell")
 	ai.last_economic_tick = -1
 	var commands: Array = ai.collect_commands(planned_snapshot, 1)

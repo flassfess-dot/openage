@@ -46,7 +46,7 @@ func _initialize() -> void:
 	for _step in range(2400):
 		var next_tick: int = int(controller.tick_index) + 1
 		for ai in players:
-			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, int(ai.team))
+			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, int(ai.team))
 			for command in ai.collect_commands(knowledge, next_tick):
 				controller.enqueue_command(command, true, int(ai.team))
 				issued_by_team[int(ai.team)] += 1

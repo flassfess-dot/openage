@@ -70,7 +70,7 @@ func test_stopped_worker_recovers(catalog, native: bool) -> void:
 	check(worker["task"] == "idle" and worker["diagnostic_reason"] == "stuck_stopped_nearest_valid", "real movement loop detects a stalled order")
 	check(worker["path"].is_empty() and worker["target"] == worker["pos"] and worker["reserved_destination"] == null, "stopping releases the complete old route")
 	worker["speed"] = original_speed
-	var snapshot := Snapshot.presentation(world, 100, 2, {"compact_entities": true})
+	var snapshot := Snapshot.with_queries(world, 100, 2, {"compact_entities": true})
 	var ai := Ai.new({"team": 2})
 	var initial: Array = ai.collect_commands(snapshot, 100).filter(func(command): return int(worker["id"]) in command.unit_ids)
 	check(initial.is_empty(), "real stuck observation enters bounded AI backoff")

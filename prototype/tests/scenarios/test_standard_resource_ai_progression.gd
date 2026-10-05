@@ -41,7 +41,7 @@ func _initialize() -> void:
 	while controller.tick_index < MAX_TICKS and world.get_current_age(2) < 101:
 		var tick: int = controller.tick_index+1
 		if ai.needs_decision(tick):
-			var knowledge := Snapshot.presentation(world,controller.tick_index,2,ai.presentation_options())
+			var knowledge := Snapshot.with_queries(world,controller.tick_index,2,ai.presentation_options())
 			for command in ai.collect_commands(knowledge,tick): controller.enqueue_command(command,true,2)
 		controller.advance_frame(.05,1,2)
 	var complete_kinds: Array = world.get_buildings().filter(func(b):return b["team"] == 2 and b["state"] == "complete").map(func(b):return b["kind"])

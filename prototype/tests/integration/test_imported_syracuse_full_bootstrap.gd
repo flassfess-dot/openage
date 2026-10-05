@@ -78,7 +78,7 @@ func verify_archimedes_defeat(world) -> void:
 	assert_true(world.is_battle_over(), "losing exact Hero Archimedes ends the mission")
 	assert_equal(int(world.get_victory_result().get("winner_team", -1)), 2, "deterministic source participant order awards the shared objective to team 2")
 	assert_equal(String(world.get_victory_result().get("reason", "")), "scenario", "Archimedes defeat retains the scenario reason")
-	var presentation: Dictionary = SimulationSnapshot.presentation(world, 2, 1, {"include_navigation": false, "include_build_sites": false})
+	var presentation: Dictionary = SimulationSnapshot.with_queries(world, 2, 1, {"include_navigation": false, "include_build_sites": false})
 	assert_true(bool(presentation.get("match_result", {}).get("over", false)), "source defeat reaches local read-only presentation")
 	assert_equal(int(presentation.get("match_result", {}).get("winner_team", -1)), 2, "Roman observer receives the source losing result")
 

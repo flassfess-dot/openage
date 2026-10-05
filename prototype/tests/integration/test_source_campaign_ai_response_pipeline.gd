@@ -43,7 +43,7 @@ func _initialize() -> void:
 			],
 		},
 	})
-	var snapshot := SimulationSnapshot.presentation(world, 0, 2, ai.presentation_options())
+	var snapshot := SimulationSnapshot.with_queries(world, 0, 2, ai.presentation_options())
 	var commands: Array = ai.collect_commands(snapshot, 1)
 	assert_equal(commands.size(), 1, "source response emits one non-conflicting group command")
 	assert_equal(commands[0].command_type(), "attack", "source response enters the common attack pipeline")

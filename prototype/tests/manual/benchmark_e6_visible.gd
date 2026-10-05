@@ -205,7 +205,7 @@ func _measure_snapshot_breakdown(game, samples: int) -> Dictionary:
 		var times: Array[int] = []
 		for _sample in range(samples):
 			var started := Time.get_ticks_usec()
-			SimulationSnapshot.presentation(game.simulation_world, game.game_controller.tick_index, game.PLAYER_TEAM, measured_options)
+			SimulationSnapshot.with_queries(game.simulation_world, game.game_controller.tick_index, game.PLAYER_TEAM, measured_options)
 			times.append(Time.get_ticks_usec() - started)
 		result[name] = _summary(times)
 	var fog_times: Array[int] = []

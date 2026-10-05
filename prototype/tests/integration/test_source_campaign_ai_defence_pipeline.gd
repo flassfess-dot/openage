@@ -44,7 +44,7 @@ func _initialize() -> void:
 		},
 	})
 	var controller = GameController.new(world)
-	var snapshot := SimulationSnapshot.presentation(world, 0, 2, ai.presentation_options())
+	var snapshot := SimulationSnapshot.with_queries(world, 0, 2, ai.presentation_options())
 	var commands: Array = ai.collect_commands(snapshot, 1)
 	assert_equal(commands.map(func(command): return command.command_type()), ["build"], "local defend assignment does not add a redundant route beside the economy command")
 	assert_true(commands[0].unit_ids == [int(worker.get("id", -1))], "economy keeps ownership of its worker")
@@ -58,7 +58,7 @@ func _initialize() -> void:
 	world.sync_all_components()
 	world.update_fog_of_war()
 
-	snapshot = SimulationSnapshot.presentation(world, controller.tick_index, 2, ai.presentation_options())
+	snapshot = SimulationSnapshot.with_queries(world, controller.tick_index, 2, ai.presentation_options())
 	commands = ai.collect_commands(snapshot, controller.tick_index + 1)
 	assert_equal(commands.size(), 1, "persistent defend group intercepts a newly visible local threat")
 	assert_equal(commands[0].command_type(), "attack", "defence interception enters the authoritative combat pipeline")

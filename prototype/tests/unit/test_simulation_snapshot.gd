@@ -81,32 +81,32 @@ func test_navigation_cache_tracks_local_changes() -> void:
 			fog.reveal_explored_cell(1, Vector2i(x, y))
 	var probe = PerformanceProbe.new()
 	var options := {"include_build_sites": false, "include_fog_cells": false, "performance_probe": probe}
-	var first: Dictionary = SimulationSnapshot.presentation(world, 1, 1, options)["navigation"]
+	var first: Dictionary = SimulationSnapshot.with_queries(world, 1, 1, options)["navigation"]
 	assert_true(Vector2(4.5, 3.5) in first["frontier"]["land"], "initial navigation marks the explored boundary")
-	SimulationSnapshot.presentation(world, 2, 1, options)
+	SimulationSnapshot.with_queries(world, 2, 1, options)
 	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "unchanged AI decision reuses its navigation cache")
 	fog.reveal_explored_cell(1, Vector2i(5, 3))
 	world.get_known_resources(1)
-	var expanded: Dictionary = SimulationSnapshot.presentation(world, 3, 1, options)["navigation"]
+	var expanded: Dictionary = SimulationSnapshot.with_queries(world, 3, 1, options)["navigation"]
 	assert_true(Vector2(5.5, 3.5) in expanded["land"], "navigation receives discoveries after resource knowledge consumes its own queue")
 	assert_true(Vector2(5.5, 3.5) in expanded["frontier"]["land"], "exploration refreshes the new fog boundary")
 	assert_true(navigation_row_major(expanded["land"]) and navigation_row_major(expanded["frontier"]["land"]), "incremental navigation keeps the original deterministic row-major order")
 	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "exploration updates only dirty navigation cells")
 	world.navigation_grid.occupy([Vector2i(5, 3)], "static_obstruction", 900)
-	var blocked: Dictionary = SimulationSnapshot.presentation(world, 4, 1, options)["navigation"]
+	var blocked: Dictionary = SimulationSnapshot.with_queries(world, 4, 1, options)["navigation"]
 	assert_true(Vector2(5.5, 3.5) not in blocked["land"], "local obstruction removes its navigation point")
 	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "local obstruction does not rebuild the complete map")
 	world.navigation_grid.release_occupant([Vector2i(5, 3)], "static_obstruction", 900)
-	var reopened: Dictionary = SimulationSnapshot.presentation(world, 5, 1, options)["navigation"]
+	var reopened: Dictionary = SimulationSnapshot.with_queries(world, 5, 1, options)["navigation"]
 	assert_true(Vector2(5.5, 3.5) in reopened["land"], "released obstruction restores only its cell")
 	world.navigation_grid.set_terrain_id(Vector2i(4, 4), 10)
-	var forest_floor: Dictionary = SimulationSnapshot.presentation(world, 6, 1, options)["navigation"]
+	var forest_floor: Dictionary = SimulationSnapshot.with_queries(world, 6, 1, options)["navigation"]
 	assert_true(Vector2(4.5, 4.5) in forest_floor["land"], "forest floor remains locally walkable")
 	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "forest terrain detail does not invalidate whole-map connectivity")
 	var before_distant_edit := int(world.navigation_grid.revision)
 	world.navigation_grid.occupy([Vector2i(2, 2), Vector2i(18, 18)], "static_obstruction", 901)
 	assert_equal(world.navigation_grid.changed_cells_since(before_distant_edit).size(), 2, "distant edits retain exact changed cells instead of one map-wide rectangle")
-	var distant_edit: Dictionary = SimulationSnapshot.presentation(world, 7, 1, options)["navigation"]
+	var distant_edit: Dictionary = SimulationSnapshot.with_queries(world, 7, 1, options)["navigation"]
 	assert_true(Vector2(2.5, 2.5) not in distant_edit["land"], "exact delta updates the known obstruction")
 	assert_true(navigation_row_major(distant_edit["land"]), "removing a distant cell preserves navigation order")
 	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "distant local edits do not trigger a full rebuild")
@@ -125,11 +125,11 @@ func test_navigation_cache_reachable_domain_switch() -> void:
 		fog.reveal_explored_cell(1, Vector2i(x, 3))
 	var probe = PerformanceProbe.new()
 	var options := {"include_build_sites": false, "include_fog_cells": false, "performance_probe": probe}
-	var first: Dictionary = SimulationSnapshot.presentation(world, 1, 1, options)["navigation"]
+	var first: Dictionary = SimulationSnapshot.with_queries(world, 1, 1, options)["navigation"]
 	assert_true(Vector2(1.5, 3.5) in first["reachable"]["water"], "ship reaches its own water component")
 	assert_true(Vector2(8.5, 3.5) not in first["reachable"]["water"], "distant island is not falsely reachable")
 	ship["pos"] = Vector2(8.5, 3.5)
-	var moved: Dictionary = SimulationSnapshot.presentation(world, 2, 1, options)["navigation"]
+	var moved: Dictionary = SimulationSnapshot.with_queries(world, 2, 1, options)["navigation"]
 	assert_true(Vector2(8.5, 3.5) in moved["reachable"]["water"], "moving between disconnected domains updates reachability")
 	assert_true(Vector2(1.5, 3.5) not in moved["reachable"]["water"], "old water component loses reachability")
 	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "component switch updates explored cells without a full map scan")
@@ -158,7 +158,7 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	world.add_victory_object("ruin", Vector2(28.0, 27.0), 0, true)
 	world.set_resource_amount(1, 2, 44)
 	world.update_fog_of_war()
-	var snapshot := SimulationSnapshot.presentation(world, 7, 1)
+	var snapshot := SimulationSnapshot.with_queries(world, 7, 1)
 	assert_equal(snapshot["tick"], 7, "presentation tick is explicit")
 	assert_equal(snapshot["units"].size(), 2, "presentation snapshot excludes unseen enemies while retaining visible contacts")
 	assert_equal(snapshot["units"][0]["id"], player["id"], "presentation snapshot retains visible unit")
@@ -172,7 +172,7 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	assert_true(not snapshot["navigation"].get("frontier", {}).get("land", []).is_empty(), "presentation snapshot exposes compact reachable fog-frontier knowledge")
 	assert_true(snapshot["navigation"]["frontier"]["land"].all(func(point): return point in snapshot["navigation"]["land"]), "every land frontier point is part of known reachable navigation")
 	assert_true(snapshot["navigation"]["reachable_frontier"]["land"].all(func(point): return point in snapshot["navigation"]["reachable"]["land"]), "reachable frontier never crosses the observer's land component")
-	var bounded := SimulationSnapshot.presentation(world, 7, 1, {
+	var bounded := SimulationSnapshot.with_queries(world, 7, 1, {
 		"include_navigation": false,
 		"include_build_sites": false,
 		"include_overview": true,
@@ -181,14 +181,14 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	})
 	assert_equal(bounded["units"].map(func(unit): return int(unit["id"])), [int(player["id"])], "bounded presentation keeps only detailed viewport units")
 	assert_equal(bounded["overview"]["units"].size(), 2, "bounded presentation retains compact minimap knowledge")
-	var selected_outside := SimulationSnapshot.presentation(world, 7, 1, {
+	var selected_outside := SimulationSnapshot.with_queries(world, 7, 1, {
 		"include_navigation": false,
 		"include_build_sites": false,
 		"entity_bounds": Rect2(Vector2(3.0, 3.0), Vector2(2.0, 2.0)),
 		"always_include_entity_ids": [int(visible_enemy["id"])],
 	})
 	assert_equal(selected_outside["units"].size(), 2, "selected entity remains detailed outside viewport bounds")
-	var compact_render := SimulationSnapshot.presentation(world, 7, 1, {
+	var compact_render := SimulationSnapshot.with_queries(world, 7, 1, {
 		"include_navigation": false,
 		"include_build_sites": false,
 		"compact_render_entities": true,
@@ -211,7 +211,7 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	assert_equal(world.get_food(), 180, "player economy snapshot is detached")
 	assert_not_equal(world.get_fog_state_at(1, Vector2(0.5, 0.5)), 99, "fog snapshot is detached")
 	world.record_attack_distress(hidden_enemy, player)
-	var distress_snapshot := SimulationSnapshot.presentation(world, 8, 1, {"compact_entities": true})
+	var distress_snapshot := SimulationSnapshot.with_queries(world, 8, 1, {"compact_entities": true})
 	assert_equal(distress_snapshot.get("ai_distress_signals", []).size(), 1, "observer receives only its own recent distress calls")
 	assert_equal(int(distress_snapshot.get("ai_distress_signals", [])[0].get("attacker_id", -1)), int(hidden_enemy["id"]), "distress call preserves the authoritative attacker identity")
 	var compact_own: Dictionary = distress_snapshot["units"].filter(func(unit): return int(unit.get("id", -1)) == int(player["id"]))[0]

@@ -233,6 +233,7 @@ func add_resource(kind: String, position: Vector2, amount: int, resolve_placemen
 		if safe_amount <= 0:
 			resource["hp"] = 0.0
 	world.apply_archetype_identity(resource, kind)
+	EntityComponents.sync_dynamic(resource)
 	world.resource_nodes.append(resource)
 	world.resource_nodes_by_id[entity_id] = resource
 	var resource_cell_index: int = floori(position.y) * world.map_size.x + floori(position.x)

@@ -35,7 +35,7 @@ func _initialize() -> void:
 	while int(controller.tick_index) < MAX_TICKS and not world.is_battle_over():
 		var next_tick := int(controller.tick_index) + 1
 		if ai.needs_decision(next_tick):
-			var knowledge := SimulationSnapshot.presentation(world, controller.tick_index, int(ai.team), ai.presentation_options())
+			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, int(ai.team), ai.presentation_options())
 			for command in ai.collect_commands(knowledge, next_tick):
 				controller.enqueue_command(command, true, int(ai.team))
 				issued += 1
@@ -51,7 +51,7 @@ func _initialize() -> void:
 	if progress_tick >= 0:
 		print("E5-006B progress tick=%d enemy_town_center_hp=%.2f" % [progress_tick, progress_town_center_hp])
 	if not world.is_battle_over():
-		var terminal_knowledge := SimulationSnapshot.presentation(world, final_tick, int(ai.team), ai.presentation_options())
+		var terminal_knowledge := SimulationSnapshot.with_queries(world, final_tick, int(ai.team), ai.presentation_options())
 		var terminal_goal := StrategicPlanner.choose_goal(terminal_knowledge, int(ai.team), ai.decision_index)
 		var terminal_commands := TacticalPlanner.plan(terminal_knowledge, final_tick + 1, int(ai.team), terminal_goal, ai.formation_name, ai.minimum_attack_group_size, ai.maximum_attack_group_size, ai.use_workers_in_attack_groups)
 		var planned_summary: Array[String] = []

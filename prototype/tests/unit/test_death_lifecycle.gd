@@ -59,7 +59,7 @@ func test_death_lifecycle(catalog) -> void:
 	assert_equal(victim["formation_group_id"], -1, "formation membership released")
 	assert_equal(victim["formation_slot_id"], -1, "formation slot released")
 	assert_equal(world.get_population(2), 0, "population released at death start")
-	assert_true(not bool(victim["components"]["health"]["alive"]), "Health component becomes non-living")
+	assert_true(not bool(bool(float(victim["hp"]) > 0.0)), "Health component becomes non-living")
 	assert_equal(world.query_units_near(victim["pos"], 0.5).filter(func(unit): return unit["id"] == victim["id"]).size(), 0, "dead unit excluded from target spatial index")
 	assert_true(world.is_battle_over(), "last enemy death updates victory condition")
 

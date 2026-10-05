@@ -81,7 +81,7 @@ func verify_source_defeat(world) -> void:
 	assert_true(world.is_battle_over(), "losing both exact protected Town Centers ends the mission")
 	assert_equal(int(world.get_victory_result().get("winner_team", -1)), 2, "source destroy-object condition awards victory to Macedonians")
 	assert_equal(String(world.get_victory_result().get("reason", "")), "scenario", "source loss retains the scenario reason")
-	var presentation: Dictionary = SimulationSnapshot.presentation(world, 2, 1, {"include_navigation": false, "include_build_sites": false})
+	var presentation: Dictionary = SimulationSnapshot.with_queries(world, 2, 1, {"include_navigation": false, "include_build_sites": false})
 	assert_true(bool(presentation.get("match_result", {}).get("over", false)), "source defeat reaches local read-only presentation")
 	assert_equal(int(presentation.get("match_result", {}).get("winner_team", -1)), 2, "Roman observer receives the source losing result")
 

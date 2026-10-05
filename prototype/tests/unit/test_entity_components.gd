@@ -39,15 +39,15 @@ func test_complete_unit_schema(world) -> void:
 	var villager: Dictionary = world.add_unit(1, "villager", Vector2(3.0, 4.0), false)
 	assert_true(EntityComponents.has_complete_schema(villager), "unit exposes all S-001 components")
 	assert_equal(villager["components"]["identity"]["source_key"], "13:83", "component links exact logical Villager object")
-	assert_equal(villager["components"]["transform"]["position"], Vector2(3.0, 4.0), "Transform position")
+	assert_equal(EntityComponents.component_view(villager, "transform")["position"], Vector2(3.0, 4.0), "Transform position")
 	assert_equal(villager["components"]["ownership"]["civilization_id"], 13, "Ownership civilization")
 
 
 func test_original_values(world) -> void:
 	var villager: Dictionary = world.add_unit(1, "villager", Vector2(5.0, 4.0), false)
 	var archer: Dictionary = world.add_unit(1, "archer", Vector2(6.0, 4.0), false)
-	var villager_components: Dictionary = villager["components"]
-	var archer_components: Dictionary = archer["components"]
+	var villager_components: Dictionary = EntityComponents.view(villager)
+	var archer_components: Dictionary = EntityComponents.view(archer)
 	assert_float(villager_components["health"]["maximum"], 25.0, "Health from Empires.dat")
 	assert_float(villager_components["movement"]["speed"], 1.100000023841858, "Movement speed from Empires.dat")
 	assert_float(villager_components["vision"]["range"], 4.0, "Vision range from Empires.dat")
@@ -73,10 +73,10 @@ func test_other_entity_types(world) -> void:
 	var resource: Dictionary = world.add_resource("tree", Vector2(7.0, 7.0), 75)
 	assert_true(EntityComponents.has_complete_schema(building), "building exposes component schema")
 	assert_true(EntityComponents.has_complete_schema(resource), "resource exposes component schema")
-	assert_float(building["components"]["health"]["maximum"], 600.0, "building Health from Empires.dat")
+	assert_float(EntityComponents.component_view(building, "health")["maximum"], 600.0, "building Health from Empires.dat")
 	assert_float(building["components"]["vision"]["range"], 7.0, "building Vision from Empires.dat")
 	assert_equal(building["components"]["footprint"]["occupied_cells"].size(), 9, "building Footprint component")
-	assert_float(resource["components"]["resource_carrier"]["amount"], 75.0, "resource amount component")
+	assert_float(EntityComponents.component_view(resource, "resource_carrier")["amount"], 75.0, "resource amount component")
 
 
 func test_dynamic_sync(world) -> void:
@@ -88,7 +88,7 @@ func test_dynamic_sync(world) -> void:
 	unit["cooldown"] = 0.75
 	unit["anim_state"] = "AttackRecover"
 	world.sync_all_components()
-	var components: Dictionary = unit["components"]
+	var components: Dictionary = EntityComponents.view(unit)
 	assert_equal(components["transform"]["position"], Vector2(2.5, 3.0), "Transform follows simulation state")
 	assert_float(components["health"]["current"], 17.0, "Health follows simulation state")
 	assert_equal(components["combat"]["target_id"], 404, "Combat target follows simulation state")

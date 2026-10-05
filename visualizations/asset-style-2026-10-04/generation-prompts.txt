@@ -1,0 +1,37 @@
+Визуальные концепты ассетов — 2026-10-04
+Способ создания: встроенный image_gen.
+A: практически естественная цветная иллюстрация.
+B: лёгкое перо; рекомендуемая интенсивность.
+C: более заметные контуры и штриховка.
+Это художественные концепты сцены для выбора направления; игровые спрайты и анимации из них ещё не изготовлены.
+A создан по тексту. B использует только A как изображение для редактирования. C использует только B. Исходные изображения других игр в эти генерации не передавались.
+
+=== A ===
+
+Use case: stylized-concept.
+Asset type: visual art-direction prototype for an original ancient Mediterranean isometric real-time strategy game, variant A of a three-variant comparison.
+Primary request: Create a detailed, playable-looking game-world scene with extremely subtle pen-and-parchment influence. This is the faintest pen treatment, almost naturalistic color illustration. Landscape 16:9 image, polished concept mockup, no interface and no text.
+Scene: A small coherent coastal settlement in early antiquity. Olive-green grass, warm earth footpaths, a gently curved shallow blue-green shoreline with sand and a few reeds, one mature deciduous tree, a few shrubs and a small rocky outcrop. A modest original plaster-and-timber house with a terracotta roof and a larger original civic gathering building with a low portico, a small open courtyard and tiled roof. Fine material detail: timber joints, irregular plaster, believable stone blocks, tiles, subtle foliage detail.
+Characters: One worker in an earth-tone linen tunic carrying timber, and one ancient spearman with a round bronze shield and a restrained red cloth accent. Both clearly visible, human-scale relative to buildings, crisp readable silhouettes; not large hero portraits.
+Camera/composition: Fixed orthographic isometric strategy-game camera, about 30 degrees above the ground, parallel edges, no horizon, no perspective vanishing point, full continuous rectangular game map filling the frame rather than a floating diorama. Both buildings, shoreline, tree, rocks, and the two people all comfortably visible with open navigable ground between them. Buildings roughly one fifth of frame width; enough detail to assess roofs, clothing and silhouettes at game scale. Consistent ground contact and soft directional cast shadows.
+Style: Detailed full-color 2D game artwork produced from coherent models and artist finishing. Extremely faint warm-brown pen accents only at selected structural creases and edges; no obvious hatching yet. Parchment influence is almost imperceptible in the material grain. Natural greens and blue water remain true colors.
+Palette: Warm limestone, terracotta, olive greens, cool blue-green water, clear restrained red faction accent. Daylight neutral enough to distinguish materials.
+Constraints: Entirely original designs. Do not replicate any existing game's sprites, architecture compositions, iconic unit costumes, UI, logos or recognizable asset designs. No copied sprites or tracing. No sepia wash, no yellow screen tint, no thick black outlines, no cartoon proportions, no painterly blur, no depth of field, no cinematic perspective, no photorealistic photographic scene, no text, no labels, no grid overlay, no watermark.
+
+=== B ===
+
+Use case: style-transfer.
+Asset type: art-direction comparison, variant B, the recommended subtle pen-and-parchment treatment for an ancient isometric strategy game.
+Input image 1 is the edit target, not an external game reference.
+Edit the supplied newly created scene. Preserve the exact orthographic isometric camera, framing, world layout, shoreline, building shapes and sizes, positions of the house, civic building, tree, rocks, boat and pier, characters and their poses, faction red, lighting direction and contact shadows. Preserve the same full-color daylight scene and high material detail. Change only the rendering language.
+Apply a restrained fine pen-and-colored-wash finish: delicate warm dark-brown slightly broken ink lines on important roof edges, selected tile seams, timber joints, building creases, armor and rock facets. Add very sparse fine directional hatching in the deepest architectural and rock shadows; no hatching everywhere. Quiet down random tiny grass speckles and excessive leaf microcontrast so terrain is calm and character silhouettes are readable. Subtle irregular hand-rendered material textures; extremely faint parchment tooth visible only on light plaster and sandy areas, not as a uniform overlay. Keep rich natural olive greens, terracotta roofs, warm limestone, distinctly cool blue-green water, and vivid but restrained faction red. Overall this should still feel like a detailed playable strategy game; the pen treatment should be noticeable on close inspection but subtle at normal view.
+No yellow cast, no global sepia filter, no paper border, no vignette, no thick black outlines, no cartoon proportions, no washed-out monochrome, no blur, no added elements, no removed objects, no interface, no text, no labels, no watermark.
+
+=== C ===
+
+Use case: style-transfer.
+Asset type: art-direction comparison, variant C, a somewhat more visible pen-and-parchment treatment for an original ancient isometric strategy game.
+Input image 1 is the edit target, an original newly generated scene.
+Preserve the exact camera, framing, scene geography, shoreline, objects, building silhouettes and dimensions, human scale, all positions and poses, faction banners, lighting and shadows. Change only the artistic rendering. All objects from the supplied scene must remain in place.
+Create a detailed full-color pen illustration with light translucent color washes. This is the upper intensity example in a comparison: more visibly drawn than the supplied image, but still a usable colorful strategy-game world. Fine warm dark-brown hand-inked contours selectively describe roof tiles, timber joints, masonry edges, rock planes, foliage clusters and the two figures. Add visible but restrained fine parallel hatching and occasional sparse cross-hatching in shadow faces of buildings, tree trunks and rocks. Introduce very light parchment tooth in pale surfaces and sandy ground, no parchment frame and no global paper overlay. Simplify random grass grain into controlled clusters to keep navigable terrain quiet. Preserve high detail and material separation. Use natural olive greens, terracotta, limestone and distinctly cool clear blue-green water; vivid red accents remain readable.
+Ensure strokes remain delicate rather than heavy comic-book outlines. The scene must not become brown monochrome or an antique yellow map. No sepia wash, no yellow screen tint, no cartoon deformation, no giant characters, no depth of field, no painterly blur, no extra buildings or objects, no change to geometry, no text, no labels, no interface, no watermark.
