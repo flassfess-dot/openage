@@ -121,6 +121,64 @@ func detached_route_caches() -> Dictionary:
 	var data := {"cache": cache, "cells": cell_cache, "smoothed": smoothed_cell_cache, "geometry": geometry_metadata}
 	return RoRIsolatedTaskData.seal(RoRIsolatedTaskData.copy(data))
 
+
+func detached_route_caches_for(requests: Array) -> Dictionary:
+	# Select using the same lookup order as find_path: an exact world hit skips
+	# endpoint resolution; misses consult cell geometry at the resolved endpoint.
+	# Unrelated historical routes never enter worker preparation.
+	_sync_route_revision()
+	var data := {"cache": {}, "cells": {}, "smoothed": {}, "geometry": {"world": {}, "cells": {}, "smooth": {}}, "required_keys": {"world": {}, "cells": {}, "smooth": {}}}
+	for request in requests:
+		var start_world: Vector2 = request["start"]
+		var goal_world: Vector2 = request["goal"]
+		var start := Vector2i(start_world.floor())
+		var domain := String(request["domain"])
+		var restriction := int(request["restriction"])
+		var radius := float(request["clearance"])
+		var world_key := _world_key(start_world, goal_world, domain, restriction, radius)
+		data["required_keys"]["world"][world_key] = true
+		if cache.has(world_key):
+			data["cache"][world_key] = cache[world_key]
+			data["geometry"]["world"][world_key] = geometry_metadata["world"].get(world_key, {})
+			continue
+		var goal := nearest_walkable(Vector2i(goal_world.floor()), domain, restriction, radius)
+		if goal.x < 0:
+			continue
+		var cell_key := _cell_key(start, goal, domain, restriction, radius)
+		for category in ["cells", "smooth"]:
+			data["required_keys"][category][cell_key] = true
+			var bucket := _geometry_bucket(category)
+			if not bucket.has(cell_key):
+				continue
+			var target: String = "cells" if category == "cells" else "smoothed"
+			data[target][cell_key] = bucket[cell_key]
+			data["geometry"][category][cell_key] = geometry_metadata[category].get(cell_key, {})
+	return RoRIsolatedTaskData.seal(RoRIsolatedTaskData.copy(data))
+
+
+func _batch_may_evict_required_geometry(route_snapshot: Dictionary) -> bool:
+	# Sequential FIFO eviction can turn a later hit into a fresh route. Retained
+	# geometry can legitimately differ from a new search after an off-route map
+	# edit, so preserve sequential order whenever the batch might evict a key it
+	# needs. Otherwise worker subsets cannot fill, and ordered delta merges retain
+	# the same first-insertion order, including repeated keys across chunks.
+	for category in ["world", "smooth"]:
+		var required: Dictionary = route_snapshot["required_keys"][category]
+		var bucket := _geometry_bucket(category)
+		var possible_insertions := 0
+		for key in required:
+			if not bucket.has(key):
+				possible_insertions += 1
+		var possible_evictions := maxi(0, bucket.size() + possible_insertions - MAX_ROUTE_CACHE_ENTRIES)
+		for key in bucket:
+			if possible_evictions <= 0:
+				break
+			if required.has(key):
+				return true
+			possible_evictions -= 1
+	return false
+
+
 func prepare_threaded_navigation(units: Array, coordinator) -> void:
 	if grid == null or not coordinator.is_enabled("navigation_prepare"):
 		prepare_native_kernels_for_units(units)
@@ -312,7 +370,7 @@ func calculate_native_movement(unit: Dictionary, target: Vector2, delta: float) 
 
 
 func find_paths_batch(requests: Array, coordinator) -> Array:
-	if requests.size() < 4 or not coordinator.is_enabled("navigation_paths") or not uses_native_kernel() or cache.size() + requests.size() >= MAX_ROUTE_CACHE_ENTRIES or cell_cache.size() + requests.size() >= MAX_ROUTE_CACHE_ENTRIES or smoothed_cell_cache.size() + requests.size() >= MAX_ROUTE_CACHE_ENTRIES:
+	if requests.size() < 4 or requests.size() >= MAX_ROUTE_CACHE_ENTRIES or not coordinator.is_enabled("navigation_paths") or not uses_native_kernel():
 		var sequential: Array = []
 		for request in requests:
 			sequential.append(find_path(request["start"], request["goal"], String(request["domain"]), int(request["restriction"]), float(request["clearance"])))
@@ -333,8 +391,13 @@ func find_paths_batch(requests: Array, coordinator) -> Array:
 		return sequential
 	var batch_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var previous_observed := observed_path_query_microseconds
+	var route_snapshot := detached_route_caches_for(requests)
+	if _batch_may_evict_required_geometry(route_snapshot):
+		var sequential: Array = []
+		for request in requests:
+			sequential.append(find_path(request["start"], request["goal"], String(request["domain"]), int(request["restriction"]), float(request["clearance"])))
+		return sequential
 	var topology := detached_task_topology()
-	var route_snapshot := detached_route_caches()
 	var chunks: Array = []
 	var ids: Array[int] = []
 	var jobs: Array = []
@@ -396,7 +459,7 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	var requested_goal := Vector2i(floori(goal_world.x), floori(goal_world.y))
 	# Resolving a blocked endpoint can visit the entire map. The requested
 	# endpoint and topology already determine that result, including failure.
-	var key := "%s:%d:%.8f:%d:%d:%d:%d:%.4f:%.4f:%.4f:%.4f" % [movement_domain, restriction_id, clearance_radius, start.x, start.y, requested_goal.x, requested_goal.y, start_world.x, start_world.y, goal_world.x, goal_world.y]
+	var key := _world_key(start_world, goal_world, movement_domain, restriction_id, clearance_radius)
 	if cache.has(key):
 		cache_hits += 1
 		var cached_path: Array[Vector2] = []
@@ -509,6 +572,10 @@ func _record_geometry(name: String, key: String, path: Array, start: Vector2i, g
 
 func _cell_key(start: Vector2i, goal: Vector2i, domain: String, restriction: int, radius: float) -> String:
 	return "%s:%d:%.8f:%d:%d:%d:%d" % [domain, restriction, radius, start.x, start.y, goal.x, goal.y]
+
+
+func _world_key(start: Vector2, goal: Vector2, domain: String, restriction: int, radius: float) -> String:
+	return "%s:%d:%.8f:%d:%d:%d:%d:%.4f:%.4f:%.4f:%.4f" % [domain, restriction, radius, floori(start.x), floori(start.y), floori(goal.x), floori(goal.y), start.x, start.y, goal.x, goal.y]
 
 
 func find_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:

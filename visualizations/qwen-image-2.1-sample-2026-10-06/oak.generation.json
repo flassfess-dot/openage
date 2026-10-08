@@ -1,0 +1,29 @@
+{
+  "model": "Qwen/Qwen-Image-2.1",
+  "provider": "https://huggingface.co/spaces/Qwen/Qwen-Image-2.1",
+  "timestamp": "2026-10-06T18:16:25.252404+00:00",
+  "asset": "oak",
+  "settings": {
+    "size": [
+      1024,
+      1024
+    ],
+    "seed": 1060102,
+    "reference": "house.png",
+    "prompt": "This is an RGBA image with transparency. Use Image 1 only as the drawing style and daylight reference. Create ONE freestanding mature Mediterranean oak tree, irregular rounded crown, readable branching trunk and detailed bark. Olive, sage and moss-green foliage in broad masses, selected small leaf clusters, avoid uniformly busy leaf noise. No cottage, buildings, people, grass platform or other objects. Detailed original ancient Mediterranean RTS illustration. Very fine warm brown pen contours, sparse restrained hatching, soft hand-painted natural colors, only a whisper of parchment character. No sepia filter, heavy paper grain, glossy 3D rendering or thick black cartoon outlines. Orthographic game camera looking down 30 degrees, 2:1 ground-plane diagonals, parallel edges, soft daylight from upper left. The image has alpha channel and the background is transparent. No text, labels, border, watermark, terrain tile or scenery. Entire object visible with generous empty margins."
+  },
+  "num_inference_steps": 40,
+  "prompt_enhancement": false,
+  "status": "complete",
+  "file": "oak.png",
+  "size": [
+    1024,
+    1024
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+    0,
+    255
+  ],
+  "elapsed_seconds": 29.83
+}

@@ -204,8 +204,13 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	assert_true(not render_enemy.get("components", {}).has("combat"), "unselected render projection omits heavyweight combat tables")
 	assert_true(render_enemy.has("footprint") and render_enemy.has("anim_state"), "unselected render projection retains picking and animation fields")
 	assert_equal(render_enemy.get("pos"), visible_enemy.get("pos"), "compact render projection retains the entity anchor")
-	render_enemy["footprint"]["selection_radius"] = Vector2(99.0, 99.0)
-	assert_not_equal(visible_enemy.get("footprint", {}).get("selection_radius"), Vector2(99.0, 99.0), "compact render footprint remains detached from simulation state")
+	var original_selection_radius: Variant = visible_enemy.get("footprint", {}).get("selection_radius")
+	assert_true(render_enemy["footprint"].is_read_only(), "published compact footprints are immutable")
+	visible_enemy["footprint"]["selection_radius"] = Vector2(99.0, 99.0)
+	var refreshed_enemy: Dictionary = world.compact_render_projection(visible_enemy)
+	assert_equal(render_enemy["footprint"]["selection_radius"], original_selection_radius, "live footprint changes preserve the previous compact render snapshot")
+	assert_equal(refreshed_enemy["footprint"]["selection_radius"], Vector2(99.0, 99.0), "new compact render snapshot receives the changed footprint")
+	visible_enemy["footprint"]["selection_radius"] = original_selection_radius
 	snapshot["player_state"]["food"] = 0
 	snapshot["fog"]["cells"][0] = 99
 	assert_equal(world.get_food(), 180, "player economy snapshot is detached")

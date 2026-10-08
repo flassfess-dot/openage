@@ -32,6 +32,7 @@ var event_stream := SimulationEventStream.new()
 var combat_awareness := CombatAwarenessSystem.new()
 var wildlife_behavior := WildlifeBehaviorSystem.new()
 var accumulator_seconds: float = 0.0
+var preparation_waiting := false
 var speed_index: int = 1
 var paused: bool = false
 var formation_groups: Dictionary = {}
@@ -149,6 +150,7 @@ func clear_queue() -> void:
 func reset_timing() -> void:
 	tick_index = 0
 	accumulator_seconds = 0.0
+	preparation_waiting = false
 	next_command_sequence = 1
 	clear_queue()
 	command_results.clear()
@@ -202,6 +204,7 @@ func replay_until_tick(target_tick: int, player_team: int, enemy_team: int) -> b
 	_inject_replay_commands_for_current_tick()
 	paused = was_paused
 	accumulator_seconds = 0.0
+	preparation_waiting = false
 	return tick_index == target_tick and last_replay_mismatch.is_empty()
 
 func process_commands() -> void:
@@ -1167,11 +1170,17 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	if paused or simulation_world == null:
 		return simulation_world.get_last_battle_message() if simulation_world != null else ""
 
-	accumulator_seconds += minf(frame_delta, 0.25) * get_speed_multiplier()
+	# An advisory worker can hold a tick for many rendered frames. Preserve
+	# the debt that reached its barrier, but do not turn wall-clock waiting
+	# into ever more catch-up work after the worker completes.
+	if not preparation_waiting:
+		accumulator_seconds += minf(frame_delta, 0.25) * get_speed_multiplier()
 	var steps := 0
 	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
 		if not _run_fixed_tick(player_team, enemy_team):
+			preparation_waiting = true
 			break
+		preparation_waiting = false
 		accumulator_seconds -= FIXED_STEP_SECONDS
 		steps += 1
 	return simulation_world.get_last_battle_message()

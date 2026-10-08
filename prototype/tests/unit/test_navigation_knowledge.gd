@@ -15,6 +15,8 @@ func _initialize() -> void:
 		test_move_discovers_forest(native)
 		test_formation_keeps_unknown_route(native)
 	test_large_exploration_updates_native_mask_incrementally()
+	test_surface_components_survive_equivalent_discovery()
+	test_surface_components_survive_occupant_changes()
 	for failure in failures:
 		push_error(failure)
 	print("Fog-aware navigation: %d failures" % failures.size())
@@ -146,3 +148,46 @@ func test_formation_keeps_unknown_route(native: bool) -> void:
 func check(value: bool, message: String) -> void:
 	if not value:
 		failures.append(message)
+
+
+func test_surface_components_survive_equivalent_discovery() -> void:
+	var world = fixture(false)
+	var knowledge = world.movement_system.knowledge
+	var planner = knowledge.planner(world, 1)
+	var cell := Vector2i(10, 10)
+	planner.grid.surface_component_id(cell, "land", -1)
+	planner.grid.surface_component_id(cell, "water", -1)
+	var land_components: Dictionary = planner.grid.surface_component_cache["land:-1"]
+	world.fog_of_war.reveal_explored_cell(1, cell)
+	planner = knowledge.planner(world, 1)
+	check(is_same(planner.grid.surface_component_cache.get("land:-1"), land_components), "learning traversable grass retains the land component map")
+	check(not planner.grid.surface_component_cache.has("water:-1"), "learning grass invalidates the water component map")
+	check(planner.grid.surface_component_id(cell, "water", -1) == -1, "discovered grass becomes inaccessible to water navigation")
+	var water_cell := Vector2i(11, 10)
+	world.navigation_grid.set_terrain(water_cell, "water")
+	world.fog_of_war.reveal_explored_cell(1, water_cell)
+	planner = knowledge.planner(world, 1)
+	check(not planner.grid.surface_component_cache.has("land:-1"), "discovering water invalidates the land component map")
+	check(planner.grid.surface_component_id(water_cell, "land", -1) == -1, "land components exclude discovered water")
+
+
+func test_surface_components_survive_occupant_changes() -> void:
+	var world = fixture(false)
+	var unit: Dictionary = world.add_unit(1, "villager", Vector2(10.5, 10.5), false)
+	unit["components"]["vision"]["enabled"] = true
+	unit["components"]["vision"]["range"] = 3.0
+	world.update_fog_of_war()
+	var knowledge = world.movement_system.knowledge
+	var planner = knowledge.planner(world, 1)
+	var cell := Vector2i(11, 10)
+	planner.grid.surface_component_id(cell, "land", -1)
+	var components: Dictionary = planner.grid.surface_component_cache["land:-1"]
+	var surface_revision: int = planner.grid.surface_revision
+	world.navigation_grid.occupy([cell], "resource", 990)
+	planner = knowledge.planner(world, 1)
+	check(planner.grid.occupied_cells.has(cell), "visible obstacle still updates navigation knowledge")
+	check(planner.grid.surface_revision == surface_revision and is_same(planner.grid.surface_component_cache.get("land:-1"), components), "adding an occupant retains terrain-only component caches")
+	world.navigation_grid.release_occupant([cell], "resource", 990)
+	planner = knowledge.planner(world, 1)
+	check(not planner.grid.occupied_cells.has(cell), "visible removed obstacle releases remembered occupancy")
+	check(planner.grid.surface_revision == surface_revision and is_same(planner.grid.surface_component_cache.get("land:-1"), components), "removing an occupant retains terrain-only component caches")

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="stone" x1="0" y1="0" x2="0.2" y2="1"><stop stop-color="#faf7ed"/><stop offset="0.5" stop-color="#e7e2d6"/><stop offset="1" stop-color="#cdc7b9"/></linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#e8d8b1"/><stop offset="0.45" stop-color="#ac9569"/><stop offset="1" stop-color="#65553b"/></linearGradient>
+    <clipPath id="face"><rect x="6" y="6" width="52" height="52" rx="1"/></clipPath>
+  </defs>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="3" fill="#494035"/>
+  <rect x="2" y="2" width="60" height="60" rx="2" fill="url(#rim)"/>
+  <rect x="5" y="5" width="54" height="54" rx="1" fill="url(#stone)" stroke="#918674"/>
+  <g clip-path="url(#face)" fill="none">
+    <path d="m3 9 17 13 2 12 16 5 11 18 16 8m-1-52-18 9-6 14-15 3" stroke="#96958d" opacity="0.17" stroke-width="0.9"/>
+    <path d="m0 41 14-4 13 5 17-2 21 11" stroke="#ffffff" opacity="0.55" stroke-width="1.1"/>
+  </g>
+  <path d="M8 15V8h7m34 0h7v7M8 49v7h7m34 0h7v-7" fill="none" stroke="#b19a6b" opacity="0.7"/>
+  <path d="M3 60V3h57" fill="none" stroke="#fff9e9" opacity="0.8"/>
+</svg>

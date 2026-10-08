@@ -1,0 +1,145 @@
+{
+	"animation": {
+		"direction": "screen lower-right",
+		"fps": 6,
+		"frames": 4,
+		"pivots": [
+			[
+				0.404062241315842,
+				1.0
+			],
+			[
+				0.44936928153038,
+				1.0
+			],
+			[
+				0.431897401809692,
+				1.0
+			],
+			[
+				0.406770080327988,
+				1.0
+			]
+		],
+		"regions": [
+			[
+				177.0,
+				55.0,
+				171.0,
+				401.0
+			],
+			[
+				705.0,
+				55.0,
+				115.0,
+				395.0
+			],
+			[
+				197.0,
+				567.0,
+				123.0,
+				399.0
+			],
+			[
+				717.0,
+				567.0,
+				107.0,
+				399.0
+			]
+		],
+		"status": "draft; pose guide improved passing poses, opposite stride still missing"
+	},
+	"assets": {
+		"earth": {
+			"alpha_type": 0,
+			"corner_alpha": 0.996078431606293,
+			"file": "earth.png",
+			"size": [
+				1024,
+				1024
+			],
+			"used_rect": [
+				0.0,
+				0.0,
+				1024.0,
+				1024.0
+			]
+		},
+		"grass": {
+			"alpha_type": 0,
+			"corner_alpha": 1.0,
+			"file": "grass.png",
+			"size": [
+				1024,
+				1024
+			],
+			"used_rect": [
+				0.0,
+				0.0,
+				1024.0,
+				1024.0
+			]
+		},
+		"house": {
+			"alpha_type": 2,
+			"corner_alpha": 0.0,
+			"file": "house.png",
+			"size": [
+				1024,
+				1024
+			],
+			"used_rect": [
+				77.0,
+				247.0,
+				897.0,
+				611.0
+			]
+		},
+		"oak": {
+			"alpha_type": 2,
+			"corner_alpha": 0.0,
+			"file": "oak.png",
+			"size": [
+				1024,
+				1024
+			],
+			"used_rect": [
+				95.0,
+				131.0,
+				831.0,
+				703.0
+			]
+		},
+		"worker": {
+			"alpha_type": 2,
+			"corner_alpha": 0.0,
+			"file": "worker-walk-v2-sheet.png",
+			"size": [
+				1024,
+				1024
+			],
+			"used_rect": [
+				177.0,
+				55.0,
+				647.0,
+				911.0
+			]
+		}
+	},
+	"model": "Qwen/Qwen-Image-2.1",
+	"projection": {
+		"cell": [
+			64,
+			32
+		],
+		"zoom": 2
+	},
+	"provider": "official demo for sprites; local Q4_K for ground and pose correction",
+	"purpose": "standalone sample only",
+	"render_sizes": {
+		"house_width": 288,
+		"tree_height": 248,
+		"worker_height": 72
+	},
+	"renderer": "Godot 4.7.2"
+}

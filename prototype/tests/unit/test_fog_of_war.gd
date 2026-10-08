@@ -15,6 +15,8 @@ func _initialize() -> void:
 	test_native_visibility_cells_match_gdscript()
 	test_player_revisions_are_isolated()
 	test_presentation_dirty_cells_track_visibility_transitions()
+	test_sparse_source_ids_and_lifecycle()
+	test_source_scan_after_legacy_restore()
 
 	if failures.is_empty():
 		print("S-006 fog of war tests passed")
@@ -130,6 +132,58 @@ func test_presentation_dirty_cells_track_visibility_transitions() -> void:
 	var moved_dirty := fog.consume_presentation_dirty_cells(1)
 	assert_true(3 * 20 + 3 in moved_dirty, "leaving sight dirties the formerly visible cell")
 	assert_true(3 * 20 + 10 in moved_dirty, "entering sight dirties the newly visible cell")
+
+
+func test_sparse_source_ids_and_lifecycle() -> void:
+	for native in [false, true]:
+		var fog = FogOfWar.new(Vector2i(16, 16))
+		fog.set_native_enabled(native)
+		var tower := vision_entity(1, Vector2(12.5, 12.5), 1.0)
+		tower["id"] = (1 << 40) + 1
+		for cycle in range(32):
+			var scout := vision_entity(1, Vector2(2.5, 2.5), 1.0)
+			# A long match consumes IDs for every resource/projectile/unit. Source
+			# memory must depend on the live roster, never the numeric ID range.
+			scout["id"] = (1 << 40) + cycle * 4096 + 4
+			fog.update([scout], [tower], 4, 0)
+			assert_equal(fog.vision_sources.size(), 2, "source churn retains only the live scout and tower")
+			assert_equal(fog.state_at_world(1, scout["pos"]), FogOfWar.VISIBLE, "sparse source ID grants sight")
+			scout["pos"] = Vector2(7.5, 2.5)
+			fog.update([scout], [tower], 4, 1)
+			assert_equal(fog.state_at_world(1, Vector2(2.5, 2.5)), FogOfWar.VISIBLE, "deferred movement preserves its previous sight")
+			fog.update([scout], [tower], 4, 0)
+			assert_equal(fog.state_at_world(1, Vector2(2.5, 2.5)), FogOfWar.EXPLORED, "matching movement bucket retires the old sight")
+			assert_equal(fog.state_at_world(1, scout["pos"]), FogOfWar.VISIBLE, "matching movement bucket publishes the new sight")
+			scout["hp"] = 0.0
+			fog.update([scout], [tower], 4, 2)
+			assert_equal(fog.vision_sources.size(), 1, "death releases the source before the next full scan")
+			assert_equal(fog.state_at_world(1, scout["pos"]), FogOfWar.EXPLORED, "dead sparse source stops granting sight")
+			assert_equal(fog.state_at_world(1, tower["pos"]), FogOfWar.VISIBLE, "static source survives partial scans")
+		fog.update([], [], 4, 0)
+		assert_true(fog.vision_sources.is_empty(), "removed buildings release their source tracking")
+		assert_equal(fog.state_at_world(1, tower["pos"]), FogOfWar.EXPLORED, "removed building no longer grants sight")
+		fog.reset()
+		assert_true(fog.vision_sources.is_empty(), "reset discards all source tracking")
+
+
+func test_source_scan_after_legacy_restore() -> void:
+	var fog = FogOfWar.new(Vector2i(16, 16))
+	var scout := vision_entity(1, Vector2(2.5, 2.5), 1.0)
+	scout["id"] = 12
+	var tower := vision_entity(1, Vector2(12.5, 12.5), 1.0)
+	tower["id"] = 13
+	fog.update([scout], [tower])
+	fog.update([scout], [tower])
+	# Old checkpoints preserved separate scan marks; restored source records
+	# may omit the new field. The first full scan must reconstruct it safely.
+	for source in fog.vision_sources.values():
+		source.erase("seen_generation")
+	fog.update([scout], [], 4, 1)
+	assert_equal(fog.vision_sources.size(), 2, "legacy sources survive until their scheduled full scan")
+	fog.update([scout], [], 4, 0)
+	assert_equal(fog.vision_sources.size(), 1, "full scan keeps the present legacy source and retires missing ones")
+	assert_equal(fog.state_at_world(1, scout["pos"]), FogOfWar.VISIBLE, "legacy source sight remains continuous")
+	assert_equal(fog.state_at_world(1, tower["pos"]), FogOfWar.EXPLORED, "missing legacy source sight is retired")
 
 
 func test_simulation_and_render_visibility() -> void:

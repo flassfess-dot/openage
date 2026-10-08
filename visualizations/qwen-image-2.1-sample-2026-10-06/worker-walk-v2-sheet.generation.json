@@ -1,0 +1,41 @@
+{
+  "model": "Qwen/Qwen-Image-2.1",
+  "provider": "local stable-diffusion.cpp",
+  "quantization": "Q4_K",
+  "text_encoder_quantization": "Q4_K_M",
+  "runtime_release": "master-931-9db0db6",
+  "hardware": "RTX 3080 Ti 12GB, i7-7700, 16GB RAM",
+  "asset": "worker-walk-v2-sheet",
+  "settings": {
+    "size": [
+      1024,
+      1024
+    ],
+    "seed": 1060205,
+    "references": [
+      "worker-walk-sheet.png",
+      "worker-pose-guide.png"
+    ],
+    "prompt": "This is an RGBA image with transparency. Image 1 shows our approved villager design and fine pen-and-wash rendering. Image 2 is a schematic guide to four DISTINCT phases of a walk. Generate exactly four full-body sprites in a precise 2 by 2 grid. Keep the same adult man, face, short dark hair, cream linen knee-length tunic, reddish-brown belt, brown sandals, proportions, illustration style, lighting and fixed three-quarter right-facing camera as Image 1. Change ONLY his poses to match the four skeletons in Image 2. Pose 1 and 3 have a wide stride, with opposite arms swinging. Pose 2 and 4 MUST be different from the stride poses: the weight-bearing leg is almost straight directly beneath the hip, the other knee is bent and its foot is lifted, with both feet close to the body. For every cell follow the hip, knee, ankle and arm positions of the corresponding diagram. The red and blue are schematic limb identifiers ONLY, never paint the final man red or blue. The diagram is a pose reference, not the final drawing style. Same body size and baseline in all cells, entire figures visible, generous empty margins, no overlap. No text, grid lines, reference diagrams, numbers, cast shadows, ground, scenery or background. The image has alpha channel and the background is transparent."
+  },
+  "num_inference_steps": 40,
+  "cfg_scale": 1.0,
+  "reference_files": [
+    "worker-walk-sheet.png",
+    "worker-pose-guide.png"
+  ],
+  "reference_resolution": 512,
+  "timestamp": "2026-10-06T19:03:09.295864+00:00",
+  "status": "complete",
+  "file": "worker-walk-v2-sheet.png",
+  "size": [
+    1024,
+    1024
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+    0,
+    255
+  ],
+  "elapsed_seconds": 183.27
+}

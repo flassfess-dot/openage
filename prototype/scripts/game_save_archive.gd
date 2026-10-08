@@ -33,7 +33,8 @@ static func create(match_path: String, match_definition: Dictionary, tick: int, 
 		"tick": tick,
 		"state_sha256": state_hash,
 		"replay": replay.duplicate(true),
-		"ai_states": codec.encode_variant(ai_states),
+		# Pending plans compare against the exact captured AI state on restore.
+		"ai_states": codec.encode_variant(ai_states, false),
 		"view_state": codec.encode_variant(saved_view),
 		"controller_state": codec.encode_variant(controller_state),
 	}
@@ -161,6 +162,32 @@ static func list_named_saves(directory_path: String = NAMED_SAVE_DIRECTORY) -> A
 	return result
 
 
+static func list_saves() -> Array[Dictionary]:
+	var entries := list_named_saves()
+	if FileAccess.file_exists(SAVE_PATH):
+		var metadata: Dictionary = {}
+		var tick := 0
+		var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+		if file != null:
+			var data: Variant = JSON.parse_string(file.get_as_text())
+			if data is Dictionary:
+				tick = int(data.get("tick", 0))
+				if data.get("metadata") is Dictionary:
+					metadata = data["metadata"]
+		entries.append({
+			"path": SAVE_PATH,
+			"slot_name": "Быстрое сохранение",
+			"saved_at_unix": int(metadata.get("saved_at_unix", 0)),
+			"tick": tick,
+			"quicksave": true,
+		})
+	entries.sort_custom(func(left, right):
+		if int(left["saved_at_unix"]) != int(right["saved_at_unix"]):
+			return int(left["saved_at_unix"]) > int(right["saved_at_unix"])
+		return String(left["slot_name"]) < String(right["slot_name"])
+	)
+	return entries
+
 static func error_message(error: String) -> String:
 	if error.begins_with("state_hash_mismatch"):
 		return "Состояние сохранения не совпало с записью команд"
@@ -191,7 +218,7 @@ static func write(path: String, archive: Dictionary) -> Error:
 	var file := FileAccess.open(temporary_path, FileAccess.WRITE)
 	if file == null:
 		return FileAccess.get_open_error()
-	file.store_string(JSON.stringify(archive, "\t"))
+	file.store_string(JSON.stringify(archive, "\t", true, true))
 	file.flush()
 	file.close()
 	if FileAccess.file_exists(backup_path):

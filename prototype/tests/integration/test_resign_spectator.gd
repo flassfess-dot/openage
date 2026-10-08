@@ -25,7 +25,11 @@ func _initialize() -> void:
 	game.set_process(false)
 	var resign = Commands.ResignCommand.new(game.game_controller.tick_index + 1)
 	game.game_controller.enqueue_command(resign, true, 1)
-	game.game_controller.advance_frame(GameController.FIXED_STEP_SECONDS, 1, 2)
+	if not await advance_until_tick(game, int(resign.tick)):
+		game.free()
+		finish()
+		return
+	assert_true(bool(game.game_controller.get_command_result(resign.sequence_id).get("accepted", false)), "resign passes the authoritative command result boundary")
 	game.sync_world_state()
 	assert_equal(game.simulation_world.player_registry.status(1), "resigned", "local player is resigned through the authoritative command")
 	assert_equal(game.battle_over, false, "other active players keep the match running")
@@ -43,6 +47,21 @@ func _initialize() -> void:
 	assert_true(game.view_offset != camera_before, "spectator retains camera control")
 	game.free()
 	finish()
+
+
+func advance_until_tick(game, expected_tick: int) -> bool:
+	# A rendered frame may only prepare asynchronous AI and leave the resign
+	# command queued. Wait for its authoritative tick before checking the HUD.
+	game.game_controller.advance_frame(GameController.FIXED_STEP_SECONDS, 1, 2)
+	var deadline := Time.get_ticks_msec() + 30_000
+	while int(game.game_controller.tick_index) < expected_tick:
+		if Time.get_ticks_msec() >= deadline:
+			assert_true(false, "deferred AI completes the resign tick within its deadline")
+			return false
+		await process_frame
+		# The first attempt already contributed the fixed step's time debt.
+		game.game_controller.advance_frame(0.0, 1, 2)
+	return true
 
 
 func assert_true(value: bool, context: String) -> void:

@@ -1,5 +1,6 @@
 extends SceneTree
 
+const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 
@@ -28,7 +29,7 @@ func _run() -> void:
 	game.map_definition_override = built["map_data"].duplicate(true)
 	root.add_child(game)
 	assert_true(game.cached_world_fog_texture != null, "fog texture is prepared before the first visible frame")
-	assert_equal(game.cached_fog_slope_neighbor_terrain_revision, game.simulation_world.terrain_revision, "first draw retains the prepared fog mask")
+	assert_equal(game.cached_fog_slope_neighbor_terrain_revision, CacheDependency.geometry_key(game.map_size, game.simulation_world.terrain_elevation), "first draw retains the prepared fog mask")
 	await process_frame
 	await process_frame
 	assert_equal(game.match_path, built["identity"], "generated identity becomes the save compatibility key")

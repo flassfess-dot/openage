@@ -62,9 +62,13 @@ func test_shared_march_preserves_spacing_and_restores_individual_avoidance() -> 
 
 	var cached_member_id := ids[0]
 	assert_true(world.open_movement_envelopes_by_id.has(cached_member_id), "open march has a route envelope before map change")
+	var retained_envelope: Dictionary = world.open_movement_envelopes_by_id[cached_member_id]
 	world.navigation_grid.set_terrain(Vector2i(35, 35), "water")
 	controller.advance_frame(0.05, 1, 2)
-	assert_true(not world.open_movement_envelopes_by_id.has(cached_member_id), "navigation revision invalidates shared open envelope (tick=%d revision=%d task=%s)" % [controller.tick_index, world.navigation_grid.revision, world.find_unit(cached_member_id)["task"]])
+	assert_true(is_same(world.open_movement_envelopes_by_id.get(cached_member_id), retained_envelope), "distant navigation changes retain the shared route envelope")
+	world.navigation_grid.set_terrain(Vector2i(20, 8), "water")
+	controller.advance_frame(0.05, 1, 2)
+	assert_true(not world.open_movement_envelopes_by_id.has(cached_member_id), "navigation change inside the route invalidates its shared open envelope (tick=%d revision=%d task=%s)" % [controller.tick_index, world.navigation_grid.revision, world.find_unit(cached_member_id)["task"]])
 	assert_true(float(outsider["hp"]) > 0.0, "external unit remains part of live collision scenario")
 
 

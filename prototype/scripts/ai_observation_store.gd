@@ -58,8 +58,11 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 	# Resource knowledge already has an incremental fog-memory cache in the
 	# world. Reuse its immutable AI projection rather than introducing another
 	# owner for the same data.
-	var resources: Array = world.get_known_ai_resources(observer_team) if world.has_method("get_known_ai_resources") else _project_resources(world.get_known_resources(observer_team), observer_team)
-	resources = resources.duplicate()
+	var resources: Array
+	if world.has_method("get_known_ai_resource_snapshot"):
+		resources = world.get_known_ai_resource_snapshot(observer_team)
+	else:
+		resources = world.get_known_ai_resources(observer_team).duplicate() if world.has_method("get_known_ai_resources") else _project_resources(world.get_known_resources(observer_team), observer_team)
 	_observe_stage(probe, prefix + ".resources", stage_started)
 	stage_started = Time.get_ticks_usec() if probe != null else 0
 

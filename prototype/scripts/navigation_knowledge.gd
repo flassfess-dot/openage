@@ -59,6 +59,16 @@ func _refresh(world, entry: Dictionary, indices: Array, initial: bool, team: int
 	var source = world.navigation_grid
 	var grid = entry["grid"]
 	var changed := false
+	var surface_changed := false
+	# Unknown cells are traversable in every domain. Learning ordinary land
+	# does not change an existing land component map, and occupant-only updates
+	# never affect surface components. Compare each cached configuration before
+	# and after learning instead of rebuilding the whole map for every sight tick.
+	var surface_configurations: Array = []
+	for key_value in grid.surface_component_cache:
+		var key := String(key_value)
+		var parts := key.rsplit(":", true, 1)
+		surface_configurations.append({"key": key, "domain": parts[0], "restriction": int(parts[1])})
 	var patch_needed: bool = not entry["planner"].native_kernels.is_empty()
 	var changed_cells: Array[Vector2i] = []
 	var seen: Dictionary = {}
@@ -74,11 +84,22 @@ func _refresh(world, entry: Dictionary, indices: Array, initial: bool, team: int
 		var occupants: Array = source.occupied_cells.get(cell, [])
 		var terrain_id: int = source.terrain_id(cell)
 		var terrain: String = source.terrain(cell)
-		if grid.learned[index] == 0 or grid.occupied_cells.get(cell, []) != occupants or grid.terrain_id(cell) != terrain_id:
+		var terrain_changed: bool = grid.learned[index] == 0 or grid.terrain_id(cell) != terrain_id or grid.terrain(cell) != terrain
+		if terrain_changed or grid.occupied_cells.get(cell, []) != occupants:
+			var previous_access: Array[bool] = []
+			if terrain_changed:
+				for configuration in surface_configurations:
+					previous_access.append(grid.surface_accessible(cell, String(configuration["domain"]), int(configuration["restriction"])))
 			grid.learned[index] = 1
 			grid.terrain_ids[cell] = terrain_id
 			grid.terrain_cells[cell] = terrain
 			grid.elevation_cells[cell] = source.elevation(cell)
+			if terrain_changed:
+				surface_changed = true
+				for configuration_index in range(surface_configurations.size()):
+					var configuration: Dictionary = surface_configurations[configuration_index]
+					if grid.surface_component_cache.has(configuration["key"]) and previous_access[configuration_index] != grid.surface_accessible(cell, String(configuration["domain"]), int(configuration["restriction"])):
+						grid.surface_component_cache.erase(configuration["key"])
 			if occupants.is_empty():
 				grid.occupied_cells.erase(cell)
 			else:
@@ -89,6 +110,6 @@ func _refresh(world, entry: Dictionary, indices: Array, initial: bool, team: int
 			changed = true
 	if changed:
 		grid.revision += 1
-		grid.surface_revision += 1
-		grid.surface_component_cache.clear()
+		if surface_changed:
+			grid.surface_revision += 1
 		entry["planner"].patch_native_masks(changed_cells)

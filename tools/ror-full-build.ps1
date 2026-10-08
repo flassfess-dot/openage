@@ -10,6 +10,7 @@ $generatedRoot = Join-Path $projectRoot "assets\generated"
 $distributionRoot = Join-Path $repositoryRoot "dist\Rise of Rome Prototype"
 $qaRoot = Join-Path $projectRoot "qa\dev-scripts"
 $godotApplication = Join-Path $repositoryRoot ".tools\godot-4.7.2\Godot_v4.7.2-stable_win64.exe"
+$releaseTemplate = Join-Path $repositoryRoot ".tools\godot-4.7.2\windows_release_x86_64.exe"
 $application = Join-Path $distributionRoot "Rise of Rome Prototype.exe"
 $package = Join-Path $distributionRoot "Rise of Rome Prototype.pck"
 $nativeBuildScript = Join-Path $repositoryRoot "tools\build_native_pathfinding.ps1"
@@ -140,6 +141,11 @@ function Invoke-GodotLogged {
     if ($process.ExitCode -ne 0) {
         throw "$Name failed with exit code $($process.ExitCode)"
     }
+    # Import/export can return zero even after a script fails to compile.
+    if (Test-Path -LiteralPath $GodotLogPath) {
+        $scriptErrors = @(Select-String -LiteralPath $GodotLogPath -Pattern 'SCRIPT ERROR:|Parse Error:|Failed to load script')
+        if ($scriptErrors.Count -gt 0) { throw "$Name contains script compilation errors; see $GodotLogPath" }
+    }
     Write-Status $EndPercent "$Name complete"
 }
 
@@ -217,6 +223,17 @@ try {
     if (-not (Test-Path -LiteralPath $godotApplication)) {
         throw "Missing Godot executable: $godotApplication"
     }
+    if (-not (Test-Path -LiteralPath $releaseTemplate)) {
+        $templateArchive = Join-Path (Split-Path -Parent $releaseTemplate) "Godot_v4.7.2-stable_export_templates.tpz"
+        if (-not (Test-Path -LiteralPath $templateArchive)) { throw "Missing Windows Release template: $releaseTemplate" }
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($templateArchive)
+        try {
+            $entry = $archive.GetEntry("templates/windows_release_x86_64.exe")
+            if ($null -eq $entry) { throw "Windows Release template missing from $templateArchive" }
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $releaseTemplate, $true)
+        } finally { $archive.Dispose() }
+    }
     Assert-ApplicationNotRunning
     New-Item -ItemType Directory -Force -Path $distributionRoot | Out-Null
 
@@ -242,22 +259,22 @@ try {
         -GodotLogPath $godotImportLog
 
     Invoke-GodotLogged `
-        -Name "godot package export" `
+        -Name "godot Release export" `
         -StartPercent 40 `
         -EndPercent 92 `
-        -Arguments @("--headless", "--path", $projectRoot, "--export-pack", "Windows Desktop", $package) `
+        -Arguments @("--headless", "--path", $projectRoot, "--export-release", "Windows Desktop", $application) `
         -GodotLogPath $godotExportLog
 
-    Write-Status 93 "copying executable and runtime files"
+    Write-Status 93 "copying Release runtime files"
     Assert-ApplicationNotRunning
-    Copy-Item -LiteralPath $godotApplication -Destination $application -Force
     New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "bin") | Out-Null
     Copy-Item -LiteralPath $nativeLibrary -Destination (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -Force
     New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "legal\MIT") | Out-Null
     Copy-Item -LiteralPath (Join-Path $repositoryRoot "legal\MIT\godot-cpp.md") -Destination (Join-Path $distributionRoot "legal\MIT\godot-cpp.md") -Force
     Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $distributionRoot "README.md") -Force
 
-    Write-Status 98 "verifying build artifacts"
+    Write-Status 98 "verifying Release build artifacts"
+    if ((Get-FileHash -LiteralPath $application -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $godotApplication -Algorithm SHA256).Hash) { throw "Release executable was replaced by the Godot editor" }
     foreach ($artifact in @($application, $package, (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll"))) {
         if (-not (Test-Path -LiteralPath $artifact)) {
             throw "Build artifact is missing: $artifact"

@@ -40,10 +40,18 @@ func _initialize() -> void:
 	var later := store.observe(world, 2, 1, options)
 	check(float(knowledge["units"][0]["hp"]) == 12.0 and float(later["units"][0]["hp"]) == 9.0, "retained AI observations never mutate earlier factual rows")
 
+	worker["components"]["vision"] = {"range": 6.0, "enabled": true}
 	var tree: Dictionary = world.add_resource("tree", Vector2(6.5, 5.5), 75)
 	world.update_fog_of_war()
 	var before := Snapshot.presentation(world, 3, 1, {"compact_render_entities": true, "borrow_visible_render_entities": true, "include_overview": true, "borrow_overview_entities": true})
-	var memory: Dictionary = world.get_known_resources(1)[0]
+	var remembered: Array = world.get_known_resources(1)
+	check(remembered.size() == 1, "visible resource is remembered before the mutation")
+	if remembered.is_empty():
+		for failure in failures:
+			push_error(failure)
+		quit(1)
+		return
+	var memory: Dictionary = remembered[0]
 	tree["amount"] = 50
 	world.mark_known_resource_dirty(tree)
 	var after := Snapshot.presentation(world, 4, 1, {"compact_render_entities": true, "borrow_visible_render_entities": true, "include_overview": true, "borrow_overview_entities": true})

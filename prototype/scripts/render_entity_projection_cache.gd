@@ -13,6 +13,10 @@ func erase(entity_id: int) -> void:
 	categories_by_id.erase(entity_id)
 
 func project(entity: Dictionary) -> Dictionary:
+	# Fog-memory resources are already immutable render records. Reprojection
+	# would rebuild the same schema for every visible tree on every tick.
+	if Contract.is_render_record(entity):
+		return entity
 	var entity_id := int(entity.get("id", -1))
 	var result: Dictionary = Contract.render(entity, projections_by_id.get(entity_id, {}))
 	if entity_id >= 0:

@@ -174,7 +174,7 @@ func verify_government_center_pipeline(catalog) -> void:
 	for technology_id in [34, 112, 114, 121]:
 		assert_true(research_ids.has(technology_id), "Government Center exposes allowed Bronze Age technology %d" % technology_id)
 	assert_true(not research_ids.has(37), "Roman disabled technology 37 is absent from Government Center palette")
-	var presentation: Dictionary = SimulationSnapshot.presentation(world, controller.tick_index, 1)
+	var presentation: Dictionary = SimulationSnapshot.with_queries(world, controller.tick_index, 1)
 	var ai_commands: Array = AiEconomicPlanner.plan(presentation, controller.tick_index + 1, 1)
 	assert_true(ai_commands.any(func(command): return command.command_type() == "research" and command.unit_ids.has(int(government["id"]))), "AI discovers Government Center research only through legal presentation options")
 

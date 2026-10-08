@@ -24,6 +24,7 @@ const EntityComponents := preload("res://scripts/entity_components.gd")
 const ChangeJournal := preload("res://scripts/cell_change_journal.gd")
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const EntityReadContract := preload("res://scripts/entity_read_contract.gd")
+const ResourcePublication := preload("res://scripts/immutable_resource_publication.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const CombatRules := preload("res://scripts/combat_rules.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
@@ -2150,6 +2151,52 @@ func get_cached_local_build_sites(team: int, kinds: Array, tick: int, maximum_ag
 			ordered[kind] = result[kind]
 	return ordered
 
+# Advisory placement requests capture immutable input at the AI source tick.
+# Searches run inside the AI worker; the owner never waits for placement jobs.
+func capture_ai_build_site_queries(team: int, kinds: Array, tick: int, maximum_age_ticks: int, maximum_per_kind: int, search_radius: int, preferred_sites: Dictionary, strict_preferred_kinds: Array, minimum_structure_gap: float) -> Array:
+	var requests: Array = []
+	if kinds.is_empty():
+		return requests
+	var dependencies := _build_site_query_dependencies(team)
+	var pending_kinds: Array = []
+	for kind_value in kinds:
+		var kind := String(kind_value)
+		var preferred := {kind: preferred_sites.get(kind, [])}
+		var strict: Array = [kind] if kind in strict_preferred_kinds else []
+		var cache_key := hash([team, kind, maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap])
+		var signature := hash([dependencies, can_afford_resource_cost(team, building_cost(kind, team))])
+		var cached: Dictionary = local_build_site_cache.get(cache_key, {})
+		var request := {"kind": kind, "cache_key": cache_key, "signature": signature, "team": team}
+		if not cached.is_empty() and tick >= int(cached.get("tick", -1)) and tick - int(cached.get("tick", -1)) <= maxi(0, maximum_age_ticks) and int(cached.get("query_signature", -1)) == signature:
+			request["cached_sites"] = cached.get("sites", {}).get(kind, []).duplicate()
+		else:
+			request["input"] = {"team": team, "kind": kind, "maximum": maximum_per_kind, "radius": search_radius, "preferred": preferred, "strict": strict, "gap": minimum_structure_gap}
+			pending_kinds.append(kind)
+		requests.append(request)
+	if not pending_kinds.is_empty():
+		var base: Dictionary = BuildSiteTask.capture(self, team, pending_kinds)
+		if not TaskData.freeze_detached(base):
+			push_error("AI build-site capture must be detached")
+		for request in requests:
+			if request.has("input"):
+				request["input"]["base"] = base
+	return requests
+
+func commit_ai_build_site_queries(updates: Array, tick: int) -> void:
+	var dependencies_by_team: Dictionary = {}
+	# A moved worker, changed occupancy, exploration or technology invalidates
+	# a captured search. Build commands also validate the live site/worker.
+	for update in updates:
+		var team := int(update.get("team", 0))
+		var kind := String(update.get("kind", ""))
+		if not dependencies_by_team.has(team):
+			dependencies_by_team[team] = _build_site_query_dependencies(team)
+		var signature := hash([dependencies_by_team[team], can_afford_resource_cost(team, building_cost(kind, team))])
+		if kind.is_empty() or signature != int(update.get("signature", -1)):
+			continue
+		local_build_site_cache[int(update["cache_key"])] = {"tick": tick, "query_signature": signature, "sites": TaskData.copy(update.get("sites", {}))}
+		_prune_local_build_site_cache(tick, 1200)
+
 func _get_cached_local_build_sites_sequential(team: int, kinds: Array, tick: int, maximum_age_ticks: int, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
 	if kinds.is_empty():
 		return {}
@@ -3023,12 +3070,12 @@ func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 			var ratio := clampf(float(entity.get("hp", old_max)) / old_max, 0.0, 1.0)
 			entity["max_hp"] = maxf(1.0, apply_effect_operator(old_max, effect_type, value))
 			entity["hp"] = float(entity["max_hp"]) * ratio
-						1:
+		1:
 			var vision: Dictionary = components.get("vision", {})
 			vision["range"] = maxf(0.0, apply_effect_operator(float(vision.get("range", 0.0)), effect_type, value))
 		5:
 			entity["speed"] = maxf(0.0, apply_effect_operator(float(entity.get("speed", 0.0)), effect_type, value))
-				8:
+		8:
 			modify_combat_class_value(components.get("combat", {}).get("armors", []), effect_type, value)
 		9:
 			var attacks: Array = components.get("combat", {}).get("attacks", [])
@@ -3347,12 +3394,59 @@ func get_known_ai_resources(observer_team: int) -> Array:
 	return projected["resources"]
 
 
+# Warm the immutable resource publication alongside incremental AI navigation.
+# A restored large forest must not produce a single long frame on first use.
+func prepare_known_ai_resource_snapshot(observer_team: int, max_records: int = 64) -> bool:
+	var known := get_known_resources(observer_team)
+	var cache: Dictionary = known_resources_by_player.get(observer_team, {})
+	if observer_team <= 0 or cache.has("ai_projection"):
+		return true
+	var revision := int(cache.get("revision", 0))
+	var pending: Dictionary = cache.get("ai_projection_preparing", {})
+	if pending.is_empty() or int(pending["revision"]) != revision:
+		pending = {"revision": revision, "resources": [], "ids": {}, "publication": ResourcePublication.new()}
+		cache["ai_projection_preparing"] = pending
+	var end := mini(known.size(), pending["resources"].size() + maxi(1, max_records))
+	for index in range(pending["resources"].size(), end):
+		var item := _compact_ai_resource(known[index])
+		if not pending["publication"].upsert(item):
+			cache.erase("ai_projection_preparing")
+			return false
+		pending["resources"].append(item)
+		pending["ids"][int(item["id"])] = item
+	if end < known.size():
+		return false
+	pending.erase("revision")
+	cache["ai_projection"] = pending
+	known_ai_resources_by_player[observer_team] = pending
+	cache.erase("ai_projection_preparing")
+	return true
+
+func get_known_ai_resource_snapshot(observer_team: int) -> Array:
+	var resources := get_known_ai_resources(observer_team)
+	var cache: Dictionary = known_resources_by_player.get(observer_team, {})
+	var projection: Dictionary = cache.get("ai_projection", {})
+	if projection.is_empty():
+		return resources.duplicate()
+	if not projection.has("publication"):
+		var publication := ResourcePublication.new()
+		for record in resources:
+			if not publication.upsert(record):
+				return resources.duplicate()
+		projection["publication"] = publication
+	return projection["publication"].snapshot()
+
+
 func _update_ai_resource_projection(cached: Dictionary, memory: Dictionary) -> void:
 	if not cached.has("ai_projection"):
 		return
 	var projection: Dictionary = cached["ai_projection"]
 	var id := int(memory["id"])
 	var item := _compact_ai_resource(memory)
+	if projection["ids"].get(id) == item:
+		return
+	if projection.has("publication") and not projection["publication"].upsert(item):
+		projection.erase("publication")
 	if projection["ids"].has(id):
 		_replace_known_resource(projection["resources"], item)
 		projection["ids"][id] = item
@@ -3499,6 +3593,8 @@ func _forget_known_resource(cached: Dictionary, resource_id: int) -> bool:
 		var projected: Dictionary = cached["ai_projection"]
 		projected["resources"].erase(projected["ids"].get(resource_id))
 		projected["ids"].erase(resource_id)
+		if projected.has("publication"):
+			projected["publication"].erase(resource_id)
 	ids.erase(resource_id)
 	_mark_known_resource_marker_changed(cached, resource_id)
 	var cell_index := _resource_cell_index(memory)

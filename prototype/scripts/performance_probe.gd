@@ -5,6 +5,7 @@ const DEFAULT_SAMPLE_LIMIT: int = 8192
 
 var sample_limit: int = DEFAULT_SAMPLE_LIMIT
 var samples_by_metric: Dictionary = {}
+var next_sample_by_metric: Dictionary = {}
 var counters: Dictionary = {}
 
 
@@ -14,6 +15,7 @@ func _init(maximum_samples_per_metric: int = DEFAULT_SAMPLE_LIMIT) -> void:
 
 func clear() -> void:
 	samples_by_metric.clear()
+	next_sample_by_metric.clear()
 	counters.clear()
 
 
@@ -21,9 +23,14 @@ func observe_microseconds(metric: String, duration_microseconds: int) -> void:
 	if metric.is_empty():
 		return
 	var samples: Array = samples_by_metric.get(metric, [])
-	samples.append(maxi(0, duration_microseconds))
-	if samples.size() > sample_limit:
-		samples.pop_front()
+	if samples.size() < sample_limit:
+		samples.append(maxi(0, duration_microseconds))
+	else:
+		# Recording must stay constant-time in long sessions. Shifting a full
+		# history for every sample makes the profiler itself slow down the game.
+		var next_sample := int(next_sample_by_metric.get(metric, 0))
+		samples[next_sample] = maxi(0, duration_microseconds)
+		next_sample_by_metric[metric] = (next_sample + 1) % sample_limit
 	samples_by_metric[metric] = samples
 
 

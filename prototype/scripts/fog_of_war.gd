@@ -33,7 +33,6 @@ var native_enabled: bool = true
 var native_available: bool = false
 var native_kernel: Variant = null
 var source_scan_generation: int = 0
-var source_seen_generations := PackedInt32Array()
 
 
 func _init(world_size: Vector2i = Vector2i.ONE) -> void:
@@ -63,7 +62,6 @@ func reset() -> void:
 	shared_vision_by_player.clear()
 	vision_sources.clear()
 	source_scan_generation = 0
-	source_seen_generations.resize(0)
 	visibility_topology_dirty = true
 	revision += 1
 
@@ -318,8 +316,7 @@ func update(units: Array, buildings: Array, movement_bucket_count: int = 1, move
 			_collect_source_deltas(buildings, 1, movement_bucket_count, movement_bucket_index, added_sources, previous_replacements, current_replacements)
 			for source_key in vision_sources.keys():
 				var source: Dictionary = vision_sources[source_key]
-				var numeric_source_key := int(source_key)
-				if numeric_source_key < source_seen_generations.size() and int(source_seen_generations[numeric_source_key]) == source_scan_generation:
+				if int(source.get("seen_generation", -1)) == source_scan_generation:
 					continue
 				removed_sources.append(source)
 				vision_sources.erase(source_key)
@@ -461,9 +458,7 @@ func _collect_source_deltas(
 		var center := Vector2(entity["pos"])
 		var previous: Variant = vision_sources.get(source_key)
 		if previous != null and int(previous["team"]) == source_player and Vector2(previous["center"]).is_equal_approx(center) and is_equal_approx(float(previous["radius"]), sight_radius):
-			if source_key >= source_seen_generations.size():
-				source_seen_generations.resize(source_key + 1)
-			source_seen_generations[source_key] = source_scan_generation
+			previous["seen_generation"] = source_scan_generation
 			continue
 		var stable_bucket_value := entity_id if entity_id >= 0 else index
 		var movement_refresh_deferred := (
@@ -474,9 +469,7 @@ func _collect_source_deltas(
 			and posmod(stable_bucket_value, maxi(1, movement_bucket_count)) != posmod(movement_bucket_index, maxi(1, movement_bucket_count))
 		)
 		if movement_refresh_deferred:
-			if source_key >= source_seen_generations.size():
-				source_seen_generations.resize(source_key + 1)
-			source_seen_generations[source_key] = source_scan_generation
+			previous["seen_generation"] = source_scan_generation
 			continue
 		var vision_started := Time.get_ticks_usec() if performance_probe != null else 0
 		var cells := _vision_cells(center, sight_radius)
@@ -492,9 +485,10 @@ func _collect_source_deltas(
 			"entity": entity,
 			"source_revision": int(previous.get("source_revision", 0)) + 1 if previous != null else 1,
 		}
-		if source_key >= source_seen_generations.size():
-			source_seen_generations.resize(source_key + 1)
-		source_seen_generations[source_key] = source_scan_generation
+		# Entity IDs share a sequence with resources and projectiles. Keep scan
+		# marks on live sources rather than allocating up to the highest ID ever
+		# produced; death then releases the mark together with its source.
+		current["seen_generation"] = source_scan_generation
 		vision_sources[source_key] = current
 		if previous == null:
 			added_sources.append(current)

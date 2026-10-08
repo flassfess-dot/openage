@@ -1,0 +1,334 @@
+{
+  "model": "Qwen/Qwen-Image-2.1",
+  "purpose": "Private standalone evaluation, no game integration",
+  "cloud_model": "official full-model demo",
+  "local_model": "same Qwen-Image-2.1, Q4_K diffusion and Q4_K_M text encoder",
+  "hardware": "RTX 3080 Ti 12GB; i7-7700; 16GB RAM",
+  "direct_paid_generation_cost_usd": 0,
+  "electricity_and_Codex_usage_not_included": true,
+  "records": [
+    {
+      "metadata_file": "earth.generation.json",
+      "model": "Qwen/Qwen-Image-2.1",
+      "provider": "local stable-diffusion.cpp",
+      "quantization": "Q4_K",
+      "text_encoder_quantization": "Q4_K_M",
+      "runtime_release": "master-931-9db0db6",
+      "hardware": "RTX 3080 Ti 12GB, i7-7700, 16GB RAM",
+      "asset": "earth",
+      "settings": {
+        "size": [
+          1024,
+          1024
+        ],
+        "seed": 1060104,
+        "prompt": "ONE seamless square texture of quiet well-worn compacted earth for paths in a hand-painted ancient Mediterranean RTS. Direct TOP-DOWN view, opaque material filling the image, neutral diffuse lighting. Muted light gray-brown, taupe and warm beige, not yellow sand. Extremely low contrast, broad gentle painted variations, just a trace of texture. Seamless wrapping on all four edges. No drawn path shape, footprints, stones, cracks, dots, hatching carpet, grass, objects, scenery, perspective, horizon, text, border or watermark. Calm background beneath detailed sprites."
+      },
+      "num_inference_steps": 40,
+      "cfg_scale": 1.0,
+      "reference_files": [],
+      "reference_resolution": null,
+      "timestamp": "2026-10-06T18:59:52.539538+00:00",
+      "status": "complete",
+      "file": "earth.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        254,
+        255
+      ],
+      "elapsed_seconds": 166.52
+    },
+    {
+      "metadata_file": "earth.remote-failed.generation.json",
+      "model": "Qwen/Qwen-Image-2.1",
+      "provider": "https://huggingface.co/spaces/Qwen/Qwen-Image-2.1",
+      "timestamp": "2026-10-06T18:21:07.498802+00:00",
+      "asset": "earth",
+      "settings": {
+        "size": [
+          1024,
+          1024
+        ],
+        "seed": 1060104,
+        "prompt": "ONE seamless square texture of quiet well-worn compacted earth for paths in a hand-painted ancient Mediterranean RTS. Direct TOP-DOWN view, opaque material filling the image, neutral diffuse lighting. Muted light gray-brown, taupe and warm beige, not yellow sand. Extremely low contrast, broad gentle painted variations, just a trace of texture. Seamless wrapping on all four edges. No drawn path shape, footprints, stones, cracks, dots, hatching carpet, grass, objects, scenery, perspective, horizon, text, border or watermark. Calm background beneath detailed sprites."
+      },
+      "num_inference_steps": 40,
+      "prompt_enhancement": false,
+      "status": "failed",
+      "error": "You have exceeded your ZeroGPU runs limit. Authenticate with a Hugging Face token for more quota - https://huggingface.co/settings/tokens",
+      "elapsed_seconds": 3.83
+    },
+    {
+      "metadata_file": "grass.generation.json",
+      "model": "Qwen/Qwen-Image-2.1",
+      "provider": "local stable-diffusion.cpp",
+      "quantization": "Q4_K",
+      "text_encoder_quantization": "Q4_K_M",
+      "runtime_release": "master-931-9db0db6",
+      "hardware": "RTX 3080 Ti 12GB, i7-7700, 16GB RAM",
+      "asset": "grass",
+      "settings": {
+        "size": [
+          1024,
+          1024
+        ],
+        "seed": 1060103,
+        "prompt": "ONE seamless square texture of short meadow turf for the ground of a hand-painted ancient Mediterranean RTS. Direct TOP-DOWN view, edge-to-edge opaque material, neutral diffuse lighting. Quiet muted natural sage and moss greens with extremely gentle broad blended variations. At least 95 percent reads as smooth continuous turf, only a few tiny understated tufts. Very low local contrast, no prominent blades, dark specks, stippling, grain, straw, flowers, stones or bright beige holes. The pen-and-parchment influence is nearly invisible in this background. Seamless wrapping on all four edges. No perspective, horizon, landscape, objects, paths, characters, text, grid, border or watermark. No sepia, yellow tint or photographic gritty detail."
+      },
+      "num_inference_steps": 40,
+      "cfg_scale": 1.0,
+      "reference_files": [],
+      "reference_resolution": null,
+      "timestamp": "2026-10-06T18:56:37.541221+00:00",
+      "status": "complete",
+      "file": "grass.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        254,
+        255
+      ],
+      "elapsed_seconds": 170.72
+    },
+    {
+      "metadata_file": "grass.remote-failed.generation.json",
+      "model": "Qwen/Qwen-Image-2.1",
+      "provider": "https://huggingface.co/spaces/Qwen/Qwen-Image-2.1",
+      "timestamp": "2026-10-06T18:19:55.680007+00:00",
+      "asset": "grass",
+      "settings": {
+        "size": [
+          1024,
+          1024
+        ],
+        "seed": 1060103,
+        "prompt": "ONE seamless square texture of short meadow turf for the ground of a hand-painted ancient Mediterranean RTS. Direct TOP-DOWN view, edge-to-edge opaque material, neutral diffuse lighting. Quiet muted natural sage and moss greens with extremely gentle broad blended variations. At least 95 percent reads as smooth continuous turf, only a few tiny understated tufts. Very low local contrast, no prominent blades, dark specks, stippling, grain, straw, flowers, stones or bright beige holes. The pen-and-parchment influence is nearly invisible in this background. Seamless wrapping on all four edges. No perspective, horizon, landscape, objects, paths, characters, text, grid, border or watermark. No sepia, yellow tint or photographic gritty detail."
+      },
+      "num_inference_steps": 40,
+      "prompt_enhancement": false,
+      "status": "failed",
+      "error": "You have exceeded your ZeroGPU runs limit. Authenticate with a Hugging Face token for more quota - https://huggingface.co/settings/tokens",
+      "elapsed_seconds": 2.95
+    },
+    {
+      "metadata_file": "house.generation.json",
+      "model": "Qwen/Qwen-Image-2.1",
+      "provider": "https://huggingface.co/spaces/Qwen/Qwen-Image-2.1",
+      "timestamp": "2026-10-06T18:14:51.715678+00:00",
+      "asset": "house",
+      "settings": {
+        "size": [
+          1024,
+          1024
+        ],
+        "seed": 1060101,
+        "prompt": "This is an RGBA image with transparency. ONE standalone compact single-storey Mediterranean cottage. Warm ivory plaster over a limestone base, low terracotta tiled gable roof, a timber entrance door, one small recessed window, one clay jar beside the door. Modest practical architecture, two walls and roof visible, no columns, monumental facade, compound, enclosed yard, people or vegetation. Small cottage: door height about one third of the facade height. Centered. Detailed original ancient Mediterranean RTS illustration. Very fine warm brown pen contours, sparse restrained hatching, soft hand-painted natural colors, only a whisper of parchment character. No sepia filter, heavy paper grain, glossy 3D rendering or thick black cartoon outlines. Orthographic game camera looking down 30 degrees, 2:1 ground-plane diagonals, parallel edges, soft daylight from upper left. The image has alpha channel and the background is transparent. No text, labels, border, watermark, terrain tile or scenery. Entire object visible with generous empty margins."
+      },
+      "num_inference_steps": 40,
+      "prompt_enhancement": false,
+      "status": "complete",
+      "file": "house.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "elapsed_seconds": 29.17
+    },
+    {
+      "metadata_file": "oak.generation.json",
+      "model": "Qwen/Qwen-Image-2.1",
+      "provider": "https://huggingface.co/spaces/Qwen/Qwen-Image-2.1",
+      "timestamp": "2026-10-06T18:16:25.252404+00:00",
+      "asset": "oak",
+      "settings": {
+        "size": [
+          1024,
+          1024
+        ],
+        "seed": 1060102,
+        "reference": "house.png",
+        "prompt": "This is an RGBA image with transparency. Use Image 1 only as the drawing style and daylight reference. Create ONE freestanding mature Mediterranean oak tree, irregular rounded crown, readable branching trunk and detailed bark. Olive, sage and moss-green foliage in broad masses, selected small leaf clusters, avoid uniformly busy leaf noise. No cottage, buildings, people, grass platform or other objects. Detailed original ancient Mediterranean RTS illustration. Very fine warm brown pen contours, sparse restrained hatching, soft hand-painted natural colors, only a whisper of parchment character. No sepia filter, heavy paper grain, glossy 3D rendering or thick black cartoon outlines. Orthographic game camera looking down 30 degrees, 2:1 ground-plane diagonals, parallel edges, soft daylight from upper left. The image has alpha channel and the background is transparent. No text, labels, border, watermark, terrain tile or scenery. Entire object visible with generous empty margins."
+      },
+      "num_inference_steps": 40,
+      "prompt_enhancement": false,
+      "status": "complete",
+      "file": "oak.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "elapsed_seconds": 29.83
+    },
+    {
+      "metadata_file": "worker-walk-sheet.generation.json",
+      "model": "Qwen/Qwen-Image-2.1",
+      "provider": "https://huggingface.co/spaces/Qwen/Qwen-Image-2.1",
+      "timestamp": "2026-10-06T18:18:16.352612+00:00",
+      "asset": "worker-walk-sheet",
+      "settings": {
+        "size": [
+          1024,
+          1024
+        ],
+        "seed": 1060105,
+        "reference": "house.png",
+        "prompt": "This is an RGBA image with transparency. Use Image 1 only as the drawing style and lighting reference. Game sprite sheet with exactly FOUR full-body walking poses of the SAME adult Mediterranean male villager, evenly placed in a precise 2-column by 2-row grid, no grid lines. Reading order top-left, top-right, bottom-left, bottom-right is four phases of one walking cycle IN PLACE. All face screen LOWER-RIGHT at the same three-quarter angle. Phase 1 left foot forward and right arm forward; phase 2 feet passing under hips; phase 3 right foot forward and left arm forward; phase 4 opposite passing phase. Each figure has identical body height, head size and costume, a common baseline in its cell. Cream short linen tunic to knees, narrow reddish-brown belt, plain brown sandals, short dark hair, no hat or tools. Realistic adult proportions, readable hands and feet. Each entire figure inside its own cell, generous space between figures, no overlap. No building, terrain, ground platform or cast shadow. Detailed original ancient Mediterranean RTS illustration. Very fine warm brown pen contours, sparse restrained hatching, soft hand-painted natural colors, only a whisper of parchment character. No sepia filter, heavy paper grain, glossy 3D rendering or thick black cartoon outlines. Orthographic game camera looking down 30 degrees, 2:1 ground-plane diagonals, parallel edges, soft daylight from upper left. The image has alpha channel and the background is transparent. No text, labels, border, watermark, terrain tile or scenery. Entire object visible with generous empty margins."
+      },
+      "num_inference_steps": 40,
+      "prompt_enhancement": false,
+      "status": "complete",
+      "file": "worker-walk-sheet.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "elapsed_seconds": 29.67
+    },
+    {
+      "metadata_file": "worker-walk-v2-sheet.generation.json",
+      "model": "Qwen/Qwen-Image-2.1",
+      "provider": "local stable-diffusion.cpp",
+      "quantization": "Q4_K",
+      "text_encoder_quantization": "Q4_K_M",
+      "runtime_release": "master-931-9db0db6",
+      "hardware": "RTX 3080 Ti 12GB, i7-7700, 16GB RAM",
+      "asset": "worker-walk-v2-sheet",
+      "settings": {
+        "size": [
+          1024,
+          1024
+        ],
+        "seed": 1060205,
+        "references": [
+          "worker-walk-sheet.png",
+          "worker-pose-guide.png"
+        ],
+        "prompt": "This is an RGBA image with transparency. Image 1 shows our approved villager design and fine pen-and-wash rendering. Image 2 is a schematic guide to four DISTINCT phases of a walk. Generate exactly four full-body sprites in a precise 2 by 2 grid. Keep the same adult man, face, short dark hair, cream linen knee-length tunic, reddish-brown belt, brown sandals, proportions, illustration style, lighting and fixed three-quarter right-facing camera as Image 1. Change ONLY his poses to match the four skeletons in Image 2. Pose 1 and 3 have a wide stride, with opposite arms swinging. Pose 2 and 4 MUST be different from the stride poses: the weight-bearing leg is almost straight directly beneath the hip, the other knee is bent and its foot is lifted, with both feet close to the body. For every cell follow the hip, knee, ankle and arm positions of the corresponding diagram. The red and blue are schematic limb identifiers ONLY, never paint the final man red or blue. The diagram is a pose reference, not the final drawing style. Same body size and baseline in all cells, entire figures visible, generous empty margins, no overlap. No text, grid lines, reference diagrams, numbers, cast shadows, ground, scenery or background. The image has alpha channel and the background is transparent."
+      },
+      "num_inference_steps": 40,
+      "cfg_scale": 1.0,
+      "reference_files": [
+        "worker-walk-sheet.png",
+        "worker-pose-guide.png"
+      ],
+      "reference_resolution": 512,
+      "timestamp": "2026-10-06T19:03:09.295864+00:00",
+      "status": "complete",
+      "file": "worker-walk-v2-sheet.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "elapsed_seconds": 183.27
+    }
+  ],
+  "files": [
+    {
+      "file": "house.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "sha256": "cfdd1ded24d84bc02b80dc15a9e2b682ab016dce2a50df668e8430b00ffff5a6"
+    },
+    {
+      "file": "oak.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "sha256": "44f76a0a4ff1aa3c4b9f6ed9e713cde6eb8df14c69e5777622a5639735c36762"
+    },
+    {
+      "file": "grass.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        254,
+        255
+      ],
+      "sha256": "8a852014641091174378ed5214015befaf5cb11b413479aa658a26af102c07e9"
+    },
+    {
+      "file": "earth.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        254,
+        255
+      ],
+      "sha256": "6162702b3b5f8ea3f575ec2491206bf6a236373f051df3a268152fe274eaa4e8"
+    },
+    {
+      "file": "worker-walk-sheet.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "sha256": "3b4f1c533f3a538d2504df9a911b419e513311694890a50ed01640a6aed8c87c"
+    },
+    {
+      "file": "worker-walk-v2-sheet.png",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha_extrema": [
+        0,
+        255
+      ],
+      "sha256": "f966e02d7a61f2662736c9b6d999be6a15d38447d13b56425525e2529706cc5c"
+    }
+  ],
+  "commercial_model_license": "Separate Qwen commercial model license required; no purchase made",
+  "license_source": "https://huggingface.co/Qwen/Qwen-Image-2.1/blob/main/LICENSE"
+}

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="64" viewBox="0 0 320 64">
+  <defs>
+    <linearGradient id="stone" x1="0" y1="0" x2="0.15" y2="1">
+      <stop stop-color="#fbf8ef"/><stop offset="0.46" stop-color="#e9e5d9"/><stop offset="1" stop-color="#d1cdc0"/>
+    </linearGradient>
+    <linearGradient id="bevel" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#f9f2dc"/><stop offset="0.5" stop-color="#ac9362"/><stop offset="1" stop-color="#65543c"/>
+    </linearGradient>
+    <clipPath id="face"><rect x="7" y="7" width="306" height="50" rx="1"/></clipPath>
+  </defs>
+  <rect x="0.5" y="0.5" width="319" height="63" rx="3" fill="#4b4134"/>
+  <rect x="2" y="2" width="316" height="60" rx="2" fill="url(#bevel)"/>
+  <path d="M4 59V4H316" fill="none" stroke="#fff8e7" stroke-width="1.2" opacity="0.8"/>
+  <rect x="6" y="6" width="308" height="52" rx="1.5" fill="url(#stone)" stroke="#8b806d"/>
+  <g clip-path="url(#face)" fill="none" stroke-linecap="round">
+    <path d="M19-2 43 15 85 20 103 29 145 31 169 40 197 41 215 50 265 53 298 66" stroke="#9a9994" opacity="0.16" stroke-width="1.1"/>
+    <path d="m38 11 20 8 11 13 32 4m65 3 10-11 19-4 8-10m35 36 12-9 32-2 14-7" stroke="#9e9b94" opacity="0.13" stroke-width="0.75"/>
+    <path d="M-4 46 36 40 58 44 79 38 110 41 137 33m86-39 12 17 23 3 17 14 48 8" stroke="#ffffff" opacity="0.45" stroke-width="1.5"/>
+  </g>
+  <path d="M9 15V9H15m290 0h6v6M9 49v6h6m290 0h6v-6" fill="none" stroke="#ae9567" opacity="0.75"/>
+  <path d="M17 8H303" stroke="#ffffff" opacity="0.72"/>
+  <path d="M17 56H303" stroke="#aaa294" opacity="0.6"/>
+</svg>

@@ -1,0 +1,9 @@
+config_version=5
+[application]
+config/name="Asset style sample — standalone"
+[display]
+window/size/viewport_width=1600
+window/size/viewport_height=1000
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -3,6 +3,7 @@ extends RefCounted
 
 const Data := preload("res://scripts/isolated_task_data.gd")
 const SCHEMA_VERSION := 1
+const RENDER_SCHEMA_KEY := "_ror_render_schema"
 # One schema for one-shot and retained projections. No live entity borrowing.
 const RENDER_FIELDS := [
 	"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
@@ -77,7 +78,12 @@ static func freeze(record: Dictionary) -> Dictionary:
 	Data._freeze(record)
 	return record
 
+static func is_render_record(entity: Dictionary) -> bool:
+	return entity.is_read_only() and int(entity.get(RENDER_SCHEMA_KEY, -1)) == SCHEMA_VERSION
+
 static func render(entity: Dictionary, previous: Dictionary = {}) -> Dictionary:
+	if is_render_record(entity):
+		return entity
 	var edit := CopyOnWrite.new(previous)
 	for key in RENDER_FIELDS:
 		if key == "entity_type":
@@ -87,6 +93,7 @@ static func render(entity: Dictionary, previous: Dictionary = {}) -> Dictionary:
 		else:
 			edit.erase(key)
 	edit.put("entity_type", entity_type(entity))
+	edit.put(RENDER_SCHEMA_KEY, SCHEMA_VERSION)
 	for key in ARRAY_FIELDS + NESTED_RENDER_FIELDS:
 		if entity.has(key):
 			edit.put(key, entity[key])

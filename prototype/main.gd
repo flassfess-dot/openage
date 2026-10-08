@@ -180,6 +180,9 @@ var hud_controls: HUDControls
 var top_bar_controls: TopBarControls
 var hud_modal_overlay: HUDModalOverlay
 var modal_restore_paused := false
+var launcher_suspended := false
+var launcher_restore_paused := false
+var launcher_audio_states: Array[Dictionary] = []
 var last_save_error := ""
 var hud_view_model := HudViewModel.new()
 var hud_model: Dictionary = {}
@@ -208,6 +211,7 @@ var cached_minimap_terrain_rectangle := Rect2()
 var cached_minimap_fog_texture: ImageTexture
 var cached_minimap_fog_image: Image
 var cached_minimap_exploration_revision: int = -1
+var cached_minimap_fog_tick := -1
 var cached_minimap_fog_rectangle := Rect2()
 var cached_minimap_mesh_tick: int = -1
 var cached_minimap_mesh_rectangle := Rect2()
@@ -822,55 +826,74 @@ func _capture_ai_decision(ai, next_tick: int) -> Dictionary:
 	var probe: Variant = game_controller.performance_probe
 	var started := Time.get_ticks_usec()
 	var options: Dictionary = ai.presentation_options()
+	options["defer_build_sites"] = true
+	var navigation_ready := true
 	if bool(options.get("include_navigation", true)):
-		var ready: bool = simulation_world.ai_navigation_knowledge.prepare_snapshot(simulation_world, simulation_world.get_fog_of_war(), int(ai.team))
-		if not ready:
-			return {"pending": true}
+		navigation_ready = simulation_world.ai_navigation_knowledge.prepare_snapshot(simulation_world, simulation_world.get_fog_of_war(), int(ai.team))
+	var resources_ready: bool = simulation_world.prepare_known_ai_resource_snapshot(int(ai.team))
+	if probe != null:
+		probe.observe_microseconds("presentation.ai.prepare", Time.get_ticks_usec() - started)
+	if not navigation_ready or not resources_ready:
+		return {"pending": true}
+	started = Time.get_ticks_usec() if probe != null else 0
 	if probe != null:
 		options["performance_probe"] = probe
 		options["performance_prefix"] = "presentation.ai.snapshot"
 	var knowledge := ai_observation_store.observe_with_queries(simulation_world, game_controller.tick_index, int(ai.team), options)
 	if probe != null:
 		probe.observe_microseconds("presentation.ai.snapshot", Time.get_ticks_usec() - started)
-	return AiPlanningTask.capture(ai, knowledge, next_tick)
+	started = Time.get_ticks_usec() if probe != null else 0
+	var captured := AiPlanningTask.capture(ai, knowledge, next_tick)
+	if probe != null:
+		probe.observe_microseconds("presentation.ai.capture", Time.get_ticks_usec() - started)
+	return captured
+
+
+func _next_ai_decision_tick(ai, next_tick: int) -> int:
+	if not ai.enabled or simulation_world.player_registry.status(int(ai.team)) != "active":
+		return -1
+	if int(ai.last_economic_tick) < 0 and int(ai.last_military_tick) < 0:
+		return maxi(next_tick, AiPlayer.initial_decision_tick(ai, ai_players))
+	var target := int(ai.last_economic_tick) + maxi(1, int(ai.economic_interval))
+	if ai.profile != "source_campaign_v1" or bool(ai.source_contract.get("runtime_support", {}).get("military_enabled", true)):
+		target = mini(target, int(ai.last_military_tick) + maxi(1, int(ai.military_interval)))
+	return maxi(next_tick, target)
 
 
 func queue_ai_commands(next_tick: int = -1) -> Variant:
 	if next_tick < 0:
 		next_tick = game_controller.tick_index + 1
 	if ai_decision_queue.active:
-		return _poll_ai_decisions()
+		return _poll_ai_decisions(next_tick)
+	var horizon: int = game_controller.tick_index + AiDecisionQueue.LOOKAHEAD_TICKS
+	var target := horizon + 1
 	var due: Array = []
 	for ai in ai_players:
-		if not ai.needs_decision(next_tick):
+		var candidate := _next_ai_decision_tick(ai, next_tick)
+		if candidate < 0 or candidate > horizon:
 			continue
-		if int(ai.last_economic_tick) < 0 and int(ai.last_military_tick) < 0 and next_tick < AiPlayer.initial_decision_tick(ai, ai_players):
-			continue
-		due.append(ai)
+		if candidate < target:
+			target = candidate
+			due = [ai]
+		elif candidate == target:
+			due.append(ai)
 	if due.is_empty():
 		return false
-	if task_coordinator.is_enabled("ai_planning"):
-		ai_decision_queue.begin(due, game_controller.tick_index, next_tick, Callable(self, "_capture_ai_decision"))
-		return _poll_ai_decisions()
-	# Explicit sequential/reference mode retains the same tick and command order.
-	for ai in due:
-		var options: Dictionary = ai.presentation_options()
-		var knowledge := ai_observation_store.observe_with_queries(simulation_world, game_controller.tick_index, int(ai.team), options)
-		for command in ai.collect_commands(knowledge, next_tick):
-			game_controller.enqueue_command(command, true, int(ai.team))
-	return true
+	ai_decision_queue.begin(due, game_controller.tick_index, target, Callable(self, "_capture_ai_decision"))
+	return _poll_ai_decisions(next_tick)
 
 
-func _poll_ai_decisions() -> Dictionary:
-	var status: Dictionary = ai_decision_queue.poll(task_coordinator, game_controller.tick_index, Engine.get_process_frames())
+func _poll_ai_decisions(next_tick: int) -> Dictionary:
+	var status: Dictionary = ai_decision_queue.poll(task_coordinator, game_controller.tick_index, Engine.get_process_frames(), game_controller.performance_probe)
 	if status.has("error"):
 		game_message = "Ошибка расчёта ИИ: %s" % String(status["error"])
 		message_time = 8.0
 		game_controller.set_paused(true)
 		ai_decision_queue.cancel(task_coordinator)
 		return {"ready": false}
-	if not bool(status.get("ready", false)):
-		return status
+	var gate: Dictionary = ai_decision_queue.gate(status, next_tick)
+	if not bool(gate["ready"]) or next_tick < ai_decision_queue.apply_tick:
+		return gate
 	var decisions := ai_decision_queue.take_ready()
 	# Decode and validate every proposal before changing any live player state.
 	for decision in decisions:
@@ -885,6 +908,7 @@ func _poll_ai_decisions() -> Dictionary:
 		if not ai.restore_state(decision["output"]["state"]):
 			game_controller.set_paused(true)
 			return {"ready": false}
+		simulation_world.commit_ai_build_site_queries(decision["output"].get("build_site_cache_updates", []), next_tick)
 		for command in decision["commands"]:
 			game_controller.enqueue_command(command, true, int(ai.team))
 	return {"ready": true, "planned": not decisions.is_empty()}
@@ -1268,8 +1292,9 @@ func _capture_save_input(path: String, slot_name: String = "Быстрое со�
 		"sound_cue_history": sound_cue_history.canonical_state(),
 	}
 	var controller_state := {
+		"ai_decisions": ai_decision_queue.canonical_state(),
 		"speed": game_controller.get_speed_multiplier(),
-		"paused": modal_restore_paused if hud_modal_overlay != null and hud_modal_overlay.is_blocking() else game_controller.paused,
+		"paused": launcher_restore_paused if launcher_suspended else modal_restore_paused if hud_modal_overlay != null and hud_modal_overlay.is_blocking() else game_controller.paused,
 	}
 	var verifier := ReplaySystem.new()
 	# Capture and hash happen at one completed-tick boundary, before the world
@@ -1382,6 +1407,10 @@ func load_game_from_path(path: String) -> bool:
 			return _load_failed("ai_state_missing:%d" % int(ai.team))
 		if not ai.restore_state(ai_state_by_team[int(ai.team)]):
 			return _load_failed("ai_state_invalid:%d" % int(ai.team))
+	var restored_decisions := AiDecisionQueue.new()
+	var saved_controller: Dictionary = archive.get("controller_state", {})
+	if not saved_controller.get("ai_decisions", {}) is Dictionary or not restored_decisions.restore_state(saved_controller.get("ai_decisions", {}), restored_ai_players, restored_controller.tick_index, Callable(self, "_capture_ai_decision")):
+		return _load_failed("ai_decision_state_invalid")
 	var saved_view: Dictionary = archive.get("view_state", {})
 	var restored_sound_history := SoundCueHistory.new()
 	if not restored_sound_history.restore_state(saved_view.get("sound_cue_history", {}), int(archive.get("tick", 0))):
@@ -1389,6 +1418,13 @@ func load_game_from_path(path: String) -> bool:
 
 	match_definition = restored_definition
 	map_definition = restored_map
+	if String(restored_map.get("environment_pack", "")) == "aoe2_temperate":
+		resource_catalog.enable_environment_pack()
+	interface_style_index = resource_catalog.interface_skin.style_index_for_match(restored_definition, resource_catalog.object_catalog_data)
+	interface_panel_texture = resource_catalog.interface_skin.panel_texture(interface_style_index)
+	hud_controls.configure_interface_skin(resource_catalog.interface_skin, interface_style_index)
+	top_bar_controls.configure(resource_catalog.interface_skin, interface_style_index)
+	hud_modal_overlay.configure(resource_catalog.interface_skin, restored_definition, interface_style_index, resource_catalog.localization)
 	match_path = String(archive["match_path"])
 	match_definition_override = restored_definition.duplicate(true)
 	map_definition_override = restored_map.duplicate(true)
@@ -1415,10 +1451,10 @@ func load_game_from_path(path: String) -> bool:
 	ai_observation_store.clear()
 	presentation_publication.clear()
 	ai_players = restored_ai_players
+	ai_decision_queue = restored_decisions
 	resource_catalog.unit_presentations.shutdown_loading()
 	resource_catalog.prewarm_match_entities(simulation_world.get_units(), simulation_world.get_buildings())
 	game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
-	var saved_controller: Dictionary = archive.get("controller_state", {})
 	game_controller.set_speed_multiplier(float(saved_controller.get("speed", 1.5)))
 	game_controller.set_paused(bool(saved_controller.get("paused", false)))
 	modal_restore_paused = game_controller.paused
@@ -2354,10 +2390,52 @@ func _restart_from_scenario_overlay() -> void:
 
 
 func _return_to_launcher() -> void:
-	if network_relay != null:
-		network_relay.close()
-	get_tree().change_scene_to_file("res://launcher.tscn")
+	if launcher_suspended:
+		return
+	if network_session != null or not network_role.is_empty():
+		if network_relay != null:
+			network_relay.close()
+		get_tree().change_scene_to_file("res://launcher.tscn")
+		return
+	launcher_restore_paused = modal_restore_paused if hud_modal_overlay != null and hud_modal_overlay.is_blocking() else game_controller.paused
+	if hud_modal_overlay != null:
+		hud_modal_overlay.close()
+	game_controller.set_paused(true)
+	launcher_suspended = true
+	launcher_audio_states.clear()
+	for player in [audio_player] + sfx_players:
+		if is_instance_valid(player):
+			launcher_audio_states.append({"player": player, "paused": player.stream_paused})
+			player.stream_paused = true
+	cancel_pending_targeting()
+	input_adapter.reset()
+	hide()
+	process_mode = Node.PROCESS_MODE_DISABLED
+	for shape in [Input.CURSOR_ARROW, Input.CURSOR_POINTING_HAND, Input.CURSOR_CAN_DROP, Input.CURSOR_MOVE, Input.CURSOR_CROSS, Input.CURSOR_FORBIDDEN]:
+		Input.set_custom_mouse_cursor(null, shape)
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	# Resolve at runtime: the launcher already preloads this game scene.
+	var launcher = load("res://launcher.tscn").instantiate()
+	launcher.active_game = self
+	get_tree().root.add_child(launcher)
+	get_tree().current_scene = launcher
 
+
+func resume_from_launcher() -> void:
+	if launcher_suspended:
+		game_controller.set_paused(launcher_restore_paused)
+		for state in launcher_audio_states:
+			if is_instance_valid(state["player"]):
+				state["player"].stream_paused = bool(state["paused"])
+		launcher_audio_states.clear()
+		launcher_suspended = false
+	process_mode = Node.PROCESS_MODE_INHERIT
+	show()
+	input_adapter.reset()
+	source_cursor_frame_applied = -1
+	_install_source_control_cursors()
+	_apply_source_cursor("default")
+	queue_redraw()
 
 func _exit_tree() -> void:
 	navigation_loading.shutdown()
@@ -3157,8 +3235,9 @@ func draw_minimap(rectangle: Rect2) -> void:
 		cached_minimap_terrain_rectangle = rectangle
 	if cached_minimap_terrain_texture != null:
 		draw_texture(cached_minimap_terrain_texture, rectangle.position)
+	var snapshot_tick := int(presentation_snapshot.get("overview_tick", presentation_snapshot.get("tick", -1)))
 	var exploration_revision := int(presentation_snapshot.get("fog_exploration_revision", presentation_snapshot.get("fog_revision", -1)))
-	if cached_minimap_fog_texture == null or cached_minimap_exploration_revision != exploration_revision or cached_minimap_fog_rectangle != rectangle:
+	if cached_minimap_fog_texture == null or cached_minimap_fog_rectangle != rectangle or (cached_minimap_exploration_revision != exploration_revision and cached_minimap_fog_tick != snapshot_tick):
 		var fog_image := MinimapTerrainRaster.build_fog(map_size, rectangle, center, scale, presentation_snapshot.get("fog", {}).get("cells", []))
 		# Retain the bounded CPU raster as the authoritative upload payload. This
 		# also makes headless verification independent of renderer-specific texture
@@ -3169,10 +3248,13 @@ func draw_minimap(rectangle: Rect2) -> void:
 		else:
 			cached_minimap_fog_texture.update(fog_image)
 		cached_minimap_exploration_revision = exploration_revision
+		cached_minimap_fog_tick = snapshot_tick
 		cached_minimap_fog_rectangle = rectangle
 	if cached_minimap_fog_texture != null:
 		draw_texture(cached_minimap_fog_texture, rectangle.position)
-	var snapshot_tick := int(presentation_snapshot.get("overview_tick", presentation_snapshot.get("tick", -1)))
+	# Fog and markers share the overview cadence; world fog still updates each
+	# frame. Rebuilding the entire minimap raster on every newly explored cell
+	# otherwise adds a forest/map-size-dependent CPU spike while units move.
 	# Keep resource and unit markers independent of changing visibility.
 	if cached_minimap_mesh == null or cached_minimap_mesh_tick != snapshot_tick or cached_minimap_mesh_rectangle != rectangle:
 		cached_minimap_mesh_rectangle = rectangle

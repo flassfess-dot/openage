@@ -1,0 +1,19 @@
+{
+  "model": "Qwen/Qwen-Image-2.1",
+  "provider": "https://huggingface.co/spaces/Qwen/Qwen-Image-2.1",
+  "timestamp": "2026-10-06T18:19:55.680007+00:00",
+  "asset": "grass",
+  "settings": {
+    "size": [
+      1024,
+      1024
+    ],
+    "seed": 1060103,
+    "prompt": "ONE seamless square texture of short meadow turf for the ground of a hand-painted ancient Mediterranean RTS. Direct TOP-DOWN view, edge-to-edge opaque material, neutral diffuse lighting. Quiet muted natural sage and moss greens with extremely gentle broad blended variations. At least 95 percent reads as smooth continuous turf, only a few tiny understated tufts. Very low local contrast, no prominent blades, dark specks, stippling, grain, straw, flowers, stones or bright beige holes. The pen-and-parchment influence is nearly invisible in this background. Seamless wrapping on all four edges. No perspective, horizon, landscape, objects, paths, characters, text, grid, border or watermark. No sepia, yellow tint or photographic gritty detail."
+  },
+  "num_inference_steps": 40,
+  "prompt_enhancement": false,
+  "status": "failed",
+  "error": "You have exceeded your ZeroGPU runs limit. Authenticate with a Hugging Face token for more quota - https://huggingface.co/settings/tokens",
+  "elapsed_seconds": 2.95
+}

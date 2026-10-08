@@ -1,0 +1,34 @@
+{
+  "model": "Qwen/Qwen-Image-2.1",
+  "provider": "local stable-diffusion.cpp",
+  "quantization": "Q4_K",
+  "text_encoder_quantization": "Q4_K_M",
+  "runtime_release": "master-931-9db0db6",
+  "hardware": "RTX 3080 Ti 12GB, i7-7700, 16GB RAM",
+  "asset": "earth",
+  "settings": {
+    "size": [
+      1024,
+      1024
+    ],
+    "seed": 1060104,
+    "prompt": "ONE seamless square texture of quiet well-worn compacted earth for paths in a hand-painted ancient Mediterranean RTS. Direct TOP-DOWN view, opaque material filling the image, neutral diffuse lighting. Muted light gray-brown, taupe and warm beige, not yellow sand. Extremely low contrast, broad gentle painted variations, just a trace of texture. Seamless wrapping on all four edges. No drawn path shape, footprints, stones, cracks, dots, hatching carpet, grass, objects, scenery, perspective, horizon, text, border or watermark. Calm background beneath detailed sprites."
+  },
+  "num_inference_steps": 40,
+  "cfg_scale": 1.0,
+  "reference_files": [],
+  "reference_resolution": null,
+  "timestamp": "2026-10-06T18:59:52.539538+00:00",
+  "status": "complete",
+  "file": "earth.png",
+  "size": [
+    1024,
+    1024
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+    254,
+    255
+  ],
+  "elapsed_seconds": 166.52
+}

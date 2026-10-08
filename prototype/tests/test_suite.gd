@@ -1,5 +1,7 @@
 extends SceneTree
 
+const TEST_TIMEOUT_MSEC := 300_000
+
 const TEST_DIRECTORIES := [
 	"tests/unit",
 	"tests/integration",
@@ -38,25 +40,23 @@ func _initialize() -> void:
 		print("A-006 suite resuming at %s (%d tests remaining)" % [start_at, test_scripts.size()])
 
 	for script in test_scripts:
-		var output: Array = []
 		var log_name := script.replace("/", "_").replace(".gd", ".log")
+		var log_path := log_directory.path_join(log_name)
 		var arguments := PackedStringArray([
 			"--headless",
 			"--log-file",
-			log_directory.path_join(log_name),
+			log_path,
 			"--path",
 			project_root,
 			"--script",
 			"res://%s" % script,
 		])
-		var exit_code := OS.execute(executable, arguments, output, true, false)
-		var output_text := ""
-		for line in output:
-			var text := String(line).strip_edges()
-			output_text += text + "\n"
-			print(text)
+		var result := run_test_process(executable, arguments, log_path, TEST_TIMEOUT_MSEC)
+		var exit_code := int(result["exit_code"])
+		var output_text := String(result["output"])
+		print(output_text.strip_edges())
 		var has_engine_error := contains_actionable_engine_error(output_text)
-		if exit_code != 0 or has_engine_error:
+		if exit_code != 0 or has_engine_error or bool(result["timed_out"]):
 			failed += 1
 			push_error("FAILED %s (exit code %d, engine error %s)" % [script, exit_code, has_engine_error])
 		else:
@@ -66,7 +66,29 @@ func _initialize() -> void:
 	quit(1 if failed > 0 else 0)
 
 
-func contains_actionable_engine_error(output_text: String) -> bool:
+static func run_test_process(executable: String, arguments: PackedStringArray, log_path: String, timeout_msec: int) -> Dictionary:
+	# Each child owns its log; an old successful log must never mask a failed launch.
+	if FileAccess.file_exists(log_path):
+		DirAccess.remove_absolute(log_path)
+	var pid := OS.create_process(executable, arguments)
+	if pid < 0:
+		return {"exit_code": -1, "timed_out": false, "output": "ERROR: Could not start test process"}
+	var deadline := Time.get_ticks_msec() + timeout_msec
+	var timed_out := false
+	while OS.is_process_running(pid):
+		if Time.get_ticks_msec() >= deadline:
+			timed_out = true
+			OS.kill(pid)
+			break
+		OS.delay_msec(20)
+	var exit_code := OS.get_process_exit_code(pid)
+	var output_text := FileAccess.get_file_as_string(log_path) if FileAccess.file_exists(log_path) else "ERROR: Test process produced no engine log"
+	if timed_out:
+		output_text += "\nERROR: Test exceeded its time limit (%d ms)\n" % timeout_msec
+	return {"exit_code": exit_code, "timed_out": timed_out, "output": output_text}
+
+
+static func contains_actionable_engine_error(output_text: String) -> bool:
 	if output_text.contains("SCRIPT ERROR:"):
 		return true
 	for line_value in output_text.split("\n"):

@@ -1,0 +1,34 @@
+{
+  "model": "Qwen/Qwen-Image-2.1",
+  "provider": "local stable-diffusion.cpp",
+  "quantization": "Q4_K",
+  "text_encoder_quantization": "Q4_K_M",
+  "runtime_release": "master-931-9db0db6",
+  "hardware": "RTX 3080 Ti 12GB, i7-7700, 16GB RAM",
+  "asset": "grass",
+  "settings": {
+    "size": [
+      1024,
+      1024
+    ],
+    "seed": 1060103,
+    "prompt": "ONE seamless square texture of short meadow turf for the ground of a hand-painted ancient Mediterranean RTS. Direct TOP-DOWN view, edge-to-edge opaque material, neutral diffuse lighting. Quiet muted natural sage and moss greens with extremely gentle broad blended variations. At least 95 percent reads as smooth continuous turf, only a few tiny understated tufts. Very low local contrast, no prominent blades, dark specks, stippling, grain, straw, flowers, stones or bright beige holes. The pen-and-parchment influence is nearly invisible in this background. Seamless wrapping on all four edges. No perspective, horizon, landscape, objects, paths, characters, text, grid, border or watermark. No sepia, yellow tint or photographic gritty detail."
+  },
+  "num_inference_steps": 40,
+  "cfg_scale": 1.0,
+  "reference_files": [],
+  "reference_resolution": null,
+  "timestamp": "2026-10-06T18:56:37.541221+00:00",
+  "status": "complete",
+  "file": "grass.png",
+  "size": [
+    1024,
+    1024
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+    254,
+    255
+  ],
+  "elapsed_seconds": 170.72
+}

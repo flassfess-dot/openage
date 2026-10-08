@@ -94,7 +94,7 @@ func test_priority_search() -> void:
 	var world = fixture()
 	var ai = Ai.new({"team": 1, "ai": {"construction_priorities": ["house", "barracks", "dock"], "building_limits": {"house": 5, "barracks": 1, "dock": 1}}})
 	var options: Dictionary = ai.presentation_options()
-	var workers: Array = [Snapshot.compact_ai_entity(world.units[0], 1)]
+	var workers: Array = [Snapshot.compact_ai_entity(world.units[0], 1).duplicate()]
 	workers[0]["command_options"] = {"build": world.get_build_options_for_kinds(1, ["house", "barracks", "dock"])}
 	var sites := Snapshot.requested_build_sites(world, 20, 1, ["house", "barracks", "dock"], options, workers, [])
 	check(sites.keys() == ["house"] and world.queries == [["house"]], "first usable priority avoids preparing unused lower priorities")

@@ -93,7 +93,10 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	_observe(probe, prefix + ".demand_filter", started)
 	started = Time.get_ticks_usec() if probe != null else 0
 	var sites: Dictionary = {}
-	if not requested_kinds.is_empty():
+	if bool(options.get("defer_build_sites", false)) and world.has_method("capture_ai_build_site_queries"):
+		result["build_site_queries"] = world.capture_ai_build_site_queries(team, available_kinds, tick, maxi(0, int(options.get("build_site_cache_ticks", 0))), maxi(1, int(options.get("maximum_build_sites_per_kind", 4))), maxi(1, int(options.get("build_site_search_radius", 12))), options.get("preferred_build_sites", {}), options.get("strict_preferred_build_site_kinds", []), maxf(0.0, float(options.get("minimum_structure_gap", 0.0))))
+		result["build_site_candidate_filter"] = options.get("build_site_candidate_filter", Callable()).is_valid()
+	elif not requested_kinds.is_empty():
 		sites = requested_build_sites(world, tick, team, available_kinds, options, units, buildings)
 	elif bool(options.get("include_build_sites", true)):
 		sites = world.get_mixed_domain_build_sites(team)

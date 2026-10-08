@@ -1,6 +1,9 @@
 class_name RoRLauncherTheme
 extends RefCounted
 
+const AntiqueTheme := preload("res://scripts/antique_ui_theme.gd")
+const Typography := preload("res://scripts/launcher_typography.gd")
+
 const GOLD := Color("d5b96f")
 const GOLD_BRIGHT := Color("ffe7a0")
 const GOLD_DARK := Color("7b5a27")
@@ -12,41 +15,31 @@ const MUTED := Color("918678")
 
 
 static func apply_primary_button(button: Button, font_size: int = 18) -> void:
-	_apply_button(button, font_size, Color("35200f"), Color("68451d"), Color("241307"))
+	button.custom_minimum_size = Vector2(300.0, 42.0)
+	AntiqueTheme.apply_button(button, font_size)
 
 
 static func apply_secondary_button(button: Button, font_size: int = 15) -> void:
-	_apply_button(button, font_size, Color("2a1b10"), Color("4d331b"), Color("1b1009"))
+	button.custom_minimum_size = Vector2(300.0, 42.0)
+	AntiqueTheme.apply_button(button, font_size, true)
 
 
 static func apply_option(option: OptionButton, minimum_width: float = 180.0) -> void:
 	option.custom_minimum_size = Vector2(minimum_width, 34.0)
-	option.add_theme_font_size_override("font_size", 14)
-	option.add_theme_color_override("font_color", GOLD_BRIGHT)
-	option.add_theme_color_override("font_hover_color", Color.WHITE)
-	option.add_theme_color_override("font_pressed_color", Color.WHITE)
-	option.add_theme_color_override("font_disabled_color", MUTED)
-	option.add_theme_stylebox_override("normal", field_style())
-	option.add_theme_stylebox_override("hover", field_style(Color("3d2a16"), GOLD_BRIGHT))
-	option.add_theme_stylebox_override("pressed", field_style(Color("17100a"), GOLD_BRIGHT))
-	option.add_theme_stylebox_override("focus", focus_style())
-	option.add_theme_stylebox_override("disabled", field_style(Color("181511"), Color("51493e")))
+	option.fit_to_longest_item = false
+	AntiqueTheme.apply_option(option)
 
 
 static func apply_line_edit(line_edit: LineEdit, minimum_width: float = 180.0) -> void:
 	line_edit.custom_minimum_size = Vector2(minimum_width, 34.0)
-	line_edit.add_theme_font_size_override("font_size", 14)
-	line_edit.add_theme_color_override("font_color", GOLD_BRIGHT)
-	line_edit.add_theme_color_override("font_placeholder_color", MUTED)
-	line_edit.add_theme_color_override("caret_color", GOLD_BRIGHT)
-	line_edit.add_theme_stylebox_override("normal", field_style())
-	line_edit.add_theme_stylebox_override("focus", field_style(Color("2e2011"), GOLD_BRIGHT))
-	line_edit.add_theme_stylebox_override("read_only", field_style(Color("181511"), Color("51493e")))
+	AntiqueTheme.apply_line_edit(line_edit)
 
 
 static func apply_spin_box(spin_box: SpinBox, minimum_width: float = 180.0) -> void:
 	spin_box.custom_minimum_size = Vector2(minimum_width, 34.0)
-	apply_line_edit(spin_box.get_line_edit(), minimum_width)
+	# The SpinBox owns the arrow gutter; its child must not impose the
+	# same minimum width a second time and push the arrows outside the row.
+	apply_line_edit(spin_box.get_line_edit(), 0.0)
 
 
 static func panel_style(soft: bool = false) -> StyleBoxFlat:
@@ -104,21 +97,27 @@ static func progress_fill_style() -> StyleBoxFlat:
 
 
 static func heading(label: Label, size: int = 24) -> void:
+	label.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	label.add_theme_font_override("font", Typography.title_font())
 	label.add_theme_font_size_override("font_size", size)
-	label.add_theme_color_override("font_color", GOLD_BRIGHT)
-	label.add_theme_color_override("font_shadow_color", Color.BLACK)
-	label.add_theme_constant_override("shadow_offset_x", 2)
-	label.add_theme_constant_override("shadow_offset_y", 2)
+	label.add_theme_color_override("font_color", Color("f3ecdc"))
+	label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.7))
+	label.add_theme_constant_override("shadow_offset_x", 0)
+	label.add_theme_constant_override("shadow_offset_y", 1)
 
 
 static func caption(label: Label, size: int = 14) -> void:
+	label.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	label.add_theme_font_override("font", Typography.body_font())
 	label.add_theme_font_size_override("font_size", size)
-	label.add_theme_color_override("font_color", GOLD)
+	label.add_theme_color_override("font_color", Color("d3c9b3"))
 
 
 static func body(label: Label, size: int = 14) -> void:
+	label.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	label.add_theme_font_override("font", Typography.body_font())
 	label.add_theme_font_size_override("font_size", size)
-	label.add_theme_color_override("font_color", Color("ead9b2"))
+	label.add_theme_color_override("font_color", AntiqueTheme.LIGHT_TEXT)
 
 
 static func field_style(background: Color = Color("24180d"), border: Color = GOLD_DARK) -> StyleBoxFlat:
@@ -138,15 +137,7 @@ static func field_style(background: Color = Color("24180d"), border: Color = GOL
 
 
 static func focus_style() -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.0, 0.0, 0.0, 0.0)
-	style.border_color = GOLD_BRIGHT
-	style.set_border_width_all(2)
-	style.expand_margin_left = 2.0
-	style.expand_margin_right = 2.0
-	style.expand_margin_top = 2.0
-	style.expand_margin_bottom = 2.0
-	return style
+	return AntiqueTheme.focus_style()
 
 
 static func _apply_button(button: Button, font_size: int, normal_color: Color, hover_color: Color, pressed_color: Color) -> void:

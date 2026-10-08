@@ -1,0 +1,28 @@
+{
+  "model": "Qwen/Qwen-Image-2.1",
+  "provider": "https://huggingface.co/spaces/Qwen/Qwen-Image-2.1",
+  "timestamp": "2026-10-06T18:14:51.715678+00:00",
+  "asset": "house",
+  "settings": {
+    "size": [
+      1024,
+      1024
+    ],
+    "seed": 1060101,
+    "prompt": "This is an RGBA image with transparency. ONE standalone compact single-storey Mediterranean cottage. Warm ivory plaster over a limestone base, low terracotta tiled gable roof, a timber entrance door, one small recessed window, one clay jar beside the door. Modest practical architecture, two walls and roof visible, no columns, monumental facade, compound, enclosed yard, people or vegetation. Small cottage: door height about one third of the facade height. Centered. Detailed original ancient Mediterranean RTS illustration. Very fine warm brown pen contours, sparse restrained hatching, soft hand-painted natural colors, only a whisper of parchment character. No sepia filter, heavy paper grain, glossy 3D rendering or thick black cartoon outlines. Orthographic game camera looking down 30 degrees, 2:1 ground-plane diagonals, parallel edges, soft daylight from upper left. The image has alpha channel and the background is transparent. No text, labels, border, watermark, terrain tile or scenery. Entire object visible with generous empty margins."
+  },
+  "num_inference_steps": 40,
+  "prompt_enhancement": false,
+  "status": "complete",
+  "file": "house.png",
+  "size": [
+    1024,
+    1024
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+    0,
+    255
+  ],
+  "elapsed_seconds": 29.17
+}

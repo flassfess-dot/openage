@@ -1,6 +1,7 @@
 class_name RoRAiNavigationKnowledge
 extends RefCounted
 
+const Data := preload("res://scripts/isolated_task_data.gd")
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const DEFAULT_PREPARE_CELLS := 2048
 const OFFSETS := [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
@@ -9,15 +10,21 @@ const BUCKET_NAMES := ["land", "water", "frontier_land", "frontier_water", "reac
 var entries: Dictionary = {}
 var pending_preparations: Dictionary = {}
 var last_prepared_cells := 0
+var last_bucket_merged_points := 0
+var last_bucket_patch_count := 0
 
 
 func clear() -> void:
 	entries.clear()
 	pending_preparations.clear()
 	last_prepared_cells = 0
+	last_bucket_merged_points = 0
+	last_bucket_patch_count = 0
 
 
 func snapshot(world, fog, team: int, probe: Variant = null) -> Dictionary:
+	last_bucket_merged_points = 0
+	last_bucket_patch_count = 0
 	var grid = world.navigation_grid
 	var size: Vector2i = world.map_size
 	var reach: Dictionary = _reachable_components(world, team)
@@ -69,6 +76,10 @@ func snapshot(world, fog, team: int, probe: Variant = null) -> Dictionary:
 	entry["exploration_stamp"] = exploration["stamp"]
 	# The legacy queue remains bounded; cache correctness uses non-consuming journals.
 	fog.consume_navigation_exploration(team)
+	_apply_bucket_changes(entry)
+	if probe != null:
+		probe.increment("ai.navigation.bucket_merged_points", last_bucket_merged_points)
+		probe.increment("ai.navigation.bucket_patches", last_bucket_patch_count)
 	_refresh_result_buckets(entry)
 	_region_targets(world, team, entry)
 	_freeze_publication(entry["result"])
@@ -130,6 +141,9 @@ func _refresh_result_buckets(entry: Dictionary) -> void:
 	# write, and each publication receives a new root with current references.
 	var result: Dictionary = entry["result"].duplicate()
 	var buckets: Dictionary = entry["buckets"]
+	for bucket_name in BUCKET_NAMES:
+		if not Data.freeze_detached(buckets[bucket_name]):
+			push_error("AI navigation bucket must contain detached points")
 	result["land"] = buckets["land"]
 	result["water"] = buckets["water"]
 	result["frontier"] = {"land": buckets["frontier_land"], "water": buckets["frontier_water"]}
@@ -141,11 +155,13 @@ func _refresh_result_buckets(entry: Dictionary) -> void:
 func _new_entry(size: Vector2i) -> Dictionary:
 	var buckets: Dictionary = {}
 	for bucket_name in BUCKET_NAMES:
-		buckets[bucket_name] = []
+		var points: Array[Vector2] = []
+		buckets[bucket_name] = points
 	return {
 		"size": size,
 		"known": {},
 		"buckets": buckets,
+		"bucket_changes": {},
 		"result": {
 			"cell_geometry": true,
 			"land": buckets["land"],
@@ -188,21 +204,51 @@ func _set_bucket(entry: Dictionary, name: String, index: int, point: Vector2, in
 			bucket.append(point)
 		return
 	var slot := _bucket_position(bucket, point)
-	if (slot < bucket.size() and bucket[slot] == point) == included:
+	var present: bool = slot < bucket.size() and bucket[slot] == point
+	var changes: Dictionary = entry["bucket_changes"].get(name, {})
+	if present == included:
+		# Multiple updates to the same cell may cancel before publication.
+		changes.erase(index)
 		return
-	if bucket.is_read_only():
-		bucket = bucket.duplicate()
-		entry["buckets"][name] = bucket
-	if included:
-		bucket.insert(slot, point)
-		return
-	bucket.remove_at(slot)
+	changes[index] = {"slot": slot, "point": point, "included": included, "present": present}
+	entry["bucket_changes"][name] = changes
+
+
+func _apply_bucket_changes(entry: Dictionary) -> void:
+	# Per-cell insert/remove shifts the increasingly large explored tail once
+	# for every discovery. Merge all patches at once, emitting each retained
+	# point once into the replacement. Native array slices avoid a script loop over the map.
+	for name in BUCKET_NAMES:
+		var changes: Dictionary = entry["bucket_changes"].get(name, {})
+		if changes.is_empty():
+			continue
+		var indices: Array = changes.keys()
+		indices.sort()
+		var bucket: Array = entry["buckets"][name]
+		var merged: Array[Vector2] = []
+		var cursor := 0
+		for index in indices:
+			var patch: Dictionary = changes[index]
+			var slot := int(patch["slot"])
+			if slot > cursor:
+				merged.append_array(bucket.slice(cursor, slot))
+				last_bucket_merged_points += slot - cursor
+			if bool(patch["included"]):
+				merged.append(Vector2(patch["point"]))
+				last_bucket_merged_points += 1
+			cursor = slot + (1 if bool(patch["present"]) else 0)
+			last_bucket_patch_count += 1
+		if cursor < bucket.size():
+			merged.append_array(bucket.slice(cursor))
+			last_bucket_merged_points += bucket.size() - cursor
+		entry["buckets"][name] = merged
+	entry["bucket_changes"].clear()
 
 
 func _bucket_position(bucket: Array, point: Vector2) -> int:
 	# The previous full scan emitted row-major lists. Preserve that order for
-	# planners that choose a known fallback by index, while binary insertion
-	# touches only changed cells rather than regenerating the complete list.
+	# planners that choose a known fallback by index. Binary lookup records
+	# positions in the unchanged array for the later batch merge.
 	var low := 0
 	var high := bucket.size()
 	while low < high:
@@ -269,7 +315,9 @@ func _region_targets(world, team: int, entry: Dictionary) -> void:
 				var region: int = planner.component_id(Vector2i(point), values[0], values[1], values[2])
 				if region < 0: continue
 				var key := "%s:%d" % [config, region]
-				if not by_region.has(key): by_region[key] = []
+				if not by_region.has(key):
+					var points: Array[Vector2] = []
+					by_region[key] = points
 				by_region[key].append(point)
 		entry["result"]["frontier_by_region"] = by_region
 		entry["region_signature"] = signature
@@ -302,17 +350,7 @@ func _region_targets(world, team: int, entry: Dictionary) -> void:
 
 
 static func _freeze_publication(value: Variant) -> void:
-	# These containers are owned by this cache. Previously published buckets
-	# were recursively frozen here, so unchanged branches need no new scan.
-	if value is Dictionary:
-		if value.is_read_only():
-			return
-		for child in value.values():
-			_freeze_publication(child)
-		value.make_read_only()
-	elif value is Array:
-		if value.is_read_only():
-			return
-		for child in value:
-			_freeze_publication(child)
-		value.make_read_only()
+	# Arrays already published by an earlier revision retain their identity.
+	# Only changed buckets are validated/frozen; callers share the sealed map.
+	if not Data.freeze_detached(value):
+		push_error("AI navigation must contain detached values")

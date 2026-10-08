@@ -11,6 +11,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	test_summary_and_bounded_storage()
+	test_long_session_samples_and_reset()
 	test_observability_does_not_change_simulation()
 	if failures.is_empty():
 		print("E6-001 performance observability tests passed")
@@ -34,6 +35,30 @@ func test_summary_and_bounded_storage() -> void:
 	assert_equal(int(tick["p95"]), 50, "nearest-rank p95 is stable")
 	assert_equal(int(tick["max"]), 50, "maximum is stable")
 	assert_equal(int(report["counters"]["paths"]), 5, "counters accumulate")
+
+
+func test_long_session_samples_and_reset() -> void:
+	var probe = PerformanceProbe.new(4)
+	for value in range(102):
+		probe.observe_microseconds("tick", value)
+		if value % 17 == 0:
+			probe.observe_microseconds("frame", value * 2)
+	var metrics: Dictionary = probe.report()["metrics_microseconds"]
+	assert_equal(probe.sample_count("tick"), 4, "long sessions retain a bounded window")
+	assert_equal(metrics["tick"]["mean"], 99.5, "wrapped history retains exactly the most recent four ticks")
+	assert_equal(metrics["tick"]["p50"], 99, "percentiles ignore overwritten history")
+	assert_equal(metrics["frame"]["mean"], 119.0, "metrics advance their sample windows independently")
+	probe.increment("work", 5)
+	probe.clear()
+	assert_equal(probe.report()["metrics_microseconds"], {}, "reset releases sample histories")
+	assert_equal(probe.report()["counters"], {}, "reset clears counters")
+	for value in [-1, 2, 3, 4, 5]:
+		probe.observe_microseconds("tick", value)
+	assert_equal(probe.report()["metrics_microseconds"]["tick"]["mean"], 3.5, "a reused probe starts a fresh window after reset")
+	var single = PerformanceProbe.new(1)
+	for value in [12, 18, -3]:
+		single.observe_microseconds("tick", value)
+	assert_equal(single.report()["metrics_microseconds"]["tick"]["max"], 0, "one-slot window preserves negative-duration clamping")
 
 
 func test_observability_does_not_change_simulation() -> void:

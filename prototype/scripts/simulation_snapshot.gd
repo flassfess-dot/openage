@@ -250,7 +250,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		if visible_now and observer_team > 0:
 			# Capture only legal, observed state. A later fogged snapshot never
 			# projects the live dictionary again.
-			remembered_buildings[building_id] = _compact_render_entity(building)
+			remembered_buildings[building_id] = compact_render_projector.call(building) if compact_render_projector.is_valid() else _compact_render_entity(building)
 		elif observer_team > 0:
 			knowledge = remembered_buildings.get(building_id, {})
 			if knowledge.is_empty():
