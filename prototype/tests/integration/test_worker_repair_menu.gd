@@ -61,7 +61,7 @@ func _initialize() -> void:
 	if repair_index >= 0:
 		hud.train_buttons[repair_index].emit_signal("pressed")
 	check(game.pending_target_command == "repair", "Repair button enters explicit targeting")
-	check(not hud.build_menu_open and hud.available_formation_buttons.size() == 5, "Repair stays with actions and formations")
+	check(not hud.build_menu_open and hud.available_formation_buttons.size() == 6, "Repair stays with actions and formations")
 	game.handle_input_action({"type": "selection_committed", "from": Vector2(-1000, -1000), "to": Vector2(-1000, -1000)})
 	check(game.pending_target_command == "repair" and game.game_controller.command_queue.is_empty(), "invalid left click keeps Repair targeting without an order")
 	game.handle_input_action({"type": "context_committed", "position": game.world_to_screen(ship["pos"])})

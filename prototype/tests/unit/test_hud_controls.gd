@@ -7,6 +7,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	await test_buttons_and_signals()
+	await test_formation_row()
 
 	if failures.is_empty():
 		print("C-006 HUD control tests passed")
@@ -21,8 +22,8 @@ func _initialize() -> void:
 func test_buttons_and_signals() -> void:
 	var hud = HUDControls.new()
 	root.add_child(hud)
-	assert_equal(hud.formation_buttons.size(), 5, "formation button count")
-	for formation_name in ["LINE", "RECTANGLE", "COLUMN", "WEDGE", "STAGGERED"]:
+	assert_equal(hud.formation_buttons.size(), 6, "formation button count")
+	for formation_name in ["LINE", "RECTANGLE", "COLUMN", "WEDGE", "STAGGERED", "FLANK"]:
 		var icon: Texture2D = hud.formation_buttons[formation_name].icon
 		assert_true(icon != null, "%s formation has a dedicated icon" % formation_name)
 		if icon != null:
@@ -37,7 +38,7 @@ func test_buttons_and_signals() -> void:
 
 	var requested := [""]
 	hud.formation_requested.connect(func(value: String): requested[0] = value)
-	for formation_name in ["LINE", "RECTANGLE", "COLUMN", "WEDGE", "STAGGERED"]:
+	for formation_name in ["LINE", "RECTANGLE", "COLUMN", "WEDGE", "STAGGERED", "FLANK"]:
 		hud.formation_buttons[formation_name].emit_signal("pressed")
 		assert_equal(requested[0], formation_name, "%s button emits immediate reform action" % formation_name)
 	hud.set_view_model({"commands": [
@@ -165,6 +166,43 @@ func test_buttons_and_signals() -> void:
 	hud.train_buttons[22].emit_signal("pressed")
 	assert_true(not hud.build_menu_open, "Back from the final page closes construction")
 	assert_equal(hud.command_page, 0, "changing command context resets paging")
+	hud.free()
+
+
+func test_formation_row() -> void:
+	var hud = HUDControls.new()
+	root.add_child(hud)
+	var commands: Array = []
+	for index in range(12):
+		commands.append({"type": "unit_action", "id": "action_%d" % index, "label": "Action", "enabled": true})
+	commands.append({"type": "unit_action", "id": "delete", "label": "Delete", "enabled": true})
+	for definition in HUDControls.FORMATIONS:
+		commands.append({"type": "formation", "id": definition[0], "enabled": true})
+	hud.set_view_model({"commands": commands})
+	for width in [536, 320, 212, 158]:
+		hud.size = Vector2(1280, 752)
+		hud.set_layout({"bottom": Rect2(0, 626, 1280, 126), "command": Rect2(136, 630, width, 118)})
+		await process_frame
+		var reached: Dictionary = {}
+		for page in range(hud.command_page_count):
+			hud.command_page = page
+			hud.layout_controls()
+			var last_right := -INF
+			var row_y: float = hud.available_formation_buttons[0].offset_top
+			for button in hud.available_formation_buttons:
+				assert_true(button.visible, "all formations remain visible on every command page")
+				assert_equal(button.offset_top, row_y, "formations share one bottom row")
+				assert_true(button.offset_left >= last_right and button.offset_right <= 136 + width + 0.01, "formation buttons fit without overlapping")
+				last_right = button.offset_right
+			for index in range(hud.active_train_commands.size()):
+				var button: Button = hud.train_buttons[index]
+				if not button.visible: continue
+				reached[index] = true
+				assert_true(button.offset_bottom < row_y, "ordinary actions never enter the formation row")
+				assert_true(button.offset_right <= 136 + width + 0.01, "action stays inside the command region")
+			for button in [hud.previous_commands_button, hud.next_commands_button]:
+				assert_true(not button.visible or button.offset_bottom < row_y, "page controls stay above formations")
+		assert_equal(reached.size(), 13, "every ordinary action remains reachable alongside formations")
 	hud.free()
 
 

@@ -78,6 +78,13 @@ func _ready() -> void:
 			campaign_matches.append(entry)
 	_build_shell()
 	_show_main_menu()
+	# Release templates do not support --script. Drive their real launcher
+	# through an explicit diagnostic entry point after the scene is ready.
+	if "--verify-packaged-startup" in OS.get_cmdline_user_args() and not get_tree().has_meta("startup_verification_started"):
+		get_tree().set_meta("startup_verification_started", true)
+		var verifier = load("res://tests/manual/verify_packaged_startup.gd").new()
+		get_tree().root.add_child.call_deferred(verifier)
+		return
 	if is_instance_valid(active_game):
 		return
 	var requested := MatchRegistry.requested_match(OS.get_cmdline_args())

@@ -65,9 +65,9 @@ func test_mixed_group_changes_shape_while_moving() -> void:
 	var center := centroid(world.get_units().map(func(unit): return unit["pos"]))
 	controller.enqueue_command(Commands.FormationMoveCommand.new(2, ids, center, FormationGeometry.WEDGE, Vector2(0, -1)))
 	controller.advance_frame(0.05, 1, 2)
-	assert_equal(controller.formation_groups.has(1), false, "shape change while moving retires old geometry")
-	assert_equal(controller.formation_groups[2].formation_type, FormationGeometry.WEDGE, "shape changes while moving")
-	assert_equal(controller.formation_groups[2].member_ids, ids, "mixed composition survives moving reform")
+	assert_equal(controller.formation_groups.has(1), true, "shape change while moving preserves group identity")
+	assert_equal(controller.formation_groups[1].formation_type, FormationGeometry.WEDGE, "shape changes while moving")
+	assert_equal(controller.formation_groups[1].member_ids, ids, "mixed composition survives moving reform")
 
 
 func test_narrow_passage_combat_recovery_and_front_loss() -> void:

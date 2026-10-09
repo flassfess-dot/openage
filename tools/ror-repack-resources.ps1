@@ -2,7 +2,8 @@
 param(
     [string]$GamePath = "D:\Games\Age of Empires 1 - Rise of Rome",
     [string]$GameVersion = "1.1",
-    [int]$Civilization = 13
+    [int]$Civilization = 13,
+    [string]$AoE2GamePath = "D:\Games\Age of Empires II"
 )
 
 $ErrorActionPreference = "Stop"
@@ -134,6 +135,16 @@ try {
         throw "Missing Godot executable: $godotApplication"
     }
 
+    $portableNode = Join-Path $repositoryRoot ".tools\nodejs\node.exe"
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    $nodeExecutable = if ($nodeCommand) { $nodeCommand.Source } else { $portableNode }
+    if (-not (Test-Path -LiteralPath $nodeExecutable)) {
+        throw "Node.js is required for the environment import."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $AoE2GamePath "Data\graphics.drs"))) {
+        throw "Missing classic AoE2 data. Set -AoE2GamePath to its install directory."
+    }
+
     Invoke-LoggedCommand `
         -Name "source asset import" `
         -StartPercent 5 `
@@ -148,8 +159,19 @@ try {
         )
 
     Invoke-LoggedCommand `
-        -Name "cache validation" `
+        -Name "environment assets and tree shadows" `
         -StartPercent 70 `
+        -EndPercent 76 `
+        -FilePath $nodeExecutable `
+        -Arguments @(
+            (Join-Path $repositoryRoot "tools\ror_import\import_environment.js"),
+            "--game", $AoE2GamePath,
+            "--ror-game", $GamePath
+        )
+
+    Invoke-LoggedCommand `
+        -Name "cache validation" `
+        -StartPercent 76 `
         -EndPercent 85 `
         -FilePath "powershell.exe" `
         -Arguments @(

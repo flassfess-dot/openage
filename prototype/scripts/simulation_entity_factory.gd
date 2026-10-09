@@ -1,6 +1,7 @@
 class_name RoRSimulationEntityFactory
 extends RefCounted
 
+const FormationRoles := preload("res://scripts/formation_roles.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const CombatRules := preload("res://scripts/combat_rules.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
@@ -122,6 +123,8 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		"action_facing": initial_facing,
 		"formation_forward": Vector2.ZERO,
 		"formation_facing": initial_facing,
+		"preferred_formation": "RECTANGLE",
+		"formation_role": String(stats.get("formation_role", FormationRoles.role_for(kind))),
 		"formation_group_id": -1,
 		"formation_slot_id": -1,
 		"formation_slot_capacity": 0.0,
@@ -224,6 +227,10 @@ func add_resource(kind: String, position: Vector2, amount: int, resolve_placemen
 		"selection_height": footprint["selection_height"],
 		"components": components,
 	}
+	if float(resource["decay_rate"]) > 0.0:
+		resource["decay_elapsed"] = 0.0
+		resource["facing"] = 0
+
 	if kind == "tree":
 		resource["tree_phase"] = "standing" if safe_amount > 0 else "stump"
 		resource["tree_fall_elapsed"] = 0.0

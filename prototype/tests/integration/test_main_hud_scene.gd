@@ -31,8 +31,9 @@ func _initialize() -> void:
 	assert_true(button_rect.position.y >= 594.0 and button_rect.end.y <= 720.0, "formation button is laid out inside exact 126px bottom HUD: %s" % button_rect)
 	assert_true(hud.current_layout["command"].encloses(button_rect), "formation button stays inside the reserved command grid: %s" % button_rect)
 	assert_true(String(hud.formation_buttons["RECTANGLE"].text).is_empty() and hud.formation_buttons["RECTANGLE"].icon != null, "formation command uses its dedicated icon")
+	assert_true(hud.current_layout["command"].encloses(hud.formation_buttons["FLANK"].get_global_rect()), "split formation remains inside the command panel")
 	assert_equal(game.hud_model.get("selection", {}).get("count", 0), 7, "main scene selection reaches HudViewModel")
-	assert_equal(game.hud_model.get("commands", []).filter(func(command): return command["type"] == "formation").size(), 5, "main scene exposes all formation actions")
+	assert_equal(game.hud_model.get("commands", []).filter(func(command): return command["type"] == "formation").size(), 6, "main scene exposes all formation actions")
 
 	game._toggle_game_menu()
 	assert_true(game.hud_modal_overlay.is_blocking(), "menu opens a modal input layer")

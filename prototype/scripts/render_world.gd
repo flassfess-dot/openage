@@ -1,5 +1,6 @@
 class_name RoRRenderWorld
 
+const PickingService := preload("res://scripts/picking_service.gd")
 const ResourcePresentationRegistry := preload("res://scripts/resource_presentation_registry.gd")
 const RenderItem := preload("res://scripts/render_item.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
@@ -119,7 +120,8 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				var resource_screen: Vector2 = world_to_screen.call(resource_position)
 				var resource_info := _frame_info(frame_info_provider, "resource", resource)
 				drawables.append(RenderItem.create("resource", resource_layer(resource), resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0))))
-				if preview_id_lookup.has(int(resource["id"])):
+				_append_resource_shadow(drawables, resource, resource_info, resource_position, resource_screen)
+				if preview_id_lookup.has(int(resource["id"])) and PickingService.resource_is_selectable(resource):
 					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0)), Color("d6bc63"), 1.0, 1))
 	for objective in source_objectives:
 		if not bool(objective.get("active", true)) or bool(objective.get("logical_only", false)):
@@ -138,12 +140,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		var render_position: Vector2 = previous_position.lerp(projectile["pos"], alpha)
 		var projectile_info := _frame_info(frame_info_provider, "projectile", projectile)
 		drawables.append(RenderItem.create("projectile", RenderItem.Layer.PROJECTILE_EFFECT, render_position, world_to_screen.call(render_position), int(projectile["id"]), projectile, projectile_info, float(projectile.get("elevation", 0.0)), RenderItem.color_for_team(int(projectile.get("team", 0)))))
-	for effect in source_effects:
-		if not bool(effect.get("active", true)):
-			continue
-		var effect_position: Vector2 = effect.get("pos", Vector2.ZERO)
-		var effect_info := _frame_info(frame_info_provider, "effect", effect)
-		drawables.append(RenderItem.create("effect", RenderItem.Layer.PROJECTILE_EFFECT, effect_position, world_to_screen.call(effect_position), int(effect.get("id", -1)), effect, effect_info, float(effect.get("elevation", 0.0)), Color.WHITE, 1.0, int(effect_info.get("graphic_layer", 30)) * 1000))
+	drawables.append_array(create_effect_drawables(source_effects, world_to_screen, frame_info_provider))
 	for marker in source_markers:
 		var marker_position: Vector2 = marker.get("position", Vector2.ZERO)
 		var marker_info := _frame_info(frame_info_provider, "marker", marker)
@@ -292,6 +289,8 @@ static func environment_layer(item: Dictionary) -> int:
 	match String(item.get("presentation_layer", "scenery")):
 		"decal":
 			return RenderItem.Layer.DECAL
+		"shadow":
+			return RenderItem.Layer.SHADOW
 		"ambient_actor":
 			return RenderItem.Layer.AIRBORNE
 	if GROUND_DECAL_SOURCE_IDS.has(int(item.get("source_unit_id", -1))):
@@ -320,6 +319,14 @@ func _reproject_statics(drawables: Array, world_to_screen: Callable) -> void:
 		var screen: Vector2 = world_to_screen.call(drawable["world_anchor"])
 		drawable["screen_position"] = screen
 		drawable["screen_y"] = screen.y
+
+static func _append_resource_shadow(drawables: Array, resource: Dictionary, frame_info: Dictionary, position: Vector2, screen: Vector2) -> void:
+	var shadow: Dictionary = frame_info.get("shadow", {})
+	if shadow.is_empty() or int(resource.get("amount", 0)) <= 0 or String(resource.get("tree_phase", "standing")) != "standing":
+		return
+	# A separate ground layer cannot cover nearby units or enlarge picking bounds.
+	drawables.append(RenderItem.create("resource_shadow", RenderItem.Layer.SHADOW, position, screen, int(resource["id"]), resource, shadow, float(resource.get("elevation", 0.0))))
+
 
 static func resource_layer(resource: Dictionary) -> int:
 	# Carcasses and harvested trunks lie on the ground, below workers on any side.
@@ -357,7 +364,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 			var resource_id := int(drawable.get("stable_id", -1))
 			if current_by_id.has(resource_id):
 				drawable["data"] = current_by_id[resource_id]
-				if String(current_by_id[resource_id].get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS or String(current_by_id[resource_id].get("tree_phase", "")) == "falling":
+				if String(drawable.get("kind", "")) != "resource_shadow" and (ResourcePresentationRegistry.is_carcass(current_by_id[resource_id]) or String(current_by_id[resource_id].get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS or String(current_by_id[resource_id].get("tree_phase", "")) == "falling"):
 					var frame_info := _frame_info(frame_info_provider, "resource", current_by_id[resource_id])
 					drawable["frame_info"] = frame_info
 					drawable["frame"] = int(frame_info.get("frame_index", 0))
@@ -376,7 +383,8 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var resource_screen: Vector2 = world_to_screen.call(position)
 		var elevation := float(resource.get("elevation", 0.0))
 		cached_resource_drawables.append(RenderItem.create("resource", resource_layer(resource), position, resource_screen, resource_id, resource, resource_info, elevation))
-		if preview_id_lookup.has(resource_id):
+		_append_resource_shadow(cached_resource_drawables, resource, resource_info, position, resource_screen)
+		if preview_id_lookup.has(resource_id) and PickingService.resource_is_selectable(resource):
 			cached_resource_drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, resource_screen, resource_id, resource, resource_info, elevation, Color("d6bc63"), 1.0, 1))
 	cached_resource_drawables.sort_custom(RenderItem.less)
 	return cached_resource_drawables
@@ -582,3 +590,19 @@ static func _building_depth_index(buildings: Array) -> Dictionary:
 					index[key] = []
 				index[key].append(building)
 	return index
+
+
+func create_effect_drawables(effects: Array, world_to_screen: Callable, frame_info_provider: Callable) -> Array:
+	var drawables: Array = []
+	for effect in effects:
+		if not bool(effect.get("active", true)):
+			continue
+		var effect_position: Vector2 = effect.get("pos", Vector2.ZERO)
+		var effect_info := _frame_info(frame_info_provider, "effect", effect)
+		drawables.append(RenderItem.create("effect", RenderItem.Layer.PROJECTILE_EFFECT, effect_position, world_to_screen.call(effect_position), int(effect.get("id", -1)), effect, effect_info, float(effect.get("elevation", 0.0)), Color.WHITE, 1.0, int(effect_info.get("graphic_layer", 30)) * 1000))
+		var part_index := 0
+		for part in effect_info.get("composite_parts", []):
+			part_index += 1
+			drawables.append(RenderItem.create("effect", RenderItem.Layer.PROJECTILE_EFFECT, effect_position, world_to_screen.call(effect_position), int(effect.get("id", -1)), effect, part, float(effect.get("elevation", 0.0)), Color.WHITE, 1.0, int(part.get("graphic_layer", 30)) * 1000 + part_index))
+	drawables.sort_custom(RenderItem.less)
+	return drawables

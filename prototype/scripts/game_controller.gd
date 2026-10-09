@@ -1,6 +1,7 @@
 class_name RoRGameController
 
 const RoRCommands = preload("res://scripts/commands.gd")
+const FormationSelection := preload("res://scripts/formation_selection.gd")
 const FormationGroup := preload("res://scripts/formation_group.gd")
 const FormationCorridor := preload("res://scripts/formation_corridor.gd")
 const FormationLifecycle := preload("res://scripts/formation_lifecycle.gd")
@@ -19,7 +20,7 @@ const FIXED_STEP_SECONDS: float = 0.05
 const GAME_SPEEDS := [1.0, 1.5, 2.0]
 const MAX_STEPS_PER_FRAME: int = 12
 const FORMATION_RECONCILE_INTERVAL_TICKS: int = 2
-const QUEUEABLE_ORDERS := ["move", "gather", "return_resources", "build", "repair", "attack", "unload"]
+const QUEUEABLE_ORDERS := ["move", "formation_move", "attack_move", "gather", "return_resources", "build", "repair", "attack", "unload"]
 const REPLACING_ORDERS := ["move", "formation_move", "attack_move", "attack", "attack_ground", "convert", "heal", "gather", "return_resources", "board", "unload", "trade", "build", "repair", "stop", "hold"]
 
 var simulation_world
@@ -361,6 +362,18 @@ func _queue_deferred_command(command) -> String:
 func _advance_deferred_orders() -> void:
 	var active_ids: Array = queued_unit_ids.keys()
 	active_ids.sort()
+	# Gather each queue head once. Per-member copies/scans of an entire cohort
+	# would turn a large group waiting at a waypoint into O(N^2) work and storage.
+	var movement_cohorts: Dictionary = {}
+	for unit_id in active_ids:
+		var member = simulation_world.find_unit(int(unit_id))
+		if member == null or float(member.get("hp", 0)) <= 0: continue
+		var queued: Array = OrderPipeline.queued(member)
+		if queued.is_empty() or String(queued[0].get("type", "")) not in ["move", "formation_move", "attack_move"]: continue
+		var key := "%d:%d" % [int(queued[0].get("issuer_id", 0)), int(queued[0].get("sequence_id", -1))]
+		if not movement_cohorts.has(key): movement_cohorts[key] = {"members": [], "ready": true}
+		movement_cohorts[key]["members"].append(member)
+		if String(member.get("task", "idle")) != "idle": movement_cohorts[key]["ready"] = false
 	for unit_id in active_ids:
 		var unit = simulation_world.find_unit(int(unit_id))
 		if unit == null or float(unit.get("hp", 0.0)) <= 0.0 or OrderPipeline.queued(unit).is_empty():
@@ -371,7 +384,21 @@ func _advance_deferred_orders() -> void:
 		for _attempt in range(OrderPipeline.MAX_QUEUED_ORDERS):
 			if OrderPipeline.queued(unit).is_empty():
 				break
+			var next_entry: Dictionary = OrderPipeline.queued(unit)[0]
+			var cohort: Array = []
+			if String(next_entry.get("type", "")) in ["move", "formation_move", "attack_move"]:
+				var key := "%d:%d" % [int(next_entry.get("issuer_id", 0)), int(next_entry.get("sequence_id", -1))]
+				var batch: Dictionary = movement_cohorts.get(key, {})
+				if batch.is_empty() or not bool(batch["ready"]): break
+				cohort = batch["members"]
+				batch["ready"] = false
 			var entry: Dictionary = OrderPipeline.pop_queued(unit)
+			if not cohort.is_empty():
+				entry = entry.duplicate(true)
+				entry["unit_ids"] = []
+				for member in cohort:
+					entry["unit_ids"].append(int(member["id"]))
+					if int(member["id"]) != int(unit_id): OrderPipeline.pop_queued(member)
 			var deferred = queued_order_codec.command_from_record(entry)
 			if deferred == null:
 				continue
@@ -486,15 +513,15 @@ func _apply_move(command) -> String:
 	var selected = _units_for_ids(command.unit_ids, command.issuer_id)
 	if selected.is_empty():
 		return "no_eligible_units"
-	_detach_units_from_formations(selected)
+	if bool(command.params.get("preserve_formations", false)) or selected.any(func(unit): return int(unit.get("formation_group_id", -1)) >= 0):
+		return "" if _move_preserving_formations(selected, target) else "no_path"
 	return "" if simulation_world.assign_command_move(selected, target) else "no_path"
 
 func _apply_attack_move(command) -> String:
 	var selected = _units_for_ids(command.unit_ids, command.issuer_id)
 	if selected.is_empty():
 		return "no_eligible_units"
-	_detach_units_from_formations(selected)
-	return "" if simulation_world.assign_command_attack_move(selected, command.target) else "no_path"
+	return "" if _move_preserving_formations(selected, command.target, Vector2.ZERO, true) else "no_path"
 
 func _apply_formation_move(command) -> String:
 	var selected = _units_for_ids(command.unit_ids, command.issuer_id)
@@ -507,6 +534,8 @@ func _apply_formation_move(command) -> String:
 		formation_name = String(command.params["formation"])
 	if command.params != null and command.params.has("forward"):
 		forward = command.params["forward"]
+	if bool(command.params.get("preserve_formations", false)):
+		return "" if _move_preserving_formations(selected, target, forward) else "no_path"
 	return "" if _assign_formation(selected, target, formation_name, forward) else "no_path"
 
 func _apply_attack(command) -> String:
@@ -519,8 +548,6 @@ func _apply_attack(command) -> String:
 		return "invalid_target"
 	if attackers.all(func(unit): return simulation_world.are_teams_allied(int(unit.get("team", 0)), int(target.get("team", 0)))):
 		return "friendly_target"
-	if not bool(command.params.get("autonomous", false)):
-		_detach_units_from_formations(attackers.filter(func(unit): return not simulation_world.entity_is_static(unit)))
 	return "" if simulation_world.assign_command_attack(attackers, command.target_entity_id, command.params) else "unreachable_target"
 
 
@@ -860,12 +887,54 @@ func _combat_entities_for_ids(entity_ids: Array[int], issuer_id: int = 0) -> Arr
 			selected.append(entity)
 	return selected
 
+func _move_preserving_formations(selected: Array, target: Vector2, forward: Vector2 = Vector2.ZERO, attack_move: bool = false) -> bool:
+	# All selected members leave their old destinations together. Reserving one
+	# batch at a time against the next batch's stale slots creates phantom gaps.
+	for unit in selected: simulation_world.release_unit_destination(unit)
+	var batches: Dictionary = {}
+	var center := Vector2.ZERO
+	var independent: Array = []
+	for unit in selected:
+		center += Vector2(unit["pos"])
+		if simulation_world.entity_is_worker(unit) and int(unit.get("formation_group_id", -1)) < 0:
+			independent.append(unit)
+			continue
+		var key := "%d:%s" % [int(unit.get("formation_group_id", -1)), FormationSelection.type_for(unit, formation_groups)]
+		if not batches.has(key): batches[key] = []
+		batches[key].append(unit)
+	center /= float(maxi(1, selected.size()))
+	var resolved := false
+	var keys := batches.keys()
+	keys.sort()
+	for key in keys:
+		var members: Array = batches[key]
+		var group_center := Vector2.ZERO
+		for member in members: group_center += Vector2(member["pos"])
+		group_center /= float(members.size())
+		var destination := target + group_center - center if batches.size() > 1 else target
+		var accepted := _assign_formation(members, destination, FormationSelection.type_for(members[0], formation_groups), forward)
+		resolved = accepted or resolved
+		if accepted and attack_move:
+			for member in members:
+				if String(member.get("task", "")) != "move": continue
+				member["task"] = "attack_move"
+				member["attack_move_destination"] = member["destination"]
+				OrderPipeline.begin(member, "attack_move", -1, member["destination"], false)
+				var group = formation_groups.get(int(member["formation_group_id"]))
+				if group != null: group.order_kind = "attack_move"
+	if not independent.is_empty():
+		var accepted: bool = simulation_world.assign_command_attack_move(independent, target) if attack_move else simulation_world.assign_command_move(independent, target)
+		resolved = accepted or resolved
+	return resolved
+
+
 func _assign_formation(selected: Array, anchor: Vector2, formation_name: String, requested_forward: Vector2 = Vector2.ZERO, partition: bool = true) -> bool:
 	if selected.is_empty():
 		return false
 	if partition:
 		var partitions := _formation_partitions(selected)
 		if partitions.size() > 1:
+			for unit in selected: simulation_world.release_unit_destination(unit)
 			var resolved := false
 			for members in partitions: resolved = _assign_formation(members, anchor, formation_name, requested_forward, false) or resolved
 			return resolved
@@ -884,7 +953,7 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 	var forward := requested_forward.normalized() if requested_forward.length_squared() > 0.0001 else Vector2.ZERO
 	if forward == Vector2.ZERO:
 		var existing_forward: Vector2 = selected[0].get("formation_forward", Vector2.ZERO)
-		if existing_forward.length_squared() > 0.0001:
+		if existing_forward.length_squared() > 0.0001 and center.distance_to(clamped_anchor) <= 8.0:
 			forward = existing_forward.normalized()
 	if forward == Vector2.ZERO:
 		forward = (clamped_anchor - center).normalized()
@@ -914,29 +983,58 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 		var replaced_group_id := int(unit.get("formation_group_id", -1))
 		if replaced_group_id >= 0:
 			replaced_group_ids[replaced_group_id] = true
-	var group = FormationGroup.new(next_formation_group_id, member_ids, clamped_anchor, forward, formation_name, 1.0)
+	var spacing := 1.0
+	for unit in ordered:
+		spacing = maxf(spacing, float(unit.get("footprint_radius", 0.3)) * 2.0 + float(unit.get("minimum_clearance", 0.0)) + 0.08)
+	var reuse: bool = previous_group != null and previous_group.member_ids == member_ids
+	var same_layout: bool = reuse and previous_group.formation_type == formation_name and previous_group.forward.is_equal_approx(forward) and is_equal_approx(previous_group.spacing, spacing) and previous_group.deployed_columns == 0 and previous_group.slots.size() == ordered.size()
+	var group = previous_group if reuse else FormationGroup.new(next_formation_group_id, member_ids, clamped_anchor, forward, formation_name, spacing)
+	if not reuse: next_formation_group_id += 1
+	group.anchor = clamped_anchor
+	group.march_anchor = center
+	group.order_kind = "move"
+	group.forward = forward
+	group.spacing = spacing
+	group.formation_type = formation_name
+	group.preferred_formation_type = formation_name
+	group.deployed_columns = 0
+	group.rebuild_slots()
 	group.policy["orientation"] = "command" if requested_forward.length_squared() > 0.0001 else "route"
 	if performance_probe != null:
 		performance_probe.observe_microseconds("formation.group_setup", Time.get_ticks_usec() - formation_probe_started)
-		formation_probe_started = Time.get_ticks_usec()
-	group.assign_units(ordered, previous_assignments)
-	if performance_probe != null:
-		performance_probe.observe_microseconds("formation.assignment", Time.get_ticks_usec() - formation_probe_started)
 		formation_probe_started = Time.get_ticks_usec()
 	var corridor_plan := _configure_group_route(group, ordered, center)
 	if performance_probe != null:
 		performance_probe.observe_microseconds("formation.corridor", Time.get_ticks_usec() - formation_probe_started)
 		formation_probe_started = Time.get_ticks_usec()
+	if same_layout and group.deployed_columns == 0 and previous_assignments.size() == ordered.size():
+		group.assignments = previous_assignments
+	else:
+		group.assign_units(ordered, previous_assignments if same_layout else {})
+	if performance_probe != null:
+		performance_probe.observe_microseconds("formation.assignment", Time.get_ticks_usec() - formation_probe_started)
+		formation_probe_started = Time.get_ticks_usec()
 	formation_groups[group.group_id] = group
-	next_formation_group_id += 1
 	var member_waypoint_sets := FormationCorridor.member_waypoint_sets(corridor_plan, ordered.size(), formation_name, group.spacing, forward)
 	var route_envelope := _formation_route_envelope(ordered, member_waypoint_sets)
 	var prevalidated_direct_routes := bool(route_envelope.get("open", false))
+	for unit in ordered: simulation_world.release_unit_destination(unit)
 	for unit in ordered:
 		var assigned_slot: Dictionary = group.slot_for(int(unit["id"]))
+		simulation_world.conversion_system.cancel(unit, "new_order")
+		simulation_world.healing_system.cancel(unit, "new_order")
+		simulation_world.release_resource_approach_slot(unit)
+		simulation_world.release_building_approach_slot(unit)
+		simulation_world.clear_combat_intent(unit)
+		if simulation_world.entity_is_worker(unit):
+			simulation_world.worker_role_system.clear(unit)
+			unit["pending_hunt_target_id"] = -1
+		unit["target_building_id"] = -1
+		unit["gather_stage"] = "none"
 		unit["task"] = "move"
 		unit["target_id"] = -1
 		unit["resource_id"] = -1
+		unit["preferred_formation"] = formation_name
 		unit["formation_group_id"] = group.group_id
 		unit["formation_slot_id"] = assigned_slot["slot_id"]
 		unit["formation_slot_capacity"] = assigned_slot["capacity_radius"]
@@ -949,6 +1047,8 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 		if slot_id >= 0 and slot_id < member_waypoint_sets.size():
 			member_waypoints.assign(member_waypoint_sets[slot_id])
 		if simulation_world.assign_unit_waypoints(unit, member_waypoints, assigned_slot["world"], prevalidated_direct_routes, route_envelope):
+			unit["formation_home"] = unit["destination"]
+			assigned_slot["world"] = unit["destination"]
 			resolved_count += 1
 	if performance_probe != null:
 		performance_probe.observe_microseconds("formation.member_routes", Time.get_ticks_usec() - formation_probe_started)
@@ -1012,6 +1112,16 @@ func _reconcile_formation_group(group_id: int, requested_member_ids: Variant = n
 	if current_ids == group.member_ids:
 		_update_group_lifecycle(group, members)
 		return
+	# Casualties and detached members leave holes until the next explicit march
+	# or reform. Surviving routes and occupied slots remain stable during combat.
+	if current_ids.all(func(id): return group.assignments.has(id)):
+		var retained: Dictionary = {}
+		for id in current_ids: retained[id] = true
+		for id in group.member_ids:
+			if not retained.has(id): group.assignments.erase(id)
+		group.member_ids = current_ids
+		_update_group_lifecycle(group, members)
+		return
 	var previous_assignments: Dictionary = group.assignments.duplicate(true)
 	group.member_ids = current_ids
 	group.rebuild_slots()
@@ -1022,6 +1132,8 @@ func _reconcile_formation_group(group_id: int, requested_member_ids: Variant = n
 	center /= float(members.size())
 	var corridor_plan := _configure_group_route(group, members, center)
 	var formation_facing: int = simulation_world.facing_for_vector(group.forward)
+	var member_waypoint_sets := FormationCorridor.member_waypoint_sets(corridor_plan, members.size(), group.formation_type, group.spacing, group.forward)
+	for unit in members: simulation_world.release_unit_destination(unit)
 	for unit in members:
 		var assigned_slot: Dictionary = group.slot_for(int(unit["id"]))
 		unit["formation_slot_id"] = assigned_slot["slot_id"]
@@ -1031,7 +1143,10 @@ func _reconcile_formation_group(group_id: int, requested_member_ids: Variant = n
 		unit["formation_home"] = assigned_slot["world"]
 		if String(unit.get("task", "idle")) in ["idle", "move"]:
 			unit["task"] = "move"
-			var member_waypoints := FormationCorridor.member_waypoints(corridor_plan, members.size(), group.formation_type, group.spacing, group.forward, int(assigned_slot["slot_id"]))
+			var member_waypoints: Array[Vector2] = []
+			var slot_index := int(assigned_slot["slot_id"])
+			if slot_index < member_waypoint_sets.size():
+				member_waypoints.assign(member_waypoint_sets[slot_index])
 			simulation_world.assign_unit_waypoints(unit, member_waypoints, assigned_slot["world"])
 	_update_group_lifecycle(group, members)
 
@@ -1039,7 +1154,7 @@ func _reconcile_formation_group(group_id: int, requested_member_ids: Variant = n
 func _update_group_lifecycle(group, members: Array) -> void:
 	var transition: Dictionary = FormationLifecycle.evaluate(group, members, Callable(simulation_world, "find_combat_target"))
 	for unit in members:
-		unit["formation_slot_mode"] = String(group.slot_constraint_mode)
+		unit["formation_slot_mode"] = "released" if String(unit.get("task", "")) == "attack" else "soft"
 	if bool(transition["changed"]):
 		event_stream.emit(tick_index, "formation_state_changed", {
 			"group_id": int(group.group_id),
@@ -1109,6 +1224,30 @@ func _configure_group_route(group, members: Array, start_center: Vector2) -> Dic
 					start_cell = Vector2i(position.floor())
 			start_center = Vector2(start_cell) + Vector2(0.5, 0.5)
 		corridor_plan = FormationCorridor.plan(start_center, group.anchor, group.formation_type, members.size(), group.spacing, maximum_radius, planner, planner.grid, movement_domain, restriction_id)
+	if not corridor_plan["route"].is_empty():
+		group.anchor = corridor_plan["route"][-1]
+		var columns: Array = corridor_plan.get("columns", [])
+		var deployed := int(columns[-1]) if not columns.is_empty() else 0
+		var deployment_forward: Vector2 = FormationCorridor._world_route_direction(corridor_plan["route"], corridor_plan["route"].size() - 1) if deployed > 0 else group.forward
+		var geometry = FormationGroup.Geometry
+		var local: Array[Vector2] = geometry.ranks(members.size(), deployed, group.spacing) if deployed > 0 else geometry.local_slots(members.size(), group.formation_type, group.spacing)
+		var planner = simulation_world.movement_system.knowledge.planner(simulation_world, int(members[0].get("team", 0)))
+		var attempts := geometry.line_width(members.size()) if deployed == 0 else deployed
+		while attempts > 0:
+			var positions: Array[Vector2] = geometry.world_slots(local, group.anchor, deployment_forward)
+			var fits := positions.all(func(position): return planner.grid.is_position_walkable_for(position, maximum_radius, movement_domain, restriction_id))
+			if fits: break
+			deployed = attempts
+			attempts -= 1
+			local = geometry.ranks(members.size(), deployed, group.spacing)
+		group.deployed_columns = deployed
+		corridor_plan["deployment_local"] = local
+		corridor_plan["deployment_forward"] = deployment_forward
+		var positions: Array[Vector2] = geometry.world_slots(local, group.anchor, deployment_forward)
+		for index in range(group.slots.size()):
+			group.slots[index]["local"] = local[index]
+			group.slots[index]["world"] = positions[index]
+			group.slots[index]["protected_layout"] = group.formation_type == geometry.BLOCK and deployed == 0
 	group.route.assign(corridor_plan["route"])
 	group.corridor_modes.assign(corridor_plan["modes"])
 	group.required_corridor_width = int(corridor_plan["required_width"])
@@ -1156,6 +1295,7 @@ func _detach_units_from_formations(selected: Array) -> void:
 		_reconcile_formation_group(int(group_id))
 
 func _clear_unit_formation(unit: Dictionary) -> void:
+	unit["preferred_formation"] = FormationSelection.type_for(unit, formation_groups)
 	unit["formation_group_id"] = -1
 	unit["formation_slot_id"] = -1
 	unit["formation_slot_capacity"] = 0.0
@@ -1164,6 +1304,8 @@ func _clear_unit_formation(unit: Dictionary) -> void:
 	unit["formation_slot_mode"] = "none"
 	unit["formation_shared_motion"] = false
 	unit["formation_shared_isolated"] = false
+	unit.erase("formation_steering_target")
+	unit.erase("_formation_path_cache")
 	unit["cohesion_speed_scale"] = 1.0
 
 func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> String:

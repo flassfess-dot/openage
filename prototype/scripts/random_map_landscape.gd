@@ -245,7 +245,10 @@ static func bind_tree(resource: Dictionary, fields: Dictionary, size: Vector2i, 
 	var index := cell.y * size.x + cell.x
 	var pine := float(fields["moisture"][index]) < 0.47
 	var palette: Dictionary = theme()["tree_palettes"]
-	var family: Dictionary = palette["conifer" if pine else "broadleaf"]
+	var palm: Dictionary = palette["palm"]
+	var coast_distances: Variant = fields.get("coast_distance", [])
+	var coastal_palm: bool = coast_distances.size() > index and int(coast_distances[index]) <= int(palm["coast_distance_max"]) and float(fields["moisture"][index]) <= float(palm["moisture_max"])
+	var family: Dictionary = palm if coastal_palm else palette["conifer" if pine else "broadleaf"]
 	var variants: Array = family["native"]
 	var native: Dictionary = variants[int(random_at(cell, seed ^ 0x73814) * 10000.0) % variants.size()]
 	# Both sources share native gameplay; art is selected once and survives saves.
@@ -254,11 +257,18 @@ static func bind_tree(resource: Dictionary, fields: Dictionary, size: Vector2i, 
 	resource.erase("environment_asset")
 	resource.erase("environment_variant")
 	resource.erase("tree_condition")
-	if random_at(cell, seed ^ 0x421CDF) >= native_share:
+	if family.has("imported") and random_at(cell, seed ^ 0x421CDF) >= native_share:
 		resource["environment_asset"] = family["imported"]
 		resource["environment_variant"] = int(random_at(cell, seed ^ 0x71873) * 10000.0) % int(family["imported_variants"])
 	resource["visible_when_depleted"] = true
 	resource["position"] = Vector2(cell) + Vector2(0.5, 0.5) + Vector2(random_at(cell, seed ^ 0xAF52) - 0.5, random_at(cell, seed ^ 0x7541) - 0.5) * 0.36
+
+
+static func is_palm(resource: Dictionary) -> bool:
+	var graphic_id := int(resource.get("source_graphic_id", -1))
+	for native in theme()["tree_palettes"]["palm"]["native"]:
+		if graphic_id == int(native["graphic_id"]): return true
+	return false
 
 
 static func _bind_native_tree(resource: Dictionary, native: Dictionary) -> void:
@@ -281,7 +291,7 @@ static func forest_accents(map_data: Dictionary, fields: Dictionary, occupied: D
 		if resource.get("kind", "") != "tree": continue
 		var cell := Vector2i(resource["position"])
 		var i := cell.y * size.x + cell.x
-		if float(fields["moisture"][i]) < 0.47: continue
+		if float(fields["moisture"][i]) < 0.47 or is_palm(resource): continue
 		if random_at(cell, seed ^ 0x251AD) >= float(accents["forest_chance"]) or not _clear_neighborhood(cell, accent_cells, spacing): continue
 		_bind_accent(resource, accents, seed)
 		accent_cells[cell] = true

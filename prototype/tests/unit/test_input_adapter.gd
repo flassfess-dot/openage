@@ -46,6 +46,14 @@ func test_pointer_actions() -> void:
 	shift_release.shift_pressed = true
 	assert_true(bool(adapter.translate(shift_release)[0].get("queue_order", false)), "Shift-right-click carries the deferred order policy")
 
+	for use_shift in [true, false]:
+		adapter.translate(mouse_button(MOUSE_BUTTON_LEFT, true, Vector2(40, 40)))
+		var build_release := mouse_button(MOUSE_BUTTON_LEFT, false, Vector2(40, 40))
+		build_release.shift_pressed = use_shift
+		build_release.ctrl_pressed = not use_shift
+		var placement: Dictionary = adapter.translate(build_release)[0]
+		assert_equal(bool(placement.get("queue_order", false)), use_shift, "original Shift-left-click repeats construction; Ctrl does not")
+
 	var zoom := adapter.translate(mouse_button(MOUSE_BUTTON_WHEEL_UP, true, Vector2(30, 40)))[0]
 	assert_equal(zoom, {"type": "zoom", "position": Vector2(30, 40), "steps": 1}, "wheel maps to zoom intent")
 
@@ -54,6 +62,10 @@ func test_keyboard_actions() -> void:
 	var adapter = InputAdapter.new()
 	var formation := adapter.translate(key_event(KEY_F8))[0]
 	assert_equal(formation, {"type": "set_formation", "formation": "WEDGE"}, "formation key is device mapping only")
+	assert_equal(adapter.translate(key_event(KEY_F10)), [{"type": "set_formation", "formation": "FLANK"}], "F10 selects only the split formation")
+	var calibration := key_event(KEY_F10)
+	calibration.ctrl_pressed = true
+	assert_equal(adapter.translate(calibration), [{"type": "open_calibration"}], "Ctrl+F10 opens calibration without changing formation")
 	var group_event := key_event(KEY_4)
 	group_event.ctrl_pressed = true
 	var group := adapter.translate(group_event)[0]

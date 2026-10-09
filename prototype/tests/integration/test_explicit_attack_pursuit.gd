@@ -51,12 +51,12 @@ func test_pursuit(catalog, native: bool) -> void:
 	submit(f, Commands.FormationMoveCommand.new(0, f["ids"], Vector2(8, 8), "LINE", Vector2.RIGHT))
 	check(f["fighters"].all(func(unit): return int(unit["formation_group_id"]) >= 0), "fixture starts in a formation")
 	submit(f, Commands.AttackCommand.new(0, f["ids"], int(f["target"]["id"])))
-	check(f["fighters"].all(func(unit): return int(unit["formation_group_id"]) == -1 and unit.get("combat_pursuit", false)), "explicit attack frees all actors from marching formations")
+	check(f["fighters"].all(func(unit): return int(unit["formation_group_id"]) >= 0 and unit.get("combat_pursuit", false) and unit["formation_slot_mode"] == "released"), "explicit attack releases slots but remembers the formation")
 	f["target"]["hp"] = 0
 	for tick in range(20): controller.advance_frame(0.05, 1, 2)
 	var ids: Array = [int(f["next"]["id"]), int(f["building"]["id"])]
 	check(f["fighters"].all(func(unit): return unit["task"] == "attack" and int(unit["target_id"]) in ids), "every actor retargets visible hostiles after its chosen enemy dies (native=%s actors=%s)" % [native, f["fighters"].map(func(unit): return [unit["task"], unit["target_id"], unit["diagnostic_reason"], unit.get("combat_pursuit"), unit["pos"]])])
-	check(f["fighters"].all(func(unit): return unit["formation_home"] == null), "combat pursuit never returns to its old travel slot")
+	check(f["fighters"].all(func(unit): return bool(unit.get("combat_pursuit", false)) and unit["task"] == "attack"), "combat pursuit never returns to its old travel slot")
 	f["next"]["hp"] = 0
 	for tick in range(20): controller.advance_frame(0.05, 1, 2)
 	check(f["fighters"].all(func(unit): return unit["task"] == "attack" and int(unit["target_id"]) == int(f["building"]["id"])), "pursuit continues from units to visible enemy buildings")

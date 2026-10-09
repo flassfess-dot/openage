@@ -1,5 +1,6 @@
 class_name RoRFormationRoles
 
+const CAVALRY := "cavalry"
 const HEAVY_INFANTRY := "heavy_infantry"
 const LIGHT_INFANTRY := "light_infantry"
 const RANGED := "ranged"
@@ -12,6 +13,8 @@ static func role_for(kind: String) -> String:
 	var normalized := kind.to_lower()
 	if normalized in ["archer", "bowman", "slinger", "chariot_archer"] or "archer" in normalized:
 		return RANGED
+	if normalized in ["scout", "cavalry", "heavy_cavalry", "cataphract", "chariot", "war_elephant", "armored_elephant", "camel"]:
+		return CAVALRY
 	if "priest" in normalized or "healer" in normalized:
 		return PRIEST
 	if "catapult" in normalized or "ballista" in normalized or "helepolis" in normalized or "stone_thrower" in normalized or "siege" in normalized:
@@ -23,9 +26,17 @@ static func role_for(kind: String) -> String:
 	return LIGHT_INFANTRY
 
 
+static func unit_role(unit: Dictionary) -> String:
+	return String(unit.get("formation_role", role_for(String(unit.get("kind", "")))))
+
+
 static func slot_cost(kind: String, slot: Dictionary, slots: Array) -> float:
 	if slots.is_empty():
 		return 0.0
+	return prepared_slot_cost(role_for(kind), slot, slot_bounds(slots))
+
+
+static func slot_bounds(slots: Array) -> Vector3:
 	var front := -INF
 	var back := INF
 	var widest := 0.0
@@ -34,9 +45,21 @@ static func slot_cost(kind: String, slot: Dictionary, slots: Array) -> float:
 		front = maxf(front, local.y)
 		back = minf(back, local.y)
 		widest = maxf(widest, absf(local.x))
+	return Vector3(front, back, widest) if not slots.is_empty() else Vector3.ZERO
+
+
+static func prepared_slot_cost(role: String, slot: Dictionary, bounds: Vector3) -> float:
+	var front := bounds.x
+	var back := bounds.y
+	var widest := bounds.z
 	var position: Vector2 = slot.get("local", slot.get("world", Vector2.ZERO))
 	var middle := (front + back) * 0.5
-	match role_for(kind):
+	if bool(slot.get("protected_layout", false)):
+		var depth := maxf(absf(position.x), absf(position.y - middle))
+		return depth * 12.0 if role in [PRIEST, SIEGE, CIVILIAN] else -depth * 4.0
+	match role:
+		CAVALRY:
+			return (front - position.y) * 4.0
 		HEAVY_INFANTRY:
 			return (front - position.y) * 4.0 + absf(position.x) * 0.05
 		RANGED:
@@ -44,7 +67,7 @@ static func slot_cost(kind: String, slot: Dictionary, slots: Array) -> float:
 		PRIEST:
 			return absf(position.x) * 4.0 + absf(position.y - middle)
 		SIEGE:
-			return (widest - absf(position.x)) * 4.0 + (position.y - back)
+			return (position.y - back) * 4.0 + absf(position.x)
 		CIVILIAN:
 			return absf(position.y - middle) + absf(position.x) * 0.25
 		_:

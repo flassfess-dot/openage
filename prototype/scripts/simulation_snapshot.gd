@@ -247,10 +247,12 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		live_building_ids[building_id] = true
 		var visible_now := _entity_visible_to_observer(building, observer_team, observer_states, observer_allies, fog_map_size)
 		var knowledge: Dictionary = building
+		var observed_render: Dictionary = {}
 		if visible_now and observer_team > 0:
 			# Capture only legal, observed state. A later fogged snapshot never
 			# projects the live dictionary again.
-			remembered_buildings[building_id] = compact_render_projector.call(building) if compact_render_projector.is_valid() else _compact_render_entity(building)
+			observed_render = compact_render_projector.call(building) if compact_render_projector.is_valid() else _compact_render_entity(building)
+			remembered_buildings[building_id] = observed_render
 		elif observer_team > 0:
 			knowledge = remembered_buildings.get(building_id, {})
 			if knowledge.is_empty():
@@ -274,7 +276,9 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 				presentation_building = presentation_building.duplicate()
 				presentation_building["last_known"] = true
 			elif compact_render_entities and always_include_entity_lookup.has(building_id):
-				presentation_building = _compact_control_entity(building, observer_team, compact_render_projector)
+				presentation_building = _compact_control_entity(building, observer_team, compact_render_projector, observed_render)
+			elif compact_render_entities and not observed_render.is_empty():
+				presentation_building = observed_render
 			else:
 				presentation_building = _presentation_entity(
 					building,
@@ -460,6 +464,8 @@ static func _sorted_entities(source: Array) -> Array:
 		# change deterministic simulation hashes.
 		canonical_entity.erase("selected")
 		canonical_entity.erase("formation_shared_motion")
+		canonical_entity.erase("_formation_path_cache")
+		canonical_entity.erase("formation_steering_target")
 		canonical_entity.erase("formation_shared_isolated")
 		result.append(canonical_entity)
 	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
@@ -477,6 +483,8 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 	EntityComponents.project_dynamic(result)
 	result.erase("selected")
 	result.erase("formation_shared_motion")
+	result.erase("_formation_path_cache")
+	result.erase("formation_steering_target")
 	result.erase("formation_shared_isolated")
 	if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
 		for private_key in ["production_queue", "production_progress", "command_options", "rally_point"]:
@@ -500,12 +508,13 @@ static func _compact_render_entity(entity: Dictionary) -> Dictionary:
 	return ReadContract.render(entity)
 
 
-static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, compact_render_projector: Callable = Callable()) -> Dictionary:
+static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, compact_render_projector: Callable = Callable(), rendered: Dictionary = {}) -> Dictionary:
 	# Selected objects need gameplay/HUD data, but not authoritative paths,
 	# destination reservations, AI bookkeeping or the full technology payload.
 	# Keeping this explicit contract avoids two deep copies of large unit records
 	# every presentation tick while preserving every player-facing control field.
-	var result: Dictionary = compact_render_projector.call(entity).duplicate(true) if compact_render_projector.is_valid() else _compact_render_entity(entity).duplicate(true)
+	var base: Dictionary = rendered if not rendered.is_empty() else (compact_render_projector.call(entity) if compact_render_projector.is_valid() else _compact_render_entity(entity))
+	var result: Dictionary = base.duplicate(true)
 	for key in ReadContract.CONTROL_FIELDS:
 		if entity.has(key):
 			result[key] = entity[key]
@@ -516,7 +525,8 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 	for component_name in ["combat", "conversion", "healing", "resource_carrier"]:
 		var component: Dictionary = EntityComponents.component_view(entity, component_name)
 		if not component.is_empty():
-			components[component_name] = component.duplicate(true)
+			# component_view already owns a detached result.
+			components[component_name] = component
 	var cargo: Dictionary = source_components.get("cargo", {})
 	if not cargo.is_empty():
 		components["cargo"] = cargo.duplicate(true)
@@ -683,6 +693,10 @@ static func _formation_groups(source: Dictionary) -> Array:
 			"corridor_modes": group.corridor_modes.duplicate(),
 			"required_corridor_width": int(group.required_corridor_width),
 			"has_compression": bool(group.has_compression),
+			"march_anchor": group.march_anchor,
+			"march_speed": group.march_speed,
+			"order_kind": group.order_kind,
+			"deployed_columns": group.deployed_columns,
 		})
 	return result
 

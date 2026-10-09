@@ -2,7 +2,7 @@
 const assert = require('assert/strict');
 const fs = require('fs');
 const path = require('path');
-const {resizeSprite, flattenTerrain, importPack, groundBounds, grade} = require('./import_environment.js');
+const {decodeTreeShadow, resizeSprite, flattenTerrain, importPack, groundBounds, grade} = require('./import_environment.js');
 const identity={saturation:1,gain:[1,1,1]};
 // Transparent black must not darken an opaque red edge after downsampling.
 const resized=resizeSprite({width:2,height:2,hotspotX:1,hotspotY:2,rgba:Buffer.from([240,30,20,255,0,0,0,0,240,30,20,255,0,0,0,0])},0.5,identity);
@@ -46,4 +46,26 @@ if(process.argv.includes('--source')){
   const installed=JSON.parse(fs.readFileSync(path.join(root,'prototype/assets/generated/environment/aoe2_temperate/manifest.json'),'utf8'));
   assert.deepEqual(first,installed);
   console.log('Source reimport is byte-identical to installed pack (all PNG hashes and manifest).');
+}
+
+// Read the original archives without repacking any project assets.
+if(process.argv.includes('--source-readonly')){
+  const {parseDrs,layerDrs,parsePalettes,decodeSlp}=require('./import_assets.js');
+  const gameIndex=process.argv.indexOf('--game');
+  const game=gameIndex<0?'D:/Games/Age of Empires II':process.argv[gameIndex+1];
+  const archive=parseDrs(path.join(game,'Data/graphics.drs'));
+  const palettes=parsePalettes(layerDrs([path.join(game,'Data/interfac.drs')]));
+  const definition=JSON.parse(fs.readFileSync(definitionFile));
+  for(const spec of definition.objects.filter(s=>s.role==='tree')){
+    for(const frame of spec.frames){
+      const tree=decodeSlp(archive.get('slp',spec.slp),palettes,frame);
+      assert.equal(tree.semanticPixels.shadow,0,'Trees store their shadows in a separate DAT delta');
+      const shadow=decodeTreeShadow(spec,archive,palettes,frame,definition.object_scale);
+      assert.ok(shadow.source_shadow_pixels>100 && shadow.hotspot.length===2);
+      assert.ok(shadow.rgba.some((v,i)=>i%4===3 && v>0 && v<255),'Shadows preserve transparency');
+      for(let i=0;i<shadow.rgba.length;i+=4)assert.deepEqual([...shadow.rgba.subarray(i,i+3)],[0,0,0]);
+      assert.equal(shadow.source_slp,spec.key==='oak'?2296:2304);
+    }
+  }
+  console.log('All 8 tree variants resolve their original AoC shadow and direction (read-only).');
 }

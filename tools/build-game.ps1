@@ -85,6 +85,7 @@ if (-not (Test-Path -LiteralPath $releaseTemplate)) {
         [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $releaseTemplate, $true)
     } finally { $archive.Dispose() }
 }
+& (Join-Path $PSScriptRoot "prepare-godot-project.ps1")
 New-Item -ItemType Directory -Force -Path $distributionRoot | Out-Null
 
 & $nativeBuildScript
@@ -122,4 +123,5 @@ Copy-Item -LiteralPath $nativeLibrary -Destination (Join-Path $distributionRoot 
 New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "legal\MIT") | Out-Null
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "legal\MIT\godot-cpp.md") -Destination (Join-Path $distributionRoot "legal\MIT\godot-cpp.md") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $distributionRoot "README.md") -Force
+& (Join-Path $PSScriptRoot "verify-packaged-startup.ps1")
 Write-Host "Build complete: $application"

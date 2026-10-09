@@ -187,9 +187,10 @@ func finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> v
 		return
 	var formation_home: Variant = unit.get("formation_home")
 	if formation_home is Vector2 and int(unit.get("formation_group_id", -1)) >= 0:
-		unit["task"] = "move"
+		var resume_task := String(resume.get("task", "move"))
+		unit["task"] = resume_task if resume_task in ["move", "attack_move"] else "move"
 		unit["formation_slot_mode"] = "soft"
-		OrderPipeline.begin(unit, "move", -1, formation_home, false)
+		OrderPipeline.begin(unit, unit["task"], -1, formation_home, false)
 		if not world.assign_unit_destination(unit, formation_home):
 			world.restore_formation_facing(unit)
 	elif String(resume.get("task", "")) in ["move", "attack_move"] and resume.get("destination") is Vector2:
@@ -396,6 +397,8 @@ func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
 	var radius_values: Array = projectile_source.get("geometry", {}).get("radius", [])
 	if not radius_values.is_empty():
 		projectile_radius = maxf(float(radius_values[0]), float(radius_values[1]) if radius_values.size() > 1 else 0.0)
+	var attacker_source: Dictionary = world.object_record_by_id(int(attacker.get("source_unit_id", -1)), int(attacker.get("team", 0)))
+	var source_blast_level := int(attacker_source.get("combat", {}).get("blast_level_offence", 3))
 	var projectile := {
 		"id": projectile_entity_id,
 		"kind": "projectile",
@@ -428,7 +431,10 @@ func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
 		"blast_range": maxf(0.0, float(combat.get("blast_range", attacker.get("blast_range", 0.0)))),
 		"friendly_fire": bool(combat.get("friendly_fire", false)),
 		"blast_falloff": String(combat.get("blast_falloff", "none")),
-		"impact_effect_graphic_id": int(combat.get("impact_effect_graphic_id", -1)),
+		# Resolve from the projectile DAT, including upgrades and old saves whose
+		# combat component predates impact presentation metadata.
+		"impact_effect_graphic_id": int(projectile_source.get("graphics", {}).get("death", combat.get("impact_effect_graphic_id", -1))),
+		"damages_trees": source_blast_level <= 1 and float(attacker.get("blast_range", 0.0)) > 0.0,
 		"radius": projectile_radius,
 		"total_distance": spawn.distance_to(destination),
 		"elapsed": 0.0,
@@ -473,6 +479,7 @@ func update_projectiles(delta: float, player_team: int) -> void:
 				"team": int(projectile.get("team", 0)),
 				"is_worker": bool(projectile.get("source_is_worker", false)),
 			}, int(projectile["id"]), player_team)
+		_destroy_trees_at_impact(projectile)
 		projectile["impact_position"] = Vector2(projectile["pos"])
 		if world.capture_domain_events:
 			world.emit_domain_event("projectile_impact", {
@@ -480,6 +487,7 @@ func update_projectiles(delta: float, player_team: int) -> void:
 				"source_id": int(projectile.get("source_id", -1)),
 				"team": int(projectile.get("team", 0)),
 				"position": Vector2(projectile["pos"]),
+				"elevation": float(projectile.get("target_elevation", 0.0)),
 				"impact_effect_graphic_id": int(projectile.get("impact_effect_graphic_id", -1)),
 				"blast_range": float(projectile.get("blast_range", 0.0)),
 				"hit_target_ids": projectile.get("hit_target_ids", []).duplicate(),
@@ -489,6 +497,27 @@ func update_projectiles(delta: float, player_team: int) -> void:
 		if resolved_projectiles.size() > 100:
 			resolved_projectiles.pop_front()
 	projectiles.assign(active_projectiles)
+
+
+func _destroy_trees_at_impact(projectile: Dictionary) -> void:
+	if not bool(projectile.get("damages_trees", false)):
+		return
+	var radius := maxf(0.0, float(projectile.get("blast_range", 0.0)))
+	var position := Vector2(projectile["pos"])
+	# The cell index contains authoritative resources, including unexplored
+	# forest. Work scales with the blast footprint, not the entire map.
+	var lower := Vector2i(floori(position.x - radius), floori(position.y - radius))
+	var upper := Vector2i(floori(position.x + radius), floori(position.y + radius))
+	for y in range(maxi(0, lower.y), mini(world.map_size.y - 1, upper.y) + 1):
+		for x in range(maxi(0, lower.x), mini(world.map_size.x - 1, upper.x) + 1):
+			for resource in world.resource_nodes_by_cell.get(y * world.map_size.x + x, []):
+				if String(resource.get("kind", "")) != "tree" or int(resource.get("amount", 0)) <= 0:
+					continue
+				if position.distance_squared_to(Vector2(resource["pos"])) > radius * radius:
+					continue
+				resource["amount"] = 0
+				world.update_resource_state(resource)
+				world.emit_domain_event("tree_destroyed", {"resource_id": int(resource["id"]), "projectile_id": int(projectile["id"])})
 
 
 func _impact_candidates(projectile: Dictionary, target: Variant) -> Array:

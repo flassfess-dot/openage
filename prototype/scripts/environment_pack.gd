@@ -41,6 +41,8 @@ func enable() -> bool:
 		for frame in frames:
 			if not _valid_image(frame) or frame.get("hotspot", []).size() != 2:
 				return false
+			if frame.has("shadow") and (not _valid_image(frame["shadow"]) or frame["shadow"].get("hotspot", []).size() != 2):
+				return false
 	definition = parsed_definition
 	manifest = parsed_manifest
 	for material in definition["materials"]:
@@ -119,7 +121,7 @@ func frame_info(item: Dictionary, resource: bool = false) -> Dictionary:
 	var frames: Array = manifest["objects"][key]["frames"]
 	var index := posmod(int(item.get("source_frame", item.get("id", 0))), frames.size())
 	var record: Dictionary = frames[index]
-	return {
+	var result := {
 		"texture": _texture(String(record["file"])),
 		"hotspot": Vector2(record["hotspot"][0], record["hotspot"][1]),
 		"asset_name": PREFIX + key,
@@ -127,6 +129,12 @@ func frame_info(item: Dictionary, resource: bool = false) -> Dictionary:
 		"mirrored": false,
 		"graphic_layer": 0 if objects_by_key[key].get("role", "") == "decal" else 20,
 	}
+	if record.has("shadow") and String(item.get("tree_phase", "standing")) == "standing":
+		var shadow: Dictionary = record["shadow"]
+		result["shadow"] = {"texture": _texture(String(shadow["file"])),
+			"hotspot": Vector2(shadow["hotspot"][0], shadow["hotspot"][1]),
+			"frame_index": index, "asset_name": PREFIX + key + ":shadow", "mirrored": false}
+	return result
 
 
 func decorate_resource(resource: Dictionary, key: String, variant: int = 0) -> Dictionary:

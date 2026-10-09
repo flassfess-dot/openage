@@ -109,7 +109,7 @@ func prewarm_units(units: Array) -> void:
 		if texture_key.is_empty():
 			continue
 		var requested: Dictionary = requested_states_by_key.get(texture_key, {})
-		for state in ["idle", "move", "death"]:
+		for state in ["idle", "move", "death", "corpse"]:
 			requested[state] = true
 		requested[AnimationController.clip_for_state(String(unit.get("anim_state", AnimationController.IDLE)))] = true
 		var components: Dictionary = unit.get("components", {})
@@ -297,15 +297,25 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -
 	var source_id := int(unit.get("source_unit_id", -1))
 	var texture_key := texture_key_for_unit(unit)
 	ensure_loaded(texture_key, state)
+	# A missing/pending lifecycle clip must never resurrect the living sprite.
+	var corpse_requested := state == "corpse" or state.ends_with("_corpse")
+	var death_requested := state == "death" or state.ends_with("_death")
+	var fallback_state := "death" if corpse_requested or death_requested else "idle"
+	if corpse_requested:
+		var role_death := state.trim_suffix("corpse") + "death"
+		if definitions.get(texture_key, {}).get("state_specs", {}).has(role_death):
+			fallback_state = role_death
 	if not textures.get(texture_key, {}).has(state):
-		ensure_loaded(texture_key, "idle")
+		ensure_loaded(texture_key, fallback_state)
 	var animation_sets: Dictionary = textures.get(texture_key, {})
-	var resolved_state := state if animation_sets.has(state) else "idle"
+	var resolved_state := state if animation_sets.has(state) else fallback_state
 	var frames: Array = animation_sets.get(resolved_state, [])
 	var graphic_descriptor = descriptor(texture_key, resolved_state)
 	if frames.is_empty() or graphic_descriptor == null:
 		return {}
 	var time := float(unit.get("anim", 0.0)) if animation_time < 0.0 else animation_time
+	if corpse_requested and resolved_state != state:
+		time = float(graphic_descriptor.frames_per_angle) * float(graphic_descriptor.frame_duration)
 	var resolved: Dictionary = graphic_descriptor.resolve(int(unit.get("facing", 0)), time, frames.size())
 	var frame_index := int(resolved["frame_index"])
 	var texture: Texture2D = frames[frame_index]
@@ -314,7 +324,7 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -
 	var damage_graphic_id := -1
 	var hp := float(unit.get("hp", 0.0))
 	var max_hp := maxf(1.0, float(unit.get("max_hp", 1.0)))
-	if resolved_state not in ["death", "corpse"] and effect_presentations != null and hp + 0.0001 < max_hp:
+	if not corpse_requested and not death_requested and effect_presentations != null and hp + 0.0001 < max_hp:
 		var source := _source_record(archetype_for_unit(alias), source_id, unit)
 		damage_graphic_id = DamageSelector.select_graphic_id(unit, source)
 		if damage_graphic_id >= 0:

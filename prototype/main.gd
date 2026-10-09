@@ -74,6 +74,7 @@ const InterfaceLayout := preload("res://scripts/interface_layout.gd")
 const MinimapAperture := preload("res://scripts/minimap_aperture.gd")
 const MinimapResourceIndex := preload("res://scripts/minimap_resource_index.gd")
 const MAP_SEED := 41721
+const FormationSelection := preload("res://scripts/formation_selection.gd")
 const FormationPreview := preload("res://scripts/formation_preview.gd")
 const TILE_WIDTH := Coordinates.TILE_WIDTH
 const TILE_HEIGHT := Coordinates.TILE_HEIGHT
@@ -433,6 +434,7 @@ func center_initial_view() -> void:
 	queue_redraw()
 
 func reset_game() -> void:
+	PickingService.SelectionResolver.clear_hit_images()
 	navigation_loading.shutdown()
 	background_saves.drain()
 	presentation_publication.clear()
@@ -1389,7 +1391,7 @@ func load_game_from_path(path: String) -> bool:
 		if not GameCheckpoint.restore(checkpoint, restored_world, restored_controller): return _load_failed("checkpoint_invalid")
 	if restored_controller.tick_index != int(archive.get("tick", -1)): return _load_failed("checkpoint_invalid")
 	var verifier := ReplaySystem.new()
-	var restored_hash := verifier.world_state_hash(restored_world, restored_controller.tick_index, restored_controller)
+	var restored_hash := verifier.world_state_hash(restored_world, restored_controller.tick_index, restored_controller, checkpoint.get("controller", {}).get("formation_groups") if not checkpoint.is_empty() else null)
 	if restored_hash != String(archive.get("state_sha256", "")):
 		return _load_failed("state_hash_mismatch:%s" % restored_hash)
 	restored_controller.replay_source = null
@@ -1416,6 +1418,7 @@ func load_game_from_path(path: String) -> bool:
 	if not restored_sound_history.restore_state(saved_view.get("sound_cue_history", {}), int(archive.get("tick", 0))):
 		return _load_failed("sound_cue_history_invalid")
 
+	PickingService.SelectionResolver.clear_hit_images()
 	match_definition = restored_definition
 	map_definition = restored_map
 	if String(restored_map.get("environment_pack", "")) == "aoe2_temperate":
@@ -1651,7 +1654,7 @@ func current_world_drawables() -> Array:
 	var effects: Array = presentation_snapshot.get("effects", [])
 	if effects.is_empty():
 		return cached_world_drawables
-	var effect_drawables: Array = render_world.create_world_drawables({"effects": effects}, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"))
+	var effect_drawables: Array = render_world.create_effect_drawables(effects, Callable(self, "world_to_screen"), Callable(self, "render_item_frame_info"))
 	return render_world.merge_sorted_drawables(cached_world_drawables, effect_drawables)
 
 
@@ -1788,6 +1791,7 @@ func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: boo
 			accepted_message = "Ремонтировать здание"
 		"move":
 			command = RoRCommands.MoveCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target"]) if queue_order else RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target"], formation, formation_forward)
+			command.params["preserve_formations"] = true
 			accepted_message = "Движение: %s" % formation_name()
 		_:
 			game_message = String(resolution.get("message", "Команда для этой цели пока недоступна"))
@@ -2032,6 +2036,8 @@ func selected_entities() -> Array:
 		for entity in presentation_snapshot.get(collection_name, []):
 			if not player_control_state.is_selected(int(entity.get("id", -1))):
 				continue
+			if collection_name == "resources" and not PickingService.resource_is_selectable(entity):
+				continue
 			if collection_name != "resources" and (float(entity.get("hp", 0.0)) <= 0.0 or bool(entity.get("last_known", false))):
 				continue
 			selected.append(entity)
@@ -2065,6 +2071,8 @@ func selectable_player_ids() -> Array[int]:
 			ids.append(entity_id)
 			seen[entity_id] = true
 	for resource in presentation_snapshot.get("resources", []):
+		if not PickingService.resource_is_selectable(resource):
+			continue
 		var resource_id := int(resource.get("id", -1))
 		if player_control_state.is_selected(resource_id) and not seen.has(resource_id):
 			ids.append(resource_id)
@@ -2088,24 +2096,25 @@ func resource_at_screen(mouse: Vector2):
 
 
 func set_formation(value: String) -> void:
+	if selected_units().is_empty():
+		return
 	formation = value
-	refresh_hud_model()
 	game_message = "Выбран строй: %s" % formation_name()
 	message_time = 1.5
 	if game_controller == null or simulation_world == null:
 		return
 	var selected = selected_units()
-	if selected.size() <= 1:
+	if selected.is_empty():
 		return
 	var center = Vector2.ZERO
 	for unit in selected:
 		center += unit["pos"]
 	center /= float(selected.size())
 	var existing_forward: Vector2 = selected[0].get("formation_forward", Vector2.ZERO)
-	var reform = RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, _selection_ids(selected), center, formation, existing_forward)
+	var reform = RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, _selection_ids(selected), center, value, existing_forward)
 	_queue_local_command(reform)
 func formation_name() -> String:
-	return {"LINE": "линия", "RECTANGLE": "каре", "COLUMN": "колонна", "WEDGE": "клин", "STAGGERED": "шахматный"}.get(formation, formation)
+	return {"LINE": "линия", "RECTANGLE": "каре", "COLUMN": "колонна", "WEDGE": "клин", "STAGGERED": "рассредоточенный", "FLANK": "фланги"}.get(formation, "смешанный" if formation.is_empty() else formation)
 
 func request_primary_train_command() -> void:
 	for command_value in hud_model.get("commands", []):
@@ -2255,6 +2264,7 @@ func set_trade_resource_from_hud(resource_type_id: int) -> void:
 
 
 func refresh_hud_model() -> void:
+	formation = FormationSelection.selected_type(selected_units(), game_controller.formation_groups if game_controller != null else {})
 	if hud_view_model == null or presentation_snapshot.is_empty():
 		return
 	var update: Dictionary = hud_view_model.build_update(presentation_snapshot, player_control_state.selected_ids(), formation, cached_hud_signature, "ru")
@@ -2333,6 +2343,7 @@ func sync_world_state(force: bool = true) -> void:
 	cached_presentation_selection_signature = selection_signature
 	cached_presentation_diagnostics = diagnostics_enabled
 	presentation_revision += 1
+	_sync_effect_snapshot()
 	presentation_snapshot["markers"] = match_definition.get("presentation_markers", [])
 	var visible_bounds := visible_tile_bounds()
 	var environment_bounds := Rect2i(visible_bounds.position - Vector2i(2, 2), visible_bounds.size + Vector2i(4, 4))
@@ -2438,6 +2449,7 @@ func resume_from_launcher() -> void:
 	queue_redraw()
 
 func _exit_tree() -> void:
+	PickingService.SelectionResolver.clear_hit_images()
 	navigation_loading.shutdown()
 	background_saves.shutdown()
 	if resource_catalog != null:
@@ -2526,15 +2538,19 @@ func draw_formation_ghost() -> void:
 		return
 	var destination := screen_to_world(gesture["position"])
 	var direction_end := screen_to_world(gesture["direction_end"])
-	var preview := FormationPreview.build(selected.size(), formation, destination, direction_end - destination, 1.0)
+	var preview := FormationPreview.build_selection(selected, game_controller.formation_groups, destination, direction_end - destination)
 	if preview.is_empty():
 		return
-	var anchor_screen := world_to_screen(preview["destination"])
-	var direction_screen := world_to_screen(preview["destination"] + preview["forward"] * 1.6)
-	draw_line(anchor_screen, direction_screen, Color(1.0, 0.88, 0.25, 0.95), 2.0, true)
-	draw_circle(direction_screen, 3.5, Color(1.0, 0.88, 0.25, 0.95))
 	for slot in preview["slots"]:
 		draw_formation_ghost_slot(slot)
+	# One heading for the entire placement gesture, including selections that
+	# retain several old groups. Individual ghosts only show occupied slots.
+	var heading: Array = preview["heading"]
+	var arrow_points := PackedVector2Array()
+	for point in heading:
+		arrow_points.append(world_to_screen(point))
+	draw_line(arrow_points[0], arrow_points[1], Color(1.0, 0.88, 0.25, 0.95), 2.0, true)
+	draw_polyline(PackedVector2Array([arrow_points[2], arrow_points[1], arrow_points[3]]), Color(1.0, 0.88, 0.25, 0.95), 2.0, true)
 
 func draw_formation_ghost_slot(world_position: Vector2) -> void:
 	var points := PackedVector2Array()
@@ -2602,7 +2618,7 @@ func draw_world_objects() -> void:
 			stage_started = Time.get_ticks_usec()
 		for drawable in drawables:
 			match drawable["kind"]:
-				"building", "building_part", "resource", "unit", "unit_part", "projectile", "effect", "marker", "environment": draw_render_body(drawable)
+				"building", "building_part", "resource", "resource_shadow", "unit", "unit_part", "projectile", "effect", "marker", "environment": draw_render_body(drawable)
 				"shadow": draw_unit_shadow(drawable)
 				"selection": draw_unit_selection(drawable)
 				"health_bar": draw_unit_health(drawable)
@@ -3015,15 +3031,11 @@ func draw_unit_selection(item: Dictionary) -> void:
 			if String(unit.get("entity_type", "")) in ["building", "foundation"] or String(unit.get("footprint", {}).get("shape", "")) == "polygon":
 				draw_building_selection_rectangle(unit, Color("ffe56c"))
 			else:
-				draw_selection_ellipse(unit_selection_center(item), Color("ffe56c"), Vector2(15.0, 6.5))
+				draw_selection_ellipse(unit_selection_center(item), Color("ffe56c"), unit_selection_radius(unit))
 		return
 	var screen := unit_selection_center(item)
 	var is_building := String(unit.get("entity_type", "")) in ["building", "foundation"] or String(unit.get("footprint", {}).get("shape", "")) == "polygon"
-	var radius := Vector2(15.0, 6.5)
-	var half_size: Variant = unit.get("footprint", {}).get("half_size")
-	if half_size is Vector2:
-		var footprint_span := float(half_size.x + half_size.y)
-		radius = Vector2(maxf(15.0, footprint_span * 17.0), maxf(6.5, footprint_span * 8.5))
+	var radius := unit_selection_radius(unit)
 	var previewed := selection_preview_ids.has(int(unit["id"]))
 	var hovered := interaction_highlight_id == int(unit["id"])
 	var selected := player_control_state.is_selected(int(unit["id"]))
@@ -3044,6 +3056,21 @@ func draw_unit_selection(item: Dictionary) -> void:
 			draw_building_selection_rectangle(unit, Color("e8f45b"))
 		else:
 			draw_selection_ellipse(screen, Color("e8f45b"), radius)
+
+
+func unit_selection_radius(entity: Dictionary) -> Vector2:
+	var footprint: Dictionary = entity.get("footprint", {})
+	var half_size: Variant = footprint.get("half_size")
+	if half_size is Vector2:
+		var span: float = half_size.x + half_size.y
+		return Vector2(maxf(15.0, span * 17.0), maxf(6.5, span * 8.5))
+	if String(entity.get("entity_type", "")) == "resource":
+		# DAT selection radii are world-space extents, independent of obstruction.
+		# A sea shoal is one tile wide; shore fish have a much smaller footprint.
+		var selection: Variant = entity.get("selection_radius", footprint.get("selection_radius", 0.0))
+		var extent: float = maxf(selection.x, selection.y) if selection is Vector2 else float(selection)
+		return Vector2(maxf(15.0, extent * 32.0), maxf(6.5, extent * 16.0))
+	return Vector2(15.0, 6.5)
 
 
 func unit_selection_center(item: Dictionary) -> Vector2:

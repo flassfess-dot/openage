@@ -5,7 +5,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const {parseDrs, layerDrs, parsePalettes, decodeSlp, writePng} = require('./import_assets.js');
-const VERSION = 'mixed-environment-2';
+const VERSION = 'mixed-environment-3';
+// AoC DAT graphics 2302/2310 attach ground-layer deltas 2300/2308.
+// Each shadow uses the same direction as its tree, with its own hotspot.
+const TREE_SHADOW_SLPS = {oak: 2296, pine: 2304};
 const ROOT = path.resolve(__dirname, '../..');
 function option(name, fallback) { const i=process.argv.indexOf(name); return i<0?fallback:process.argv[i+1]; }
 function json(file) { return JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'')); }
@@ -84,6 +87,15 @@ function groundBounds(d) {
   }
   return bounds.map((v,i)=> ((i<2?Math.floor(v*32):Math.ceil(v*32))/32)||0);
 }
+function decodeTreeShadow(spec,archive,palettes,frame,scale) {
+  const slpId=spec.source_game==='ror'?null:TREE_SHADOW_SLPS[spec.key];
+  if(!slpId)return null;
+  const slp=archive.get('slp',slpId);
+  if(!slp)throw Error('Missing tree shadow '+spec.key+'/'+slpId);
+  const decoded=decodeSlp(slp,palettes,frame);
+  if(decoded.semanticPixels.shadow===0)throw Error('Tree shadow has no shadow pixels: '+spec.key+'/'+frame);
+  return {...resizeSprite(decoded,scale,{saturation:1,gain:[1,1,1]}),source_slp:slpId,source_shadow_pixels:decoded.semanticPixels.shadow};
+}
 function importPack(game,output,definitionPath,rorGame='D:/Games/Age of Empires 1 - Rise of Rome') {
   const definition=json(definitionPath), dataDir=path.join(game,'Data');
   const paths={terrain:path.join(dataDir,'terrain.drs'),graphics:path.join(dataDir,'graphics.drs'),palette:path.join(dataDir,'interfac.drs')};
@@ -117,14 +129,16 @@ function importPack(game,output,definitionPath,rorGame='D:/Games/Age of Empires 
       const resized=resizeSprite(d,scale,spec),bounds=groundBounds(resized);
       if(spec.ground_masks && JSON.stringify(spec.ground_masks[index])!==JSON.stringify(groundMask(resized)))throw Error("Route mask differs from source: "+spec.key);
       if(spec.placement && JSON.stringify(spec.ground_bounds?.[index])!==JSON.stringify(bounds))throw Error('Placement geometry differs from source: '+spec.key+'/'+index);
-      frames.push({...save(spec.key+'_'+String(frames.length).padStart(2,'0')+'.png',resized),hotspot:resized.hotspot,source_frame:frame,source_slp:slpId,source_hotspot:[d.hotspotX,d.hotspotY],source_size:[d.width,d.height],source_shadow_pixels:d.semanticPixels.shadow,scale,ground_bounds:bounds});
+      const shadowImage=decodeTreeShadow(spec,archive,sourcePalettes,frame,scale);
+      const shadow=shadowImage?{...save(spec.key+'_shadow_'+String(index).padStart(2,'0')+'.png',shadowImage),hotspot:shadowImage.hotspot,source_slp:shadowImage.source_slp,source_frame:frame,source_shadow_pixels:shadowImage.source_shadow_pixels}:null;
+      frames.push({...save(spec.key+'_'+String(frames.length).padStart(2,'0')+'.png',resized),hotspot:resized.hotspot,source_frame:frame,source_slp:slpId,source_hotspot:[d.hotspotX,d.hotspotY],source_size:[d.width,d.height],source_shadow_pixels:d.semanticPixels.shadow,scale,ground_bounds:bounds,...(shadow?{shadow}:{})});
     }
     manifest.objects[spec.key]={source_game:spec.source_game??'aoe2',source_slp:spec.slp??null,frames};
   }
   fs.writeFileSync(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   return manifest;
 }
-module.exports={resizeSprite,flattenTerrain,importPack,grade,groundBounds,groundMask};
+module.exports={TREE_SHADOW_SLPS,decodeTreeShadow,resizeSprite,flattenTerrain,importPack,grade,groundBounds,groundMask};
 if(require.main===module){
   try{
     const definition=option('--definition',path.join(ROOT,'prototype/data/environment/aoe2_temperate.json'));

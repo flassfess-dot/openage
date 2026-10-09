@@ -19,9 +19,9 @@ class ObjectsLayer extends Node2D:
 	func _draw() -> void:
 		if preview == null:
 			return
-		var items: Array = preview.objects.duplicate()
-		items.sort_custom(preview.object_less)
-		for item in items:
+		var items: Array = []
+		for source in preview.objects:
+			var item: Dictionary = source.duplicate()
 			if not preview.show_pack and not bool(item.get("reference", false)):
 				continue
 			var info: Dictionary = item.get("frame_info", {})
@@ -31,6 +31,13 @@ class ObjectsLayer extends Node2D:
 				info = preview.catalog.environment_frame_info(item)
 			if info.is_empty():
 				continue
+			item["frame_info"] = info
+			items.append(item)
+			if info.has("shadow"):
+				items.append({"position": item["position"], "frame_info": info["shadow"], "presentation_layer": "shadow"})
+		items.sort_custom(preview.object_less)
+		for item in items:
+			var info: Dictionary = item["frame_info"]
 			var point: Vector2 = preview.elevation.world_to_screen(item["position"], preview.zoom, preview.view_offset)
 			var texture: Texture2D = info["texture"]
 			var origin: Vector2 = (point - Vector2(info["hotspot"]) * preview.zoom).round()

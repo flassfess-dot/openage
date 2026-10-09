@@ -235,6 +235,8 @@ func command_from_record(record: Dictionary):
 			command.params["plan_only"] = true
 		if bool(params.get("queue_order", false)):
 			command.params["queue_order"] = true
+		if bool(params.get("preserve_formations", false)):
+			command.params["preserve_formations"] = true
 		command.assign_envelope(int(record.get("issuer_id", 0)), int(record.get("sequence_id", 0)))
 	return command
 
@@ -279,8 +281,17 @@ func decode_variant(value: Variant) -> Variant:
 	return value
 
 
-func world_state_hash(world, tick: int, controller = null) -> String:
+func world_state_hash(world, tick: int, controller = null, checkpoint_groups: Variant = null) -> String:
 	var snapshot := world_snapshot(world, tick, controller)
+	# Validate old checkpoint hashes in their original schema before continuing
+	# with the new movement state. Never bypass the saved checksum itself.
+	if checkpoint_groups is Array and snapshot.has("controller"):
+		var saved_by_id: Dictionary = {}
+		for record in checkpoint_groups: saved_by_id[int(record["group_id"])] = record
+		for record in snapshot["controller"]["formation_groups"]:
+			var saved: Dictionary = saved_by_id.get(int(record["group_id"]), {})
+			for field in ["march_anchor", "march_speed", "order_kind", "deployed_columns"]:
+				if not saved.has(field): record.erase(field)
 	var canonical := JSON.stringify(encode_variant(snapshot))
 	var hashing := HashingContext.new()
 	hashing.start(HashingContext.HASH_SHA256)

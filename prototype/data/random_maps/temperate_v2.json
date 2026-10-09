@@ -114,6 +114,19 @@
       "imported": "pine",
       "imported_variants": 5
     },
+    "palm": {
+      "coast_distance_max": 12,
+      "moisture_max": 0.52,
+      "native": [
+        {"unit_id": 113, "graphic_id": 648},
+        {"unit_id": 114, "graphic_id": 649},
+        {"unit_id": 121, "graphic_id": 650},
+        {"unit_id": 129, "graphic_id": 651},
+        {"unit_id": 150, "graphic_id": 617},
+        {"unit_id": 152, "graphic_id": 619},
+        {"unit_id": 153, "graphic_id": 620}
+      ]
+    },
     "accents": {
       "forest_chance": 0.006,
       "minimum_spacing": 7,

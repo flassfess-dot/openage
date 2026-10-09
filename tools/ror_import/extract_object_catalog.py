@@ -23,7 +23,7 @@ from openage.convert.value_object.init.game_version import (  # noqa: E402
 
 CACHE_SCHEMA_VERSION = 1
 CATALOG_SCHEMA_VERSION = 2
-IMPORTER_VERSION = "object-catalog-5"
+IMPORTER_VERSION = "object-catalog-6"
 
 
 def parse_args() -> argparse.Namespace:
@@ -122,6 +122,7 @@ def unit_record(unit, civilization_id: int) -> dict[str, object]:
             "range_min": float(field(unit, "weapon_range_min", 0.0)),
             "range_max": float(field(unit, "weapon_range_max", 0.0)),
             "blast_range": float(field(unit, "blast_range", 0.0)),
+            "blast_level_offence": int(field(unit, "blast_level_offence", 3)),
             "accuracy": int(field(unit, "accuracy", 0)),
             "projectile_id": int(field(unit, "projectile_id0", -1)),
             "frame_delay": int(field(unit, "frame_delay", 0)),

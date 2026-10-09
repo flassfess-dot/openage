@@ -119,7 +119,7 @@ func _initialize() -> void:
 	var first: Dictionary = world.add_unit(1, "clubman", Vector2(4.0, 4.0), false)
 	var second: Dictionary = world.add_unit(1, "clubman", Vector2(5.0, 4.0), false)
 	model = view_model.build(SimulationSnapshot.with_queries(world, 11, 1), [int(first["id"]), int(second["id"])], "WEDGE", "ru")
-	assert_equal(model["commands"].filter(func(command): return command["type"] == "formation").size(), 5, "mobile group receives formation palette")
+	assert_equal(model["commands"].filter(func(command): return command["type"] == "formation").size(), 6, "mobile group receives formation palette")
 	assert_true(bool(first_command(model["commands"], "formation", "WEDGE")["active"]), "current formation is marked active")
 	assert_equal(model["commands"].filter(func(command): return command["type"] == "unit_action").size(), 5, "military units expose ordinary actions and deletion")
 	assert_equal(first_command(model["commands"], "unit_action", "attack_move").get("icon_id"), 4, "attack-move uses the source attack glyph")

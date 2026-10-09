@@ -109,9 +109,10 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	if probe != null:
 		simulation_world.movement_neighbor_query_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
+	var steering_target: Vector2 = unit.get("formation_steering_target", unit["target"]) if open_envelope != null else unit["target"]
 	var movement_reason := ""
 	if shared_motion and bool(unit["formation_shared_isolated"]):
-		LocalMovement.calculate_shared_translation_into(unit, unit["target"])
+		LocalMovement.calculate_shared_translation_into(unit, steering_target)
 	elif native_movement:
 		var native_result: Vector4 = simulation_world.pathfinder.calculate_native_movement(unit, unit["target"], delta)
 		var native_state := roundi(native_result.z)
@@ -126,7 +127,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		simulation_world.movement_native_unit_updates += 1
 		simulation_world.movement_native_neighbor_candidates += maxi(0, roundi(native_result.w))
 	else:
-		movement_reason = LocalMovement.calculate_runtime_unit_into(unit, unit["target"], simulation_world.movement_neighbor_buffer, simulation_world.navigation_grid, delta, open_envelope)
+		movement_reason = LocalMovement.calculate_runtime_unit_into(unit, steering_target, simulation_world.movement_neighbor_buffer, simulation_world.navigation_grid, delta, open_envelope)
 	if movement_reason == "local_blocked":
 		var escape_velocity := _escape_invalid_footprint(unit, delta)
 		if escape_velocity.length_squared() > 0.000001:
@@ -355,6 +356,8 @@ func assign_command_attack_move(selected: Array, target: Vector2) -> bool:
 
 
 func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_destination: bool = true, prevalidated_direct: bool = false, prepared_result: Dictionary = {}) -> bool:
+	unit.erase("formation_steering_target")
+	unit.erase("_formation_path_cache")
 	world.open_movement_envelopes_by_id.erase(int(unit["id"]))
 	if not OrderPipeline.is_active(unit):
 		OrderPipeline.begin(unit, String(unit.get("task", "move")), int(unit.get("target_id", -1)), destination, String(unit.get("task", "")) in ["attack", "gather"])
@@ -443,8 +446,16 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 	unit["path_index"] = 0
 	if combined.is_empty():
 		unit["target"] = unit["pos"]
-		unit["diagnostic_reason"] = "no_group_route"
 		unit["task"] = "idle"
+		# A member already on its slot (often the middle rider during a turn)
+		# has completed the order; an empty route here is not a path failure.
+		if Vector2(unit["pos"]).distance_squared_to(reserved_destination) <= 0.001225:
+			unit["path_status"] = "arrived"
+			unit["diagnostic_reason"] = ""
+			OrderPipeline.complete(unit, "destination_reached")
+			restore_formation_facing(unit)
+			return true
+		unit["diagnostic_reason"] = "no_group_route"
 		return false
 	if direct_segments_allowed and bool(open_envelope.get("open", false)):
 		world.open_movement_envelopes_by_id[int(unit["id"])] = open_envelope
@@ -464,6 +475,8 @@ func stop_unit_motion(unit: Dictionary, reset_progress: bool = true) -> void:
 	world.open_movement_envelopes_by_id.erase(int(unit["id"]))
 	release_unit_destination(unit)
 	unit["path"] = []
+	unit.erase("_formation_path_cache")
+	unit.erase("formation_steering_target")
 	unit["path_index"] = 0
 	unit["path_status"] = "idle"
 	unit["target"] = unit["pos"]

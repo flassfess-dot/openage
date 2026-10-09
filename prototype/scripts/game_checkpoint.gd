@@ -75,10 +75,11 @@ static func _capture_runtime(world, controller) -> Dictionary:
 	for bucket in wildlife.cached_due_wildlife: animals["due"].append(_entity_ids(bucket))
 	var activity := _capture_fields(world.unit_activity_registry, ["unit_order_by_id", "order_dirty", "roster_dirty", "compatibility_ticks", "movement_candidate_active", "formation_active", "tick_prepared"])
 	activity["active"] = _entity_ids(world.unit_activity_registry.active_units)
-	return {"activity": activity, "combat": combat, "wildlife": animals, "roster_revision": world.combat_roster_revision, "activity_ticks": world.unit_activity_registry.compatibility_ticks, "spatial_ticks": world.spatial_sync_system.compatibility_ticks}
+	return {"open_movement_envelopes": world.open_movement_envelopes_by_id.duplicate(true), "activity": activity, "combat": combat, "wildlife": animals, "roster_revision": world.combat_roster_revision, "activity_ticks": world.unit_activity_registry.compatibility_ticks, "spatial_ticks": world.spatial_sync_system.compatibility_ticks}
 
 static func _restore_runtime(runtime: Dictionary, world, controller, entities: Dictionary) -> void:
 	if runtime.is_empty(): return
+	world.open_movement_envelopes_by_id = runtime.get("open_movement_envelopes", {}).duplicate(true)
 	world.combat_roster_revision = int(runtime["roster_revision"])
 	var activity = world.unit_activity_registry
 	if runtime.has("activity"):
@@ -126,7 +127,11 @@ static func capture(world, controller, definition: Dictionary, map: Dictionary) 
 		var grid := _capture_fields(entry["grid"], GRID_FIELDS)
 		grid["learned"] = entry["grid"].learned
 		knowledge[team] = {"grid": grid, "source_revision": entry["source_revision"], "fog_revision": entry.get("fog_revision", -1)}
-	return {"version": VERSION, "runtime": _capture_runtime(world, controller), "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": _capture_fields(world, WORLD_FIELDS), "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
+	var world_state := _capture_fields(world, WORLD_FIELDS)
+	for unit in world_state["units"]:
+		unit.erase("_formation_path_cache")
+		unit.erase("formation_steering_target")
+	return {"version": VERSION, "runtime": _capture_runtime(world, controller), "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
 
 static func _digest(bytes: PackedByteArray) -> String:
 	var hashing := HashingContext.new()

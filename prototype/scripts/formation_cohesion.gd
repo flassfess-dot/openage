@@ -32,11 +32,8 @@ static func update(units: Array) -> void:
 			groups[group_id] = []
 		groups[group_id].append(unit)
 	for members in groups.values():
-		if members.any(func(member): return String(member.get("task", "")) != "move"):
-			continue
+		_update_group(members)
 		_mark_shared_motion(members)
-		if not bool(members[0]["formation_shared_motion"]):
-			_update_group(members)
 	_mark_isolated_shared_groups(groups, ungrouped_units, maximum_unit_radius, maximum_unit_clearance)
 
 
@@ -45,7 +42,10 @@ static func update_active_groups(
 	units_by_id: Dictionary,
 	has_external_unit_in_bounds: Callable,
 	maximum_unit_radius: float,
-	maximum_unit_clearance: float
+	maximum_unit_clearance: float,
+	delta: float = 0.05,
+	open_envelopes: Dictionary = {},
+	grid_revision: int = -1
 ) -> void:
 	# The controller already owns the authoritative, ordered member lists. Use
 	# those instead of rebuilding groups by scanning every world unit. External
@@ -64,6 +64,7 @@ static func update_active_groups(
 				continue
 			if int(unit.get("formation_group_id", -1)) != group_id:
 				continue
+			unit.erase("formation_steering_target")
 			unit["cohesion_speed_scale"] = 1.0
 			unit["formation_shared_motion"] = false
 			unit["formation_shared_isolated"] = false
@@ -72,11 +73,11 @@ static func update_active_groups(
 			groups[group_id] = members
 	for members_value in groups.values():
 		var members: Array = members_value
-		if members.any(func(member): return String(member.get("task", "")) != "move"):
-			continue
+		var march_speed := _update_group(members)
+		var group = group_records[int(members[0]["formation_group_id"])]
+		group.march_speed = march_speed
+		_steer_open_group(group, members, delta, open_envelopes, grid_revision)
 		_mark_shared_motion(members)
-		if not bool(members[0]["formation_shared_motion"]):
-			_update_group(members)
 	_mark_isolated_shared_groups_spatial(groups, has_external_unit_in_bounds, maximum_unit_radius, maximum_unit_clearance)
 
 
@@ -85,37 +86,82 @@ static func remaining_distance(unit: Dictionary) -> float:
 	var path_index := int(unit.get("path_index", 0))
 	if path.is_empty() or path_index >= path.size():
 		return unit["pos"].distance_to(unit.get("destination", unit["pos"]))
-	var total: float = unit["pos"].distance_to(path[path_index])
-	for index in range(path_index + 1, path.size()):
-		total += path[index - 1].distance_to(path[index])
-	return total
+	# Published paths are immutable; only the cursor advances. Identity also
+	# invalidates a replacement path with the same number of waypoints.
+	var cache: Dictionary = unit.get("_formation_path_cache", {})
+	if not is_same(cache.get("path"), path):
+		var suffix := PackedFloat64Array()
+		suffix.resize(path.size())
+		for index in range(path.size() - 2, -1, -1):
+			suffix[index] = suffix[index + 1] + path[index].distance_to(path[index + 1])
+		cache = {"path": path, "suffix": suffix}
+		unit["_formation_path_cache"] = cache
+	return unit["pos"].distance_to(path[path_index]) + float(cache["suffix"][path_index])
 
 
-static func _update_group(members: Array) -> void:
-	var active_units: Array = []
-	var remaining_distances := PackedFloat64Array()
+static func _update_group(members: Array) -> float:
+	var active: Array = []
+	var distances := PackedFloat64Array()
+	var march_speed := INF
+	var minimum := INF
+	var maximum := 0.0
 	for unit in members:
-		if int(unit.get("stuck_ticks", 0)) < DETACH_STUCK_TICKS:
-			active_units.append(unit)
-			remaining_distances.append(remaining_distance(unit))
-	if active_units.size() < 2:
-		return
-	var minimum_remaining := INF
-	var maximum_remaining := 0.0
-	for remaining in remaining_distances:
-		minimum_remaining = minf(minimum_remaining, remaining)
-		maximum_remaining = maxf(maximum_remaining, remaining)
-	var spread := maximum_remaining - minimum_remaining
-	if spread <= COHESION_TOLERANCE:
-		return
-	var pressure := clampf((spread - COHESION_TOLERANCE) / 3.0, 0.0, 1.0)
-	for index in range(active_units.size()):
-		var remaining := remaining_distances[index]
-		var unit: Dictionary = active_units[index]
-		if remaining <= minimum_remaining + FRONT_BAND:
-			unit["cohesion_speed_scale"] = lerpf(1.0, MIN_FRONT_SCALE, pressure)
-		elif remaining >= maximum_remaining - REAR_BAND:
-			unit["cohesion_speed_scale"] = lerpf(1.0, MAX_CATCHUP_SCALE, pressure)
+		if String(unit.get("task", "")) not in ["move", "attack_move"] or int(unit.get("stuck_ticks", 0)) >= DETACH_STUCK_TICKS: continue
+		var speed := float(unit.get("speed", 0.0))
+		if speed <= 0.0: continue
+		var remaining := remaining_distance(unit)
+		active.append(unit)
+		distances.append(remaining)
+		march_speed = minf(march_speed, speed)
+		minimum = minf(minimum, remaining)
+		maximum = maxf(maximum, remaining)
+	if active.is_empty(): return 0.0
+	var pressure := clampf((maximum - minimum - COHESION_TOLERANCE) / 3.0, 0.0, 1.0)
+	for index in range(active.size()):
+		var unit: Dictionary = active[index]
+		var requested := march_speed
+		if distances[index] <= minimum + FRONT_BAND:
+			requested *= lerpf(1.0, MIN_FRONT_SCALE, pressure)
+		elif distances[index] >= maximum - REAR_BAND:
+			# Catch-up uses spare speed, never accelerates a siege engine beyond
+			# its actual unit stats simply because cavalry joined the selection.
+			requested *= lerpf(1.0, MAX_CATCHUP_SCALE, pressure)
+		unit["cohesion_speed_scale"] = minf(1.0, requested / float(unit["speed"]))
+	return march_speed
+
+
+static func _steer_open_group(group, members: Array, delta: float, envelopes: Dictionary, grid_revision: int) -> void:
+	# A moving reference frame is safe only inside the already validated open
+	# envelope. Chokepoints retain their common corridor waypoints and collision
+	# resolution; no per-tick path queries are introduced by this steering.
+	if group.march_speed <= 0.0 or group.has_compression: return
+	var moving: Array = []
+	var observed_center := Vector2.ZERO
+	for unit in members:
+		if String(unit.get("task", "")) not in ["move", "attack_move"]: continue
+		var envelope: Dictionary = envelopes.get(int(unit["id"]), {})
+		if envelope.is_empty() or int(envelope.get("grid_revision", -1)) != grid_revision: return
+		if int(unit.get("stuck_ticks", 0)) >= DETACH_STUCK_TICKS: continue
+		var slot: Dictionary = group.slot_for(int(unit["id"]))
+		if slot.is_empty(): return
+		observed_center += Vector2(unit["pos"]) - (Vector2(slot["world"]) - group.anchor)
+		moving.append(unit)
+	if moving.is_empty(): return
+	observed_center /= float(moving.size())
+	var direction: Vector2 = (group.anchor - group.march_anchor).normalized()
+	var candidate: Vector2 = group.march_anchor.move_toward(group.anchor, group.march_speed * delta)
+	if (candidate - observed_center).dot(direction) > COHESION_TOLERANCE:
+		candidate = group.march_anchor
+	group.march_anchor = candidate
+	var lead: Vector2 = candidate.move_toward(group.anchor, maxf(0.75, group.march_speed * 0.4))
+	for unit in moving:
+		var slot: Dictionary = group.slot_for(int(unit["id"]))
+		var target: Vector2 = lead + Vector2(slot["world"]) - group.anchor
+		var final_direction: Vector2 = Vector2(unit["destination"]) - Vector2(unit["pos"])
+		# Short retreat commands start immediately. Never ask a front unit to
+		# walk backwards just to join the moving reference frame.
+		if (target - Vector2(unit["pos"])).dot(final_direction) > 0.0 and candidate.distance_to(group.anchor) > 1.0:
+			unit["formation_steering_target"] = target
 
 
 static func _mark_shared_motion(members: Array) -> void:
@@ -157,7 +203,7 @@ static func _mark_shared_motion(members: Array) -> void:
 
 static func _eligible_for_shared_motion(unit: Dictionary) -> bool:
 	return (
-		String(unit["task"]) == "move"
+		String(unit["task"]) in ["move", "attack_move"]
 		and String(unit.get("formation_slot_mode", "soft")) == "soft"
 		and int(unit["stuck_ticks"]) == 0
 		and not unit["path"].is_empty()

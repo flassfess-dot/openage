@@ -25,6 +25,10 @@ var route: Array[Vector2] = []
 var corridor_modes: Array[String] = []
 var required_corridor_width: int = 1
 var has_compression: bool = false
+var march_anchor: Vector2 = Vector2.ZERO
+var march_speed: float = 0.0
+var order_kind: String = "move"
+var deployed_columns: int = 0
 
 
 func _init(id: int, members: Array[int], world_anchor: Vector2, world_forward: Vector2, type: String, slot_spacing: float = 1.0) -> void:
@@ -32,6 +36,7 @@ func _init(id: int, members: Array[int], world_anchor: Vector2, world_forward: V
 	member_ids = members.duplicate()
 	member_ids.sort()
 	anchor = world_anchor
+	march_anchor = world_anchor
 	forward = world_forward.normalized() if world_forward.length_squared() > 0.0001 else Vector2(0.0, -1.0)
 	engagement_forward = forward
 	formation_type = type if Geometry.ALL.has(type) else Geometry.BLOCK
@@ -46,7 +51,7 @@ func rebuild_slots() -> void:
 	var local := Geometry.local_slots(member_ids.size(), formation_type, spacing)
 	var world := Geometry.world_slots(local, anchor, forward)
 	for index in range(member_ids.size()):
-		var slot := {"slot_id": index, "local": local[index], "world": world[index], "capacity_radius": spacing * 0.45}
+		var slot := {"slot_id": index, "local": local[index], "world": world[index], "capacity_radius": spacing * 0.5, "protected_layout": formation_type == Geometry.BLOCK, "forward": forward}
 		slots.append(slot)
 		assignments[member_ids[index]] = index
 

@@ -8,6 +8,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_minimum_total_movement_avoids_crossing()
 	test_previous_slot_is_preserved_when_it_fits()
+	test_large_turn_can_replace_previous_slots()
 	test_ties_resolve_by_entity_id()
 	test_large_assignment_is_unique_deterministic_and_role_aware()
 
@@ -30,7 +31,7 @@ func test_minimum_total_movement_avoids_crossing() -> void:
 
 
 func test_previous_slot_is_preserved_when_it_fits() -> void:
-	var units := [unit(4, Vector2(9, 0)), unit(8, Vector2(1, 0))]
+	var units := [unit(4, Vector2(4.95, 0)), unit(8, Vector2(5.05, 0))]
 	var slots := [slot(0, Vector2(0, 0)), slot(1, Vector2(10, 0))]
 	var result := Assignment.assign(units, slots, {4: 0, 8: 1})
 	assert_equal(result, {4: 0, 8: 1}, "valid previous slots are retained")
@@ -86,3 +87,9 @@ func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 func assert_true(value: bool, context: String) -> void:
 	if not value:
 		failures.append("%s: expected true" % context)
+
+
+func test_large_turn_can_replace_previous_slots() -> void:
+	var units := [unit(4, Vector2(9, 0)), unit(8, Vector2(1, 0))]
+	var slots := [slot(0, Vector2(0, 0)), slot(1, Vector2(10, 0))]
+	assert_equal(Assignment.assign(units, slots, {4: 0, 8: 1}), {4: 1, 8: 0}, "old slots do not force long crossing paths after a turn")

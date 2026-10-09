@@ -21,6 +21,8 @@ func _initialize() -> void:
 
 func test_role_classification() -> void:
 	assert_equal(Roles.role_for("clubman"), Roles.HEAVY_INFANTRY, "clubman role")
+	assert_equal(Roles.role_for("scout"), Roles.CAVALRY, "cavalry has its own role")
+	assert_equal(Roles.unit_role({"kind": "custom_unit", "formation_role": Roles.SIEGE}), Roles.SIEGE, "catalog role overrides name heuristics")
 	assert_equal(Roles.role_for("archer"), Roles.RANGED, "archer role")
 	assert_equal(Roles.role_for("priest"), Roles.PRIEST, "priest role")
 	assert_equal(Roles.role_for("stone_thrower"), Roles.SIEGE, "siege role")
@@ -44,7 +46,7 @@ func test_mixed_group_uses_front_center_back_and_wide_slots() -> void:
 	assert_true(by_id[assignments[1]].y > by_id[assignments[3]].y, "heavy infantry stands ahead of ranged")
 	assert_true(by_id[assignments[2]].y > by_id[assignments[3]].y, "second heavy infantry stands ahead of ranged")
 	assert_equal(absf(by_id[assignments[4]].x), 0.0, "priest receives protected center")
-	assert_equal(absf(by_id[assignments[5]].x), 2.0, "siege receives a wide slot")
+	assert_true(by_id[assignments[5]].y < 0.0, "siege occupies the rear")
 
 
 func unit(id: int, kind: String) -> Dictionary:

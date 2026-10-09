@@ -607,6 +607,11 @@ func advance_resource_lifecycle(delta: float) -> void:
 		var decay_rate := maxf(0.0, float(resource.get("decay_rate", 0.0)))
 		if decay_rate <= 0.0:
 			continue
+		var previous_age := float(resource.get("decay_elapsed", 0.0))
+		resource["decay_elapsed"] = previous_age + maxf(0.0, delta)
+		# Publish the slow corpse animation even when no whole food unit decays.
+		if floori(previous_age) != floori(float(resource["decay_elapsed"])):
+			world.mark_known_resource_dirty(resource)
 		var accumulator := float(resource.get("decay_accumulator", 0.0)) + decay_rate * maxf(0.0, delta)
 		var lost := mini(int(resource.get("amount", 0)), floori(accumulator))
 		resource["decay_accumulator"] = accumulator - float(lost)

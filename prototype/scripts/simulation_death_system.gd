@@ -174,6 +174,9 @@ func _complete_huntable_death(huntable: Dictionary) -> void:
 		return
 	huntable["huntable_carcass_spawned"] = true
 	var carcass: Dictionary = world.add_resource(carcass_alias, Vector2(huntable.get("pos", Vector2.ZERO)), harvest_amount)
+	carcass["facing"] = int(huntable.get("facing", 0))
+	carcass["decay_elapsed"] = 0.0
+	world.mark_known_resource_dirty(carcass)
 	carcass["origin_entity_id"] = int(huntable.get("id", -1))
 	carcass["origin_source_unit_id"] = int(huntable.get("source_unit_id", -1))
 	huntable["death_phase"] = "removed"

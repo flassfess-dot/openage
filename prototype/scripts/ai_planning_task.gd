@@ -7,6 +7,9 @@ const BuildSites := preload("res://scripts/build_site_task.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 
 static func capture(ai, snapshot: Dictionary, tick: int) -> Dictionary:
+	var frozen_snapshot := Data.capture_frozen(snapshot)
+	if not snapshot.is_empty() and frozen_snapshot.is_empty():
+		return {}
 	var settings: Dictionary = Data.copy(ai.economic_policy)
 	for field in ["enabled", "formation_name", "profile", "initial_attack_delay", "attack_separation", "minimum_attack_group_size", "maximum_attack_group_size", "enemy_response_distance", "use_workers_in_attack_groups"]:
 		var key := String(field)
@@ -17,7 +20,7 @@ static func capture(ai, snapshot: Dictionary, tick: int) -> Dictionary:
 		settings[key] = ai.get(field)
 	settings["economic_interval_ticks"] = ai.economic_interval
 	settings["military_interval_ticks"] = ai.military_interval
-	return {"definition": {"team": ai.team, "ai": settings, "source_ai": Data.copy(ai.source_contract)}, "state": Data.copy(ai.canonical_state()), "snapshot": Data.capture(snapshot), "tick": tick}
+	return {"definition": {"team": ai.team, "ai": settings, "source_ai": Data.copy(ai.source_contract)}, "state": Data.copy(ai.canonical_state()), "snapshot": frozen_snapshot, "tick": tick}
 
 static func run(input: Dictionary) -> Dictionary:
 	var ai := AiPlayer.new(input["definition"])

@@ -37,6 +37,15 @@ function Write-Status {
     Write-LogLine ("PROGRESS {0,3}% | {1}" -f $Percent, $Status)
 }
 
+function Get-ArtifactSha256 {
+    param([string]$Path)
+    # Also works in child PowerShell sessions with restricted module discovery.
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return [System.BitConverter]::ToString($sha.ComputeHash($stream)) }
+    finally { $sha.Dispose(); $stream.Dispose() }
+}
+
 function Assert-ApplicationNotRunning {
     # WMI/CIM process inspection is denied in some managed Windows sessions.
     # The packaged executable has a unique process name, so the ordinary
@@ -234,6 +243,7 @@ try {
             [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $releaseTemplate, $true)
         } finally { $archive.Dispose() }
     }
+    & (Join-Path $PSScriptRoot "prepare-godot-project.ps1")
     Assert-ApplicationNotRunning
     New-Item -ItemType Directory -Force -Path $distributionRoot | Out-Null
 
@@ -274,7 +284,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $distributionRoot "README.md") -Force
 
     Write-Status 98 "verifying Release build artifacts"
-    if ((Get-FileHash -LiteralPath $application -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $godotApplication -Algorithm SHA256).Hash) { throw "Release executable was replaced by the Godot editor" }
+    if ((Get-ArtifactSha256 $application) -eq (Get-ArtifactSha256 $godotApplication)) { throw "Release executable was replaced by the Godot editor" }
     foreach ($artifact in @($application, $package, (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll"))) {
         if (-not (Test-Path -LiteralPath $artifact)) {
             throw "Build artifact is missing: $artifact"
@@ -282,6 +292,9 @@ try {
         $item = Get-Item -LiteralPath $artifact
         Write-LogLine ("ARTIFACT: {0} | {1} bytes | {2}" -f $item.FullName, $item.Length, $item.LastWriteTime)
     }
+
+    Write-Status 99 "verifying packaged random map and save loading"
+    & (Join-Path $PSScriptRoot "verify-packaged-startup.ps1")
 
     Write-Status 100 "full build complete"
     Write-LogLine "Application: $application"

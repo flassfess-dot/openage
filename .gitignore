@@ -84,7 +84,8 @@ perf.data*
 /prototype/assets/audio/
 /prototype/assets/generated/
 /prototype/assets/ui/**/*.import
-/prototype/qa/
+/prototype/qa/*
+!/prototype/qa/.gdignore
 /tools/ror_import/scenario_converter/target/
 
 # macOS

@@ -35,6 +35,7 @@ public:
         const PackedInt32Array &priorities,
         const PackedFloat32Array &health,
         const PackedByteArray &solid_animals = PackedByteArray());
+    void share_movement_snapshot(const Ref<RoRPathKernel> &source);
     Vector4 calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) const;
     int64_t get_revision() const;
     int32_t get_last_expanded_nodes() const;
@@ -66,18 +67,21 @@ private:
     std::vector<FrontierEntry> frontier_;
     std::unordered_map<uint64_t, std::shared_ptr<const std::vector<int32_t>>> components_by_radius_;
     const std::vector<int32_t> &components(double clearance_radius);
-    std::vector<int32_t> movement_ids_;
-    std::vector<Vector2> movement_positions_;
-    std::vector<float> movement_radii_;
-    std::vector<float> movement_clearances_;
-    std::vector<int32_t> movement_priorities_;
-    std::vector<float> movement_health_;
-    std::vector<uint8_t> movement_solid_animals_;
-    std::unordered_map<int32_t, int32_t> movement_index_by_id_;
-    std::unordered_map<int64_t, std::vector<int32_t>> movement_buckets_;
-
-    float maximum_movement_radius_ = 0.0f;
-    float maximum_movement_clearance_ = 0.0f;
+    // All terrain-specific kernels borrow the same immutable neighbor generation.
+    struct MovementSnapshot {
+        std::vector<int32_t> ids;
+        std::vector<Vector2> positions;
+        std::vector<float> radii;
+        std::vector<float> clearances;
+        std::vector<int32_t> priorities;
+        std::vector<float> health;
+        std::vector<uint8_t> solid_animals;
+        std::unordered_map<int32_t, int32_t> index_by_id;
+        std::unordered_map<int64_t, std::vector<int32_t>> buckets;
+        float maximum_radius = 0.0f;
+        float maximum_clearance = 0.0f;
+    };
+    std::shared_ptr<const MovementSnapshot> movement_ = std::make_shared<MovementSnapshot>();
 
     bool contains(int32_t x, int32_t y) const;
     bool cell_walkable(int32_t x, int32_t y) const;

@@ -8,6 +8,8 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
+	test_mixed_speed_and_partial_engagement()
+	test_cached_distance_replacement_and_cursor()
 	test_front_waits_and_rear_catches_up()
 	test_stuck_member_does_not_hold_group_forever()
 	test_small_detour_keeps_group_membership()
@@ -30,10 +32,10 @@ func test_front_waits_and_rear_catches_up() -> void:
 	var members := [front, middle, rear]
 	FormationCohesion.update(members)
 	assert_true(front["cohesion_speed_scale"] < 1.0, "front rank waits for group")
-	assert_true(rear["cohesion_speed_scale"] > 1.0, "rear rank may catch up")
+	assert_true(rear["cohesion_speed_scale"] > front["cohesion_speed_scale"], "rear rank may catch up")
 	assert_equal(middle["cohesion_speed_scale"], 1.0, "middle keeps normal pace")
 	var movement := LocalMovement.calculate(rear, rear["target"], [], open_grid(), 0.05)
-	assert_true(movement["actual_velocity"].length() > rear["speed"], "catch-up scale reaches movement")
+	assert_true(movement["actual_velocity"].length() <= rear["speed"] + 0.0001, "catch-up never exceeds the unit movement stat")
 	assert_true(movement["actual_velocity"].length() <= rear["speed"] * FormationCohesion.MAX_CATCHUP_SCALE + 0.0001, "catch-up remains capped")
 
 
@@ -117,3 +119,34 @@ func assert_true(value: bool, context: String) -> void:
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
+
+
+func test_mixed_speed_and_partial_engagement() -> void:
+	var slow := moving_unit(40, 3, 13)
+	var fast := moving_unit(41, 4, 14)
+	fast["speed"] = 3.6
+	slow["task"] = "attack_move"
+	fast["task"] = "attack_move"
+	FormationCohesion.update([slow, fast])
+	assert_true(is_equal_approx(slow["speed"] * slow["cohesion_speed_scale"], fast["speed"] * fast["cohesion_speed_scale"]), "mixed units share march speed")
+	assert_true(fast["formation_shared_motion"], "shared translation supports mixed base speeds and attack-move")
+	var attacking := moving_unit(42, 2, 12)
+	attacking["task"] = "attack"
+	attacking["speed"] = 0.1
+	FormationCohesion.update([slow, fast, attacking])
+	assert_true(is_equal_approx(fast["speed"] * fast["cohesion_speed_scale"], slow["speed"]), "one engaged member does not disable cohesion of marchers")
+	assert_equal(attacking["cohesion_speed_scale"], 1.0, "combat speed is independent of march speed")
+
+
+func test_cached_distance_replacement_and_cursor() -> void:
+	var unit := moving_unit(50, 0, 8)
+	unit["pos"] = Vector2.ZERO
+	unit["path"] = [Vector2(3, 0), Vector2(3, 4), Vector2(8, 4)]
+	assert_equal(FormationCohesion.remaining_distance(unit), 12.0, "initial suffix sum")
+	var cache: Dictionary = unit["_formation_path_cache"]
+	unit["path_index"] = 1
+	unit["pos"] = Vector2(3, 0)
+	assert_equal(FormationCohesion.remaining_distance(unit), 9.0, "cursor uses the cached suffix")
+	assert_true(is_same(cache, unit["_formation_path_cache"]), "advancing does not allocate a new suffix cache")
+	unit["path"] = [Vector2.ZERO, Vector2(6, 0), Vector2(6, 8)]
+	assert_equal(FormationCohesion.remaining_distance(unit), 11.0, "same-length replacement invalidates cached distances")

@@ -76,6 +76,7 @@ func _initialize() -> void:
 	check(highlands["map_data"]["vertex_levels"] != data["vertex_levels"], "profile affects shared relief")
 	_test_solitary_accents()
 	_test_tree_palettes()
+	_test_palms()
 	_test_alliances()
 	finish()
 
@@ -130,6 +131,32 @@ func _test_tree_palettes() -> void:
 				native_graphics[tree["source_graphic_id"]] = true
 				check(tree["source_graphic_id"] in ([603, 623, 655] if pine else [601, 603, 609, 611, 614]), "native species follows the same habitat")
 		check(native_count > 100 and imported_count > 100 and native_graphics.size() >= 3, "both sources provide varied trees in each habitat")
+
+func _test_palms() -> void:
+	var size := Vector2i(24, 24)
+	var fields := {"moisture": [], "geology": [], "coast_distance": []}
+	for key in fields:
+		fields[key].resize(size.x * size.y)
+	fields["moisture"].fill(0.4)
+	fields["geology"].fill(0.5)
+	fields["coast_distance"].fill(8)
+	var variants: Dictionary = {}
+	for i in range(size.x * size.y):
+		var tree := {"kind": "tree", "position": Vector2(i % size.x + 0.5, i / size.x + 0.5), "amount": 75}
+		Landscape.bind_tree(tree, fields, size, 7919)
+		check(Landscape.is_palm(tree) and not tree.has("environment_asset"), "dry coastal groves retain original palms")
+		check(tree["amount"] == 75 and tree["source_frame"] == 0, "palms remain standing, harvestable trees")
+		check(ResourceLoader.exists("res://assets/generated/graphic_%d.png" % tree["source_graphic_id"]), "every selected palm has imported art")
+		var same := tree.duplicate(true)
+		Landscape.bind_tree(same, fields, size, 7919)
+		check(same == tree, "palm species and placement regenerate identically")
+		variants[tree["source_graphic_id"]] = true
+	check(variants.size() == 7, "all seven imported native palm variants participate")
+	fields["coast_distance"].fill(20)
+	var inland := {"kind": "tree", "position": Vector2(5.5, 5.5), "amount": 75}
+	Landscape.bind_tree(inland, fields, size, 7919)
+	check(not Landscape.is_palm(inland), "inland conifer habitat remains distinct")
+
 
 func _test_alliances() -> void:
 	var size := Vector2i(40, 20)

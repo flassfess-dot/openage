@@ -21,7 +21,7 @@ Controls:
 - a boarding selection may exceed transport capacity: everyone approaches, free seats fill, and the rest wait on shore
 - `Ctrl+1`-`Ctrl+9`: assign a control group
 - `1`-`9`: recall a group; press again to center, use `Shift` to add it
-- `F5`-`F9`: line, rectangle, column, wedge, and staggered formations
+- `F5`-`F10`: line, protective box, column, wedge, staggered, and split flank formations
 - `T`: train a clubman for 50 food
 - `WASD` / arrows: move camera
 - mouse wheel: zoom
@@ -29,11 +29,18 @@ Controls:
 - `Space`: pause/resume simulation
 - `,` / `.`: slower/faster game speed (1.0x, 1.5x, 2.0x)
 - `F3`: toggle diagnostics (IDs, footprints, grid, paths, slots, velocities, facing and render keys)
-- `F10`: open the eight-direction animation calibration scene
+- `Ctrl+F10`: open the eight-direction animation calibration scene
 - `B`: open construction choices for selected villagers
 - `R`: choose a repair target for selected villagers; restart when no villager is selected or the battle has ended
 - `Del`: delete selected own objects
 - `Esc`: cancel targeting or return from construction; quit when no command or submenu is active
+
+Each group remembers its own formation. Selecting another group only updates the
+highlighted formation button; a mixed selection keeps each group's layout when
+moving. Short moves preserve the current front, and right-button dragging sets
+an explicit facing. Groups share the slowest member's march speed, narrow their
+ranks through chokepoints, and keep surviving units' slots after casualties.
+`Shift` + right click appends a waypoint for the group.
 
 Generated files in `assets/generated` and copied original music are for local
 use only and must not be redistributed.
@@ -96,3 +103,36 @@ Visible neutral and foreign objects can be inspected individually; their command
 palettes and private production/research queues are never exposed.
 Generated highlands now support seven elevation levels. Native RoR brown cliff
 strips reserve connected footprints before resource and route placement.
+
+Corpse and siege presentation
+-----------------------------
+Animals retain their facing when becoming food resources and use the original
+corpse animation for both hunted and non-hunted deaths. Corpse frames advance
+with simulation age, independently of entity ID and harvested food. The age and
+facing survive saves; older carcasses without an age start at the fresh stage.
+Pending corpse clips hold the final death frame during background loading.
+Projectile impacts resolve the original projectile death graphic, including the
+catapult/ballista explosion and its dust layer. Ordinary arrows have no explosion
+in the source DAT. Heavy Catapult and Juggernaught blasts destroy trees according
+to the original blast offence level, immediately releasing their navigation
+footprints and updating the forest surface. Use Attack Ground to clear forest.
+
+### Обновление ресурсов окружения и сборка
+
+После изменений импортера деревьев выполните из корня репозитория:
+
+```powershell
+.\tools\ror-repack-resources.ps1
+.\tools\ror-full-build.ps1
+```
+
+Первая команда заново импортирует ресурсы RoR и окружение AoE2, включая отдельные
+исходные тени всех восьми вариантов дубов и сосен, проверяет кеш и обновляет импорт
+Godot. При другом расположении AoE2 передайте `-AoE2GamePath "путь к игре"`.
+Вторая собирает релиз в `dist/Rise of Rome Prototype`; перед ней закройте игру.
+Эти команды выполняются последовательно, только после успешного завершения предыдущей.
+
+Серийное размещение зданий: **Shift + щелчок**, как в оригинальном руководстве
+[Age of Empires](https://www.bestoldgames.net/download/games/age-of-empires/age-of-empires-win-manual.pdf).
+Пальмы появляются в сухих прибрежных рощах новых случайных карт; ранее созданные
+карты сохраняют состав деревьев из сохранения.

@@ -9,7 +9,8 @@ const FORMATIONS := [
 	{"id": "RECTANGLE", "label": "Каре", "hotkey": "F6"},
 	{"id": "COLUMN", "label": "Колонна", "hotkey": "F7"},
 	{"id": "WEDGE", "label": "Клин", "hotkey": "F8"},
-	{"id": "STAGGERED", "label": "Шахматный", "hotkey": "F9"},
+	{"id": "STAGGERED", "label": "Рассредоточенный", "hotkey": "F9"},
+	{"id": "FLANK", "label": "Фланги", "hotkey": "F10"},
 ]
 const STANCE_LABELS_RU := {
 	"aggressive": "Агрессивная",
@@ -377,6 +378,8 @@ func _entity_input_signature(entity: Dictionary) -> int:
 		int(entity.get("team", 0)),
 		String(entity.get("kind", "")),
 		_category(entity),
+		int(entity.get("source_unit_id", -1)),
+		int(entity.get("presentation_facing", 0)),
 		float(entity.get("hp", 0.0)),
 		float(entity.get("max_hp", 0.0)),
 		float(entity.get("attack_damage", 0.0)),
@@ -626,6 +629,14 @@ func _icon_id_for_kind(kind: String, entity: Dictionary) -> int:
 		return -1
 	var default_civilization_id := int(archetype.get("default_civilization_id", runtime_catalog.get("default_civilization_id", 13)))
 	var civilization_id := int(entity.get("components", {}).get("ownership", {}).get("civilization_id", default_civilization_id))
+	# A selected entity can have advanced to another DAT record while retaining
+	# its gameplay kind. Its current source and packed age facet own the icon.
+	if String(entity.get("kind", "")) == kind:
+		var source_id := int(entity.get("source_unit_id", -1))
+		var source: Dictionary = object_catalog.get("objects", {}).get("%d:%d" % [civilization_id, source_id], {})
+		var icon_id := int(source.get("interface", {}).get("icon_id", -1))
+		if icon_id >= 0:
+			return icon_id + maxi(0, int(entity.get("presentation_facing", 0))) if _category(entity) == "building" else icon_id
 	var records: Dictionary = archetype.get("records", {})
 	var record: Dictionary = records.get(String.num_int64(civilization_id), records.get(String.num_int64(default_civilization_id), {}))
 	return int(record.get("presentation", {}).get("icon_id", -1))

@@ -11,6 +11,7 @@ static var sealed_roots: Dictionary = {}
 static var next_seal := 1
 const MAX_IMMUTABLE_ROOTS := 12
 static var immutable_roots: Array = []
+static var native_capture_enabled := true
 
 static func is_detached(value: Variant, depth: int = 0) -> bool:
 	if depth > 64:
@@ -19,9 +20,9 @@ static func is_detached(value: Variant, depth: int = 0) -> bool:
 		TYPE_OBJECT, TYPE_CALLABLE, TYPE_RID, TYPE_SIGNAL:
 			return false
 		TYPE_DICTIONARY:
-			if is_trusted_immutable(value):
+			if _is_typed_cell_values(value) or is_trusted_immutable(value):
 				return true
-			if value.is_read_only() and value.has(SEAL_KEY):
+			if value.is_read_only() and _has_seal(value):
 				seal_mutex.lock()
 				var token: Variant = value[SEAL_KEY]
 				var trusted := sealed_roots.has(token) and is_same(sealed_roots[token], value)
@@ -50,6 +51,9 @@ static func _freeze(value: Variant) -> void:
 	if is_trusted_immutable(value):
 		return
 	if value is Dictionary:
+		if _is_typed_cell_values(value):
+			value.make_read_only()
+			return
 		for key in value:
 			_freeze(key)
 			_freeze(value[key])
@@ -65,12 +69,14 @@ static func _freeze(value: Variant) -> void:
 static func is_trusted_immutable(value: Variant) -> bool:
 	if not (value is Dictionary or value is Array) or not value.is_read_only():
 		return false
+	if value is Dictionary and _is_typed_cell_values(value):
+		return true
 	# Readonly typed point arrays contain only value types. They are safe by
 	# construction and need no retaining registry entry, even after eviction.
 	if value is Array and value.is_typed() and value.get_typed_builtin() in [TYPE_VECTOR2, TYPE_VECTOR2I]:
 		return true
 	seal_mutex.lock()
-	if value is Dictionary and value.has(SEAL_KEY):
+	if value is Dictionary and _has_seal(value):
 		var token: Variant = value[SEAL_KEY]
 		if sealed_roots.has(token) and is_same(sealed_roots[token], value):
 			sealed_roots.erase(token)
@@ -95,6 +101,9 @@ static func freeze_detached(value: Variant, depth: int = 0, retain_root: bool = 
 		TYPE_OBJECT, TYPE_CALLABLE, TYPE_RID, TYPE_SIGNAL:
 			return false
 		TYPE_DICTIONARY:
+			if _is_typed_cell_values(value):
+				value.make_read_only()
+				return true
 			for key in value:
 				if not freeze_detached(key, depth + 1, false) or not freeze_detached(value[key], depth + 1, false):
 					return false
@@ -144,11 +153,33 @@ static func capture(value: Variant, depth: int = 0) -> Variant:
 		return result
 	return copy(value)
 
+# Validate, detach and freeze an observation in one traversal.
+# Trust is still held only by our bounded identity registries.
+static func capture_frozen(value: Dictionary) -> Dictionary:
+	if native_capture_enabled and ClassDB.class_exists("RoRReadModelKernel"):
+		seal_mutex.lock()
+		var trusted: Array = immutable_roots.duplicate()
+		trusted.append_array(sealed_roots.values())
+		seal_mutex.unlock()
+		var kernel = ClassDB.instantiate("RoRReadModelKernel")
+		var captured: Dictionary = kernel.capture_frozen(value, trusted)
+		if not bool(captured.get("valid", false)):
+			return {}
+		# Preserve the reference implementation's LRU promotion: a hot map must
+		# not be evicted just because its traversal now happens in native code.
+		for index in captured.get("shared_indices", PackedInt32Array()):
+			is_trusted_immutable(trusted[int(index)])
+		var frozen: Dictionary = captured["value"]
+		_retain_immutable(frozen)
+		return frozen
+	var detached: Dictionary = capture(value)
+	return detached if freeze_detached(detached) else {}
+
 static func seal(value: Dictionary) -> Dictionary:
 	if not is_detached(value):
 		return {}
 	seal_mutex.lock()
-	if value.is_read_only() and value.has(SEAL_KEY) and sealed_roots.has(value[SEAL_KEY]) and is_same(sealed_roots[value[SEAL_KEY]], value):
+	if value.is_read_only() and _has_seal(value) and sealed_roots.has(value[SEAL_KEY]) and is_same(sealed_roots[value[SEAL_KEY]], value):
 		seal_mutex.unlock()
 		return value
 	var token := next_seal
@@ -173,3 +204,13 @@ static func copy(value: Variant) -> Variant:
 		TYPE_PACKED_BYTE_ARRAY, TYPE_PACKED_INT32_ARRAY, TYPE_PACKED_INT64_ARRAY, TYPE_PACKED_FLOAT32_ARRAY, TYPE_PACKED_FLOAT64_ARRAY, TYPE_PACKED_STRING_ARRAY, TYPE_PACKED_VECTOR2_ARRAY, TYPE_PACKED_VECTOR3_ARRAY, TYPE_PACKED_VECTOR4_ARRAY, TYPE_PACKED_COLOR_ARRAY:
 			return value.duplicate()
 	return value
+
+# Engine-enforced scalar dictionaries cannot contain a mutable child or Object.
+# Unlike an identity LRU, this proof remains valid after other DTOs are published.
+static func _is_typed_cell_values(value: Dictionary) -> bool:
+	return value.get_typed_key_builtin() == TYPE_VECTOR2I and value.get_typed_value_builtin() in [TYPE_BOOL, TYPE_INT, TYPE_STRING]
+
+static func _has_seal(value: Dictionary) -> bool:
+	# Typed maps may forbid string keys; querying a marker must not emit a
+	# runtime error while rejecting an unsafe container supplied by a caller.
+	return value.get_typed_key_builtin() in [TYPE_NIL, TYPE_STRING, TYPE_STRING_NAME] and value.has(SEAL_KEY)

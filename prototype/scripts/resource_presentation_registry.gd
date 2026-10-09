@@ -1,6 +1,8 @@
 class_name RoRResourcePresentationRegistry
 extends RefCounted
 
+const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
+
 const ANIMATED_MARINE_KINDS := ["deep_fish", "shore_fish", "whale"]
 
 var runtime_catalog: Dictionary = {}
@@ -99,7 +101,12 @@ func frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary
 	if frames.is_empty():
 		return {}
 	var frame_index := posmod(int(resource.get("id", 0)), frames.size())
-	if bool(metadata.get("animated", false)) or kind in ANIMATED_MARINE_KINDS:
+	var mirrored := false
+	if is_carcass(resource):
+		var resolved := corpse_frame(resource, frames.size(), _graphic_for_resource(resource))
+		frame_index = int(resolved["frame_index"])
+		mirrored = bool(resolved["mirrored"])
+	elif bool(metadata.get("animated", false)) or kind in ANIMATED_MARINE_KINDS:
 		frame_index = _animated_frame(resource, int(resource.get("id", 0)), animation_time, frames.size())
 	var texture: Texture2D = frames[frame_index]
 	var frame_metadata: Dictionary = metadata_by_asset_frame.get(_key(asset_name, frame_index), {})
@@ -111,8 +118,26 @@ func frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary
 		"asset_name": asset_name,
 		"frame_index": frame_index,
 		"hotspot": hotspot,
-		"mirrored": false,
+		"mirrored": mirrored,
 	}
+
+
+static func is_carcass(resource: Dictionary) -> bool:
+	return "carcass" in resource.get("behavior_tags", []) or String(resource.get("kind", "")).ends_with("_carcass")
+
+
+static func corpse_frame(resource: Dictionary, frame_count: int, graphic: Dictionary) -> Dictionary:
+	var descriptor := GraphicDescriptor.new("", graphic, frame_count, false)
+	return descriptor.resolve(int(resource.get("facing", 0)), float(resource.get("decay_elapsed", 0.0)), frame_count)
+
+
+func _graphic_for_resource(resource: Dictionary) -> Dictionary:
+	var kind := String(resource.get("kind", ""))
+	var archetype: Dictionary = runtime_catalog.get("archetypes", {}).get(kind, {})
+	var source_unit_id := int(resource.get("source_unit_id", archetype.get("identifiers", {}).get("source_unit_id", -1)))
+	var source: Dictionary = object_catalog.get("objects", {}).get("0:%d" % source_unit_id, {})
+	var graphic_id := int(resource.get("source_graphic_id", source.get("graphics", {}).get("idle", -1)))
+	return graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
 
 
 func _animated_frame(resource: Dictionary, entity_id: int, animation_time: float, frame_count: int) -> int:

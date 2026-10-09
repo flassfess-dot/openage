@@ -2,16 +2,17 @@ class_name RoRFormationAssignment
 
 const Roles := preload("res://scripts/formation_roles.gd")
 
-const RETENTION_BONUS: float = 1000000.0
+const RETENTION_BONUS: float = 4.0
 const SIZE_PENALTY: float = 10000.0
 const ROLE_WEIGHT: float = 25.0
 const EXACT_ASSIGNMENT_LIMIT: int = 64
 const ROLE_ORDER := [
+	Roles.PRIEST,
+	Roles.SIEGE,
+	Roles.CAVALRY,
 	Roles.HEAVY_INFANTRY,
 	Roles.LIGHT_INFANTRY,
 	Roles.RANGED,
-	Roles.PRIEST,
-	Roles.SIEGE,
 	Roles.CIVILIAN,
 ]
 
@@ -25,13 +26,21 @@ static func assign(units: Array, slots: Array, previous_assignments: Dictionary 
 	if count > EXACT_ASSIGNMENT_LIMIT:
 		return _assign_scalable(ordered, slots, count, previous_assignments)
 	var costs: Array = []
+	var bounds := Roles.slot_bounds(slots)
+	var role_costs: Dictionary = {}
 	for row in range(count):
 		var row_costs: Array[float] = []
 		var unit: Dictionary = ordered[row]
+		var role := Roles.unit_role(unit)
+		if not role_costs.has(role):
+			var prepared := PackedFloat64Array()
+			for slot in slots:
+				prepared.append(Roles.prepared_slot_cost(role, slot, bounds) * ROLE_WEIGHT)
+			role_costs[role] = prepared
 		for column in range(count):
 			var slot: Dictionary = slots[column]
 			var cost: float = unit["pos"].distance_squared_to(slot["world"])
-			cost += Roles.slot_cost(String(unit.get("kind", "")), slot, slots) * ROLE_WEIGHT
+			cost += role_costs[role][column]
 			var radius := float(unit.get("footprint_radius", 0.3))
 			var capacity := float(slot.get("capacity_radius", INF))
 			if radius > capacity:
@@ -77,7 +86,7 @@ static func _assign_scalable(ordered_units: Array, slots: Array, count: int, pre
 	for role in ROLE_ORDER:
 		role_units[role] = []
 	for unit in remaining_units:
-		var role := Roles.role_for(String(unit.get("kind", "")))
+		var role := Roles.unit_role(unit)
 		if not role_units.has(role):
 			role_units[role] = []
 		role_units[role].append(unit)
@@ -86,7 +95,7 @@ static func _assign_scalable(ordered_units: Array, slots: Array, count: int, pre
 		var members: Array = role_units.get(role, [])
 		if members.is_empty():
 			continue
-		members.sort_custom(_unit_spatial_less)
+		members.sort_custom(func(left, right): return _unit_spatial_less(left, right, Vector2(slots[0].get("forward", Vector2.DOWN))))
 		available_slots.sort_custom(func(left, right): return _role_slot_less(role, left, right, middle_y))
 		var selected_slots: Array = available_slots.slice(0, members.size())
 		available_slots = available_slots.slice(members.size())
@@ -109,23 +118,30 @@ static func _slot_middle_y(slots: Array) -> float:
 static func _role_slot_less(role: String, left: Dictionary, right: Dictionary, middle_y: float) -> bool:
 	var left_local: Vector2 = left.get("local", left.get("world", Vector2.ZERO))
 	var right_local: Vector2 = right.get("local", right.get("world", Vector2.ZERO))
-	var left_key := _role_slot_key(role, left_local, middle_y)
-	var right_key := _role_slot_key(role, right_local, middle_y)
+	var left_key := _layout_slot_key(role, left, left_local, middle_y)
+	var right_key := _layout_slot_key(role, right, right_local, middle_y)
 	if left_key != right_key:
 		return _vector3_less(left_key, right_key)
 	return int(left["slot_id"]) < int(right["slot_id"])
 
 
+static func _layout_slot_key(role: String, slot: Dictionary, local: Vector2, middle_y: float) -> Vector3:
+	if bool(slot.get("protected_layout", false)):
+		var depth := maxf(absf(local.x), absf(local.y - middle_y))
+		return Vector3(depth if role in [Roles.PRIEST, Roles.SIEGE, Roles.CIVILIAN] else -depth, -local.y, local.x)
+	return _role_slot_key(role, local, middle_y)
+
+
 static func _role_slot_key(role: String, local: Vector2, middle_y: float) -> Vector3:
 	match role:
-		Roles.HEAVY_INFANTRY:
+		Roles.HEAVY_INFANTRY, Roles.CAVALRY:
 			return Vector3(-local.y, absf(local.x), local.x)
 		Roles.RANGED:
 			return Vector3(local.y, absf(local.x), local.x)
 		Roles.PRIEST:
 			return Vector3(absf(local.x), absf(local.y - middle_y), local.y)
 		Roles.SIEGE:
-			return Vector3(-absf(local.x), local.y, local.x)
+			return Vector3(local.y, absf(local.x), local.x)
 		Roles.CIVILIAN:
 			return Vector3(absf(local.y - middle_y), absf(local.x), local.x)
 		_:
@@ -140,15 +156,18 @@ static func _vector3_less(left: Vector3, right: Vector3) -> bool:
 	return left.z < right.z
 
 
-static func _unit_spatial_less(left: Dictionary, right: Dictionary) -> bool:
-	var left_position: Vector2 = left.get("pos", Vector2.ZERO)
-	var right_position: Vector2 = right.get("pos", Vector2.ZERO)
+static func _unit_spatial_less(left: Dictionary, right: Dictionary, forward: Vector2 = Vector2.DOWN) -> bool:
+	var right_axis := Vector2(forward.y, -forward.x)
+	var left_world: Vector2 = left.get("pos", Vector2.ZERO)
+	var right_world: Vector2 = right.get("pos", Vector2.ZERO)
+	var left_position := Vector2(left_world.dot(right_axis), left_world.dot(forward))
+	var right_position := Vector2(right_world.dot(right_axis), right_world.dot(forward))
 	return left_position.y < right_position.y or (is_equal_approx(left_position.y, right_position.y) and (left_position.x < right_position.x or (is_equal_approx(left_position.x, right_position.x) and int(left["id"]) < int(right["id"]))))
 
 
 static func _slot_spatial_less(left: Dictionary, right: Dictionary) -> bool:
-	var left_position: Vector2 = left.get("world", Vector2.ZERO)
-	var right_position: Vector2 = right.get("world", Vector2.ZERO)
+	var left_position: Vector2 = left.get("local", left.get("world", Vector2.ZERO))
+	var right_position: Vector2 = right.get("local", right.get("world", Vector2.ZERO))
 	return left_position.y < right_position.y or (is_equal_approx(left_position.y, right_position.y) and (left_position.x < right_position.x or (is_equal_approx(left_position.x, right_position.x) and int(left["slot_id"]) < int(right["slot_id"]))))
 
 

@@ -16,9 +16,11 @@ func hit_stack(screen_position: Vector2, drawables: Array, world_to_screen: Call
 		if drawable_kind not in SELECTABLE_DRAWABLES:
 			continue
 		var entity: Dictionary = drawable.get("data", {})
-		# RoR berry bushes have zero source HP while still containing food. The
-		# resource renderer governs visibility/depletion; combat HP is irrelevant.
+		# Resource HP is not harvestability: berries have zero source HP, and
+		# felled trunks still contain wood. Exhausted tree stumps are decoration.
 		if entity.is_empty() or (drawable_kind != "resource" and float(entity.get("hp", 1.0)) <= 0.0):
+			continue
+		if drawable_kind == "resource" and not resource_is_selectable(entity):
 			continue
 		var entity_type := entity_type_for(drawable_kind, entity)
 		var stable_id := int(drawable.get("stable_id", entity.get("id", -1)))
@@ -116,3 +118,7 @@ func footprint_hit(screen_position: Vector2, entity_type: String, entity: Dictio
 	var radius_y := maxf(4.0, selection.y * 17.0 * zoom)
 	var relative := screen_position - anchor
 	return relative.x * relative.x / (radius_x * radius_x) + relative.y * relative.y / (radius_y * radius_y) <= 1.0
+
+
+static func resource_is_selectable(resource: Dictionary) -> bool:
+	return String(resource.get("tree_phase", "")) != "stump" and not (String(resource.get("kind", "")) == "tree" and int(resource.get("amount", 1)) <= 0)

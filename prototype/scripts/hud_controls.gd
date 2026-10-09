@@ -24,12 +24,14 @@ const FORMATIONS := [
 	["COLUMN", "F7 COLUMN", "Narrow column formation"],
 	["WEDGE", "F8 WEDGE", "Wedge formation"],
 	["STAGGERED", "F9 STAGGER", "Staggered formation"],
+	["FLANK", "F10 FLANK", "Split flank formation"],
 ]
 const FORMATION_ICONS := {
 	"LINE": preload("res://assets/ui/formations/formation_line.png"),
 	"RECTANGLE": preload("res://assets/ui/formations/formation_rectangle.png"),
 	"COLUMN": preload("res://assets/ui/formations/formation_column.png"),
 	"WEDGE": preload("res://assets/ui/formations/formation_wedge.png"),
+	"FLANK": preload("res://assets/ui/formations/formation_flank.svg"),
 	"STAGGERED": preload("res://assets/ui/formations/formation_staggered.png"),
 }
 
@@ -308,8 +310,25 @@ func layout_controls() -> void:
 		commands.append(train_button)
 	for button in formation_buttons.values():
 		button.visible = false
-	commands.append_array(available_formation_buttons)
-	var grid := command_grid(local_rect.size)
+	# Formations own the last row on every command page. Reserve it before
+	# paginating ordinary orders, including Delete and the navigation arrows.
+	var has_formations := not available_formation_buttons.is_empty()
+	if has_formations and current_layout.has("production") and not bool(current_layout.get("narrow", false)):
+		# Mobile groups have no production queue: use its otherwise empty space
+		# at small desktop widths before reducing the six formation icons.
+		var production: Rect2 = current_layout["production"]
+		var row_width := available_formation_buttons.size() * (InterfaceLayout.COMMAND_CELL_SIZE + InterfaceLayout.COMMAND_GAP) - InterfaceLayout.COMMAND_GAP
+		local_rect.size.x = maxf(local_rect.size.x, minf(row_width, production.end.x - command_rect.position.x))
+	var action_size := local_rect.size
+	var formation_cell := minf(InterfaceLayout.COMMAND_CELL_SIZE, (local_rect.size.x - InterfaceLayout.COMMAND_GAP * (available_formation_buttons.size() - 1)) / maxf(1, available_formation_buttons.size()))
+	var formation_y := local_rect.end.y - formation_cell
+	if has_formations:
+		action_size.y = formation_y - local_rect.position.y - InterfaceLayout.COMMAND_GAP
+	var grid := command_grid(action_size)
+	if has_formations and int(grid["capacity"]) < 4:
+		# Even a narrow window needs one action, two page arrows and Delete.
+		var compact_cell := minf(InterfaceLayout.COMMAND_CELL_SIZE, (action_size.x - 3 * InterfaceLayout.COMMAND_GAP) / 4.0)
+		grid = {"columns": 4, "rows": 1, "capacity": 4, "cell_size": Vector2.ONE * compact_cell}
 	var capacity: int = grid["capacity"]
 	var pinned_cancel: Button = null
 	if build_menu_open and not active_train_commands.is_empty() and active_train_commands.back().get("type") == "close_build_menu":
@@ -353,10 +372,15 @@ func layout_controls() -> void:
 		button.visible = true
 		var column := slot % columns
 		var row := floori(float(slot) / float(columns))
-		set_bottom_rect(button, Rect2(local_rect.position + Vector2(column, row) * (InterfaceLayout.COMMAND_CELL_SIZE + InterfaceLayout.COMMAND_GAP), cell_size))
-		button.add_theme_constant_override("icon_max_width", int(InterfaceLayout.COMMAND_CELL_SIZE) - 14)
+		set_bottom_rect(button, Rect2(local_rect.position + Vector2(column, row) * (cell_size + Vector2.ONE * InterfaceLayout.COMMAND_GAP), cell_size))
+		button.add_theme_constant_override("icon_max_width", maxi(8, int(cell_size.x) - 14))
 		if train_buttons.has(button):
-			hotkey_badges[train_buttons.find(button)].position = Vector2(4, InterfaceLayout.COMMAND_CELL_SIZE - 16)
+			hotkey_badges[train_buttons.find(button)].position = Vector2(4, maxf(0, cell_size.y - 16))
+	for index in range(available_formation_buttons.size()):
+		var button := available_formation_buttons[index]
+		button.visible = true
+		set_bottom_rect(button, Rect2(Vector2(local_rect.position.x + index * (formation_cell + InterfaceLayout.COMMAND_GAP), formation_y), Vector2.ONE * formation_cell))
+		button.add_theme_constant_override("icon_max_width", maxi(8, int(formation_cell) - 14))
 
 
 static func command_grid(available_size: Vector2) -> Dictionary:

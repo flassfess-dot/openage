@@ -28,7 +28,7 @@ const STATE_TO_CLIP := {
 	CONVERT: "convert",
 	HEAL: "heal",
 	DIE: "death",
-	DECAY: "death",
+	DECAY: "corpse",
 }
 
 

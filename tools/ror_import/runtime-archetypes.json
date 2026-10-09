@@ -810,7 +810,8 @@
           "idle": {"asset_name": "gazelle_idle", "graphic_field": "idle", "loop": true},
           "move": {"asset_name": "gazelle_move", "graphic_field": "move", "loop": true},
           "attack": {"asset_name": "gazelle_idle", "graphic_field": "attack", "loop": false},
-          "death": {"asset_name": "gazelle_death", "graphic_field": "death", "loop": false}
+          "death": {"asset_name": "gazelle_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "gazelle_carcass", "graphic_id": 395, "loop": false}
         }
       }
     },
@@ -831,7 +832,8 @@
           "idle": {"asset_name": "elephant_idle", "graphic_field": "idle", "loop": true},
           "move": {"asset_name": "elephant_move", "graphic_field": "move", "loop": true},
           "attack": {"asset_name": "elephant_attack", "graphic_field": "attack", "loop": false},
-          "death": {"asset_name": "elephant_death", "graphic_field": "death", "loop": false}
+          "death": {"asset_name": "elephant_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "elephant_carcass", "graphic_id": 147, "loop": false}
         }
       }
     },
@@ -855,7 +857,8 @@
           "idle": {"asset_name": "alligator_idle", "graphic_field": "idle", "loop": true},
           "move": {"asset_name": "alligator_move", "graphic_field": "move", "loop": true},
           "attack": {"asset_name": "alligator_attack", "graphic_field": "attack", "loop": false},
-          "death": {"asset_name": "alligator_death", "graphic_field": "death", "loop": false}
+          "death": {"asset_name": "alligator_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "alligator_carcass", "graphic_id": 391, "loop": false}
         }
       }
     },
@@ -878,7 +881,8 @@
           "idle": {"asset_name": "lion_idle", "graphic_field": "idle", "loop": true},
           "move": {"asset_name": "lion_move", "graphic_field": "move", "loop": true},
           "attack": {"asset_name": "lion_attack", "graphic_field": "attack", "loop": false},
-          "death": {"asset_name": "lion_death", "graphic_field": "death", "loop": false}
+          "death": {"asset_name": "lion_death", "graphic_field": "death", "loop": false},
+          "corpse": {"asset_name": "lion_carcass", "graphic_id": 460, "loop": false}
         }
       }
     },

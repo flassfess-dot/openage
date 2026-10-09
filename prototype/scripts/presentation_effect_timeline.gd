@@ -23,7 +23,7 @@ func consume(events: Array, visibility_resolver: Callable = Callable()) -> void:
 			continue
 		var payload: Dictionary = event.get("payload", {})
 		var graphic_id := int(payload.get("impact_effect_graphic_id", -1))
-		if graphic_id < 0:
+		if graphic_id < 0 or not effect_registry.has_graphic(graphic_id, int(payload.get("team", 0))):
 			continue
 		var position := _position(payload.get("position", Vector2.ZERO))
 		if visibility_resolver.is_valid() and not bool(visibility_resolver.call(position)):
@@ -33,6 +33,7 @@ func consume(events: Array, visibility_resolver: Callable = Callable()) -> void:
 			"graphic_id": graphic_id,
 			"team": int(payload.get("team", 0)),
 			"pos": position,
+			"elevation": float(payload.get("elevation", 0.0)),
 			"elapsed": 0.0,
 			"duration": effect_registry.duration(graphic_id),
 			"active": true,

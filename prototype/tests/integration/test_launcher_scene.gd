@@ -24,8 +24,18 @@ func _initialize() -> void:
 	assert_equal(launcher.current_screen, "single_player", "single-player menu is a separate workflow step")
 	assert_true(not launcher.screen_buttons["campaigns"].disabled, "campaign workflow is enabled")
 	assert_true(not launcher.screen_buttons["random_map"].disabled, "random-map workflow is enabled")
-	assert_true(launcher.screen_buttons["saved_game"].disabled, "unfinished saved-game workflow is disabled")
+	assert_true(not launcher.screen_buttons["saved_game"].disabled, "saved-game workflow is enabled")
 	assert_true(launcher.screen_buttons["scenario"].disabled, "unfinished scenario workflow is disabled")
+
+	launcher.screen_buttons["saved_game"].pressed.emit()
+	await process_frame
+	assert_equal(launcher.current_screen, launcher.SCREEN_SAVES, "saved games are accessible before starting a match")
+	assert_true(launcher.save_list != null, "save browser shows its list")
+	assert_equal(launcher.screen_buttons["load_save"].disabled, launcher.saved_games.is_empty(), "loading is available when a save exists")
+	assert_true(launcher.screen_buttons["save_game"].disabled, "creating a save requires an active match")
+	launcher.screen_buttons["back"].pressed.emit()
+	await process_frame
+	assert_equal(launcher.current_screen, "single_player", "leaving saved games returns to the menu that opened it")
 
 	launcher._show_campaign_menu()
 	assert_equal(launcher.campaign_selector.item_count, 10, "campaign screen lists the tutorial and nine campaign missions")

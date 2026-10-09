@@ -19,6 +19,7 @@ const DIRECTIONS := [
 
 var task_topology_source: Variant = null
 var task_topology_revision := -1
+var task_topology_epoch := -1
 var task_topology: Dictionary = {}
 var grid
 var cache: Dictionary = {}
@@ -90,10 +91,15 @@ func uses_native_kernel() -> bool:
 
 
 func detached_task_topology() -> Dictionary:
-	if task_topology_source != grid or task_topology_revision != int(grid.revision):
-		task_topology = NavigationTaskData.capture(grid)
+	if task_topology_source != grid or task_topology_revision != int(grid.revision) or task_topology_epoch != int(grid.cache_epoch):
+		var started := Time.get_ticks_usec() if performance_probe != null else 0
+		var previous := task_topology if task_topology_source == grid else {}
+		task_topology = NavigationTaskData.capture(grid, previous)
 		task_topology_source = grid
 		task_topology_revision = int(grid.revision)
+		task_topology_epoch = int(grid.cache_epoch)
+		if performance_probe != null:
+			performance_probe.observe_microseconds("navigation.task_topology.capture", Time.get_ticks_usec() - started)
 	return task_topology
 
 func create_task_context(topology: Dictionary, configurations: Array, route_snapshot: Dictionary = {}):
@@ -279,20 +285,25 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 		configurations[configuration_key] = [movement_domain, restriction_id]
 		configuration_by_unit_id[unit_id] = configuration_key
 	var kernels_by_configuration: Dictionary = {}
+	var collision_owner: Variant = null
 	var configuration_keys := configurations.keys()
 	configuration_keys.sort()
 	for configuration_key in configuration_keys:
 		var configuration: Array = configurations[configuration_key]
 		var kernel = _native_kernel_for(String(configuration[0]), int(configuration[1]))
-		kernel.configure_movement_snapshot(
-			native_movement_ids,
-			native_movement_positions,
-			native_movement_radii,
-			native_movement_clearances,
-			native_movement_priorities,
-			native_movement_health,
-			native_movement_solid_animals
-		)
+		if collision_owner != null and kernel.has_method("share_movement_snapshot"):
+			kernel.share_movement_snapshot(collision_owner)
+		else:
+			kernel.configure_movement_snapshot(
+				native_movement_ids,
+				native_movement_positions,
+				native_movement_radii,
+				native_movement_clearances,
+				native_movement_priorities,
+				native_movement_health,
+				native_movement_solid_animals
+			)
+			collision_owner = kernel
 		kernels_by_configuration[configuration_key] = kernel
 	for unit_id in configuration_by_unit_id:
 		native_movement_kernels_by_unit_id[unit_id] = kernels_by_configuration[configuration_by_unit_id[unit_id]]
@@ -698,6 +709,17 @@ func _find_native_cell_path(start: Vector2i, goal: Vector2i, movement_domain: St
 		result[result_index] = Vector2i(packed[packed_index], packed[packed_index + 1])
 		result_index += 1
 	return result
+
+
+# Same deterministic direct-path/A* and smoothing order as the reference path.
+# Shared by ordinary movement and formation corridor bend detection.
+func find_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
+	if uses_native_kernel():
+		return _find_native_smoothed_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)["path"]
+	var direct := direct_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
+	if not direct.is_empty():
+		return [direct[0], direct[-1]] if direct.size() > 1 else direct
+	return smooth_cells(find_cell_path(start, goal, movement_domain, restriction_id, clearance_radius), movement_domain, restriction_id, clearance_radius)
 
 
 func _find_native_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String, restriction_id: int, clearance_radius: float) -> Dictionary:

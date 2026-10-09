@@ -10,6 +10,7 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
+	test_aoe_layout_spacing_and_protection()
 	test_group_contract()
 	test_all_geometry_is_unique_centered_and_deterministic()
 	test_world_space_basis_and_controller()
@@ -86,3 +87,33 @@ func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 func assert_true(value: bool, context: String) -> void:
 	if not value:
 		failures.append("%s: expected true" % context)
+
+
+func test_aoe_layout_spacing_and_protection() -> void:
+	var line := FormationGeometry.local_slots(20, FormationGeometry.LINE)
+	var rows: Dictionary = {}
+	var minimum := Vector2(INF, INF)
+	var maximum := Vector2(-INF, -INF)
+	for point in line:
+		rows[point.y] = true
+		minimum = minimum.min(point)
+		maximum = maximum.max(point)
+	assert_true(rows.size() > 1, "large line has several ranks")
+	assert_true(maximum.x - minimum.x > maximum.y - minimum.y, "battle line is wider than it is deep")
+	var stagger := FormationGeometry.local_slots(20, FormationGeometry.STAGGER)
+	var minimum_gap := INF
+	for i in range(stagger.size()):
+		for j in range(i): minimum_gap = minf(minimum_gap, stagger[i].distance_to(stagger[j]))
+	assert_true(minimum_gap >= 1.5, "staggered formation genuinely increases separation")
+	var flank := FormationGeometry.local_slots(20, FormationGeometry.FLANK)
+	assert_true(flank.all(func(point): return absf(point.x) >= 1.0), "split formation leaves a central gap")
+	var ids: Array[int] = []
+	var units: Array = []
+	for i in range(20):
+		ids.append(i + 1)
+		units.append({"id": i + 1, "kind": "priest" if i == 0 else ("stone_thrower" if i == 1 else "clubman"), "pos": Vector2.ZERO, "footprint_radius": 0.3})
+	var box := FormationGroup.new(1, ids, Vector2.ZERO, Vector2.DOWN, FormationGeometry.BLOCK)
+	box.assign_units(units)
+	for id in [1, 2]:
+		var support: Vector2 = box.slot_for(id)["local"]
+		assert_true(support.length() < 1.5, "box protects priests and siege in its inner ranks")

@@ -2,6 +2,7 @@ extends SceneTree
 
 const Settings := preload("res://scripts/skirmish_settings.gd")
 const Generator := preload("res://scripts/random_map_generator.gd")
+const Landscape := preload("res://scripts/random_map_landscape.gd")
 const Water := preload("res://scripts/random_map_water.gd")
 const Catalog := preload("res://scripts/resource_catalog.gd")
 const Bootstrap := preload("res://scripts/match_bootstrap.gd")
@@ -28,6 +29,8 @@ func run() -> void:
 			check(bool(built.get("valid", false)), "%s/%d builds: %s" % [profile, seed_value, built.get("errors", [])])
 			if not built.get("valid", false): continue
 			inspect_map(built["map_data"], "%s/%d" % [profile, seed_value])
+			var palms: Array = built["map_data"]["resources"].filter(func(item): return item.get("kind", "") == "tree" and Landscape.is_palm(item))
+			check(not palms.is_empty(), "%s/%d generates coastal palm groves" % [profile, seed_value])
 			if profile == "mediterranean" and seed_value == 41689: sample = built
 	if not sample.is_empty():
 		var repeat := Generator.generate(sample["definition"])

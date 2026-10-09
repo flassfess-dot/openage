@@ -14,11 +14,11 @@ const RENDER_FIELDS := [
 	"harvestable", "resource_type_id", "building_type", "movement_domain",
 	"footprint_radius", "selection_radius", "selection_height",
 	"anim", "anim_state", "facing", "presentation_facing",
-	"death_phase", "death_elapsed", "construction_stage",
+	"death_phase", "death_elapsed", "decay_elapsed", "construction_stage",
 	"environment_asset", "environment_variant", "tree_condition", "tree_phase", "tree_fall_elapsed", "tree_fall_duration", "source_felled_graphic_id", "source_felled_asset_name", "display_graphic_id", "source_frame", "source_graphic_id", "source_graphic_asset_name",
 	"source_requested_graphic_asset_name", "source_asset_fallback_reason",
 	"source_depleted_graphic_id", "source_depleted_asset_name", "combat_enabled", "task", "target_id",
-	"target_building_id", "resource_id", "formation_forward", "carried_amount", "construction_progress"]
+	"target_building_id", "resource_id", "formation_forward", "preferred_formation", "formation_group_id", "carried_amount", "construction_progress"]
 const AI_FIELDS := [
 	"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
 	"pos", "hp", "max_hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
@@ -81,7 +81,21 @@ static func freeze(record: Dictionary) -> Dictionary:
 static func is_render_record(entity: Dictionary) -> bool:
 	return entity.is_read_only() and int(entity.get(RENDER_SCHEMA_KEY, -1)) == SCHEMA_VERSION
 
+static var native_kernel: Variant = null
+static var native_enabled := true
+const NESTED_FIELDS := ARRAY_FIELDS + NESTED_RENDER_FIELDS
+
 static func render(entity: Dictionary, previous: Dictionary = {}) -> Dictionary:
+	if is_render_record(entity):
+		return entity
+	if native_enabled and ClassDB.class_exists("RoRReadModelKernel"):
+		if native_kernel == null:
+			native_kernel = ClassDB.instantiate("RoRReadModelKernel")
+		return native_kernel.project_render(entity, previous, RENDER_FIELDS, NESTED_FIELDS, SCHEMA_VERSION)
+	return render_reference(entity, previous)
+
+# Reference/fallback implementation defines the parity contract.
+static func render_reference(entity: Dictionary, previous: Dictionary = {}) -> Dictionary:
 	if is_render_record(entity):
 		return entity
 	var edit := CopyOnWrite.new(previous)

@@ -32,11 +32,15 @@ func configure(graphics_data: Dictionary, asset_records: Array, indexed_frame_re
 
 
 func frame_info(effect: Dictionary) -> Dictionary:
-	return frame_info_for(
-		int(effect.get("graphic_id", -1)),
-		int(effect.get("team", 1)),
-		float(effect.get("elapsed", 0.0))
-	)
+	var graphic_id := int(effect.get("graphic_id", -1))
+	var team := int(effect.get("team", 1))
+	var elapsed := float(effect.get("elapsed", 0.0))
+	var result := frame_info_for(graphic_id, team, elapsed)
+	if not result.is_empty():
+		var parts: Array = []
+		_append_parts(graphic_id, team, elapsed, Vector2.ZERO, {}, parts)
+		result["composite_parts"] = parts
+	return result
 
 
 func frame_info_for(graphic_id: int, team: int, animation_time: float) -> Dictionary:
@@ -103,3 +107,20 @@ func _ensure_loaded(graphic_id: int, player: int) -> String:
 	frames_by_key[requested_key] = frames
 	descriptors_by_key[requested_key] = descriptor
 	return requested_key
+
+
+func _append_parts(graphic_id: int, team: int, elapsed: float, offset: Vector2, visited: Dictionary, parts: Array) -> void:
+	if visited.has(graphic_id):
+		return
+	visited[graphic_id] = true
+	var graphic: Dictionary = graphics_catalog.get("graphics", {}).get(str(graphic_id), {})
+	for delta in graphic.get("deltas", []):
+		var child_id := int(delta.get("graphic_id", -1))
+		if child_id < 0 or visited.has(child_id):
+			continue
+		var child_offset := offset + Vector2(float(delta.get("offset_x", 0)), float(delta.get("offset_y", 0)))
+		var part := frame_info_for(child_id, team, elapsed)
+		if not part.is_empty():
+			part["screen_offset"] = child_offset
+			parts.append(part)
+		_append_parts(child_id, team, elapsed, child_offset, visited, parts)

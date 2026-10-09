@@ -665,6 +665,8 @@
   {"archive": "graphics", "id": 450, "name": "graphic_329_p1", "player": 1, "frameRange": [0, 19]},
   {"archive": "graphics", "id": 450, "name": "graphic_329_p2", "player": 2, "frameRange": [0, 19]},
   {"archive": "graphics", "id": 409, "name": "graphic_270_p1", "player": 1, "frameRange": [0, 9]},
+  {"archive": "graphics", "id": 409, "name": "graphic_272_p1", "player": 1, "frameRange": [0, 9]},
+  {"archive": "graphics", "id": 267, "name": "graphic_271_p1", "player": 1, "frameRange": [0, 19]},
   {"archive": "graphics", "id": 455, "name": "graphic_325_p1", "player": 1, "frameRange": [0, 19]},
   {"archive": "graphics", "id": 454, "name": "graphic_326_p1", "player": 1, "frameRange": [0, 19]},
   {"archive": "graphics", "id": 453, "name": "graphic_328_p1", "player": 1, "frameRange": [0, 19]},

@@ -36,6 +36,19 @@ func _run() -> void:
 	check(registry.textures.get("shared", {}).has("move") and registry.textures.get("shared", {}).has("attack"), "shared frame paths remain available to every pending state")
 	registry.ensure_loaded("fixture", "missing_state")
 	check(registry.loaded_states["fixture"].has("missing_state"), "unknown state uses declared fallback without repeated I/O")
+	registry.background_loading_enabled = false
+	registry.definitions["dead"] = {"alias": "dead", "team": 1, "archetype": {}, "source_unit_id": -1, "state_specs": {"idle": {"asset_name": "idle", "graphic_id": 0}, "death": {"asset_name": "move", "graphic_id": 1, "loop": false}, "corpse": {"asset_name": "part", "graphic_id": 2, "loop": false}}}
+	registry.ensure_loaded("dead", "death")
+	registry.background_loading_enabled = true
+	var fallback := registry.frame_info({"kind": "dead", "facing": 0, "anim": 0.0}, "corpse")
+	check(String(fallback.get("asset_name", "")) in ["move", "part"], "pending corpse holds death frame instead of standing idle")
+	registry.definitions["dead"]["state_specs"]["hunter_death"] = registry.definitions["dead"]["state_specs"]["death"]
+	registry.definitions["dead"]["state_specs"]["hunter_corpse"] = registry.definitions["dead"]["state_specs"]["corpse"]
+	registry.background_loading_enabled = false
+	registry.ensure_loaded("dead", "hunter_death")
+	registry.background_loading_enabled = true
+	fallback = registry.frame_info({"kind": "dead", "facing": 0, "anim": 0.0}, "hunter_corpse")
+	check(String(fallback.get("asset_name", "")) in ["move", "part"], "worker task corpse uses lifecycle fallback too")
 	registry.shutdown_loading()
 	check(registry.pending_states.is_empty() and registry.texture_queue.active.is_empty(), "shutdown drains loading")
 	finish()

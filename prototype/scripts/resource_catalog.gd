@@ -118,7 +118,7 @@ func prewarm_match_entities(units: Array, buildings: Array) -> void:
 	unit_presentations.prewarm_units(units)
 	building_presentations.prewarm_buildings(buildings)
 	var projectile_source_ids: Dictionary = {}
-	for unit_value in units:
+	for unit_value in units + buildings:
 		var unit: Dictionary = unit_value
 		var source_unit_id := int(unit.get("projectile_id", -1))
 		if source_unit_id >= 0:
@@ -126,7 +126,12 @@ func prewarm_match_entities(units: Array, buildings: Array) -> void:
 	var ordered_projectile_ids: Array = projectile_source_ids.keys()
 	ordered_projectile_ids.sort()
 	for source_unit_id_value in ordered_projectile_ids:
-		projectile_presentations.ensure_loaded(int(source_unit_id_value))
+		var projectile_source_id := int(source_unit_id_value)
+		projectile_presentations.ensure_loaded(projectile_source_id)
+		var source: Dictionary = object_catalog_data.get("objects", {}).get("0:%d" % projectile_source_id, {})
+		var impact_id := int(source.get("graphics", {}).get("death", -1))
+		if impact_id >= 0:
+			effect_presentations.frame_info({"graphic_id": impact_id, "team": 1, "elapsed": 0.0})
 
 
 func read_json(path: String):
@@ -308,7 +313,7 @@ func _standing_resource_frame_info(resource: Dictionary, animation_time: float) 
 
 func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
 	var depleted := int(resource.get("amount", 0)) <= 0
-	if depleted and String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
+	if depleted and (ResourcePresentationRegistry.is_carcass(resource) or String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS):
 		return {}
 	var graphic_field := "source_depleted_graphic_id" if depleted else "source_graphic_id"
 	var asset_field := "source_depleted_asset_name" if depleted else "source_graphic_asset_name"
@@ -325,7 +330,12 @@ func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.
 	var frame_index := frames.size() - 1 if depleted else posmod(int(resource.get("source_frame", int(resource.get("id", 0)))), frames.size())
 	if not depleted and int(resource.get("source_frame", -1)) < 0:
 		frame_index = posmod(int(resource.get("id", 0)), frames.size())
-	if not depleted and String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
+	var mirrored := false
+	if ResourcePresentationRegistry.is_carcass(resource):
+		var resolved := ResourcePresentationRegistry.corpse_frame(resource, frames.size(), spec)
+		frame_index = int(resolved["frame_index"])
+		mirrored = bool(resolved["mirrored"])
+	elif not depleted and String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
 		frame_index = ResourcePresentationRegistry.animation_frame(resource, int(resource.get("id", 0)), animation_time, frames.size(), spec)
 	var texture: Texture2D = frames[frame_index]
 	if texture == null:
@@ -341,7 +351,7 @@ func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.
 		"graphic_id": graphic_id,
 		"frame_index": frame_index,
 		"hotspot": hotspot,
-		"mirrored": false,
+		"mirrored": mirrored,
 		"graphic_layer": int(spec.get("layer", 20)),
 	}
 

@@ -10,6 +10,7 @@ func _initialize() -> void:
 	test_topmost_is_stable()
 	test_texture_alpha_hit_and_mirror()
 	test_spatial_candidates()
+	test_hit_image_cache()
 
 	if failures.is_empty():
 		print("C-002 selection resolver tests passed")
@@ -69,3 +70,20 @@ func test_spatial_candidates() -> void:
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
+
+func test_hit_image_cache() -> void:
+	SelectionResolver.clear_hit_images()
+	var texture: Texture2D = load("res://assets/generated/villager_idle_00.png")
+	var first := SelectionResolver._hit_image(texture)
+	var second := SelectionResolver._hit_image(texture)
+	assert_equal(texture is CompressedTexture2D, true, "test uses a real imported sprite")
+	assert_equal(is_same(first, second), true, "repeated picking reuses CPU image")
+	assert_equal(SelectionResolver.hit_images.size(), 1, "one cache entry per source sprite")
+	texture.emit_changed()
+	assert_equal(SelectionResolver.hit_images.is_empty(), true, "resource updates invalidate cached pixels")
+	var dynamic := ImageTexture.create_from_image(first)
+	SelectionResolver._hit_image(dynamic)
+	assert_equal(SelectionResolver.hit_images.is_empty(), true, "dynamic textures never acquire stale cached pixels")
+	SelectionResolver._hit_image(texture)
+	SelectionResolver.clear_hit_images()
+	assert_equal(SelectionResolver.hit_images.is_empty() and SelectionResolver.hit_image_bytes == 0, true, "match shutdown releases cached image memory")

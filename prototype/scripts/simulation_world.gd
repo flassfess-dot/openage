@@ -1297,7 +1297,10 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 				units_by_id,
 				Callable(self, "_has_external_formation_unit"),
 				spatial_index.maximum_unit_radius,
-				spatial_index.maximum_unit_clearance
+				spatial_index.maximum_unit_clearance,
+				delta,
+				open_movement_envelopes_by_id,
+				navigation_grid.revision
 			)
 		elif unit_activity_registry.has_active_formation():
 			FormationCohesion.update(units)
@@ -1953,12 +1956,26 @@ func _build_option_template(team: int, kind: String) -> Dictionary:
 	return {
 		"kind": kind,
 		"source_unit_id": resolved_source_id,
-		"icon_id": int(interface.get("icon_id", -1)),
+		"icon_id": _build_option_icon_id(team, base_source_id, resolved_source_id, source),
 		"button_id": int(interface.get("button_id", -1)),
 		"cost": cost,
 		"duration": float(source.get("production", {}).get("creation_time", unit_stats(kind).get("creation_time", 0.0))),
 		"footprint_radius": maxf(option_half_size.x, option_half_size.y),
 	}
+
+
+func _build_option_icon_id(team: int, base_source_id: int, resolved_source_id: int, source: Dictionary) -> int:
+	var icon_id := int(source.get("interface", {}).get("icon_id", -1))
+	if icon_id < 0 or technology_system.current_age(team) == 100:
+		return icon_id
+	# Use the same DAT attribute-17 effects as a newly created building. This
+	# also handles ages that only change the facet, without replacing its ID.
+	var preview := {"team": team, "source_unit_id": resolved_source_id,
+		"unit_lineage": [base_source_id, resolved_source_id], "components": {}}
+	for effect in technology_system.persistent_entity_effects(team):
+		if int(effect.get("attr_c", -1)) == 17:
+			apply_attribute_effect(preview, effect)
+	return icon_id + maxi(0, int(preview.get("presentation_facing", 0)))
 
 
 func _present_build_option(template: Dictionary, team: int) -> Dictionary:

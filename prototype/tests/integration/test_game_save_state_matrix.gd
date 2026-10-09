@@ -91,9 +91,9 @@ func test_formation_and_combat_state(game) -> void:
 	game.game_controller.enqueue_command(attack, true, 1)
 	advance_ticks(game, 2)
 	assert_command_accepted(game, attack, "formation attack command")
-	assert_true(game.game_controller.formation_groups.is_empty(), "explicit combat releases the marching formation")
+	assert_true(not game.game_controller.formation_groups.is_empty(), "explicit combat remembers the formation")
 	for soldier in matching_entities(game.simulation_world.get_units(), 1, "clubman"):
-		assert_true(int(soldier.get("formation_group_id", -1)) == -1, "explicit attacker leaves its formation")
+		assert_true(int(soldier.get("formation_group_id", -1)) >= 0, "explicit attacker retains its group")
 		assert_true(bool(soldier.get("combat_pursuit", false)), "explicit attacker retains combat pursuit")
 	round_trip(game, "combat/explicit-pursuit")
 
