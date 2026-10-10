@@ -24,7 +24,7 @@ static func _forget_hit_image(id: int) -> void:
 static func _hit_image(texture: Texture2D) -> Image:
 	# Imported sprites are immutable between Resource.changed notifications.
 	# Dynamic ImageTexture/ViewportTexture updates have no such guarantee.
-	if not texture is CompressedTexture2D:
+	if not texture is CompressedTexture2D and not bool(texture.get_meta("ror_immutable_player_texture", false)):
 		return texture.get_image()
 	var id := texture.get_instance_id()
 	var entry: Dictionary = hit_images.get(id, {})

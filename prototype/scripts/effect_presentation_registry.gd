@@ -3,6 +3,7 @@ extends RefCounted
 
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
 
+var player_palette
 var graphics_catalog: Dictionary = {}
 var records_by_name: Dictionary = {}
 var frames_by_key: Dictionary = {}
@@ -44,7 +45,7 @@ func frame_info(effect: Dictionary) -> Dictionary:
 
 
 func frame_info_for(graphic_id: int, team: int, animation_time: float) -> Dictionary:
-	var player := 2 if team == 2 else 1
+	var player: int = player_palette.color_index(team) if player_palette != null else clampi(team, 1, 8)
 	var key := _ensure_loaded(graphic_id, player)
 	if key.is_empty():
 		return {}
@@ -73,7 +74,8 @@ func duration(graphic_id: int) -> float:
 
 
 func has_graphic(graphic_id: int, team: int = 1) -> bool:
-	return not _ensure_loaded(graphic_id, 2 if team == 2 else 1).is_empty()
+	var player: int = player_palette.color_index(team) if player_palette != null else clampi(team, 1, 8)
+	return not _ensure_loaded(graphic_id, player).is_empty()
 
 
 func _ensure_loaded(graphic_id: int, player: int) -> String:
@@ -82,6 +84,8 @@ func _ensure_loaded(graphic_id: int, player: int) -> String:
 		return requested_key
 	var asset_name := "graphic_%d_p%d" % [graphic_id, player]
 	var frame_records: Array = records_by_name.get(asset_name, [])
+	if frame_records.is_empty() and player > 2:
+		frame_records = records_by_name.get("graphic_%d_p1" % graphic_id, [])
 	if frame_records.is_empty() and player != 1:
 		return _ensure_loaded(graphic_id, 1)
 	if frame_records.is_empty():
@@ -93,6 +97,8 @@ func _ensure_loaded(graphic_id: int, player: int) -> String:
 		var texture: Texture2D = load("res://assets/generated/%s" % String(record.get("file", "")))
 		if texture == null:
 			continue
+		if player_palette != null:
+			texture = player_palette.texture_for(record, texture, player)
 		frames.append(texture)
 		var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
 		if record.has("hotspot"):

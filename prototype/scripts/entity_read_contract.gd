@@ -30,7 +30,7 @@ const CONTROL_FIELDS := [
 	"stance", "attack_damage", "attack_range", "attack_range_min", "attack_period",
 	"carry_capacity", "carried_resource_type_id", "resource_id", "gather_stage",
 	"worker_role_source_unit_id", "dropoff_id", "diagnostic_reason",
-	"construction_progress", "production_progress", "rally_point",
+	"construction_progress", "production_progress", "rally_point", "rally_point_set",
 ]
 const ARRAY_FIELDS := ["behavior_tags", "unit_lineage", "allowed_gatherer_domains"]
 const NESTED_RENDER_FIELDS := ["footprint", "presentation_state_overrides"]

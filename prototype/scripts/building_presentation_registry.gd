@@ -6,6 +6,7 @@ const CompositeGraphic := preload("res://scripts/composite_graphic.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const DamageSelector := preload("res://scripts/presentation_damage_selector.gd")
 
+var player_palette
 var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
 var graphics_catalog: Dictionary = {}
@@ -182,6 +183,8 @@ func _ensure_loaded(graphic_id: int, player: int) -> String:
 		return String(resolved_graphic_keys[requested_key])
 	var asset_name := "graphic_%d_p%d" % [graphic_id, player]
 	var frame_records: Array = frame_records_by_name.get(asset_name, [])
+	if frame_records.is_empty() and player > 2:
+		frame_records = frame_records_by_name.get("graphic_%d_p1" % graphic_id, [])
 	if frame_records.is_empty() and player != 1:
 		var fallback_key := _ensure_loaded(graphic_id, 1)
 		resolved_graphic_keys[requested_key] = fallback_key
@@ -196,6 +199,8 @@ func _ensure_loaded(graphic_id: int, player: int) -> String:
 		var texture: Texture2D = load("res://assets/generated/%s" % String(metadata.get("file", "")))
 		if texture == null:
 			continue
+		if player_palette != null:
+			texture = player_palette.texture_for(metadata, texture, player)
 		frames.append(texture)
 		var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
 		if metadata.has("hotspot"):
@@ -207,9 +212,6 @@ func _ensure_loaded(graphic_id: int, player: int) -> String:
 	var spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
 	var sequence_type := int(spec.get("sequence_type", 0))
 	var descriptor := GraphicDescriptor.new(asset_name, spec, frames.size(), sequence_type != 0 and (sequence_type & 0x08) == 0)
-	if descriptor.loop and descriptor.frames_per_angle > 1 and descriptor.replay_delay <= 0.0:
-		var animation_duration := descriptor.frame_duration * float(descriptor.frames_per_angle)
-		descriptor.replay_delay = clampf(animation_duration * 0.5, 0.35, 2.5)
 	descriptor.set_hotspots(hotspots)
 	textures_by_key[requested_key] = frames
 	descriptors_by_key[requested_key] = descriptor
@@ -226,7 +228,8 @@ func _idle_presentation_time(building: Dictionary, animation_time: float) -> flo
 
 
 func _frame_records(graphic_id: int, player: int) -> Array:
-	return frame_records_by_name.get("graphic_%d_p%d" % [graphic_id, player], [])
+	var records: Array = frame_records_by_name.get("graphic_%d_p%d" % [graphic_id, player], [])
+	return frame_records_by_name.get("graphic_%d_p1" % graphic_id, []) if records.is_empty() and player > 2 else records
 
 
 func _source_record(building: Dictionary) -> Dictionary:
@@ -371,7 +374,7 @@ func _graphic_layer(graphic_id: int) -> int:
 
 
 func _player_asset_id(team: int) -> int:
-	return 2 if team == 2 else 1
+	return player_palette.color_index(team) if player_palette != null else clampi(team, 1, 8)
 
 
 func _farm_layer_frame(part: String, player: int) -> Dictionary:
@@ -379,12 +382,16 @@ func _farm_layer_frame(part: String, player: int) -> Dictionary:
 	if farm_layer_frames.has(name):
 		return farm_layer_frames[name].duplicate()
 	var records: Array = frame_records_by_name.get(name, [])
+	if records.is_empty() and player > 2:
+		records = frame_records_by_name.get("graphic_273_%s_p1" % part, [])
 	if records.is_empty():
 		return {}
 	var record: Dictionary = records[0]
 	var texture: Texture2D = load("res://assets/generated/%s" % record["file"])
 	if texture == null:
 		return {}
+	if player_palette != null:
+		texture = player_palette.texture_for(record, texture, player)
 	var hotspot: Array = record.get("hotspot", [94, 48])
 	var info := {"texture": texture, "asset_name": name, "frame_index": 0,
 		"graphic_id": 273, "graphic_layer": 20, "hotspot": Vector2(hotspot[0], hotspot[1]), "mirrored": false}

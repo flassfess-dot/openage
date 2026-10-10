@@ -488,7 +488,7 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 	result.erase("formation_steering_target")
 	result.erase("formation_shared_isolated")
 	if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
-		for private_key in ["production_queue", "production_progress", "command_options", "rally_point"]:
+		for private_key in ["production_queue", "production_progress", "command_options", "rally_point", "rally_point_set"]:
 			result.erase(private_key)
 		result.get("components", {}).erase("production")
 		result.get("components", {}).erase("order")
@@ -540,7 +540,7 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 			for private_field in ["target_dock_id", "home_dock_id", "selected_input_resource_type_id", "approach_position", "cargo_goods", "cargo_gold", "trip_count"]:
 				components["trade"].erase(private_field)
 	if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
-		for private_key in ["production_progress", "rally_point", "resource_id", "dropoff_id", "worker_role_source_unit_id", "diagnostic_reason"]:
+		for private_key in ["production_progress", "rally_point", "rally_point_set", "resource_id", "dropoff_id", "worker_role_source_unit_id", "diagnostic_reason"]:
 			result.erase(private_key)
 	result["components"] = components
 	return result

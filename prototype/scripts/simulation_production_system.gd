@@ -459,11 +459,12 @@ func stop_waiting(building_id: int) -> bool:
 	return true
 
 
-func set_rally_point(building_id: int, target: Vector2) -> bool:
+func set_rally_point(building_id: int, target: Vector2, show_flag: bool = true) -> bool:
 	var building: Variant = world.find_building(building_id)
 	if building == null:
 		return false
 	world.set_entity_field(building, "rally_point", Coordinates.clamp_world(target, world.get_map_size()))
+	world.set_entity_field(building, "rally_point_set", show_flag)
 	return true
 
 

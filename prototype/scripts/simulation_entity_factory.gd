@@ -374,6 +374,7 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 		"death_duration": world.building_death_animation_duration(source),
 		"removed": false,
 		"rally_point": position,
+		"rally_point_set": false,
 		"components": components,
 	}
 	world.apply_archetype_identity(building, kind)

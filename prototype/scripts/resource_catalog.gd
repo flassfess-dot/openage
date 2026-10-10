@@ -1,5 +1,8 @@
 class_name RoRResourceCatalog
 
+const PlayerPalette := preload("res://scripts/player_palette.gd")
+var player_palette := PlayerPalette.new()
+
 const EnvironmentPack := preload("res://scripts/environment_pack.gd")
 
 const ShorelineTiles := preload("res://scripts/shoreline_tiles.gd")
@@ -63,6 +66,10 @@ var interface_skin := InterfaceSkin.new()
 
 func load() -> void:
 	load_generated_data()
+	player_palette.configure_assets(asset_records)
+	unit_presentations.player_palette = player_palette
+	building_presentations.player_palette = player_palette
+	effect_presentations.player_palette = player_palette
 	var graphics_frame_records: Dictionary = asset_frame_records_by_archive.get("graphics", {})
 	var interface_frame_records: Dictionary = asset_frame_records_by_archive.get("interfac", {})
 	scenario_marker_textures.clear()
@@ -114,9 +121,20 @@ func load() -> void:
 	interface_icons.configure(asset_records, interface_frame_records)
 
 
+func configure_player_colors(players: Array) -> void:
+	player_palette.configure_players(players)
+
+
+func rally_flag_frame_info(team: int, animation_time: float) -> Dictionary:
+	return effect_presentations.frame_info_for(322, team, animation_time)
+
+
 func prewarm_match_entities(units: Array, buildings: Array) -> void:
 	unit_presentations.prewarm_units(units)
 	building_presentations.prewarm_buildings(buildings)
+	for building in buildings:
+		if String(building.get("state", "")) == "complete":
+			rally_flag_frame_info(int(building.get("team", 1)), 0.0)
 	var projectile_source_ids: Dictionary = {}
 	for unit_value in units + buildings:
 		var unit: Dictionary = unit_value

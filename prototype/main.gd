@@ -13,6 +13,7 @@ const InputAdapter := preload("res://scripts/input_adapter.gd")
 const PointerController := preload("res://scripts/pointer_controller.gd")
 const PickingService := preload("res://scripts/picking_service.gd")
 const CommandFeedbackRouter := preload("res://scripts/command_feedback_router.gd")
+const FishShoalSelection := preload("res://scripts/fish_shoal_selection.gd")
 const CommandMarkerPresentation := preload("res://scripts/command_marker_presentation.gd")
 const SourceCursorPresentation := preload("res://scripts/source_cursor_presentation.gd")
 const InteractionCursor := preload("res://scripts/interaction_cursor.gd")
@@ -118,6 +119,8 @@ var picking_service := PickingService.new()
 var selection_preview_ids: Array[int] = []
 var command_feedback_router := CommandFeedbackRouter.new()
 var command_marker_presentation := CommandMarkerPresentation.new()
+var minimap_right_pressed := false
+var cached_rally_drawables: Array = []
 var interaction_highlight_id: int = -1
 var interaction_cursor_semantic := "default"
 var source_cursor_frame_applied := -1
@@ -284,6 +287,7 @@ func _ready() -> void:
 	terrain_border_textures = resource_catalog.terrain_border_textures
 	tree_texture = resource_catalog.tree_texture
 	berry_texture = resource_catalog.berry_texture
+	resource_catalog.configure_player_colors(match_definition.get("players", []))
 	interface_style_index = resource_catalog.interface_skin.style_index_for_match(match_definition, resource_catalog.object_catalog_data)
 	interface_panel_texture = resource_catalog.interface_skin.panel_texture(interface_style_index)
 	var status_candidate: Dictionary = resource_catalog.interface_skin.status_candidate()
@@ -295,6 +299,7 @@ func _ready() -> void:
 	simulation_world = _new_simulation_world()
 	game_controller = GameController.new(simulation_world)
 	render_world = RenderWorld.new()
+	render_world.player_palette = resource_catalog.player_palette
 	terrain_canvas = TerrainCanvas.new()
 	terrain_canvas.z_index = -100
 	add_child(terrain_canvas)
@@ -508,6 +513,8 @@ func reset_game() -> void:
 	if render_world != null:
 		render_world.clear_caches()
 	command_marker_presentation.reset()
+	minimap_right_pressed = false
+	cached_rally_drawables.clear()
 	interaction_highlight_id = -1
 	_apply_source_cursor("default")
 	units.clear()
@@ -874,9 +881,9 @@ func process_presentation_events() -> void:
 			var sound_name := String(feedback["sound_name"])
 			if not sound_name.is_empty():
 				play_sfx(sound_name)
-			if feedback["marker"] is Vector2:
+			if not quiet_order and feedback["marker"] is Vector2:
 				command_marker_presentation.trigger(feedback["marker"])
-			elif feedback["marker"] is Dictionary:
+			elif not quiet_order and feedback["marker"] is Dictionary:
 				resource_feedback_id = int(feedback["marker"].get("entity_id", feedback["marker"].get("resource_id", -1)))
 				resource_feedback_time = 0.7
 		message_time = 0.0 if quiet_order else 1.8
@@ -992,8 +999,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func handle_minimap_input(event: InputEvent) -> bool:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed and minimap_right_pressed:
+		minimap_right_pressed = false
+		return true
 	var screen_position: Variant = null
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+	if event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
 		screen_position = event.position
 	elif event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
 		screen_position = event.position
@@ -1002,7 +1012,15 @@ func handle_minimap_input(event: InputEvent) -> bool:
 	var geometry := minimap_geometry()
 	if not MinimapAperture.contains(screen_position, geometry["rectangle"]) or not MinimapProjection.contains_world(screen_position, map_size, geometry["center"], geometry["scale"]):
 		return false
-	center_view_on_world(MinimapProjection.minimap_to_world(screen_position, geometry["center"], geometry["scale"]))
+	var target := Coordinates.clamp_world(MinimapProjection.minimap_to_world(screen_position, geometry["center"], geometry["scale"]), map_size)
+	if event is InputEventMouseButton:
+		if not event.pressed: return false
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			minimap_right_pressed = true
+			if not local_spectator and not battle_over and not navigation_loading.is_loading():
+				issue_ground_order(target, event.shift_pressed)
+			return true
+	center_view_on_world(target)
 	queue_redraw()
 	return true
 
@@ -1298,6 +1316,7 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 
 	PickingService.SelectionResolver.clear_hit_images()
 	match_definition = restored_definition
+	resource_catalog.configure_player_colors(restored_definition.get("players", []))
 	map_definition = restored_map
 	if String(restored_map.get("environment_pack", "")) == "aoe2_temperate":
 		resource_catalog.enable_environment_pack()
@@ -1365,6 +1384,8 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	game_controller.event_stream.prune_through(command_feedback_router.event_cursor)
 	presentation_effect_timeline.reset()
 	command_marker_presentation.reset()
+	minimap_right_pressed = false
+	cached_rally_drawables.clear()
 	cached_fog_revision = -1
 	cached_fog_runs.clear()
 	cached_world_fog_meshes.clear()
@@ -1520,6 +1541,7 @@ func current_world_drawables() -> Array:
 		# Retained static caches project before their depth merge. Refresh only
 		# interpolation here; a second full scenery projection wastes frame time.
 		render_world.refresh_world_drawables(cached_world_drawables, Callable(self, "world_to_screen"), interpolation_alpha, false)
+		cached_rally_drawables = cached_world_drawables.filter(func(item): return String(item.get("kind", "")) == "rally_flag")
 		cached_world_drawables_revision = presentation_revision
 		cached_world_drawables_control_signature = control_signature
 	else:
@@ -1679,6 +1701,25 @@ func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: boo
 		command.params["queue_order"] = true
 	var feedback_marker: Variant = ContextResolver.feedback_marker(resolution, clicked_entity, mouse_world)
 	enqueue_with_feedback(command, accepted_message, "command:%s" % String(selected[0].get("kind", "")), feedback_marker)
+
+
+func issue_ground_order(target: Vector2, queue_order: bool = false) -> void:
+	var selected := selected_units()
+	if selected.is_empty():
+		selected = selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team)
+	if selected.is_empty(): return
+	var ids := _selection_ids(selected)
+	var resolution := ContextResolver.resolve(selected, null, target, local_player_team, simulation_world.get_allied_teams(local_player_team))
+	var command: Variant = null
+	if String(resolution.get("type", "")) == "set_rally_point":
+		command = RoRCommands.SetRallyPointCommand.new(game_controller.tick_index + 1, ids, target)
+	elif String(resolution.get("type", "")) == "move":
+		command = RoRCommands.MoveCommand.new(game_controller.tick_index + 1, ids, target) if queue_order else RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, ids, target, formation, Vector2.ZERO)
+		command.params["preserve_formations"] = true
+		if queue_order: command.params["queue_order"] = true
+	else:
+		return
+	enqueue_with_feedback(command, CommandFeedbackRouter.accepted_message(command.command_type()), "command:%s" % String(selected[0].get("kind", "")), target)
 
 
 func issue_martyrdom() -> void:
@@ -2113,7 +2154,7 @@ func research_from_hud(technology_id: int, building_id: int) -> void:
 		message_time = 2.0
 		return
 	var command = RoRCommands.ResearchCommand.new(game_controller.tick_index + 1, [building_id], String.num_int64(technology_id))
-	enqueue_with_feedback(command, "Исследование добавлено в очередь", "", Vector2(building.get("pos", Vector2.ZERO)))
+	enqueue_with_feedback(command, "Исследование добавлено в очередь", "", null)
 
 
 func cancel_production_from_hud(building_id: int, queue_index: int) -> void:
@@ -2125,7 +2166,7 @@ func cancel_production_from_hud(building_id: int, queue_index: int) -> void:
 		message_time = 2.0
 		return
 	var command = RoRCommands.CancelProductionCommand.new(game_controller.tick_index + 1, [building_id], queue_index)
-	enqueue_with_feedback(command, "Элемент очереди отменён", "", Vector2(building.get("pos", Vector2.ZERO)))
+	enqueue_with_feedback(command, "Элемент очереди отменён", "", null)
 
 
 func set_trade_resource_from_hud(resource_type_id: int) -> void:
@@ -2356,6 +2397,7 @@ func _draw() -> void:
 		probe.observe_microseconds("presentation.draw.fog", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
 	draw_command_marker()
+	draw_rally_flags()
 	draw_build_placement_preview()
 	if probe != null:
 		probe.observe_microseconds("presentation.draw.command_marker", Time.get_ticks_usec() - stage_started)
@@ -2477,6 +2519,13 @@ func draw_world_objects() -> void:
 		if probe != null:
 			probe.observe_microseconds("presentation.draw.world_submit", Time.get_ticks_usec() - stage_started)
 	return
+
+
+func draw_rally_flags() -> void:
+	# A rally point is the player's own command, so its flag stays visible over fog.
+	if presentation_snapshot.is_empty(): return
+	for item in cached_rally_drawables:
+		draw_render_body(item)
 
 
 func draw_command_marker() -> void:
@@ -2822,6 +2871,9 @@ func render_item_frame_info(kind: String, data: Variant) -> Dictionary:
 			return resource_catalog.projectile_frame_info(data)
 		"effect":
 			return resource_catalog.effect_frame_info(data)
+		"rally_flag":
+			var animation_time := float(presentation_snapshot.get("tick", 0)) * GameController.FIXED_STEP_SECONDS
+			return resource_catalog.rally_flag_frame_info(int(data.get("team", 1)), animation_time)
 		"marker":
 			var animation_time := float(presentation_snapshot.get("tick", 0)) * GameController.FIXED_STEP_SECONDS
 			return resource_catalog.scenario_marker_frame_info(data, animation_time)
@@ -2864,7 +2916,7 @@ func draw_objective_fallback(item: Dictionary) -> void:
 	var screen := PixelScaling.snap_screen(item["screen_position"])
 	var extent := 13.0 * view_zoom
 	var owner := int(objective.get("team", 0))
-	var fill := Color("747f81") if owner <= 0 else RenderItem.color_for_team(owner)
+	var fill := Color("747f81") if owner <= 0 else resource_catalog.player_palette.color_for_team(owner)
 	var points := PackedVector2Array([
 		screen + Vector2(0, -extent),
 		screen + Vector2(extent * 0.8, -extent * 0.25),
@@ -2878,7 +2930,7 @@ func draw_objective_fallback(item: Dictionary) -> void:
 
 func draw_unit_selection(item: Dictionary) -> void:
 	var unit: Dictionary = item["data"]
-	if resource_feedback_time > 0.0 and int(unit.get("id", -1)) == resource_feedback_id:
+	if resource_feedback_time > 0.0 and unit.get("selection_member_ids", [int(unit.get("id", -1))]).has(resource_feedback_id):
 		if int(resource_feedback_time * 10.0) % 2 == 0:
 			if String(unit.get("entity_type", "")) in ["building", "foundation"] or String(unit.get("footprint", {}).get("shape", "")) == "polygon":
 				draw_building_selection_rectangle(unit, Color("ffe56c"))
@@ -2888,9 +2940,10 @@ func draw_unit_selection(item: Dictionary) -> void:
 	var screen := unit_selection_center(item)
 	var is_building := String(unit.get("entity_type", "")) in ["building", "foundation"] or String(unit.get("footprint", {}).get("shape", "")) == "polygon"
 	var radius := unit_selection_radius(unit)
-	var previewed := selection_preview_ids.has(int(unit["id"]))
-	var hovered := interaction_highlight_id == int(unit["id"])
-	var selected := player_control_state.is_selected(int(unit["id"]))
+	var members: Array = unit.get("selection_member_ids", [int(unit["id"])])
+	var previewed := members.any(func(id): return selection_preview_ids.has(int(id)))
+	var hovered := members.has(interaction_highlight_id)
+	var selected := members.any(func(id): return player_control_state.is_selected(int(id)))
 	if previewed:
 		var preview_color := Color("f39a55") if Input.is_key_pressed(KEY_SHIFT) and selected else Color("66e8ff")
 		if is_building:
@@ -2911,6 +2964,9 @@ func draw_unit_selection(item: Dictionary) -> void:
 
 
 func unit_selection_radius(entity: Dictionary) -> Vector2:
+	if entity.has("selection_members"):
+		var geometry := FishShoalSelection.geometry(entity, Callable(self, "world_to_screen"), view_zoom)
+		return Vector2(geometry["radius"]) / maxf(0.001, view_zoom)
 	var footprint: Dictionary = entity.get("footprint", {})
 	var half_size: Variant = footprint.get("half_size")
 	if half_size is Vector2:
@@ -2926,6 +2982,9 @@ func unit_selection_radius(entity: Dictionary) -> Vector2:
 
 
 func unit_selection_center(item: Dictionary) -> Vector2:
+	var entity: Dictionary = item.get("data", {})
+	if entity.has("selection_members"):
+		return PixelScaling.snap_screen(FishShoalSelection.geometry(entity, Callable(self, "world_to_screen"), view_zoom)["center"])
 	# Render-item screen_position is the object's ground anchor. Adding another
 	# sprite-height offset detached ship/resource rings from the water or ground.
 	return PixelScaling.snap_screen(Vector2(item.get("screen_position", Vector2.ZERO)))
@@ -3177,10 +3236,10 @@ func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
 		stage_started = Time.get_ticks_usec()
 	for unit in overview_units:
 		if unit["hp"] > 0.0:
-			_append_colored_circle(vertices, colors, minimap_position(unit["pos"], center, scale), 2.0, Color("40b9ff") if unit["team"] == local_player_team else Color("e33d31"))
+			_append_colored_circle(vertices, colors, minimap_position(unit["pos"], center, scale), 2.0, resource_catalog.player_palette.color_for_team(int(unit["team"])))
 	for building in overview_buildings:
 		if building["hp"] > 0.0:
-			_append_colored_circle(vertices, colors, minimap_position(building["pos"], center, scale), 3.0, Color("f0d16d") if building["team"] == local_player_team else Color("e33d31"))
+			_append_colored_circle(vertices, colors, minimap_position(building["pos"], center, scale), 3.0, resource_catalog.player_palette.color_for_team(int(building["team"])))
 	if probe != null:
 		probe.observe_microseconds("presentation.minimap.entities", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()

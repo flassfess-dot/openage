@@ -1,6 +1,7 @@
 class_name RoRPickingService
 extends RefCounted
 
+const FishShoalSelection := preload("res://scripts/fish_shoal_selection.gd")
 const SelectionResolver := preload("res://scripts/selection_resolver.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 
@@ -23,20 +24,21 @@ func hit_stack(screen_position: Vector2, drawables: Array, world_to_screen: Call
 		if drawable_kind == "resource" and not resource_is_selectable(entity):
 			continue
 		var entity_type := entity_type_for(drawable_kind, entity)
-		var stable_id := int(drawable.get("stable_id", entity.get("id", -1)))
+		var selection_entity: Dictionary = drawable.get("selection_group", entity)
+		var stable_id := int(selection_entity.get("id", drawable.get("stable_id", -1)))
 		var dedupe_key := "%s:%d" % [entity_type, stable_id]
 		if seen.has(dedupe_key):
 			continue
 		var hit_method := ""
 		if texture_hit(screen_position, drawable, world_to_screen, zoom):
 			hit_method = "opaque_pixel"
-		elif footprint_hit(screen_position, entity_type, entity, world_to_screen, zoom):
+		elif footprint_hit(screen_position, entity_type, selection_entity, world_to_screen, zoom):
 			hit_method = "footprint"
 		if hit_method.is_empty():
 			continue
 		seen[dedupe_key] = true
 		result.append({
-			"entity": entity,
+			"entity": selection_entity,
 			"entity_type": entity_type,
 			"id": stable_id,
 			"team": int(entity.get("team", 0)),
@@ -104,6 +106,11 @@ func texture_hit(screen_position: Vector2, drawable: Dictionary, world_to_screen
 
 
 func footprint_hit(screen_position: Vector2, entity_type: String, entity: Dictionary, world_to_screen: Callable, zoom: float) -> bool:
+	if entity.has("selection_members"):
+		var geometry := FishShoalSelection.geometry(entity, world_to_screen, zoom)
+		var offset := screen_position - Vector2(geometry["center"])
+		var radius := Vector2(geometry["radius"])
+		return offset.x * offset.x / (radius.x * radius.x) + offset.y * offset.y / (radius.y * radius.y) <= 1.0
 	var footprint: Dictionary = entity.get("footprint", {})
 	if entity_type in ["building", "foundation"]:
 		var polygon_source: Variant = footprint.get("polygon", PackedVector2Array())
@@ -121,4 +128,5 @@ func footprint_hit(screen_position: Vector2, entity_type: String, entity: Dictio
 
 
 static func resource_is_selectable(resource: Dictionary) -> bool:
+	if String(resource.get("kind", "")) in ["deep_fish", "shore_fish", "whale"] and int(resource.get("amount", 0)) <= 0: return false
 	return String(resource.get("tree_phase", "")) != "stump" and not (String(resource.get("kind", "")) == "tree" and int(resource.get("amount", 1)) <= 0)

@@ -6,6 +6,7 @@ const Coordinates := preload("res://scripts/coordinates.gd")
 # Genie/SLP clockwise screen convention. Only S..N are stored for the usual
 # 8-angle/mirroring-mode-6 sprites; NE..SE mirror source blocks 3..1.
 const LABELS := ["S", "SW", "W", "NW", "N", "NE", "E", "SE"]
+const SIMULATION_ANGLE_COUNT := 8
 
 
 static func logical_for_world(direction: Vector2, angle_count: int = 8) -> int:
@@ -20,6 +21,14 @@ static func logical_for_screen(direction: Vector2, angle_count: int = 8) -> int:
 	# south rotate toward west/left. Negating X is therefore intentional.
 	var angle := atan2(-direction.x, direction.y)
 	return posmod(roundi(angle / (TAU / float(count))), count)
+
+
+# Simulation facing is an eight-sector compass, not a frame-block index.
+# Each graphic (including every composite layer) has its own angle count.
+static func for_angle_count(logical_facing: int, angle_count: int, source_angle_count: int = SIMULATION_ANGLE_COUNT) -> int:
+	var source_count := maxi(1, source_angle_count)
+	var destination_count := maxi(1, angle_count)
+	return posmod(roundi(float(posmod(logical_facing, source_count)) * float(destination_count) / float(source_count)), destination_count)
 
 
 static func screen_vector(logical_facing: int, angle_count: int = 8) -> Vector2:

@@ -53,7 +53,8 @@ func _draw() -> void:
 		var column := facing % 4
 		var row := floori(float(facing) / 4.0)
 		var anchor := Vector2(145 + column * 300, 225 + row * 310)
-		var resolved: Dictionary = descriptor.resolve(facing, animation_time, frames.size())
+		var graphic_facing := FacingConvention.for_angle_count(facing, descriptor.logical_angle_count)
+		var resolved: Dictionary = descriptor.resolve(graphic_facing, animation_time, frames.size())
 		var frame_index: int = resolved["frame_index"]
 		var texture: Texture2D = frames[frame_index]
 		var hotspot: Vector2 = descriptor.hotspot_for(frame_index, Vector2(texture.get_width() * 0.5, texture.get_height()))

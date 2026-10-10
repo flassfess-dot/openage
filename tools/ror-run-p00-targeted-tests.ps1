@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$ScenarioOnly, [switch]$InlandOnly, [switch]$P01QueueOnly, [switch]$P01PopulationOnly, [switch]$P01HudOnly, [switch]$P01HudRemaining, [switch]$P01StateOnly, [string]$TestScript = "", [string]$FromTest = "")
+param([switch]$ScenarioOnly, [switch]$InlandOnly, [switch]$P01QueueOnly, [switch]$P01PopulationOnly, [switch]$P01HudOnly, [switch]$P01HudRemaining, [switch]$P01StateOnly, [switch]$GameplayRegressions, [string]$TestScript = "", [string]$FromTest = "")
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -75,6 +75,19 @@ if ($P01StateOnly) {
         "res://tests/integration/test_game_save_state_matrix.gd"
     )
 }
+if ($GameplayRegressions) {
+    $tests = @(
+        "res://tests/unit/test_live_gameplay_player_palette.gd",
+        "res://tests/unit/test_live_gameplay_fire_animation.gd",
+        "res://tests/unit/test_live_gameplay_fish_shoal.gd",
+        "res://tests/unit/test_live_gameplay_naval_facing.gd",
+        "res://tests/integration/test_live_gameplay_naval_movement_facing.gd",
+        "res://tests/integration/test_live_gameplay_skirmish_colors.gd",
+        "res://tests/integration/test_live_gameplay_production_feedback.gd",
+        "res://tests/integration/test_live_gameplay_rally_flag.gd",
+        "res://tests/integration/test_live_gameplay_minimap_orders.gd"
+    )
+}
 if ($TestScript) {
     $tests = @($TestScript)
 }
@@ -86,6 +99,7 @@ if ($P01PopulationOnly) { $selectionCount++ }
 if ($P01HudOnly) { $selectionCount++ }
 if ($P01HudRemaining) { $selectionCount++ }
 if ($P01StateOnly) { $selectionCount++ }
+if ($GameplayRegressions) { $selectionCount++ }
 if ($TestScript) { $selectionCount++ }
 if ($selectionCount -gt 1) {
     throw "Choose only one test selection option"

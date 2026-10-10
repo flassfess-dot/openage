@@ -33,6 +33,7 @@ func configure(definitions: Array) -> void:
 			"team": team,
 			"controller": String(definition.get("controller", "ai")),
 			"civilization_id": int(definition.get("civilization_id", 13)),
+			"color_index": clampi(int(definition.get("color_index", team)), 1, 8),
 			"status": ACTIVE,
 		}
 		relations[team] = {team: ALLY}
@@ -41,7 +42,7 @@ func configure(definitions: Array) -> void:
 func ensure(team: int, civilization_id: int = 13, controller: String = "unknown") -> void:
 	if team <= 0 or players.has(team):
 		return
-	players[team] = {"team": team, "controller": controller, "civilization_id": civilization_id, "status": ACTIVE}
+	players[team] = {"team": team, "controller": controller, "civilization_id": civilization_id, "color_index": clampi(team, 1, 8), "status": ACTIVE}
 	relations[team] = {team: ALLY}
 
 

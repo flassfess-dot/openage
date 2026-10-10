@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$StartAt = "")
+param([string]$StartAt = "", [switch]$GameplayRegressions)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -44,7 +44,7 @@ function Get-TestScripts {
 try {
     Write-LogLine "Rise of Rome test run started"
     Write-LogLine "Repository: $repositoryRoot"
-    Write-LogLine ("Category: {0}" -f $(if ($StartAt) { "from $StartAt" } else { "all" }))
+    Write-LogLine ("Category: {0}" -f $(if ($GameplayRegressions) { "live gameplay regressions" } elseif ($StartAt) { "from $StartAt" } else { "all" }))
     Write-Status 0 "checking test runner"
 
     if (-not (Test-Path -LiteralPath $godotApplication)) {
@@ -55,6 +55,9 @@ try {
     }
 
     $testScripts = @(Get-TestScripts)
+    if ($GameplayRegressions) {
+        $testScripts = @($testScripts | Where-Object { $_.Name -like "test_live_gameplay_*.gd" })
+    }
     if ($testScripts.Count -eq 0) {
         throw "No tests found"
     }
@@ -83,9 +86,10 @@ try {
         "--path", $projectRoot,
         "--script", "res://tests/test_suite.gd"
     )
-    if ($startScript) {
-        $arguments += @("--", "--start-at=$startScript")
-    }
+    $suiteOptions = @()
+    if ($GameplayRegressions) { $suiteOptions += "--filter=test_live_gameplay_" }
+    if ($startScript) { $suiteOptions += "--start-at=$startScript" }
+    if ($suiteOptions.Count -gt 0) { $arguments += @("--") + $suiteOptions }
     Write-LogLine ("COMMAND: {0} {1}" -f $godotApplication, ($arguments -join " "))
     $passed = 0
     $failed = 0
@@ -112,7 +116,10 @@ try {
         }
     }
 
-    if ($exitCode -ne 0) {
+    if ($passed + $failed -ne $testCount) {
+        throw "Test suite did not report all selected scripts. Expected: $testCount. Passed: $passed. Failed: $failed. Engine log: $godotLog"
+    }
+    if ($exitCode -ne 0 -or $failed -gt 0) {
         throw "Test suite failed with exit code $exitCode. Passed: $passed. Failed: $failed."
     }
 

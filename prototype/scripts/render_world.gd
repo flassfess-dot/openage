@@ -1,5 +1,6 @@
 class_name RoRRenderWorld
 
+const FishShoalSelection := preload("res://scripts/fish_shoal_selection.gd")
 const PickingService := preload("res://scripts/picking_service.gd")
 const ResourcePresentationRegistry := preload("res://scripts/resource_presentation_registry.gd")
 const RenderItem := preload("res://scripts/render_item.gd")
@@ -16,6 +17,11 @@ const GROUND_DECAL_SOURCE_IDS := {
 	178: true, 179: true, 180: true, 181: true, 182: true, 183: true,
 	187: true, 188: true, 189: true, 190: true, 191: true,
 }
+
+var player_palette
+
+func team_color(team: int) -> Color:
+	return player_palette.color_for_team(team) if player_palette != null else RenderItem.color_for_team(team)
 
 var cached_resource_signature: int = 0
 var cached_resource_drawables: Array = []
@@ -108,7 +114,11 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			part_item["screen_y"] = Vector2(world_to_screen.call(building_position + depth_offset)).y
 			drawables.append(part_item)
 		if selected_id_lookup.has(building_id) or preview_id_lookup.has(building_id):
-			drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, building_screen, building_id, building, building_info, building_elevation, RenderItem.color_for_team(int(building.get("team", 0))), 1.0, 1))
+			drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, building_screen, building_id, building, building_info, building_elevation, team_color(int(building.get("team", 0))), 1.0, 1))
+		if selected_id_lookup.has(building_id) and int(building.get("team", 0)) == observer_team and bool(building.get("rally_point_set", false)) and float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "")) == "complete":
+			var rally_position := Vector2(building.get("rally_point", building_position))
+			var rally_info := _frame_info(frame_info_provider, "rally_flag", building)
+			drawables.append(RenderItem.create("rally_flag", RenderItem.Layer.UNIT_BUILDING, rally_position, world_to_screen.call(rally_position), building_id, building, rally_info, 0.0, team_color(observer_team), 1.0, 20_001))
 	_observe_stage("buildings", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	if not from_snapshot:
@@ -139,7 +149,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		var previous_position: Vector2 = projectile.get("previous_pos", projectile["pos"])
 		var render_position: Vector2 = previous_position.lerp(projectile["pos"], alpha)
 		var projectile_info := _frame_info(frame_info_provider, "projectile", projectile)
-		drawables.append(RenderItem.create("projectile", RenderItem.Layer.PROJECTILE_EFFECT, render_position, world_to_screen.call(render_position), int(projectile["id"]), projectile, projectile_info, float(projectile.get("elevation", 0.0)), RenderItem.color_for_team(int(projectile.get("team", 0)))))
+		drawables.append(RenderItem.create("projectile", RenderItem.Layer.PROJECTILE_EFFECT, render_position, world_to_screen.call(render_position), int(projectile["id"]), projectile, projectile_info, float(projectile.get("elevation", 0.0)), team_color(int(projectile.get("team", 0)))))
 	drawables.append_array(create_effect_drawables(source_effects, world_to_screen, frame_info_provider))
 	for marker in source_markers:
 		var marker_position: Vector2 = marker.get("position", Vector2.ZERO)
@@ -156,6 +166,8 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		var environment_info := _frame_info(frame_info_provider, "environment", environment_data)
 		var layer := environment_layer(environment_item)
 		drawables.append(RenderItem.create("environment", layer, environment_position, world_to_screen.call(environment_position), int(environment_data.get("id", -1)), environment_data, environment_info, float(environment_data.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(environment_info.get("graphic_layer", 0)) * 1000))
+	if not from_snapshot:
+		drawables = FishShoalSelection.group_drawables(drawables, preview_ids + selected_ids, world_to_screen)
 	_observe_stage("static_entities", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	for unit in source_units:
@@ -172,7 +184,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			var frame_info := _frame_info(frame_info_provider, "unit", unit)
 			var stable_id := int(unit["id"])
 			var elevation := float(unit.get("elevation", 0.0))
-			var player_color := RenderItem.color_for_team(int(unit.get("team", 0)))
+			var player_color := team_color(int(unit.get("team", 0)))
 			if death_phase != "corpse":
 				drawables.append(RenderItem.create("shadow", RenderItem.Layer.SHADOW, render_position, unit_screen, stable_id, unit, {}, elevation, Color(0.0, 0.0, 0.0, 0.32)))
 			var unit_base_sub_order := int(frame_info.get("graphic_layer", 20)) * 1000
@@ -363,6 +375,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 			var drawable: Dictionary = drawable_value
 			var resource_id := int(drawable.get("stable_id", -1))
 			if current_by_id.has(resource_id):
+				if drawable.get("data", {}).has("selection_members"): continue
 				drawable["data"] = current_by_id[resource_id]
 				if String(drawable.get("kind", "")) != "resource_shadow" and (ResourcePresentationRegistry.is_carcass(current_by_id[resource_id]) or String(current_by_id[resource_id].get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS or String(current_by_id[resource_id].get("tree_phase", "")) == "falling"):
 					var frame_info := _frame_info(frame_info_provider, "resource", current_by_id[resource_id])
@@ -386,6 +399,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		_append_resource_shadow(cached_resource_drawables, resource, resource_info, position, resource_screen)
 		if preview_id_lookup.has(resource_id) and PickingService.resource_is_selectable(resource):
 			cached_resource_drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, resource_screen, resource_id, resource, resource_info, elevation, Color("d6bc63"), 1.0, 1))
+	cached_resource_drawables = FishShoalSelection.group_drawables(cached_resource_drawables, preview_ids, world_to_screen)
 	cached_resource_drawables.sort_custom(RenderItem.less)
 	return cached_resource_drawables
 

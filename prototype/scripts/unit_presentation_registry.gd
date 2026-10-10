@@ -8,9 +8,11 @@ var background_loading_enabled := false
 var prewarming := false
 
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
+const FacingConvention := preload("res://scripts/facing_convention.gd")
 const DamageSelector := preload("res://scripts/presentation_damage_selector.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 
+var player_palette
 var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
 var graphics_catalog: Dictionary = {}
@@ -163,12 +165,20 @@ func prewarm_units(units: Array) -> void:
 func texture_key_for_unit(unit: Dictionary) -> String:
 	var alias := String(unit.get("kind", ""))
 	var owner_team := int(unit.get("team", 1))
-	var prefix := alias if owner_team == 1 else "enemy_%s" % alias
+	var player: int = player_palette.color_index(owner_team) if player_palette != null else clampi(owner_team, 1, 8)
+	var prefix := alias if player == 1 else "enemy_%s" % alias if player == 2 else "color_%d_%s" % [player, alias]
+	if player > 2 and not definitions.has(prefix) and definitions.has(alias):
+		var source: Dictionary = definitions[alias]
+		_register_team(alias, prefix, player, source["archetype"], source["state_specs"])
 	var neutral_prefix := "neutral_%s" % alias
 	if owner_team <= 0 and definitions.has(neutral_prefix):
 		prefix = neutral_prefix
 	var source_id := int(unit.get("source_unit_id", -1))
 	var variant_key := "%s#%d" % [prefix, source_id]
+	var base_variant := "%s#%d" % [alias, source_id]
+	if owner_team > 0 and player > 2 and definitions.has(base_variant) and not definitions.has(variant_key):
+		var source: Dictionary = definitions[base_variant]
+		_register_team(alias, variant_key, player, source["archetype"], source["state_specs"], source_id)
 	return variant_key if definitions.has(variant_key) else prefix
 
 
@@ -182,7 +192,9 @@ func _state_paths(definition: Dictionary, state_spec: Dictionary) -> Array[Strin
 		var part: Dictionary = parts[index]
 		var base_name := String(part.get("asset_name", ""))
 		var asset_name := String(part.get("neutral_asset_name", base_name)) if team <= 0 and index == 0 else String(part.get("enemy_asset_name", base_name)) if team == 2 else base_name
-		var records: Array = records_by_name.get(asset_name, [])
+		var records: Array = records_by_name.get(asset_name, []).duplicate()
+		if team > 2:
+			records.append_array(records_by_name.get(String(part.get("enemy_asset_name", "")), []))
 		if records.is_empty() and team == 2:
 			records = records_by_name.get(base_name, [])
 		for record in records:
@@ -316,7 +328,8 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -
 	var time := float(unit.get("anim", 0.0)) if animation_time < 0.0 else animation_time
 	if corpse_requested and resolved_state != state:
 		time = float(graphic_descriptor.frames_per_angle) * float(graphic_descriptor.frame_duration)
-	var resolved: Dictionary = graphic_descriptor.resolve(int(unit.get("facing", 0)), time, frames.size())
+	var graphic_facing := FacingConvention.for_angle_count(int(unit.get("facing", 0)), graphic_descriptor.logical_angle_count)
+	var resolved: Dictionary = graphic_descriptor.resolve(graphic_facing, time, frames.size())
 	var frame_index := int(resolved["frame_index"])
 	var texture: Texture2D = frames[frame_index]
 	var graphic_id := int(graphic_ids.get(texture_key, {}).get(resolved_state, -1))
@@ -398,6 +411,8 @@ func _load_team(alias: String, texture_key: String, team: int, archetype: Dictio
 			var texture: Texture2D = _texture_for_path("res://assets/generated/%s" % String(record.get("file", "")))
 			if texture == null:
 				continue
+			if team > 0 and player_palette != null:
+				texture = player_palette.texture_for(record, texture, team)
 			frames.append(texture)
 			var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
 			if record.has("hotspot"):
@@ -438,6 +453,8 @@ func _load_composite_parts(texture_key: String, state: String, team: int, state_
 			var texture: Texture2D = _texture_for_path("res://assets/generated/%s" % String(record.get("file", "")))
 			if texture == null:
 				continue
+			if team > 0 and player_palette != null:
+				texture = player_palette.texture_for(record, texture, team)
 			frames.append(texture)
 			var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
 			if record.has("hotspot"):
@@ -468,7 +485,8 @@ func _resolved_composite_parts(texture_key: String, state: String, facing: int, 
 		var part_descriptor = loaded.get("descriptor")
 		if frames.is_empty() or part_descriptor == null:
 			continue
-		var resolved: Dictionary = part_descriptor.resolve(facing, animation_time, frames.size())
+		var part_facing := FacingConvention.for_angle_count(facing, part_descriptor.logical_angle_count)
+		var resolved: Dictionary = part_descriptor.resolve(part_facing, animation_time, frames.size())
 		var frame_index := int(resolved.get("frame_index", 0))
 		var texture: Texture2D = frames[frame_index]
 		result.append({

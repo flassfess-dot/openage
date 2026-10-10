@@ -23,10 +23,22 @@ func _initialize() -> void:
 		quit(1)
 		return
 	var start_at := ""
+	var name_filter := ""
 	for argument_value in OS.get_cmdline_user_args():
 		var argument := String(argument_value)
+		if argument.begins_with("--filter="):
+			name_filter = argument.trim_prefix("--filter=")
 		if argument.begins_with("--start-at="):
 			start_at = argument.trim_prefix("--start-at=").trim_prefix("res://").replace("\\", "/")
+	if not name_filter.is_empty():
+		var filtered: Array[String] = []
+		for script in test_scripts:
+			if script.get_file().begins_with(name_filter): filtered.append(script)
+		test_scripts = filtered
+		if test_scripts.is_empty():
+			push_error("A-006 test runner found no scripts for filter: %s" % name_filter)
+			quit(1)
+			return
 	if not start_at.is_empty():
 		var start_index := test_scripts.find(start_at)
 		if start_index < 0:

@@ -1,5 +1,7 @@
 class_name RoRRenderItem
 
+const PlayerPalette := preload("res://scripts/player_palette.gd")
+
 enum Layer {
 	TERRAIN,
 	DECAL,
@@ -64,7 +66,4 @@ static func less_same_layer(left: Dictionary, right: Dictionary) -> bool:
 
 
 static func color_for_team(team: int) -> Color:
-	match team:
-		1: return Color("4a7fda")
-		2: return Color("d75a50")
-		_: return Color.WHITE
+	return PlayerPalette.shade(clampi(team, 1, 8), 3) if team > 0 else Color.WHITE
