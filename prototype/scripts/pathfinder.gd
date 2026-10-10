@@ -31,10 +31,13 @@ var cache_hits: int = 0
 var route_cache_revision: int = -1
 var performance_probe: Variant = null
 var native_enabled: bool = true
+var native_region_grouping_enabled := true
 var native_available: bool = false
 var native_kernels: Dictionary = {}
 var native_movement_kernels_by_unit_id: Dictionary = {}
 var native_shared_movement_kernel: Variant = null
+var incremental_movement_enabled := true
+var last_movement_snapshot_stats: Dictionary = {}
 var native_movement_ids := PackedInt32Array()
 var native_movement_positions := PackedVector2Array()
 var native_movement_radii := PackedFloat32Array()
@@ -63,6 +66,13 @@ func path_query_tick_microseconds() -> int:
 
 
 func clear_cache() -> void:
+	movement_owner = null
+	movement_cursor = -1
+	movement_epoch = -1
+	movement_kernels.clear()
+	movement_configuration_by_id.clear()
+	movement_kernels_by_configuration.clear()
+	movement_unit_kernels.clear()
 	clear_route_cache()
 	fallback_components.clear()
 	route_cache_revision = -1
@@ -233,80 +243,94 @@ func prepare_native_kernels_for_units(units: Array) -> void:
 		_native_kernel_for(String(configuration[0]), int(configuration[1]))
 
 
+var movement_world_ref: WeakRef
+var movement_cursor := -1
+var movement_epoch := -1
+var movement_owner: Variant = null
+var movement_kernels: Array = []
+var movement_configuration_by_id: Dictionary = {}
+var movement_kernels_by_configuration: Dictionary = {}
+var movement_unit_kernels: Dictionary = {}
+
+func configure_entity_change_source(world) -> void:
+	if movement_world_ref == null or movement_world_ref.get_ref() != world:
+		movement_world_ref = weakref(world)
+		movement_cursor = -1
+		movement_epoch = -1
+		movement_owner = null
+		movement_kernels.clear()
+		movement_configuration_by_id.clear()
+		movement_kernels_by_configuration.clear()
+
 func prepare_native_movement_snapshot(units: Array) -> void:
 	native_batch_results.clear()
-	native_movement_kernels_by_unit_id.clear()
 	native_shared_movement_kernel = null
-	if not uses_native_kernel() or units.is_empty():
+	native_movement_kernels_by_unit_id = {}
+	if not uses_native_kernel() or units.is_empty(): return
+	if units.size() > 65536:
+		# Capacity overflow uses the complete current scalar movement path.
+		movement_owner = null
+		movement_kernels.clear()
+		movement_configuration_by_id.clear()
+		movement_kernels_by_configuration.clear()
+		movement_unit_kernels.clear()
 		return
-	native_movement_ids.resize(units.size())
-	native_movement_positions.resize(units.size())
-	native_movement_radii.resize(units.size())
-	native_movement_clearances.resize(units.size())
-	native_movement_priorities.resize(units.size())
-	native_movement_health.resize(units.size())
-	native_movement_solid_animals.resize(units.size())
-	var first_unit: Dictionary = units[0]
-	var shared_domain := String(first_unit["movement_domain"])
-	var shared_restriction := int(first_unit["terrain_restriction"])
-	var homogeneous_configuration := true
-	for index in range(units.size()):
-		var unit: Dictionary = units[index]
-		var movement_domain := String(unit["movement_domain"])
-		var restriction_id := int(unit["terrain_restriction"])
-		if movement_domain != shared_domain or restriction_id != shared_restriction:
-			homogeneous_configuration = false
-		native_movement_ids[index] = int(unit["id"])
-		native_movement_positions[index] = Vector2(unit["pos"])
-		native_movement_radii[index] = float(unit["footprint_radius"])
-		native_movement_clearances[index] = float(unit["minimum_clearance"])
-		native_movement_priorities[index] = int(unit["push_priority"])
-		native_movement_health[index] = float(unit["hp"])
-		native_movement_solid_animals[index] = int(MobileCollision.is_solid_animal(unit))
-	if homogeneous_configuration:
-		native_shared_movement_kernel = _native_kernel_for(shared_domain, shared_restriction)
-		native_shared_movement_kernel.configure_movement_snapshot(
-			native_movement_ids,
-			native_movement_positions,
-			native_movement_radii,
-			native_movement_clearances,
-			native_movement_priorities,
-			native_movement_health,
-			native_movement_solid_animals
-		)
+	var world: Variant = movement_world_ref.get_ref() if movement_world_ref != null else null
+	if world == null:
+		# Standalone planners own a complete input rather than a world journal.
+		movement_owner = _native_kernel_for(String(units[0]["movement_domain"]), int(units[0]["terrain_restriction"]))
+		_record_movement_snapshot_stats(movement_owner.configure_movement_entities(units))
+		for unit in units:
+			var kernel = _native_kernel_for(String(unit["movement_domain"]), int(unit["terrain_restriction"]))
+			kernel.share_movement_snapshot(movement_owner)
+			native_movement_kernels_by_unit_id[int(unit["id"])] = kernel
 		return
-	var configurations: Dictionary = {}
-	var configuration_by_unit_id: Dictionary = {}
-	for unit in units:
-		var unit_id := int(unit["id"])
-		var movement_domain := String(unit["movement_domain"])
-		var restriction_id := int(unit["terrain_restriction"])
-		var configuration_key := "%s:%d" % [movement_domain, restriction_id]
-		configurations[configuration_key] = [movement_domain, restriction_id]
-		configuration_by_unit_id[unit_id] = configuration_key
-	var kernels_by_configuration: Dictionary = {}
-	var collision_owner: Variant = null
-	var configuration_keys := configurations.keys()
-	configuration_keys.sort()
-	for configuration_key in configuration_keys:
-		var configuration: Array = configurations[configuration_key]
-		var kernel = _native_kernel_for(String(configuration[0]), int(configuration[1]))
-		if collision_owner != null and kernel.has_method("share_movement_snapshot"):
-			kernel.share_movement_snapshot(collision_owner)
-		else:
-			kernel.configure_movement_snapshot(
-				native_movement_ids,
-				native_movement_positions,
-				native_movement_radii,
-				native_movement_clearances,
-				native_movement_priorities,
-				native_movement_health,
-				native_movement_solid_animals
-			)
-			collision_owner = kernel
-		kernels_by_configuration[configuration_key] = kernel
-	for unit_id in configuration_by_unit_id:
-		native_movement_kernels_by_unit_id[unit_id] = kernels_by_configuration[configuration_by_unit_id[unit_id]]
+	var journal = world.entity_changes
+	var delta: Dictionary = journal.changes_since(movement_cursor if movement_epoch == journal.epoch else -1)
+	var rebuild: bool = movement_owner == null or bool(delta["full"])
+	var changed: Array = []
+	for id in delta["ids"]:
+		var mask := int(delta["masks"][id])
+		if mask & 1 and (world.units_by_id.has(id) or movement_configuration_by_id.has(id)): rebuild = true
+		var unit: Variant = world.find_unit(int(id))
+		if unit != null and mask & (2 | 4 | 8 | 128):
+			changed.append(unit)
+			var configuration := "%s:%d" % [String(unit["movement_domain"]), int(unit["terrain_restriction"])]
+			if movement_configuration_by_id.get(int(id), "") != configuration: rebuild = true
+	# Other terrain kernels drop borrowed owner generations before mutation.
+	# Worker batches have already joined at this owner-thread tick boundary.
+	for kernel in movement_kernels:
+		if kernel != movement_owner: kernel.release_movement_snapshot()
+	if rebuild:
+		movement_configuration_by_id.clear()
+		movement_kernels_by_configuration.clear()
+		for unit in units:
+			var key := "%s:%d" % [String(unit["movement_domain"]), int(unit["terrain_restriction"])]
+			movement_configuration_by_id[int(unit["id"])] = key
+			if not movement_kernels_by_configuration.has(key): movement_kernels_by_configuration[key] = _native_kernel_for(String(unit["movement_domain"]), int(unit["terrain_restriction"]))
+		var keys: Array = movement_kernels_by_configuration.keys()
+		keys.sort()
+		movement_owner = movement_kernels_by_configuration[keys[0]]
+		_record_movement_snapshot_stats(movement_owner.configure_movement_entities(units, false))
+		movement_kernels = movement_kernels_by_configuration.values()
+		movement_unit_kernels.clear()
+		for id in movement_configuration_by_id: movement_unit_kernels[id] = movement_kernels_by_configuration[movement_configuration_by_id[id]]
+	else:
+		_record_movement_snapshot_stats(movement_owner.update_movement_entities(changed))
+	for kernel in movement_kernels:
+		if kernel != movement_owner: kernel.share_movement_snapshot(movement_owner)
+	if movement_kernels.size() == 1: native_shared_movement_kernel = movement_owner
+	else:
+		native_movement_kernels_by_unit_id = movement_unit_kernels
+	movement_cursor = int(delta["revision"])
+	movement_epoch = int(journal.epoch)
+
+
+func _record_movement_snapshot_stats(stats: Dictionary) -> void:
+	last_movement_snapshot_stats = stats
+	if performance_probe != null:
+		for key in stats:
+			performance_probe.increment("movement.snapshot." + String(key), int(stats[key]))
 
 
 func has_native_movement_for(unit_id: int) -> bool:
@@ -941,3 +965,31 @@ func _heuristic(left: Vector2i, right: Vector2i) -> float:
 	var dx := absi(left.x - right.x)
 	var dy := absi(left.y - right.y)
 	return float(maxi(dx, dy)) + (DIAGONAL_COST - 1.0) * float(mini(dx, dy))
+
+# Detached point lists only. One owner-thread call replaces per-point Variant
+# calls and repeated kernel synchronization; reference ordering stays available.
+# A lawful planner's mask version changes only when actual access changes.
+func connectivity_dependency_stamp(domain: String, restriction: int) -> Array:
+	if uses_native_kernel():
+		var kernel = _native_kernel_for(domain, restriction)
+		if kernel.has_method("get_walkability_version"):
+			return [kernel.get_instance_id(), kernel.get_walkability_version()]
+	return [grid.get_instance_id(), grid.revision]
+
+func group_points_by_component(points: Array, domain: String = "land", restriction: int = -1, radius: float = 0.0) -> Dictionary:
+	if grid == null or points.is_empty(): return {}
+	if uses_native_kernel() and native_region_grouping_enabled:
+		var kernel = _native_kernel_for(domain, restriction)
+		if kernel.has_method("group_points_by_component"):
+			var typed_points: Array[Vector2] = []
+			typed_points.assign(points)
+			return kernel.group_points_by_component(typed_points, radius)
+	var result: Dictionary = {}
+	for point in points:
+		var region := component_id(Vector2i(point), domain, restriction, radius)
+		if region < 0: continue
+		if not result.has(region):
+			var bucket: Array[Vector2] = []
+			result[region] = bucket
+		result[region].append(point)
+	return result

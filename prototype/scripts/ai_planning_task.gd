@@ -43,7 +43,7 @@ static func run(input: Dictionary) -> Dictionary:
 					private_planner = BuildSites.Pathfinder.new(BuildSites.NavigationData.create_grid(base["navigation"]))
 				var output: Dictionary = BuildSites.run(query["input"], private_planner)
 				candidates = output.get("sites", {}).get(kind, [])
-				cache_updates.append({"team": query["team"], "kind": kind, "cache_key": query["cache_key"], "signature": query["signature"], "sites": output.get("sites", {})})
+				cache_updates.append({"team": query["team"], "kind": kind, "cache_key": query["cache_key"], "signature": query["signature"], "sites": output.get("sites", {}), "dependency_scope": query.get("dependency_scope", {})})
 			if not candidates.is_empty():
 				sites[kind] = candidates
 				if bool(snapshot.get("build_site_candidate_filter", false)) and ai._has_usable_build_site(kind, candidates, snapshot.get("units", []), snapshot.get("buildings", [])):

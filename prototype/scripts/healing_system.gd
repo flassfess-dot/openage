@@ -40,26 +40,26 @@ func assign_command(selected: Array, target_id: int) -> String:
 		cancel(unit, "new_healing")
 		world.release_resource_approach_slot(unit)
 		world.release_building_approach_slot(unit)
-		unit["resource_id"] = -1
-		unit["gather_stage"] = "none"
-		unit["target_building_id"] = -1
-		unit["target_id"] = target_id
-		unit["task"] = "heal"
-		unit["retaliation_target_id"] = -1
+		world.set_entity_field(unit, "resource_id", -1)
+		world.set_entity_field(unit, "gather_stage", "none")
+		world.set_entity_field(unit, "target_building_id", -1)
+		world.set_entity_field(unit, "target_id", target_id)
+		world.set_entity_field(unit, "task", "heal")
+		world.set_entity_field(unit, "retaliation_target_id", -1)
 		world.clear_combat_intent(unit)
 		var target_direction: Vector2 = Vector2(target["pos"]) - Vector2(unit["pos"])
 		if target_direction.length_squared() > 0.0001:
-			unit["action_facing"] = world.facing_for_vector(target_direction)
-		OrderPipeline.begin(unit, "heal", target_id, target["pos"], true)
+			world.set_entity_field(unit, "action_facing", world.facing_for_vector(target_direction))
+		world.begin_entity_order(unit, "heal", target_id, target["pos"], true)
 		rejection = begin(unit, target)
 		if not rejection.is_empty():
 			last_rejection = rejection
 			world.halt_unit(unit, rejection)
 			continue
 		if is_in_range(unit, target):
-			OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
-			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
-			OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+			world.transition_entity_order(unit, OrderPipeline.PLAN_PATH)
+			world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
+			world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
 			resolved_count += 1
 		elif world.assign_unit_destination(unit, target["pos"], false):
 			resolved_count += 1
@@ -75,10 +75,10 @@ func finish_healing(healer: Dictionary, reason: String, completed: bool = false)
 	else:
 		cancel(healer, reason)
 	world.release_unit_destination(healer)
-	healer["target_id"] = -1
-	healer["task"] = "idle"
-	healer["diagnostic_reason"] = "healing_complete:%s" % reason
-	OrderPipeline.complete(healer, reason)
+	world.set_entity_field(healer, "target_id", -1)
+	world.set_entity_field(healer, "task", "idle")
+	world.set_entity_field(healer, "diagnostic_reason", "healing_complete:%s" % reason)
+	world.complete_entity_order(healer, reason)
 	world.restore_formation_facing(healer)
 	if completed and float(healer.get("hp", 0.0)) > 0.0 and OrderPipeline.queued(healer).is_empty():
 		var next_target: Variant = next_chain_target(healer)
@@ -138,9 +138,9 @@ func advance_unit_order(healer: Dictionary, delta: float, result: Dictionary) ->
 		result["moving"] = world.move_unit(healer, delta)
 	else:
 		world.release_unit_destination(healer)
-		OrderPipeline.transition(healer, OrderPipeline.FACE_TARGET)
+		world.transition_entity_order(healer, OrderPipeline.FACE_TARGET)
 		world.face_unit_toward(healer, Vector2(target.get("pos", healer.get("pos", Vector2.ZERO))))
-		OrderPipeline.transition(healer, OrderPipeline.PERFORM_ACTION)
+		world.transition_entity_order(healer, OrderPipeline.PERFORM_ACTION)
 		result["animation_state"] = AnimationController.HEAL
 		var healing_result := advance_healing(healer, target, delta)
 		if healing_result == "complete":
@@ -198,7 +198,7 @@ func advance_healing(healer: Dictionary, target: Dictionary, delta: float) -> St
 		return "healing_not_active"
 	var previous := float(target.get("hp", 0.0))
 	var maximum := float(target.get("max_hp", previous))
-	target["hp"] = minf(maximum, previous + rate_for(healer) * maxf(0.0, delta))
+	world.set_entity_field(target, "hp", minf(maximum, previous + rate_for(healer) * maxf(0.0, delta)))
 	var restored := maxf(0.0, float(target["hp"]) - previous)
 	healing["restored_amount"] = float(healing.get("restored_amount", 0.0)) + restored
 	return "complete" if float(target["hp"]) + 0.0001 >= maximum else "pending"

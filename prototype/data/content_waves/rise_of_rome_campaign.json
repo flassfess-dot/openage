@@ -6,7 +6,7 @@
   "campaign_name": "Расцвет Рима",
   "campaign_sha256": "7b6d3630bb6a11c7ac68fd1f066299f61e07a998c25fe5c78b5dc3d3f47e181d",
   "manifest_sha256": "bbce57ca3d1019fdbd26b47f8cb95be3f74220923272ed23630c6f1da6d5d8a8",
-  "runtime_catalog_cache_key": "68bd5c0162b551ff54fa98001335ff39ae9d1fd3cde653db2eb34bb62c32d713",
+  "runtime_catalog_cache_key": "ceb3fcbf2658bfa7dee85a567dd51392cccac64d0a13862deaae5457682bb685",
   "gate_contract": {
     "launcher_required_zero_gaps": [
       "objects",

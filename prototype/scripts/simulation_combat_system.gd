@@ -58,19 +58,19 @@ func assign_command_attack_ground(selected: Array, target: Vector2) -> bool:
 		world.healing_system.cancel(unit, "new_order")
 		world.release_resource_approach_slot(unit)
 		world.release_building_approach_slot(unit)
-		unit["gather_stage"] = "none"
-		unit["resource_id"] = -1
-		unit["target_building_id"] = -1
-		unit["task"] = "attack_ground"
-		unit["target_id"] = -1
+		world.set_entity_field(unit, "gather_stage", "none")
+		world.set_entity_field(unit, "resource_id", -1)
+		world.set_entity_field(unit, "target_building_id", -1)
+		world.set_entity_field(unit, "task", "attack_ground")
+		world.set_entity_field(unit, "target_id", -1)
 		world.clear_combat_intent(unit)
-		unit["combat_destination"] = FormationCombat.destination(unit, ground_target)
-		unit["retaliation_target_id"] = -1
-		OrderPipeline.begin(unit, "attack_ground", -1, target, true)
+		world.set_entity_field(unit, "combat_destination", FormationCombat.destination(unit, ground_target))
+		world.set_entity_field(unit, "retaliation_target_id", -1)
+		world.begin_entity_order(unit, "attack_ground", -1, target, true)
 		if CombatRules.is_in_range(unit, ground_target):
 			world.release_unit_destination(unit)
-			OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
-			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
+			world.transition_entity_order(unit, OrderPipeline.PLAN_PATH)
+			world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
 			resolved_count += 1
 		elif world.assign_unit_destination(unit, Vector2(unit["combat_destination"])):
 			resolved_count += 1
@@ -106,39 +106,40 @@ func assign_command_attack(selected: Array, target_id: int, policy: Dictionary =
 		var autonomous := bool(policy.get("autonomous", false))
 		var previous_task := String(unit.get("task", "idle"))
 		if autonomous and previous_task != "attack" and previous_task in ["move", "attack_move"]:
+			world.notify_entity_changed(unit)
 			unit["combat_resume"] = {
 				"task": previous_task,
 				"destination": unit.get("destination", unit.get("pos", Vector2.ZERO)),
 			}
 		elif not autonomous:
-			unit["combat_resume"] = {}
-			unit["combat_pursuit"] = not huntable and not static_attacker
+			world.set_entity_field(unit, "combat_resume", {})
+			world.set_entity_field(unit, "combat_pursuit", not huntable and not static_attacker)
 		world.release_resource_approach_slot(unit)
 		world.release_building_approach_slot(unit)
-		unit["gather_stage"] = "none"
-		unit["resource_id"] = -1
-		unit["target_building_id"] = -1
+		world.set_entity_field(unit, "gather_stage", "none")
+		world.set_entity_field(unit, "resource_id", -1)
+		world.set_entity_field(unit, "target_building_id", -1)
 		world.destination_reservations.release(int(unit["id"]))
-		unit["reserved_destination"] = null
-		unit["task"] = "attack"
-		unit["target_id"] = target_id
-		unit["attack_autonomous"] = autonomous
+		world.set_entity_field(unit, "reserved_destination", null)
+		world.set_entity_field(unit, "task", "attack")
+		world.set_entity_field(unit, "target_id", target_id)
+		world.set_entity_field(unit, "attack_autonomous", autonomous)
 		if int(unit.get("formation_group_id", -1)) >= 0:
-			unit["formation_slot_mode"] = "released"
-		unit["combat_leash_origin"] = Vector2(policy.get("leash_origin", unit.get("pos", Vector2.ZERO)))
-		unit["chase_range"] = maxf(0.0, float(policy.get("chase_range", unit.get("chase_range", 0.0))))
-		unit["retaliation_target_id"] = -1
-		unit["diagnostic_reason"] = "target:%s" % String(policy.get("trigger", "explicit"))
+			world.set_entity_field(unit, "formation_slot_mode", "released")
+		world.set_entity_field(unit, "combat_leash_origin", Vector2(policy.get("leash_origin", unit.get("pos", Vector2.ZERO))))
+		world.set_entity_field(unit, "chase_range", maxf(0.0, float(policy.get("chase_range", unit.get("chase_range", 0.0)))))
+		world.set_entity_field(unit, "retaliation_target_id", -1)
+		world.set_entity_field(unit, "diagnostic_reason", "target:%s" % String(policy.get("trigger", "explicit")))
 		if static_attacker:
-			unit["combat_destination"] = unit.get("pos", Vector2.ZERO)
+			world.set_entity_field(unit, "combat_destination", unit.get("pos", Vector2.ZERO))
 		var target_direction: Vector2 = target["pos"] - unit["pos"]
 		if target_direction.length_squared() > 0.0001:
-			unit["action_facing"] = world.facing_for_vector(target_direction)
-		OrderPipeline.begin(unit, "attack", target_id, target["pos"], true)
+			world.set_entity_field(unit, "action_facing", world.facing_for_vector(target_direction))
+		world.begin_entity_order(unit, "attack", target_id, target["pos"], true)
 		if CombatRules.is_in_range(unit, target):
-			OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
-			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
-			OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+			world.transition_entity_order(unit, OrderPipeline.PLAN_PATH)
+			world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
+			world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
 			resolved_count += 1
 		elif not static_attacker and world.assign_unit_destination(unit, unit["combat_destination"]):
 			resolved_count += 1
@@ -159,50 +160,50 @@ func finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> v
 	var completed_target: Variant = world.find_combat_target(completed_target_id)
 	var waiting_for_carcass: bool = world.entity_is_worker(unit) and int(unit.get("pending_hunt_target_id", -1)) == completed_target_id and completed_target != null and float(completed_target.get("hp", 0.0)) <= 0.0
 	var resume: Dictionary = unit.get("combat_resume", {}).duplicate(true)
-	OrderPipeline.complete(unit, reason)
-	unit["diagnostic_reason"] = "combat_complete:%s" % reason
+	world.complete_entity_order(unit, reason)
+	world.set_entity_field(unit, "diagnostic_reason", "combat_complete:%s" % reason)
 	if reason in ["target_became_allied", "target_unreachable"]:
-		unit["combat_pursuit"] = false
-	unit["target_id"] = -1
-	unit["combat_role"] = ""
-	unit["combat_slot_index"] = -1
-	unit["combat_slot_count"] = 0
-	unit["combat_destination"] = null
-	unit["attack_autonomous"] = false
-	unit["combat_resume"] = {}
+		world.set_entity_field(unit, "combat_pursuit", false)
+	world.set_entity_field(unit, "target_id", -1)
+	world.set_entity_field(unit, "combat_role", "")
+	world.set_entity_field(unit, "combat_slot_index", -1)
+	world.set_entity_field(unit, "combat_slot_count", 0)
+	world.set_entity_field(unit, "combat_destination", null)
+	world.set_entity_field(unit, "attack_autonomous", false)
+	world.set_entity_field(unit, "combat_resume", {})
 	if world.entity_is_static(unit):
-		unit["task"] = "idle"
+		world.set_entity_field(unit, "task", "idle")
 		EntityComponents.sync_dynamic(unit)
 		return
 	if waiting_for_carcass:
-		unit["task"] = "idle"
+		world.set_entity_field(unit, "task", "idle")
 		world.stop_unit_motion(unit)
 		return
 	if world.entity_is_worker(unit):
-		unit["pending_hunt_target_id"] = -1
+		world.set_entity_field(unit, "pending_hunt_target_id", -1)
 		world.worker_role_system.clear(unit)
 	if bool(unit.get("combat_pursuit", false)):
-		unit["task"] = "idle"
+		world.set_entity_field(unit, "task", "idle")
 		world.stop_unit_motion(unit)
 		return
 	var formation_home: Variant = unit.get("formation_home")
 	if formation_home is Vector2 and int(unit.get("formation_group_id", -1)) >= 0:
 		var resume_task := String(resume.get("task", "move"))
-		unit["task"] = resume_task if resume_task in ["move", "attack_move"] else "move"
-		unit["formation_slot_mode"] = "soft"
-		OrderPipeline.begin(unit, unit["task"], -1, formation_home, false)
+		world.set_entity_field(unit, "task", resume_task if resume_task in ["move", "attack_move"] else "move")
+		world.set_entity_field(unit, "formation_slot_mode", "soft")
+		world.begin_entity_order(unit, unit["task"], -1, formation_home, false)
 		if not world.assign_unit_destination(unit, formation_home):
 			world.restore_formation_facing(unit)
 	elif String(resume.get("task", "")) in ["move", "attack_move"] and resume.get("destination") is Vector2:
 		var resume_task := String(resume["task"])
 		var resume_destination: Vector2 = resume["destination"]
-		unit["task"] = resume_task
-		OrderPipeline.begin(unit, resume_task, -1, resume_destination, false)
+		world.set_entity_field(unit, "task", resume_task)
+		world.begin_entity_order(unit, resume_task, -1, resume_destination, false)
 		if not world.assign_unit_destination(unit, resume_destination):
-			unit["task"] = "idle"
-			OrderPipeline.complete(unit, "resume_unreachable")
+			world.set_entity_field(unit, "task", "idle")
+			world.complete_entity_order(unit, "resume_unreachable")
 	else:
-		unit["task"] = "idle"
+		world.set_entity_field(unit, "task", "idle")
 		world.stop_unit_motion(unit)
 		world.restore_formation_facing(unit)
 
@@ -232,7 +233,7 @@ func update_static_combatants(delta: float, player_team: int) -> void:
 			continue
 		if String(building.get("state", "complete")) != "complete" or not bool(building.get("combat_enabled", false)):
 			continue
-		building["cooldown"] = maxf(0.0, float(building.get("cooldown", 0.0)) - delta)
+		world.set_entity_field(building, "cooldown", maxf(0.0, float(building.get("cooldown", 0.0)) - delta))
 		var animation_state := AnimationController.IDLE
 		var attack_target: Variant = null
 		if String(building.get("task", "idle")) == "attack":
@@ -247,18 +248,18 @@ func update_static_combatants(delta: float, player_team: int) -> void:
 				world.finish_combat(building, "stand_ground_range")
 			else:
 				if OrderPipeline.phase(building) == OrderPipeline.RECOVER and float(building.get("cooldown", 0.0)) <= 0.0:
-					OrderPipeline.restart(building)
+					world.restart_entity_order(building)
 				world.face_unit_toward(building, Vector2(target.get("pos", building.get("pos", Vector2.ZERO))))
 				if float(building.get("cooldown", 0.0)) <= 0.0:
-					OrderPipeline.transition(building, OrderPipeline.FACE_TARGET)
-					OrderPipeline.transition(building, OrderPipeline.PERFORM_ACTION)
+					world.transition_entity_order(building, OrderPipeline.FACE_TARGET)
+					world.transition_entity_order(building, OrderPipeline.PERFORM_ACTION)
 					animation_state = AnimationController.ATTACK_WINDUP
 					attack_target = target
 				else:
-					OrderPipeline.transition(building, OrderPipeline.RECOVER)
+					world.transition_entity_order(building, OrderPipeline.RECOVER)
 					animation_state = AnimationController.ATTACK_RECOVER
 		var restart_attack_clip := animation_state == AnimationController.ATTACK_WINDUP and String(building.get("anim_state", "")) == AnimationController.ATTACK_RECOVER
-		AnimationController.update(building, animation_state, delta, restart_attack_clip)
+		world.advance_entity_animation(building, animation_state, delta, restart_attack_clip)
 		if attack_target != null:
 			apply_attack_frame_event(building, attack_target, player_team)
 		EntityComponents.sync_dynamic(building)
@@ -285,7 +286,7 @@ func _advance_ground_attack_order(unit: Dictionary, delta: float, result: Dictio
 			simulation_world.halt_unit(unit, "stand_ground_range")
 		else:
 			var ground_destination := FormationCombat.destination(unit, ground_target)
-			unit["combat_destination"] = ground_destination
+			world.set_entity_field(unit, "combat_destination", ground_destination)
 			simulation_world.ensure_navigation_destination(unit, ground_destination)
 			if unit.get("path", []).is_empty():
 				simulation_world.halt_unit(unit, "no_path")
@@ -294,12 +295,12 @@ func _advance_ground_attack_order(unit: Dictionary, delta: float, result: Dictio
 	else:
 		simulation_world.movement_system.face_unit_toward(unit, ground_position)
 		if float(unit.get("cooldown", 0.0)) <= 0.0:
-			OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
-			OrderPipeline.transition(unit, OrderPipeline.PERFORM_ACTION)
+			world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
+			world.transition_entity_order(unit, OrderPipeline.PERFORM_ACTION)
 			result["animation_state"] = AnimationController.ATTACK_WINDUP
 			result["attack_target"] = ground_target
 		else:
-			OrderPipeline.transition(unit, OrderPipeline.RECOVER)
+			world.transition_entity_order(unit, OrderPipeline.RECOVER)
 			result["animation_state"] = AnimationController.ATTACK_RECOVER
 
 
@@ -318,9 +319,9 @@ func _advance_target_attack_order(unit: Dictionary, delta: float, result: Dictio
 		simulation_world.finish_combat(unit, "leash_exceeded")
 	else:
 		if OrderPipeline.phase(unit) == OrderPipeline.RECOVER and float(unit.get("cooldown", 0.0)) <= 0.0:
-			OrderPipeline.restart(unit)
+			world.restart_entity_order(unit)
 		var combat_destination := FormationCombat.destination(unit, enemy)
-		unit["combat_destination"] = combat_destination
+		world.set_entity_field(unit, "combat_destination", combat_destination)
 		var too_close := CombatRules.is_too_close(unit, enemy)
 		if not CombatRules.is_in_range(unit, enemy) or too_close:
 			simulation_world.ensure_navigation_destination(unit, combat_destination)
@@ -328,12 +329,12 @@ func _advance_target_attack_order(unit: Dictionary, delta: float, result: Dictio
 		else:
 			simulation_world.movement_system.face_unit_toward(unit, Vector2(enemy.get("pos", unit.get("pos", Vector2.ZERO))))
 			if float(unit.get("cooldown", 0.0)) <= 0.0:
-				OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
-				OrderPipeline.transition(unit, OrderPipeline.PERFORM_ACTION)
+				world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
+				world.transition_entity_order(unit, OrderPipeline.PERFORM_ACTION)
 				result["animation_state"] = AnimationController.ATTACK_WINDUP
 				result["attack_target"] = enemy
 			else:
-				OrderPipeline.transition(unit, OrderPipeline.RECOVER)
+				world.transition_entity_order(unit, OrderPipeline.RECOVER)
 				result["animation_state"] = AnimationController.ATTACK_RECOVER
 
 
@@ -373,9 +374,9 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 			_apply_impact_damage(candidate, impact_damage, source_context, -1, player_team)
 			if int(candidate.get("id", -1)) == int(enemy.get("id", -2)):
 				damage = impact_damage
-	unit["cooldown"] = maxf(0.1, unit["attack_period"])
-	OrderPipeline.transition(unit, OrderPipeline.RECOVER)
-	unit["last_damage"] = damage
+	world.set_entity_field(unit, "cooldown", maxf(0.1, unit["attack_period"]))
+	world.transition_entity_order(unit, OrderPipeline.RECOVER)
+	world.set_entity_field(unit, "last_damage", damage)
 
 
 func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
@@ -515,7 +516,7 @@ func _destroy_trees_at_impact(projectile: Dictionary) -> void:
 					continue
 				if position.distance_squared_to(Vector2(resource["pos"])) > radius * radius:
 					continue
-				resource["amount"] = 0
+				world.set_entity_field(resource, "amount", 0)
 				world.update_resource_state(resource)
 				world.emit_domain_event("tree_destroyed", {"resource_id": int(resource["id"]), "projectile_id": int(projectile["id"])})
 
@@ -533,8 +534,8 @@ func _impact_candidates(projectile: Dictionary, target: Variant) -> Array:
 func _apply_impact_damage(target: Dictionary, damage: float, source_context: Dictionary, projectile_id: int, player_team: int) -> void:
 	var source_id := int(source_context.get("entity_id", -1))
 	var source_team := int(source_context.get("team", 0))
-	target["hp"] -= damage
-	target["retaliation_target_id"] = source_id
+	world.set_entity_field(target, "hp", target["hp"] - (damage))
+	world.set_entity_field(target, "retaliation_target_id", source_id)
 	world.refresh_unit_activity(target)
 	world.record_attack_distress({"id": source_id, "team": source_team}, target)
 	if world.capture_domain_events:

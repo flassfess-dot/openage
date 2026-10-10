@@ -7,7 +7,7 @@ const Replay := preload("res://scripts/replay_system.gd")
 const Formation := preload("res://scripts/formation_group.gd")
 const KnowledgeGrid := preload("res://scripts/navigation_knowledge_grid.gd")
 const Pathfinder := preload("res://scripts/pathfinder.gd")
-const VERSION := 1
+const VERSION := 2
 const MAX_BYTES := 268435456
 # Durable state is explicit. Catalogs, projections, spatial indices and native
 # objects are reconstructed rather than serialized as implementation objects.
@@ -38,7 +38,6 @@ static func _capture_fields(owner, fields: Array) -> Dictionary:
 
 static func _restore_fields(owner, values: Dictionary, fields: Array) -> void:
 	for field in fields:
-		if not values.has(field): continue
 		var current: Variant = owner.get(field)
 		if current is Array and current.is_typed():
 			current.assign(values[field])
@@ -57,50 +56,21 @@ static func _entity_refs(ids: Array, entities: Dictionary) -> Array:
 	return result
 
 static func _capture_runtime(world, controller) -> Dictionary:
-	# These retained indices also carry timing or historical bucket membership.
-	# Rebuilding them at a different tick can change autonomous decisions.
-	var awareness = controller.combat_awareness
-	var combat := _capture_fields(awareness, ["cached_entity_count", "cached_roster_tick", "cached_roster_revision", "cached_candidate_index_tick"])
-	combat["attackers"] = _entity_ids(awareness.cached_attackers)
-	combat["targets"] = _entity_ids(awareness.cached_targets)
-	combat["index"] = {"maximum_radius": awareness.cached_candidate_index.get("maximum_radius", 0.0), "buckets": {}}
-	for cell in awareness.cached_candidate_index.get("buckets", {}):
-		combat["index"]["buckets"][cell] = {}
-		for team in awareness.cached_candidate_index["buckets"][cell]:
-			combat["index"]["buckets"][cell][team] = _entity_ids(awareness.cached_candidate_index["buckets"][cell][team])
+	# Wildlife has historical wake/bucket state that affects behavior. Activity,
+	# combat and spatial indices are reconstructed from current source facts.
 	var wildlife = controller.wildlife_behavior
 	var animals := _capture_fields(wildlife, ["cached_unit_count", "cached_roster_tick", "cached_world_roster_revision"])
 	animals["roster"] = _entity_ids(wildlife.cached_wildlife)
 	animals["due"] = []
 	for bucket in wildlife.cached_due_wildlife: animals["due"].append(_entity_ids(bucket))
-	var activity := _capture_fields(world.unit_activity_registry, ["unit_order_by_id", "order_dirty", "roster_dirty", "compatibility_ticks", "movement_candidate_active", "formation_active", "tick_prepared"])
-	activity["active"] = _entity_ids(world.unit_activity_registry.active_units)
-	return {"open_movement_envelopes": world.open_movement_envelopes_by_id.duplicate(true), "activity": activity, "combat": combat, "wildlife": animals, "roster_revision": world.combat_roster_revision, "activity_ticks": world.unit_activity_registry.compatibility_ticks, "spatial_ticks": world.spatial_sync_system.compatibility_ticks}
+	return {"open_movement_envelopes": world.open_movement_envelopes_by_id.duplicate(true), "wildlife": animals, "roster_revision": world.combat_roster_revision}
 
 static func _restore_runtime(runtime: Dictionary, world, controller, entities: Dictionary) -> void:
-	if runtime.is_empty(): return
-	world.open_movement_envelopes_by_id = runtime.get("open_movement_envelopes", {}).duplicate(true)
+	world.open_movement_envelopes_by_id = runtime["open_movement_envelopes"].duplicate(true)
 	world.combat_roster_revision = int(runtime["roster_revision"])
-	var activity = world.unit_activity_registry
-	if runtime.has("activity"):
-		_restore_fields(activity, runtime["activity"], ["unit_order_by_id", "order_dirty", "roster_dirty", "compatibility_ticks", "movement_candidate_active", "formation_active", "tick_prepared"])
-		activity.active_units = _entity_refs(runtime["activity"]["active"], entities)
-		activity.active_units_by_id.clear()
-		for unit in activity.active_units: activity.active_units_by_id[int(unit["id"])] = unit
-		activity._rebuild_active_indices()
-	else: activity.compatibility_ticks = int(runtime["activity_ticks"])
-	world.spatial_sync_system.compatibility_ticks = int(runtime["spatial_ticks"])
-	var saved: Dictionary = runtime["combat"]
-	var combat = controller.combat_awareness
-	_restore_fields(combat, saved, ["cached_entity_count", "cached_roster_tick", "cached_roster_revision", "cached_candidate_index_tick"])
-	combat.cached_attackers = _entity_refs(saved["attackers"], entities)
-	combat.cached_targets = _entity_refs(saved["targets"], entities)
-	combat.cached_candidate_index = {"maximum_radius": saved["index"]["maximum_radius"], "buckets": {}}
-	for cell in saved["index"]["buckets"]:
-		combat.cached_candidate_index["buckets"][cell] = {}
-		for team in saved["index"]["buckets"][cell]:
-			combat.cached_candidate_index["buckets"][cell][team] = _entity_refs(saved["index"]["buckets"][cell][team], entities)
-	saved = runtime["wildlife"]
+	world.unit_activity_registry.synchronize(world)
+	controller.combat_awareness.reset()
+	var saved: Dictionary = runtime["wildlife"]
 	var wildlife = controller.wildlife_behavior
 	_restore_fields(wildlife, saved, ["cached_unit_count", "cached_roster_tick", "cached_world_roster_revision"])
 	wildlife.cached_wildlife = _entity_refs(saved["roster"], entities)
@@ -131,7 +101,7 @@ static func capture(world, controller, definition: Dictionary, map: Dictionary) 
 	for unit in world_state["units"]:
 		unit.erase("_formation_path_cache")
 		unit.erase("formation_steering_target")
-	return {"version": VERSION, "runtime": _capture_runtime(world, controller), "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
+	return {"version": VERSION, "runtime": _capture_runtime(world, controller), "observation_memory": {"buildings": world.last_known_buildings_by_player.duplicate(true), "resources": world.known_resource_memory_state()}, "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
 
 static func _digest(bytes: PackedByteArray) -> String:
 	var hashing := HashingContext.new()
@@ -152,8 +122,27 @@ static func unpack(blob: Dictionary) -> Dictionary:
 
 static func validate(data: Dictionary) -> bool:
 	if int(data.get("version", -1)) != VERSION: return false
-	for name in ["match_definition", "map_definition", "world", "systems", "fog", "grid", "knowledge", "controller", "indices"]:
+	for name in ["runtime", "observation_memory", "match_definition", "map_definition", "world", "systems", "fog", "grid", "knowledge", "controller", "indices"]:
 		if not data.get(name) is Dictionary: return false
+	var memory: Dictionary = data["observation_memory"]
+	if not memory.get("buildings") is Dictionary or not memory.get("resources") is Dictionary: return false
+	for observer in memory["buildings"]:
+		if not observer is int or not memory["buildings"][observer] is Dictionary: return false
+		for id in memory["buildings"][observer]:
+			var record: Variant = memory["buildings"][observer][id]
+			if not id is int or not record is Dictionary or not record.get("pos") is Vector2: return false
+	for observer in memory["resources"]:
+		if not observer is int or not memory["resources"][observer] is Array: return false
+		for record in memory["resources"][observer]:
+			if not record is Dictionary or not record.get("id") is int or not record.get("pos") is Vector2: return false
+	var runtime: Dictionary = data["runtime"]
+	if not runtime.get("open_movement_envelopes") is Dictionary or not runtime.get("roster_revision") is int or not runtime.get("wildlife") is Dictionary: return false
+	for field in ["cached_unit_count", "cached_roster_tick", "cached_world_roster_revision"]:
+		if not runtime["wildlife"].get(field) is int: return false
+	for field in ["roster", "due"]:
+		if not runtime["wildlife"].get(field) is Array: return false
+	for bucket in runtime["wildlife"]["due"]:
+		if not bucket is Array: return false
 	for field in WORLD_FIELDS:
 		if not data["world"].has(field): return false
 	var size: Variant = data["world"]["map_size"]
@@ -176,7 +165,6 @@ static func validate(data: Dictionary) -> bool:
 			if not data["systems"][system].has(field): return false
 	for section in [["grid", GRID_FIELDS], ["fog", FOG_FIELDS]]:
 		for field in section[1]:
-			if field == "path_dirty_by_player": continue # Earlier checkpoint migration rebuilds this journal.
 			if not data[section[0]].has(field): return false
 	if data["grid"]["size"] != size or data["fog"]["map_size"] != size or data["map_definition"].get("size", size) != size: return false
 	if not data["fog"].get("sources") is Dictionary: return false
@@ -250,7 +238,12 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	world.last_known_buildings_by_player.clear()
 	world.ai_navigation_knowledge.clear()
 	world.local_build_site_cache.clear()
+	world.local_build_site_cache_bytes = 0
+	world.build_query_scopes.clear()
+	world.build_query_scope_bytes = 0
+	world.ai_build_capture_cache.clear()
 	world.render_entity_projection_cache.clear()
+	world.rebuild_entity_change_tracking()
 	world.terrain_elevation.revision += 1
 	world.terrain_elevation.nonzero_vertex_count = 0
 	world.terrain_elevation.maximum_vertex_level = 0
@@ -278,8 +271,6 @@ static func restore(data: Dictionary, world, controller) -> bool:
 			fog.vision_sources[key] = source
 	# Projection cursors are new consumers and need fresh tracking journals.
 	fog.navigation_newly_explored_by_player.clear()
-	if not data["fog"].has("path_dirty_by_player"):
-		fog.path_dirty_by_player.clear()
 	fog.presentation_dirty_tracked_players.clear()
 	for team in data["knowledge"]:
 		var saved: Dictionary = data["knowledge"][team]
@@ -291,10 +282,6 @@ static func restore(data: Dictionary, world, controller) -> bool:
 		planner.set_native_enabled(world.pathfinder.native_enabled)
 		world.movement_system.knowledge.entries[team] = {"source": world.navigation_grid, "grid": grid, "planner": planner, "source_revision": saved["source_revision"], "fog_revision": saved["fog_revision"]}
 		fog.track_path_knowledge(int(team))
-		if not data["fog"].has("path_dirty_by_player"):
-			var states: PackedByteArray = fog.states_by_player[team]
-			for index in range(states.size()):
-				if states[index] == 2: fog.path_dirty_by_player[team][index] = true
 	world.simulation_rng.state = int(data["rng_state"])
 	world.entity_id_sequence.reset(int(data["next_entity_id"]))
 	world.navigation_service.reset()
@@ -323,5 +310,7 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	controller.event_stream._next_sequence = int(data["event_sequence"]) + 1
 	controller.event_stream._first_sequence = controller.event_stream._next_sequence
 	controller.wildlife_behavior.coastal_homes = data["wildlife_homes"]
-	_restore_runtime(data.get("runtime", {}), world, controller, entities)
+	world.restore_last_known_buildings(data["observation_memory"]["buildings"])
+	world.restore_known_resource_memory(data["observation_memory"]["resources"])
+	_restore_runtime(data["runtime"], world, controller, entities)
 	return true

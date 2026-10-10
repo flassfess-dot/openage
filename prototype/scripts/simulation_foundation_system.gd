@@ -23,7 +23,7 @@ func place_foundation(team: int, kind: String, position: Vector2, workers: Array
 	var cost: Dictionary = world.building_cost(kind, team)
 	world.spend_resource_cost(team, cost)
 	var building: Dictionary = world.add_building(world.entity_id_sequence.next(), kind, position, team, false)
-	building["reserved_cost"] = cost.duplicate(true)
+	world.set_entity_field(building, "reserved_cost", cost.duplicate(true))
 	world.assign_workers_to_building(workers, building, "build")
 	world.emit_domain_event("foundation_placed", {
 		"building_id": int(building.get("id", -1)),
@@ -47,24 +47,25 @@ func cancel_foundation(building_id: int) -> bool:
 			world.finish_building_order(unit, "foundation_cancelled")
 	var was_reseed := bool(building.get("reseed_from_depleted", false))
 	if was_reseed:
-		building["state"] = "complete"
-		building["construction_progress"] = 1.0
-		building["construction_stage"] = 3
-		building["hp"] = building["max_hp"]
-		building["amount"] = 0
-		building["max_amount"] = maxi(0, int(building.get("reseed_previous_max_amount", building.get("max_amount", 0))))
-		building["resource_state"] = "depleted"
-		building["resource_depletion_stage"] = 2
-		building["reserved_cost"] = {}
-		building["builders"] = {}
-		building.erase("reseed_from_depleted")
-		building.erase("reseed_previous_max_amount")
+		world.set_entity_field(building, "state", "complete")
+		world.set_entity_field(building, "construction_progress", 1.0)
+		world.set_entity_field(building, "construction_stage", 3)
+		world.set_entity_field(building, "hp", building["max_hp"])
+		world.set_entity_field(building, "amount", 0)
+		world.set_entity_field(building, "max_amount", maxi(0, int(building.get("reseed_previous_max_amount", building.get("max_amount", 0)))))
+		world.set_entity_field(building, "resource_state", "depleted")
+		world.set_entity_field(building, "resource_depletion_stage", 2)
+		world.set_entity_field(building, "reserved_cost", {})
+		world.set_entity_field(building, "builders", {})
+		world.erase_entity_field(building, "reseed_from_depleted")
+		world.erase_entity_field(building, "reseed_previous_max_amount")
 		EntityComponents.sync_dynamic(building)
 	else:
 		world.deactivate_building_victory_objective(building)
 		for index in range(world.buildings.size() - 1, -1, -1):
 			if int(world.buildings[index].get("id", -1)) == building_id:
 				world.production_system.unregister_building(building_id)
+				world.entity_changes.remove(building_id)
 				world.render_entity_projection_cache.erase(building_id)
 				world.buildings_by_id.erase(building_id)
 				world.buildings.remove_at(index)
@@ -120,17 +121,17 @@ func reseed_harvestable_building(building: Dictionary, workers: Array = []) -> V
 		return null
 	world.spend_resource_cost(team, cost)
 	world.resource_approach_slots.erase(int(building.get("id", -1)))
-	building["reseed_from_depleted"] = true
-	building["reseed_previous_max_amount"] = int(building.get("max_amount", 0))
-	building["state"] = "foundation"
-	building["construction_progress"] = 0.0
-	building["construction_stage"] = 0
-	building["hp"] = maxf(1.0, float(building.get("max_hp", 1.0)) * 0.1)
-	building["amount"] = 0
-	building["resource_state"] = "planting"
-	building["resource_depletion_stage"] = 0
-	building["reserved_cost"] = cost.duplicate(true)
-	building["builders"] = {}
+	world.set_entity_field(building, "reseed_from_depleted", true)
+	world.set_entity_field(building, "reseed_previous_max_amount", int(building.get("max_amount", 0)))
+	world.set_entity_field(building, "state", "foundation")
+	world.set_entity_field(building, "construction_progress", 0.0)
+	world.set_entity_field(building, "construction_stage", 0)
+	world.set_entity_field(building, "hp", maxf(1.0, float(building.get("max_hp", 1.0)) * 0.1))
+	world.set_entity_field(building, "amount", 0)
+	world.set_entity_field(building, "resource_state", "planting")
+	world.set_entity_field(building, "resource_depletion_stage", 0)
+	world.set_entity_field(building, "reserved_cost", cost.duplicate(true))
+	world.set_entity_field(building, "builders", {})
 	EntityComponents.sync_dynamic(building)
 	world.assign_workers_to_building(workers, building, "build")
 	world.sync_building_navigation_occupancy(building)
@@ -151,14 +152,14 @@ func complete_foundation(building: Dictionary) -> void:
 		if int(worker.get("target_building_id", -1)) == int(building["id"]) and String(worker.get("task", "")) == "build":
 			completing_builder_ids.append(int(worker["id"]))
 	completing_builder_ids.sort()
-	building["state"] = "complete"
-	building["construction_progress"] = 1.0
-	building["construction_stage"] = 3
-	building["hp"] = building["max_hp"]
-	building["reserved_cost"] = {}
-	building["builders"] = {}
-	building.erase("reseed_from_depleted")
-	building.erase("reseed_previous_max_amount")
+	world.set_entity_field(building, "state", "complete")
+	world.set_entity_field(building, "construction_progress", 1.0)
+	world.set_entity_field(building, "construction_stage", 3)
+	world.set_entity_field(building, "hp", building["max_hp"])
+	world.set_entity_field(building, "reserved_cost", {})
+	world.set_entity_field(building, "builders", {})
+	world.erase_entity_field(building, "reseed_from_depleted")
+	world.erase_entity_field(building, "reseed_previous_max_amount")
 	activate_harvestable_building(building)
 	EntityComponents.sync_dynamic(building)
 	activate_building_completion(building)
@@ -251,12 +252,12 @@ func configure_harvestable_building(building: Dictionary, completed: bool) -> vo
 		return
 	var runtime_metadata: Dictionary = world.data_repository.runtime_metadata(String(building.get("kind", "")))
 	var maximum := harvestable_amount_for(String(building.get("kind", "")), int(building.get("team", 0)))
-	building["resource_type_id"] = int(runtime_metadata.get("resource_type_id", -1))
-	building["resource_amount_id"] = int(runtime_metadata.get("resource_amount_id", -1))
-	building["max_amount"] = maximum
-	building["amount"] = maximum if completed else 0
-	building["resource_state"] = "available" if completed and maximum > 0 else "depleted" if completed else "planting"
-	building["resource_depletion_stage"] = 0 if maximum > 0 else 2
+	world.set_entity_field(building, "resource_type_id", int(runtime_metadata.get("resource_type_id", -1)))
+	world.set_entity_field(building, "resource_amount_id", int(runtime_metadata.get("resource_amount_id", -1)))
+	world.set_entity_field(building, "max_amount", maximum)
+	world.set_entity_field(building, "amount", maximum if completed else 0)
+	world.set_entity_field(building, "resource_state", "available" if completed and maximum > 0 else "depleted" if completed else "planting")
+	world.set_entity_field(building, "resource_depletion_stage", 0 if maximum > 0 else 2)
 	var carrier: Dictionary = building.get("components", {}).get("resource_carrier", {})
 	carrier["capacity"] = float(maximum)
 	carrier["amount"] = float(building["amount"])
@@ -298,7 +299,7 @@ func activate_population_support(building: Dictionary) -> void:
 		return
 	var team := int(building.get("team", 0))
 	world.economy_system.add_population_housing(team, support)
-	building["population_support_applied"] = true
+	world.set_entity_field(building, "population_support_applied", true)
 	world.emit_domain_event("population_cap_changed", {
 		"building_id": int(building.get("id", -1)),
 		"team": team,
@@ -314,7 +315,7 @@ func deactivate_population_support(building: Dictionary) -> void:
 	var support := maxi(0, int(building.get("population_support", 0)))
 	var team := int(building.get("team", 0))
 	world.economy_system.add_population_housing(team, -support)
-	building["population_support_applied"] = false
+	world.set_entity_field(building, "population_support_applied", false)
 	world.emit_domain_event("population_cap_changed", {
 		"building_id": int(building.get("id", -1)),
 		"team": team,

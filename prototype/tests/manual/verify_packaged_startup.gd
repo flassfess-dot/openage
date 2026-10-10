@@ -101,6 +101,10 @@ func wait_for_match(stage: String):
 	var deadline := Time.get_ticks_msec() + 180000
 	while Time.get_ticks_msec() < deadline:
 		await tree.process_frame
+		if stage == "load_save" and is_instance_valid(tree.current_scene) and tree.current_scene.has_method("_load_selected_save") and tree.current_scene.current_screen == "saves":
+			report["menu_status"] = tree.current_scene.status_label.text if tree.current_scene.status_label != null else ""
+			fail("The current save menu rejected the load: " + String(report["menu_status"] ))
+			return null
 		if is_instance_valid(tree.current_scene) and tree.current_scene.has_method("load_game_from_path"):
 			if tree.current_scene.game_controller != null and not tree.current_scene.navigation_loading.is_loading():
 				return tree.current_scene

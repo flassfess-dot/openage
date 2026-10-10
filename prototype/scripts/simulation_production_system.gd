@@ -19,6 +19,12 @@ var next_building_order: int = 0
 var unit_aliases_by_civilization: Dictionary = {}
 var research_ids_by_location: Dictionary = {}
 var research_index_ready := false
+const MAX_OPTION_TEMPLATE_CACHE_ENTRIES := 512
+const MAX_OPTION_TEMPLATE_CACHE_BYTES := 2 * 1024 * 1024
+var option_template_cache_bytes := 0
+var option_template_sizes: Dictionary = {}
+var option_template_cache_enabled := true
+var option_template_cache: Dictionary = {}
 
 
 func _init(simulation_world) -> void:
@@ -38,6 +44,9 @@ func reset() -> void:
 
 
 func invalidate_option_catalogs() -> void:
+	option_template_cache.clear()
+	option_template_sizes.clear()
+	option_template_cache_bytes = 0
 	unit_aliases_by_civilization.clear()
 	research_ids_by_location.clear()
 	research_index_ready = false
@@ -187,40 +196,18 @@ func unit_options(building_id: int, team: int) -> Array:
 
 
 func _unit_availability(building: Variant, team: int, kind: String, enforce_runtime_rules: bool) -> Dictionary:
-	var result := {
-		"kind": kind,
-		"source_unit_id": -1,
-		"icon_id": -1,
-		"button_id": -1,
-		"accepted": false,
-		"reason": "",
-		"cost": {},
-		"population_cost": 0,
-		"duration": 0.0,
-		"behavior_tags": [],
-	}
-	if world.data_repository.has_archetype(kind):
-		result["behavior_tags"] = world.data_repository.behavior_tags(kind)
-		var base_source_id := int(world.data_repository.identifiers(kind).get("source_unit_id", -1))
-		var resolved_source_id: int = int(world.technology_system.resolved_unit_id(team, base_source_id))
-		var source: Dictionary = world.object_record_by_id(resolved_source_id, team)
-		result["source_unit_id"] = resolved_source_id
-		result["icon_id"] = int(source.get("interface", {}).get("icon_id", -1))
-		result["button_id"] = int(source.get("interface", {}).get("button_id", -1))
+	var result: Dictionary = _unit_option_header(team, kind).duplicate(true)
 	if building == null or int(building.get("team", 0)) != team or String(building.get("state", "complete")) != "complete" or float(building.get("hp", 0.0)) <= 0.0:
 		result["reason"] = "invalid_production_building"
 		return result
-	if enforce_runtime_rules:
-		var target_failure := _production_target_failure(building, team, kind)
-		if not target_failure.is_empty():
-			result["reason"] = target_failure
-			return result
-	var cost: Dictionary = world.unit_resource_cost(kind, team)
-	var population_cost: int = world.unit_population_cost(kind, team)
-	var duration := maxf(0.05, float(world.unit_stats(kind).get("creation_time", world.object_record_for(kind, team).get("production", {}).get("creation_time", 1.0))))
+	var details := _unit_option_details(building, team, kind, enforce_runtime_rules)
+	if not String(details["reason"]).is_empty():
+		result["reason"] = details["reason"]
+		return result
+	var cost: Dictionary = details["cost"]
 	result["cost"] = cost.duplicate(true)
-	result["population_cost"] = population_cost
-	result["duration"] = duration
+	result["population_cost"] = details["population_cost"]
+	result["duration"] = details["duration"]
 	var queue: Array = building.get("production_queue", [])
 	if queue.size() >= 15:
 		result["reason"] = "queue_full"
@@ -308,7 +295,7 @@ func research_options(building_id: int, team: int) -> Array:
 			continue
 		if int(record.get("language", {}).get("name_id", 0)) <= 0 or float(record.get("research_time", 0.0)) <= 0.0:
 			continue
-		var rule_reason: String = world.technology_system.can_research(team, technology_id, int(record.get("research_location_id", -1)))
+		var rule_reason: String = _research_option_details(team, technology_id, int(record.get("research_location_id", -1)))["reason"]
 		if rule_reason in ["already_researched", "already_researching", "technology_disabled", "missing_prerequisites"]:
 			continue
 		result.append(_research_availability(building, team, technology_id))
@@ -332,12 +319,12 @@ func _research_availability(building: Variant, team: int, technology_id: int) ->
 	if expected_location >= 0 and not lineage.has(expected_location):
 		result["reason"] = "wrong_research_location"
 		return result
-	var cost: Dictionary = world.technology_system.research_cost(team, technology_id)
+	var details := _research_option_details(team, technology_id, expected_location)
+	var cost: Dictionary = details["cost"]
 	result["cost"] = cost.duplicate(true)
-	result["duration"] = world.technology_system.research_time(team, technology_id)
-	var rule_reason: String = world.technology_system.can_research(team, technology_id, expected_location)
-	if not rule_reason.is_empty():
-		result["reason"] = rule_reason
+	result["duration"] = details["duration"]
+	if not String(details["reason"]).is_empty():
+		result["reason"] = details["reason"]
 		return result
 	if building.get("production_queue", []).size() >= 15:
 		result["reason"] = "queue_full"
@@ -361,16 +348,16 @@ func update(delta: float) -> void:
 			continue
 		var queue: Array = building.get("production_queue", [])
 		if queue.is_empty():
-			building["production_progress"] = 0.0
+			world.set_entity_field(building, "production_progress", 0.0)
 			active_building_ids.erase(int(building_id))
 			continue
 		var order: Dictionary = queue[0]
 		order["status"] = "researching" if String(order.get("order_type", "unit")) == "research" else "training"
 		order["progress"] = minf(float(order["duration"]), float(order.get("progress", 0.0)) + maxf(0.0, delta))
 		queue[0] = order
-		building["production_progress"] = float(order["progress"]) / maxf(0.05, float(order["duration"]))
+		world.set_entity_field(building, "production_progress", float(order["progress"]) / maxf(0.05, float(order["duration"])))
 		if float(order["progress"]) + 0.000001 < float(order["duration"]):
-			building["production_queue"] = queue
+			world.set_entity_field(building, "production_queue", queue)
 			continue
 		if String(order.get("order_type", "unit")) == "research":
 			_complete_research(building, queue, order)
@@ -399,17 +386,17 @@ func _complete_unit(building: Dictionary, queue: Array, order: Dictionary) -> vo
 	if world.economy_system.get_population_points(team) + world.unit_population_points_cost(String(order["kind"]), team) > world.economy_system.get_population_cap_points(team):
 		order["status"] = "blocked_population"
 		queue[0] = order
-		building["production_queue"] = queue
+		world.set_entity_field(building, "production_queue", queue)
 		return
 	var spawn: Variant = free_spawn_position(building, String(order["kind"]))
 	if not spawn is Vector2:
 		order["status"] = "blocked_spawn"
 		queue[0] = order
-		building["production_queue"] = queue
+		world.set_entity_field(building, "production_queue", queue)
 		return
 	queue.pop_front()
 	var trained: Dictionary = world.add_unit(team, String(order["kind"]), spawn, false)
-	trained["production_order_id"] = int(order["id"])
+	world.set_entity_field(trained, "production_order_id", int(order["id"]))
 	world.emit_domain_event("unit_produced", {
 		"order_id": int(order["id"]),
 		"building_id": int(building.get("id", -1)),
@@ -476,7 +463,7 @@ func set_rally_point(building_id: int, target: Vector2) -> bool:
 	var building: Variant = world.find_building(building_id)
 	if building == null:
 		return false
-	building["rally_point"] = Coordinates.clamp_world(target, world.get_map_size())
+	world.set_entity_field(building, "rally_point", Coordinates.clamp_world(target, world.get_map_size()))
 	return true
 
 
@@ -500,10 +487,10 @@ func free_spawn_position(building: Dictionary, kind: String) -> Variant:
 
 
 func _sync_queue(building: Dictionary, queue: Array) -> void:
-	building["production_queue"] = queue
+	world.set_entity_field(building, "production_queue", queue)
 	building["components"]["production"]["queue"] = queue
 	building["components"]["technology"]["active_research_id"] = int(queue[0].get("technology_id", -1)) if not queue.is_empty() and String(queue[0].get("order_type", "unit")) == "research" else -1
-	building["production_progress"] = 0.0 if queue.is_empty() else float(queue[0].get("progress", 0.0)) / maxf(0.05, float(queue[0]["duration"]))
+	world.set_entity_field(building, "production_progress", 0.0 if queue.is_empty() else float(queue[0].get("progress", 0.0)) / maxf(0.05, float(queue[0]["duration"])))
 	var building_id := int(building.get("id", -1))
 	if queue.is_empty():
 		active_building_ids.erase(building_id)
@@ -515,3 +502,82 @@ func _sync_queue(building: Dictionary, queue: Array) -> void:
 				insertion_index = index
 				break
 		active_building_ids.insert(insertion_index, building_id)
+
+# Only rare rules/catalog facts are cached. Building validity, queue capacity and
+# current affordability remain owner-thread reads with the original precedence.
+func _option_template_key(team: int, suffix: String) -> String:
+	return "%d:%d:%d:%d:%s" % [world.cache_epoch, team, int(world.civilization_by_team.get(team, 13)), world.technology_system.revision(team), suffix]
+
+func _remember_option_template(key: String, value: Dictionary) -> Dictionary:
+	if not option_template_cache_enabled: return value
+	# Serialized payload is a deterministic logical byte budget; the entry cap
+	# separately bounds Godot Dictionary/container overhead. Oversized facts stay
+	# on the uncached reference path.
+	var payload_bytes := var_to_bytes(value).size() + key.length() * 4
+	if payload_bytes > MAX_OPTION_TEMPLATE_CACHE_BYTES: return value
+	if option_template_cache.has(key):
+		option_template_cache_bytes -= int(option_template_sizes[key])
+		option_template_sizes.erase(key)
+		option_template_cache.erase(key)
+	while not option_template_cache.is_empty() and (option_template_cache.size() >= MAX_OPTION_TEMPLATE_CACHE_ENTRIES or option_template_cache_bytes + payload_bytes > MAX_OPTION_TEMPLATE_CACHE_BYTES):
+		var expired = option_template_cache.keys()[0]
+		option_template_cache_bytes -= int(option_template_sizes[expired])
+		option_template_sizes.erase(expired)
+		option_template_cache.erase(expired)
+	option_template_cache[key] = value
+	option_template_sizes[key] = payload_bytes
+	option_template_cache_bytes += payload_bytes
+	if world.tick_pipeline.performance_probe != null:
+		world.tick_pipeline.performance_probe.increment("ai.commands.rare_templates_built")
+	return value
+
+func _cached_option_template(key: String) -> Dictionary:
+	if not option_template_cache_enabled or not option_template_cache.has(key): return {}
+	var result: Dictionary = option_template_cache[key]
+	if world.tick_pipeline.performance_probe != null:
+		world.tick_pipeline.performance_probe.increment("ai.commands.rare_templates_reused")
+	return result
+
+func _unit_option_header(team: int, kind: String) -> Dictionary:
+	var key := _option_template_key(team, "header:" + kind)
+	var cached := _cached_option_template(key)
+	if not cached.is_empty(): return cached
+	var result := {
+		"kind": kind,
+		"source_unit_id": -1,
+		"icon_id": -1,
+		"button_id": -1,
+		"accepted": false,
+		"reason": "",
+		"cost": {},
+		"population_cost": 0,
+		"duration": 0.0,
+		"behavior_tags": [],
+	}
+	if world.data_repository.has_archetype(kind):
+		result["behavior_tags"] = world.data_repository.behavior_tags(kind)
+		var base_source_id := int(world.data_repository.identifiers(kind).get("source_unit_id", -1))
+		var resolved_source_id: int = int(world.technology_system.resolved_unit_id(team, base_source_id))
+		var source: Dictionary = world.object_record_by_id(resolved_source_id, team)
+		result["source_unit_id"] = resolved_source_id
+		result["icon_id"] = int(source.get("interface", {}).get("icon_id", -1))
+		result["button_id"] = int(source.get("interface", {}).get("button_id", -1))
+	return _remember_option_template(key, result)
+
+func _unit_option_details(building: Dictionary, team: int, kind: String, enforce_runtime_rules: bool) -> Dictionary:
+	var lineage: Array = building.get("unit_lineage", [int(building.get("source_unit_id", -1))])
+	var key := _option_template_key(team, "unit:" + kind + ":" + str(lineage) + ":" + str(enforce_runtime_rules))
+	var cached := _cached_option_template(key)
+	if not cached.is_empty(): return cached
+	var reason := _production_target_failure(building, team, kind) if enforce_runtime_rules else ""
+	if not reason.is_empty(): return _remember_option_template(key, {"reason": reason})
+	var cost: Dictionary = world.unit_resource_cost(kind, team)
+	var population_cost: int = world.unit_population_cost(kind, team)
+	var duration := maxf(0.05, float(world.unit_stats(kind).get("creation_time", world.object_record_for(kind, team).get("production", {}).get("creation_time", 1.0))))
+	return _remember_option_template(key, {"reason": "", "cost": cost, "population_cost": population_cost, "duration": duration})
+
+func _research_option_details(team: int, technology_id: int, expected_location: int) -> Dictionary:
+	var key := _option_template_key(team, "research:%d:%d" % [technology_id, expected_location])
+	var cached := _cached_option_template(key)
+	if not cached.is_empty(): return cached
+	return _remember_option_template(key, {"cost": world.technology_system.research_cost(team, technology_id), "duration": world.technology_system.research_time(team, technology_id), "reason": world.technology_system.can_research(team, technology_id, expected_location)})

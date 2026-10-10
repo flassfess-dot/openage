@@ -30,13 +30,18 @@ void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("find_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_cell_path, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("find_smoothed_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_smoothed_cell_path, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("configure_movement_snapshot", "ids", "positions", "radii", "clearances", "priorities", "health", "solid_animals"), &RoRPathKernel::configure_movement_snapshot, DEFVAL(PackedByteArray()));
+    ClassDB::bind_method(D_METHOD("configure_movement_entities", "units", "incremental"), &RoRPathKernel::configure_movement_entities, DEFVAL(true));
+    ClassDB::bind_method(D_METHOD("update_movement_entities", "units"), &RoRPathKernel::update_movement_entities);
+    ClassDB::bind_method(D_METHOD("release_movement_snapshot"), &RoRPathKernel::release_movement_snapshot);
     ClassDB::bind_method(D_METHOD("share_movement_snapshot", "source"), &RoRPathKernel::share_movement_snapshot);
     ClassDB::bind_method(D_METHOD("calculate_movement", "unit_id", "target", "speed", "cohesion_scale", "delta"), &RoRPathKernel::calculate_movement);
     ClassDB::bind_method(D_METHOD("get_revision"), &RoRPathKernel::get_revision);
+    ClassDB::bind_method(D_METHOD("get_walkability_version"), &RoRPathKernel::get_walkability_version);
     ClassDB::bind_method(D_METHOD("get_last_expanded_nodes"), &RoRPathKernel::get_last_expanded_nodes);
     ClassDB::bind_method(D_METHOD("get_last_path_was_direct"), &RoRPathKernel::get_last_path_was_direct);
     ClassDB::bind_method(D_METHOD("is_configured"), &RoRPathKernel::is_configured);
     ClassDB::bind_method(D_METHOD("component_id", "cell", "clearance_radius"), &RoRPathKernel::component_id, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("group_points_by_component", "points", "clearance_radius"), &RoRPathKernel::group_points_by_component, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("cells_connected", "start", "goal", "clearance_radius"), &RoRPathKernel::cells_connected, DEFVAL(0.0));
 }
 
@@ -46,6 +51,7 @@ Ref<RoRPathKernel> RoRPathKernel::create_search_context() const {
     context->width_ = width_;
     context->height_ = height_;
     context->revision_ = revision_;
+    context->walkability_version_ = walkability_version_;
     context->walkable_ = walkable_;
     context->costs_.resize(walkable_->size());
     context->parents_.resize(walkable_->size());
@@ -118,6 +124,128 @@ void RoRPathKernel::configure_movement_snapshot(
         next->buckets[movement_bucket_key(bucket_x, bucket_y)].push_back(static_cast<int32_t>(index));
     }
     movement_ = next;
+}
+
+// Owner-thread extraction preserves legacy float32 packing and neighbor order.
+// No live Dictionary is retained. Workers keep the previous immutable generation.
+Dictionary RoRPathKernel::configure_movement_entities(const Array &units, bool incremental) {
+    return configure_movement_entity_rows(units, incremental, false);
+}
+Dictionary RoRPathKernel::update_movement_entities(const Array &units) {
+    return configure_movement_entity_rows(units, true, true);
+}
+void RoRPathKernel::release_movement_snapshot() {
+    movement_ = std::make_shared<MovementSnapshot>();
+}
+Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, bool incremental, bool delta) {
+    static const String k_id("id");
+    static const String k_pos("pos");
+    static const String k_footprint_radius("footprint_radius");
+    static const String k_minimum_clearance("minimum_clearance");
+    static const String k_push_priority("push_priority");
+    static const String k_hp("hp");
+    static const String k_behavior_tags("behavior_tags");
+    static const String k_kind("kind");
+    static const String k_solid_animal("solid_animal");
+    static const String k_team("team");
+    const int64_t count = units.size();
+    bool stable = delta || (incremental && count <= 65536 && movement_->ids.size() == static_cast<size_t>(count));
+    for (int64_t i = 0; !delta && stable && i < count; ++i) {
+        const Dictionary unit = units[i];
+        stable = movement_->ids[static_cast<size_t>(i)] == static_cast<int32_t>(int64_t(unit[k_id]));
+    }
+    Dictionary stats;
+    stats["checked"] = count;
+    stats["updated"] = 0;
+    stats["bucket_updates"] = 0;
+    stats["generation_copies"] = 0;
+    stats["full_rebuilds"] = stable ? 0 : 1;
+    if (!stable) {
+        PackedInt32Array ids, priorities;
+        PackedVector2Array positions;
+        PackedFloat32Array radii, clearances, health;
+        PackedByteArray solid;
+        ids.resize(count); positions.resize(count); radii.resize(count);
+        clearances.resize(count); priorities.resize(count); health.resize(count); solid.resize(count);
+        for (int64_t i = 0; i < count; ++i) {
+            const Dictionary unit = units[i];
+            ids[i] = int64_t(unit[k_id]); positions[i] = unit[k_pos];
+            radii[i] = double(unit[k_footprint_radius]); clearances[i] = double(unit[k_minimum_clearance]);
+            priorities[i] = int64_t(unit[k_push_priority]); health[i] = double(unit[k_hp]);
+            if (unit.has(k_solid_animal)) { solid[i] = bool(unit[k_solid_animal]); continue; }
+            const Array tags = unit.get(k_behavior_tags, Array());
+            const String kind = unit.get(k_kind, String());
+            solid[i] =
+                tags.has("predator") || tags.has("huntable") ||
+                ((kind == "gazelle" || kind == "elephant" || kind == "lion" || kind == "alligator" || kind == "crocodile") && int64_t(unit.get(k_team, 0)) == 0);
+        }
+        configure_movement_snapshot(ids, positions, radii, clearances, priorities, health, solid);
+        stats["updated"] = count; stats["bucket_updates"] = count;
+        return stats;
+    }
+    std::shared_ptr<MovementSnapshot> next;
+    int64_t updated = 0, bucket_updates = 0;
+    bool maxima_dirty = false;
+    bool copied_generation = false;
+    for (int64_t i = 0; i < count; ++i) {
+        const Dictionary unit = units[i];
+        const auto found = movement_->index_by_id.find(static_cast<int32_t>(int64_t(unit[k_id])));
+        if (delta && found == movement_->index_by_id.end()) continue;
+        const size_t slot = delta ? static_cast<size_t>(found->second) : static_cast<size_t>(i);
+        const Vector2 position = unit[k_pos];
+        const float radius = std::max(0.0f, static_cast<float>(double(unit[k_footprint_radius])));
+        const float clearance = std::max(0.0f, static_cast<float>(double(unit[k_minimum_clearance])));
+        const int32_t priority = int64_t(unit[k_push_priority]);
+        const float health = double(unit[k_hp]);
+        uint8_t solid;
+        if (unit.has(k_solid_animal)) solid = bool(unit[k_solid_animal]);
+        else {
+            const Array tags = unit.get(k_behavior_tags, Array());
+            const String kind = unit.get(k_kind, String());
+            solid = tags.has("predator") || tags.has("huntable") ||
+                ((kind == "gazelle" || kind == "elephant" || kind == "lion" || kind == "alligator" || kind == "crocodile") && int64_t(unit.get(k_team, 0)) == 0);
+        }
+        if (movement_->positions[slot] == position && movement_->radii[slot] == radius &&
+            movement_->clearances[slot] == clearance && movement_->priorities[slot] == priority &&
+            movement_->health[slot] == health && movement_->solid_animals[slot] == solid) continue;
+        if (!next) {
+            copied_generation = movement_.use_count() > 1;
+            next = copied_generation ? std::make_shared<MovementSnapshot>(*movement_) : std::const_pointer_cast<MovementSnapshot>(movement_);
+        }
+        ++updated;
+        const bool old_alive = movement_->health[slot] > 0.0f, alive = health > 0.0f;
+        const int64_t old_key = movement_bucket_key(static_cast<int32_t>(std::floor(movement_->positions[slot].x / 2.0)), static_cast<int32_t>(std::floor(movement_->positions[slot].y / 2.0)));
+        const int64_t key = movement_bucket_key(static_cast<int32_t>(std::floor(position.x / 2.0)), static_cast<int32_t>(std::floor(position.y / 2.0)));
+        if (old_alive != alive || (alive && old_key != key)) {
+            if (old_alive) {
+                auto &bucket = next->buckets[old_key];
+                bucket.erase(std::remove(bucket.begin(), bucket.end(), static_cast<int32_t>(slot)), bucket.end());
+                if (bucket.empty()) next->buckets.erase(old_key);
+            }
+            if (alive) {
+                auto &bucket = next->buckets[key];
+                // Original configure emits slot order; retain its floating-point sum order.
+                bucket.insert(std::lower_bound(bucket.begin(), bucket.end(), static_cast<int32_t>(slot)), static_cast<int32_t>(slot));
+            }
+            ++bucket_updates;
+        }
+        maxima_dirty = maxima_dirty || old_alive != alive || radius != movement_->radii[slot] || clearance != movement_->clearances[slot];
+        next->positions[slot] = position; next->radii[slot] = radius; next->clearances[slot] = clearance;
+        next->priorities[slot] = priority; next->health[slot] = health; next->solid_animals[slot] = solid;
+    }
+    if (next) {
+        if (maxima_dirty) {
+            next->maximum_radius = 0.0f; next->maximum_clearance = 0.0f;
+            for (size_t i = 0; i < next->ids.size(); ++i) if (next->health[i] > 0.0f) {
+                next->maximum_radius = std::max(next->maximum_radius, next->radii[i]);
+                next->maximum_clearance = std::max(next->maximum_clearance, next->clearances[i]);
+            }
+        }
+        movement_ = next;
+        stats["generation_copies"] = copied_generation ? 1 : 0;
+    }
+    stats["updated"] = updated; stats["bucket_updates"] = bucket_updates;
+    return stats;
 }
 
 void RoRPathKernel::share_movement_snapshot(const Ref<RoRPathKernel> &source) {
@@ -254,12 +382,13 @@ bool RoRPathKernel::update_walkable(int64_t revision, const PackedInt32Array &in
         changed = changed || (*walkable_)[static_cast<size_t>(indices[i])] != value;
         (*walkable_)[static_cast<size_t>(indices[i])] = value;
     }
-    if (changed) components_by_radius_.clear();
+    if (changed) { components_by_radius_.clear(); ++walkability_version_; }
     revision_ = revision;
     return true;
 }
 
 void RoRPathKernel::configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable) {
+    ++walkability_version_;
     width_ = std::max<int32_t>(0, width);
     height_ = std::max<int32_t>(0, height);
     revision_ = revision;
@@ -316,6 +445,26 @@ const std::vector<int32_t> &RoRPathKernel::components(double radius) {
 int32_t RoRPathKernel::component_id(const Vector2i &cell, double radius) {
     if (!is_configured() || !contains(cell.x, cell.y)) return -1;
     return components(radius)[cell.y * width_ + cell.x];
+}
+
+// Same labels, bounds and point conversion as individual component_id calls.
+// Input order is retained in each region; no map-sized label copy is published.
+Dictionary RoRPathKernel::group_points_by_component(const TypedArray<Vector2> &points, double radius) {
+    Dictionary result;
+    if (!is_configured() || points.is_empty()) return result;
+    const auto &labels = components(radius);
+    for (int64_t i = 0; i < points.size(); ++i) {
+        const Vector2 point = points[i];
+        const Vector2i cell(point);
+        if (!contains(cell.x, cell.y)) continue;
+        const int32_t region = labels[cell.y * width_ + cell.x];
+        if (region < 0) continue;
+        TypedArray<Vector2> bucket;
+        if (result.has(region)) bucket = Array(result[region]);
+        bucket.push_back(point);
+        result[region] = bucket;
+    }
+    return result;
 }
 
 bool RoRPathKernel::cells_connected(const Vector2i &start, const Vector2i &goal, double radius) {
@@ -460,6 +609,8 @@ PackedInt32Array RoRPathKernel::find_smoothed_cell_path(const Vector2i &start, c
     }
     return pack_cells(smoothed);
 }
+
+int64_t RoRPathKernel::get_walkability_version() const { return walkability_version_; }
 
 int64_t RoRPathKernel::get_revision() const {
     return revision_;

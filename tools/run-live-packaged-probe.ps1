@@ -22,13 +22,16 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
 }
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot)
 $report = Join-Path $OutputRoot "report.json"
+New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
+if(Test-Path -LiteralPath $report){throw "Probe report already exists: $report"}
 
 $arguments = @(
     "--audio-driver",
     "Dummy",
-    "--script",
-    "res://tests/manual/live_packaged_game_probe.gd",
+    "--log-file",
+    (Join-Path $OutputRoot "runtime.log"),
     "--",
+    "--live-packaged-probe",
     "--size=$Size",
     "--output=$($report.Replace('\', '/'))",
     "--match=$Match"
@@ -47,8 +50,19 @@ $process = Start-Process `
     -WorkingDirectory $distributionRoot `
     -ArgumentList $quotedArguments `
     -WindowStyle Hidden `
-    -Wait `
+    -RedirectStandardOutput (Join-Path $OutputRoot "stdout.log") `
+    -RedirectStandardError (Join-Path $OutputRoot "stderr.log") `
     -PassThru
+$processHandle=$process.Handle
+$deadline=[DateTime]::UtcNow.AddSeconds(300)
+while(-not $process.WaitForExit(1000)){
+    if([DateTime]::UtcNow -ge $deadline){Stop-Process -Id $process.Id -Force;throw "Live packaged probe timeout"}
+    if(Select-String -LiteralPath (Join-Path $OutputRoot "runtime.log") -Pattern "SCRIPT ERROR:|ERROR:|Parse Error:" -Quiet -ErrorAction SilentlyContinue){Stop-Process -Id $process.Id -Force;throw "Live packaged engine error"}
+}
+$process.WaitForExit()
+foreach($logName in @("runtime.log","stdout.log","stderr.log")){
+    if(Select-String -LiteralPath (Join-Path $OutputRoot $logName) -Pattern "SCRIPT ERROR:|ERROR:|Parse Error:" -Quiet -ErrorAction SilentlyContinue){throw "Live packaged engine error in $logName"}
+}
 if ($process.ExitCode -ne 0) {
     throw "Live packaged probe failed with exit code $($process.ExitCode)."
 }

@@ -774,3 +774,22 @@ func _record_exploration_index(changes: Dictionary, index: int) -> void:
 
 func exploration_changes_since(observer: int, previous_revision: int) -> Dictionary:
 	return ChangeJournal.delta(exploration_change_history.get(observer, []), previous_revision, exploration_revision_for_player(observer))
+
+# Called with source event deltas, never a partial roster requiring retirement.
+func apply_entity_changes(units: Array, buildings: Array, removed_keys: Array) -> void:
+	vision_cells_microseconds = 0
+	regenerated_sources = 0
+	var removed: Array[Dictionary] = []
+	var added: Array[Dictionary] = []
+	var previous: Array[Dictionary] = []
+	var current: Array[Dictionary] = []
+	for key in removed_keys:
+		if vision_sources.has(key):
+			removed.append(vision_sources[key])
+			vision_sources.erase(key)
+	_collect_source_deltas(units, 0, 1, 0, added, previous, current)
+	_collect_source_deltas(buildings, 1, 1, 0, added, previous, current)
+	var changed: Dictionary = _apply_source_deltas(removed, added, previous, current)
+	if not changed.is_empty():
+		revision += 1
+		for player in changed: revisions_by_player[player] = int(revisions_by_player.get(player, 0)) + 1

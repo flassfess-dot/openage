@@ -87,9 +87,9 @@ func start_route(traders: Array, target_dock: Dictionary) -> String:
 		world.halt_unit(trader, "new_trade_route")
 		trade["target_dock_id"] = int(target_dock.get("id", -1))
 		trade["home_dock_id"] = int(plan["home"].get("id", -1))
-		trader["task"] = "trade"
-		trader["target_id"] = int(target_dock.get("id", -1))
-		OrderPipeline.begin(trader, "trade", int(target_dock.get("id", -1)), Vector2(target_dock.get("pos", trader.get("pos", Vector2.ZERO))), true)
+		world.set_entity_field(trader, "task", "trade")
+		world.set_entity_field(trader, "target_id", int(target_dock.get("id", -1)))
+		world.begin_entity_order(trader, "trade", int(target_dock.get("id", -1)), Vector2(target_dock.get("pos", trader.get("pos", Vector2.ZERO))), true)
 		if int(trade.get("cargo_gold", 0)) > 0:
 			_begin_leg(trader, plan["home"], "to_home")
 		else:
@@ -110,7 +110,7 @@ func cancel(trader: Dictionary, reason: String = "cancelled") -> void:
 	if String(trade.get("stage", "idle")) == "idle":
 		return
 	world.release_building_approach_slot(trader)
-	trader["target_building_id"] = -1
+	world.set_entity_field(trader, "target_building_id", -1)
 	trade["stage"] = "holding_gold" if int(trade.get("cargo_gold", 0)) > 0 else "idle"
 	trade["approach_position"] = Vector2(trader.get("pos", Vector2.ZERO))
 	world.emit_domain_event("trade_route_stopped", {
@@ -138,7 +138,7 @@ func advance_unit(trader: Dictionary, delta: float) -> Dictionary:
 	var trade: Dictionary = trader["components"]["trade"]
 	var stage := String(trade.get("stage", "idle"))
 	if stage in ["idle", "holding_gold"]:
-		trader["task"] = "idle"
+		world.set_entity_field(trader, "task", "idle")
 		return _idle_result()
 	var target: Variant = world.find_building(int(trade.get("target_dock_id", -1)))
 	if not _valid_dock(target, int(trade.get("target_building_source_id", -1))) or int(target.get("team", 0)) == int(trader.get("team", 0)):
@@ -275,9 +275,9 @@ func _begin_leg(trader: Dictionary, dock: Dictionary, stage: String) -> bool:
 	if not trade["approach_position"] is Vector2:
 		_finish(trader, "trade_route_unreachable")
 		return false
-	trader["task"] = "trade"
-	trader["target_id"] = int(dock.get("id", -1))
-	OrderPipeline.begin(trader, "trade", int(dock.get("id", -1)), trade["approach_position"], true)
+	world.set_entity_field(trader, "task", "trade")
+	world.set_entity_field(trader, "target_id", int(dock.get("id", -1)))
+	world.begin_entity_order(trader, "trade", int(dock.get("id", -1)), trade["approach_position"], true)
 	if not world.assign_unit_destination(trader, trade["approach_position"], false):
 		_finish(trader, "trade_route_unreachable")
 		return false
@@ -292,11 +292,11 @@ func _try_load_trade_goods(trader: Dictionary, target: Dictionary) -> bool:
 	var target_team := int(target.get("team", 0))
 	if world.get_resource_amount(owner, input_resource) < amount:
 		trade["stage"] = "waiting_resource"
-		trader["diagnostic_reason"] = "trade_waiting_resource"
+		world.set_entity_field(trader, "diagnostic_reason", "trade_waiting_resource")
 		return false
 	if trade_goods(target_team) + 0.0001 < float(amount):
 		trade["stage"] = "waiting_goods"
-		trader["diagnostic_reason"] = "trade_waiting_goods"
+		world.set_entity_field(trader, "diagnostic_reason", "trade_waiting_goods")
 		return false
 	var home: Variant = _resolve_home_dock(trader, target)
 	if home == null:
@@ -308,7 +308,7 @@ func _try_load_trade_goods(trader: Dictionary, target: Dictionary) -> bool:
 	var gold := maxi(0, roundi(float(base_gold) * profit_multiplier))
 	trade["cargo_goods"] = amount
 	trade["cargo_gold"] = gold
-	trader["diagnostic_reason"] = "trade_returning_gold"
+	world.set_entity_field(trader, "diagnostic_reason", "trade_returning_gold")
 	world.emit_domain_event("trade_goods_loaded", {
 		"trader_id": int(trader.get("id", -1)),
 		"target_dock_id": int(target.get("id", -1)),
@@ -332,7 +332,7 @@ func _deposit_gold(trader: Dictionary, home: Dictionary) -> void:
 	trade["cargo_goods"] = 0
 	trade["cargo_gold"] = 0
 	trade["trip_count"] = int(trade.get("trip_count", 0)) + 1
-	trader["diagnostic_reason"] = "trade_trip_complete"
+	world.set_entity_field(trader, "diagnostic_reason", "trade_trip_complete")
 	world.emit_domain_event("trade_gold_deposited", {
 		"trader_id": int(trader.get("id", -1)),
 		"home_dock_id": int(home.get("id", -1)),
@@ -345,10 +345,10 @@ func _deposit_gold(trader: Dictionary, home: Dictionary) -> void:
 func _finish(trader: Dictionary, reason: String) -> void:
 	cancel(trader, reason)
 	world.release_unit_destination(trader)
-	trader["task"] = "idle"
-	trader["target_id"] = -1
-	trader["diagnostic_reason"] = reason
-	OrderPipeline.complete(trader, reason)
+	world.set_entity_field(trader, "task", "idle")
+	world.set_entity_field(trader, "target_id", -1)
+	world.set_entity_field(trader, "diagnostic_reason", reason)
+	world.complete_entity_order(trader, reason)
 
 
 func _idle_result() -> Dictionary:

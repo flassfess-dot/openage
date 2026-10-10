@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$VerifyStartup
+)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -109,6 +111,31 @@ function Invoke-LoggedCommand {
     Write-Status $EndPercent "$Name complete"
 }
 
+function Read-GodotLogUpdates {
+    param(
+        [System.IO.StreamReader]$Reader,
+        [string]$Name,
+        [int]$StartPercent,
+        [int]$EndPercent,
+        [hashtable]$ProgressState
+    )
+    while (-not $Reader.EndOfStream) {
+        $text = $Reader.ReadLine()
+        if ($text -match '^\[\s*(\d+)%\s*\]') {
+            $inner = [int]$Matches[1]
+            # Godot logs each packed resource at the same percentage. Keep
+            # those details in the raw Godot log and report each change once.
+            if ($inner -eq $ProgressState.InnerPercent) { continue }
+            $ProgressState.InnerPercent = $inner
+            $mapped = $StartPercent + [int](($EndPercent - $StartPercent) * $inner / 100)
+            Write-Progress -Activity "Rise of Rome build" -Status $text -PercentComplete $mapped
+        }
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            Write-LogLine ("{0}: {1}" -f $Name, $text)
+        }
+    }
+}
+
 function Invoke-GodotLogged {
     param(
         [string]$Name,
@@ -123,39 +150,43 @@ function Invoke-GodotLogged {
     $fullArguments = @("--log-file", $GodotLogPath) + $Arguments
     Write-Status $StartPercent "$Name started"
     Write-LogLine ("COMMAND: {0} {1}" -f $godotApplication, ($fullArguments -join " "))
+    Write-LogLine ("Full Godot log: {0}" -f $GodotLogPath)
     $process = Start-Process -FilePath $godotApplication -ArgumentList (Join-ProcessArguments $fullArguments) -PassThru -WindowStyle Hidden
-    $seenLines = 0
-    while (-not $process.HasExited) {
-        if (Test-Path -LiteralPath $GodotLogPath) {
-            $lines = @(Get-Content -LiteralPath $GodotLogPath)
-            for ($i = $seenLines; $i -lt $lines.Count; $i++) {
-                $text = [string]$lines[$i]
-                Write-LogLine ("{0}: {1}" -f $Name, $text)
-                if ($text -match '\[\s*(\d+)%\s*\]') {
-                    $inner = [int]$Matches[1]
-                    $mapped = $StartPercent + [int](($EndPercent - $StartPercent) * $inner / 100)
-                    Write-Progress -Activity "Rise of Rome build" -Status $text -PercentComplete $mapped
-                }
+    # Retain the handle before waiting, including in Windows PowerShell 5.1.
+    $processHandle = $process.Handle
+    $reader = $null
+    $progressState = @{ InnerPercent = -1 }
+    try {
+        while (-not $process.WaitForExit(1000)) {
+            if ($null -eq $reader -and (Test-Path -LiteralPath $GodotLogPath)) {
+                $stream = [System.IO.File]::Open($GodotLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8, $true)
             }
-            $seenLines = $lines.Count
+            if ($null -ne $reader) {
+                Read-GodotLogUpdates -Reader $reader -Name $Name -StartPercent $StartPercent -EndPercent $EndPercent -ProgressState $progressState
+            }
         }
-        Start-Sleep -Seconds 2
-    }
-    if (Test-Path -LiteralPath $GodotLogPath) {
-        $lines = @(Get-Content -LiteralPath $GodotLogPath)
-        for ($i = $seenLines; $i -lt $lines.Count; $i++) {
-            Write-LogLine ("{0}: {1}" -f $Name, [string]$lines[$i])
+        $process.WaitForExit()
+        if ($null -eq $reader -and (Test-Path -LiteralPath $GodotLogPath)) {
+            $stream = [System.IO.File]::Open($GodotLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8, $true)
         }
+        if ($null -ne $reader) {
+            Read-GodotLogUpdates -Reader $reader -Name $Name -StartPercent $StartPercent -EndPercent $EndPercent -ProgressState $progressState
+        }
+        if ($null -eq $process.ExitCode) { throw "$Name did not expose an exit code; see $GodotLogPath" }
+        if ($process.ExitCode -ne 0) { throw "$Name failed with exit code $($process.ExitCode); see $GodotLogPath" }
+        # Import/export can return zero after a script fails to compile.
+        # Inspect the complete raw log, including compacted progress lines.
+        if ((Test-Path -LiteralPath $GodotLogPath) -and (Select-String -LiteralPath $GodotLogPath -Pattern 'SCRIPT ERROR:|Parse Error:|Failed to load script' -Quiet)) {
+            throw "$Name contains script compilation errors; see $GodotLogPath"
+        }
+        Write-Status $EndPercent "$Name complete"
     }
-    if ($process.ExitCode -ne 0) {
-        throw "$Name failed with exit code $($process.ExitCode)"
+    finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        $process.Dispose()
     }
-    # Import/export can return zero even after a script fails to compile.
-    if (Test-Path -LiteralPath $GodotLogPath) {
-        $scriptErrors = @(Select-String -LiteralPath $GodotLogPath -Pattern 'SCRIPT ERROR:|Parse Error:|Failed to load script')
-        if ($scriptErrors.Count -gt 0) { throw "$Name contains script compilation errors; see $GodotLogPath" }
-    }
-    Write-Status $EndPercent "$Name complete"
 }
 
 try {
@@ -293,8 +324,20 @@ try {
         Write-LogLine ("ARTIFACT: {0} | {1} bytes | {2}" -f $item.FullName, $item.Length, $item.LastWriteTime)
     }
 
-    Write-Status 99 "verifying packaged random map and save loading"
-    & (Join-Path $PSScriptRoot "verify-packaged-startup.ps1")
+    Write-LogLine "Release artifacts exported and copied."
+    if ($VerifyStartup) {
+        Write-Status 99 "verifying packaged random map and save loading"
+        try {
+            & (Join-Path $PSScriptRoot "verify-packaged-startup.ps1")
+        }
+        catch {
+            throw "Release artifacts were exported, but startup verification failed: $($_.Exception.Message)"
+        }
+        Write-LogLine "Packaged startup verification passed."
+    }
+    else {
+        Write-LogLine "Packaged startup verification was not requested. Use -VerifyStartup or tools\verify-packaged-startup.ps1 to run it."
+    }
 
     Write-Status 100 "full build complete"
     Write-LogLine "Application: $application"

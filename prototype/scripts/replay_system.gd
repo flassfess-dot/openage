@@ -3,8 +3,10 @@ extends RefCounted
 
 const Commands := preload("res://scripts/commands.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
-const FORMAT_VERSION: int = 3
-const LEGACY_FORMAT_VERSIONS := [1, 2]
+const FORMAT_VERSION: int = 4
+
+var native_encoding_enabled := true
+var encoding_kernel: Variant = null
 
 var simulation_seed: int = 1
 var command_records: Array = []
@@ -92,23 +94,13 @@ func to_json() -> String:
 
 func load_dictionary(data: Dictionary) -> bool:
 	var source_version := int(data.get("format_version", -1))
-	if source_version not in LEGACY_FORMAT_VERSIONS and source_version != FORMAT_VERSION:
+	if source_version != FORMAT_VERSION:
 		return false
 	simulation_seed = int(data.get("simulation_seed", 1))
 	command_records = data.get("commands", []).duplicate(true)
 	state_hashes = data.get("state_hashes", []).duplicate(true)
-	for index in range(command_records.size()):
-		var record: Dictionary = command_records[index]
-		# Version 1 did not serialize an envelope. File order is the only
-		# recoverable ordering contract for legacy replays.
-		if int(record.get("sequence_id", 0)) <= 0:
-			record["sequence_id"] = index + 1
-		if not record.has("issuer_id"):
-			record["issuer_id"] = 0
-		# Versions 1 and 2 only recorded the scheduled execution tick. Their
-		# historical playback contract queued every command at tick zero.
-		if not record.has("issued_tick"):
-			record["issued_tick"] = 0
+	for record in command_records:
+		if not record is Dictionary or int(record.get("sequence_id", 0)) <= 0 or not record.has("issuer_id") or not record.has("issued_tick"): return false
 	command_records.sort_custom(_record_less)
 	_rebuild_issuance_records()
 	playback_cursor = 0
@@ -242,6 +234,15 @@ func command_from_record(record: Dictionary):
 
 
 func encode_variant(value: Variant, quantize_numbers: bool = true) -> Variant:
+	if native_encoding_enabled and ClassDB.class_exists("RoRReadModelKernel"):
+		if encoding_kernel == null: encoding_kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if encoding_kernel.has_method("encode_replay_variant"):
+			var encoded: Dictionary = encoding_kernel.encode_replay_variant(value, quantize_numbers)
+			if bool(encoded.get("valid", false)): return encoded["value"]
+	return encode_variant_reference(value, quantize_numbers)
+
+
+func encode_variant_reference(value: Variant, quantize_numbers: bool = true) -> Variant:
 	if value is Vector2:
 		return {"__vector2": [quantize(value.x) if quantize_numbers else value.x, quantize(value.y) if quantize_numbers else value.y]}
 	if value is Vector2i:
@@ -251,12 +252,12 @@ func encode_variant(value: Variant, quantize_numbers: bool = true) -> Variant:
 		var keys: Array = value.keys()
 		keys.sort_custom(func(left, right): return str(left) < str(right))
 		for key in keys:
-			result[str(key)] = encode_variant(value[key], quantize_numbers)
+			result[str(key)] = encode_variant_reference(value[key], quantize_numbers)
 		return result
 	if value is Array:
 		var result: Array = []
 		for item in value:
-			result.append(encode_variant(item, quantize_numbers))
+			result.append(encode_variant_reference(item, quantize_numbers))
 		return result
 	if value is float:
 		return quantize(value) if quantize_numbers else value

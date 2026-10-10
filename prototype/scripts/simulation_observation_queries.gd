@@ -55,7 +55,7 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 			if source != null:
 				row = row.duplicate()
 				row["builder_count"] = source.get("builders", {}).size()
-				if String(source.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(source, units)):
+				if String(source.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(source, options.get("foundation_units", units))):
 					row["reachable_builder_ids"] = world.reachable_builder_ids(source)
 				if bool(options.get("requested_production_only", false)):
 					row["command_options"] = requested_production_options(world, source, team, options.get("production_requests", []))
@@ -79,6 +79,7 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 				controls.append(replacements.get(int(row.get("id", -1)), row))
 			result[category] = controls
 	_observe(probe, prefix + ".commands", started)
+	if bool(options.get("skip_spatial_queries", false)): return result
 	started = Time.get_ticks_usec() if probe != null else 0
 	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, world.get_fog_of_war(), team, probe) if bool(options.get("include_navigation", true)) else {}
 	result["navigation"] = navigation

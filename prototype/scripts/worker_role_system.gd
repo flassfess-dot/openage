@@ -42,6 +42,7 @@ func profile_for_hunt(worker: Dictionary, target: Dictionary) -> Dictionary:
 
 
 func apply(worker: Dictionary, profile: Dictionary, combat_role: bool = false) -> bool:
+	world.notify_entity_changed(worker)
 	if profile.is_empty():
 		clear(worker)
 		return false
@@ -50,10 +51,10 @@ func apply(worker: Dictionary, profile: Dictionary, combat_role: bool = false) -
 	var role_source: Dictionary = world.object_record_by_id(role_source_id, int(worker.get("team", 0))) if role_source_id >= 0 else {}
 	if not role_source.is_empty():
 		_apply_task_source(worker, role_source)
-	worker["worker_role_source_unit_id"] = role_source_id
-	worker["worker_role_name"] = String(profile.get("role_name", ""))
-	worker["worker_role_profile"] = profile.duplicate(true)
-	worker["presentation_state_overrides"] = _presentation_overrides(profile)
+	world.set_entity_field(worker, "worker_role_source_unit_id", role_source_id)
+	world.set_entity_field(worker, "worker_role_name", String(profile.get("role_name", "")))
+	world.set_entity_field(worker, "worker_role_profile", profile.duplicate(true))
+	world.set_entity_field(worker, "presentation_state_overrides", _presentation_overrides(profile))
 	var identity: Dictionary = worker.get("components", {}).get("identity", {})
 	identity["task_source_unit_id"] = role_source_id
 	identity["task_source_key"] = String(role_source.get("key", ""))
@@ -63,26 +64,27 @@ func apply(worker: Dictionary, profile: Dictionary, combat_role: bool = false) -
 
 
 func clear(worker: Dictionary) -> void:
+	world.notify_entity_changed(worker)
 	var previous_combat_enabled := bool(worker.get("combat_enabled", false))
 	if worker.has("_worker_base_combat"):
 		var backup: Dictionary = worker["_worker_base_combat"]
 		for field in ["attack_damage", "attack_period", "attack_range_min", "attack_range", "blast_range", "projectile_id", "combat_enabled", "stance", "acquisition_range", "chase_range"]:
 			if backup.has(field):
-				worker[field] = backup[field]
+				world.set_entity_field(worker, String(field), backup[field])
 		worker.get("components", {})["combat"] = backup.get("component", {}).duplicate(true)
 		worker.erase("_worker_base_combat")
 	if worker.has("_worker_base_task"):
 		var task_backup: Dictionary = worker["_worker_base_task"]
-		worker["gather_interval"] = task_backup.get("gather_interval", worker.get("gather_interval", 1.0))
-		worker["carry_capacity"] = task_backup.get("carry_capacity", worker.get("carry_capacity", 0.0))
+		world.set_entity_field(worker, "gather_interval", task_backup.get("gather_interval", worker.get("gather_interval", 1.0)))
+		world.set_entity_field(worker, "carry_capacity", task_backup.get("carry_capacity", worker.get("carry_capacity", 0.0)))
 		var components: Dictionary = worker.get("components", {})
 		components["worker"] = task_backup.get("worker_component", {}).duplicate(true)
 		components["resource_carrier"] = task_backup.get("carrier_component", {}).duplicate(true)
 		worker.erase("_worker_base_task")
-	worker["worker_role_source_unit_id"] = -1
-	worker["worker_role_name"] = ""
-	worker["worker_role_profile"] = {}
-	worker["presentation_state_overrides"] = {}
+	world.set_entity_field(worker, "worker_role_source_unit_id", -1)
+	world.set_entity_field(worker, "worker_role_name", "")
+	world.set_entity_field(worker, "worker_role_profile", {})
+	world.set_entity_field(worker, "presentation_state_overrides", {})
 	var identity: Dictionary = worker.get("components", {}).get("identity", {})
 	identity.erase("task_source_unit_id")
 	identity.erase("task_source_key")
@@ -121,9 +123,11 @@ func _presentation_overrides(profile: Dictionary) -> Dictionary:
 
 
 func _apply_task_source(worker: Dictionary, source: Dictionary) -> void:
+	world.notify_entity_changed(worker)
 	var components: Dictionary = worker.get("components", {})
 	var worker_component: Dictionary = components.get("worker", {})
 	var carrier_component: Dictionary = components.get("resource_carrier", {})
+	world.notify_entity_changed(worker)
 	worker["_worker_base_task"] = {
 		"gather_interval": worker.get("gather_interval", 1.0),
 		"carry_capacity": worker.get("carry_capacity", 0.0),
@@ -142,8 +146,8 @@ func _apply_task_source(worker: Dictionary, source: Dictionary) -> void:
 		match int(command.get("attr_c", -1)):
 			13: work_rate = maxf(0.01, _apply_effect_operator(work_rate, effect_type, float(command.get("attr_d", 0.0))))
 			14: capacity = maxf(0.0, _apply_effect_operator(capacity, effect_type, float(command.get("attr_d", 0.0))))
-	worker["gather_interval"] = 1.0 / work_rate
-	worker["carry_capacity"] = capacity
+	world.set_entity_field(worker, "gather_interval", 1.0 / work_rate)
+	world.set_entity_field(worker, "carry_capacity", capacity)
 	worker_component["work_rate"] = work_rate
 	worker_component["commands"] = source.get("commands", []).duplicate(true)
 	worker_component["task_group"] = int(source.get("links", {}).get("task_group", 0))
@@ -168,10 +172,12 @@ func _apply_effect_operator(current: float, effect_type: int, value: float) -> f
 
 
 func _apply_combat_source(worker: Dictionary, source: Dictionary) -> void:
+	world.notify_entity_changed(worker)
 	if source.is_empty():
 		return
 	var previous_combat_enabled := bool(worker.get("combat_enabled", false))
 	var component: Dictionary = worker.get("components", {}).get("combat", {})
+	world.notify_entity_changed(worker)
 	worker["_worker_base_combat"] = {
 		"attack_damage": worker.get("attack_damage", 0.0),
 		"attack_period": worker.get("attack_period", 0.0),
@@ -187,13 +193,13 @@ func _apply_combat_source(worker: Dictionary, source: Dictionary) -> void:
 	}
 	var source_combat: Dictionary = source.get("combat", {})
 	var attacks: Array = source_combat.get("attacks", []).duplicate(true)
-	worker["attack_damage"] = CombatRules.primary_attack_damage(attacks)
-	worker["attack_period"] = float(source_combat.get("attack_period", 0.0))
-	worker["attack_range_min"] = float(source_combat.get("range_min", 0.0))
-	worker["attack_range"] = float(source_combat.get("range_max", 0.0))
-	worker["blast_range"] = float(source_combat.get("blast_range", 0.0))
-	worker["projectile_id"] = int(source_combat.get("projectile_id", -1))
-	worker["combat_enabled"] = not attacks.is_empty()
+	world.set_entity_field(worker, "attack_damage", CombatRules.primary_attack_damage(attacks))
+	world.set_entity_field(worker, "attack_period", float(source_combat.get("attack_period", 0.0)))
+	world.set_entity_field(worker, "attack_range_min", float(source_combat.get("range_min", 0.0)))
+	world.set_entity_field(worker, "attack_range", float(source_combat.get("range_max", 0.0)))
+	world.set_entity_field(worker, "blast_range", float(source_combat.get("blast_range", 0.0)))
+	world.set_entity_field(worker, "projectile_id", int(source_combat.get("projectile_id", -1)))
+	world.set_entity_field(worker, "combat_enabled", not attacks.is_empty())
 	component["attacks"] = attacks
 	component["armors"] = source_combat.get("armors", []).duplicate(true)
 	component["base_armor"] = float(source_combat.get("base_armor", 0.0))

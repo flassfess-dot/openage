@@ -184,6 +184,7 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		"kind": kind,
 		"team": team,
 	})
+	world.register_entity_changes(unit)
 	return unit
 
 
@@ -238,7 +239,7 @@ func add_resource(kind: String, position: Vector2, amount: int, resolve_placemen
 		resource["source_felled_graphic_id"] = int(source.get("graphics", {}).get("death", 636))
 		resource["source_felled_asset_name"] = "graphic_%d" % int(resource["source_felled_graphic_id"])
 		if safe_amount <= 0:
-			resource["hp"] = 0.0
+			world.set_entity_field(resource, "hp", 0.0)
 	world.apply_archetype_identity(resource, kind)
 	EntityComponents.sync_dynamic(resource)
 	world.resource_nodes.append(resource)
@@ -260,6 +261,7 @@ func add_resource(kind: String, position: Vector2, amount: int, resolve_placemen
 		"kind": kind,
 		"team": 0,
 	})
+	world.register_entity_changes(resource)
 	return resource
 
 
@@ -407,4 +409,5 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 		"team": team,
 		"completed": completed,
 	})
+	world.register_entity_changes(building)
 	return building

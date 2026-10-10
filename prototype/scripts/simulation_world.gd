@@ -21,6 +21,8 @@ const FormationCombat := preload("res://scripts/formation_combat.gd")
 const TerrainElevation := preload("res://scripts/terrain_elevation.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const EntityComponents := preload("res://scripts/entity_components.gd")
+const EntityChangeJournal := preload("res://scripts/entity_change_journal.gd")
+const EntityReadIndex := preload("res://scripts/entity_read_index.gd")
 const ChangeJournal := preload("res://scripts/cell_change_journal.gd")
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const EntityReadContract := preload("res://scripts/entity_read_contract.gd")
@@ -70,6 +72,13 @@ var map_reserved_foundation_cells: Dictionary = {}
 var forest_resource_counts: Dictionary = {}
 const MAX_TERRAIN_CHANGE_HISTORY := 256
 var cache_epoch := 0
+var entity_changes := EntityChangeJournal.new()
+var entity_read_index := EntityReadIndex.new()
+# The event contract is mandatory; direct external mutation is unsupported.
+var read_generation_pins := 0
+var runtime_task_capture := false
+var runtime_previous_tasks: Dictionary = {}
+var runtime_actor_eligibility: Dictionary = {}
 var terrain_revision: int = 0
 var terrain_change_history: Array = []
 var units: Array = []
@@ -93,6 +102,12 @@ const RESOURCE_MEMORY_CHUNK_SIZE := 8
 const MAX_MINIMAP_RESOURCE_CHANGES := 4096
 var last_known_buildings_by_player: Dictionary = {}
 var local_build_site_cache: Dictionary = {}
+var build_query_scopes: Dictionary = {}
+var ai_build_capture_cache: Dictionary = {}
+var build_query_scope_bytes := 0
+const MAX_BUILD_QUERY_SCOPE_BYTES := 4 * 1024 * 1024
+var local_build_site_cache_bytes := 0
+const MAX_LOCAL_BUILD_SITE_CACHE_BYTES := 4 * 1024 * 1024
 const MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES := 64
 var build_option_catalog_cache: Dictionary = {}
 var render_entity_projection_cache := RenderEntityProjectionCache.new()
@@ -256,12 +271,17 @@ func set_simulation_seed(value: int) -> void:
 
 
 func set_performance_probe(probe: Variant) -> void:
+	entity_changes.performance_probe = probe
 	tick_pipeline.set_performance_probe(probe)
 	pathfinder.set_performance_probe(probe)
 	visibility_system.set_performance_probe(probe)
 
 func set_gamespec(data: Dictionary) -> void:
 	local_build_site_cache.clear()
+	local_build_site_cache_bytes = 0
+	build_query_scopes.clear()
+	build_query_scope_bytes = 0
+	ai_build_capture_cache.clear()
 	building_placement_system.invalidate_site_cache()
 	gamespec_data = data
 	data_repository.configure_compatibility_gamespec(data)
@@ -418,7 +438,10 @@ func configure_players(definitions: Array) -> void:
 			trade_system.initialize_team(team, data_repository.runtime_metadata("trade_boat").get("trade", {}))
 
 func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = false) -> void:
-	task_coordinator.shutdown()
+	shutdown_derived_state()
+	read_generation_pins = 0
+	entity_changes.reset()
+	cache_epoch += 1
 	if not preserve_bulk_load:
 		bulk_load_depth = 0
 	units.clear()
@@ -643,7 +666,7 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 func remove_selection_for(team: int) -> void:
 	for unit in units:
 		if unit["team"] == team:
-			unit["selected"] = false
+			set_entity_field(unit, "selected", false)
 
 func get_selected_units(team: int) -> Array:
 	var selected: Array = []
@@ -661,10 +684,10 @@ func apply_archetype_identity(entity: Dictionary, kind: String) -> void:
 	var identifiers := data_repository.identifiers(kind)
 	if identifiers.is_empty():
 		return
-	entity["internal_id"] = String(identifiers.get("internal_id", kind))
-	entity["source_unit_id"] = int(identifiers.get("source_unit_id", entity.get("source_unit_id", -1)))
-	entity["presentation_id"] = String(identifiers.get("presentation_id", kind))
-	entity["behavior_tags"] = data_repository.behavior_tags(kind)
+	set_entity_field(entity, "internal_id", String(identifiers.get("internal_id", kind)))
+	set_entity_field(entity, "source_unit_id", int(identifiers.get("source_unit_id", entity.get("source_unit_id", -1))))
+	set_entity_field(entity, "presentation_id", String(identifiers.get("presentation_id", kind)))
+	set_entity_field(entity, "behavior_tags", data_repository.behavior_tags(kind))
 	var identity: Dictionary = entity.get("components", {}).get("identity", {})
 	identity["internal_id"] = entity["internal_id"]
 	identity["source_unit_id"] = entity["source_unit_id"]
@@ -706,10 +729,10 @@ func configure_entity_combat_awareness(entity: Dictionary) -> void:
 		vision_range = 6.0
 	var configured_stance := String(data_repository.runtime_metadata(String(entity.get("kind", ""))).get("combat_stance", ""))
 	var default_stance := "stand_ground" if entity_is_static(entity) else ("defensive" if entity_is_worker(entity) else ("aggressive" if combat_enabled else "passive"))
-	entity["combat_enabled"] = combat_enabled
-	entity["stance"] = configured_stance if not configured_stance.is_empty() else default_stance
-	entity["acquisition_range"] = vision_range
-	entity["chase_range"] = maxf(vision_range, maxf(0.85, float(entity.get("attack_range", 0.0)))) * 2.0
+	set_entity_field(entity, "combat_enabled", combat_enabled)
+	set_entity_field(entity, "stance", configured_stance if not configured_stance.is_empty() else default_stance)
+	set_entity_field(entity, "acquisition_range", vision_range)
+	set_entity_field(entity, "chase_range", maxf(vision_range, maxf(0.85, float(entity.get("attack_range", 0.0)))) * 2.0)
 	if previous_combat_enabled != combat_enabled:
 		mark_combat_roster_dirty()
 
@@ -753,7 +776,7 @@ func refresh_building_connectivity() -> void:
 	for building_value in buildings:
 		var building: Dictionary = building_value
 		var group := String(data_repository.runtime_metadata(String(building.get("kind", ""))).get("connectivity_group", ""))
-		building["connectivity_group"] = group
+		set_entity_field(building, "connectivity_group", group)
 		if group.is_empty() or float(building.get("hp", 0.0)) <= 0.0 or String(building.get("state", "complete")) == "destroyed":
 			continue
 		for cell_value in building.get("occupied_cells", []):
@@ -773,8 +796,8 @@ func refresh_building_connectivity() -> void:
 						next_mask |= 1 << direction
 						break
 		if int(building.get("connection_mask", 0)) != next_mask:
-			building["connection_mask"] = next_mask
-			building["connection_revision"] = int(building.get("connection_revision", 0)) + 1
+			set_entity_field(building, "connection_mask", next_mask)
+			set_entity_field(building, "connection_revision", int(building.get("connection_revision", 0)) + 1)
 
 
 func register_building_victory_objective(building: Dictionary) -> void:
@@ -782,8 +805,8 @@ func register_building_victory_objective(building: Dictionary) -> void:
 	if category.is_empty() or int(building.get("victory_objective_id", -1)) >= 0:
 		return
 	var objective := add_victory_object(category, Vector2(building.get("pos", Vector2.ZERO)), int(building.get("team", 0)), String(building.get("state", "complete")) == "complete")
-	objective["source_entity_id"] = int(building.get("id", -1))
-	building["victory_objective_id"] = int(objective["id"])
+	set_entity_field(objective, "source_entity_id", int(building.get("id", -1)))
+	set_entity_field(building, "victory_objective_id", int(objective["id"]))
 
 
 func register_unit_victory_objective(unit: Dictionary) -> void:
@@ -792,9 +815,9 @@ func register_unit_victory_objective(unit: Dictionary) -> void:
 	if category.is_empty() or int(unit.get("victory_objective_id", -1)) >= 0:
 		return
 	var objective := add_victory_object(category, Vector2(unit.get("pos", Vector2.ZERO)), int(unit.get("team", 0)), true)
-	objective["source_entity_id"] = int(unit.get("id", -1))
-	objective["logical_only"] = true
-	unit["victory_objective_id"] = int(objective["id"])
+	set_entity_field(objective, "source_entity_id", int(unit.get("id", -1)))
+	set_entity_field(objective, "logical_only", true)
+	set_entity_field(unit, "victory_objective_id", int(objective["id"]))
 
 
 func track_conquest_entity(entity: Dictionary) -> void:
@@ -832,10 +855,10 @@ func sync_unit_victory_objective(unit: Dictionary) -> void:
 		return
 	for objective in victory_objectives:
 		if int(objective.get("id", -1)) == objective_id:
-			objective["team"] = int(unit.get("team", 0))
-			objective["completed"] = float(unit.get("hp", 0.0)) > 0.0
-			objective["active"] = float(unit.get("hp", 0.0)) > 0.0 and not bool(unit.get("removed", false)) and String(unit.get("cargo_state", "deployed")) != "embarked"
-			objective["pos"] = Vector2(unit.get("pos", Vector2.ZERO))
+			set_entity_field(objective, "team", int(unit.get("team", 0)))
+			set_entity_field(objective, "completed", float(unit.get("hp", 0.0)) > 0.0)
+			set_entity_field(objective, "active", float(unit.get("hp", 0.0)) > 0.0 and not bool(unit.get("removed", false)) and String(unit.get("cargo_state", "deployed")) != "embarked")
+			set_entity_field(objective, "pos", Vector2(unit.get("pos", Vector2.ZERO)))
 			victory_system.track_objective(objective)
 			return
 
@@ -912,10 +935,10 @@ func sync_building_victory_objective(building: Dictionary) -> void:
 		return
 	for objective in victory_objectives:
 		if int(objective.get("id", -1)) == objective_id:
-			objective["team"] = int(building.get("team", 0))
-			objective["completed"] = String(building.get("state", "complete")) == "complete" and float(building.get("hp", 0.0)) > 0.0
-			objective["active"] = float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "complete")) != "destroyed"
-			objective["pos"] = Vector2(building.get("pos", Vector2.ZERO))
+			set_entity_field(objective, "team", int(building.get("team", 0)))
+			set_entity_field(objective, "completed", String(building.get("state", "complete")) == "complete" and float(building.get("hp", 0.0)) > 0.0)
+			set_entity_field(objective, "active", float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "complete")) != "destroyed")
+			set_entity_field(objective, "pos", Vector2(building.get("pos", Vector2.ZERO)))
 			victory_system.track_objective(objective)
 			return
 
@@ -1001,12 +1024,17 @@ func _configure_tick_pipeline() -> void:
 
 
 func advance(delta: float, player_team: int, enemy_team: int) -> String:
+	assert(read_generation_pins == 0, "AI capture must finish at its fixed source boundary")
 	var context := {
 		"delta": delta,
 		"player_team": player_team,
 		"enemy_team": enemy_team,
 	}
 	tick_pipeline.run(battle_over, context)
+	entity_changes.flush()
+	if entity_changes.comparison_enabled:
+		var missed: Array = entity_changes.compare(_entity_change_comparison_roster())
+		assert(missed.is_empty(), "Untracked entity writes: " + str(missed))
 	return battle_message
 
 
@@ -1015,7 +1043,10 @@ func tick_system_order(match_completed: bool = false) -> Array[String]:
 
 
 func _tick_capture_previous_positions(context: Dictionary) -> void:
+	unit_activity_registry.synchronize(self)
 	unit_activity_registry.begin_tick(units, maxf(0.0, float(context.get("delta", 0.0))))
+	if tick_pipeline.performance_probe != null:
+		tick_pipeline.performance_probe.increment("entities.activity_scanned", units.size())
 
 
 func _tick_unit_orders(context: Dictionary) -> void:
@@ -1213,11 +1244,11 @@ func elevation_at(position: Vector2) -> float:
 
 func sync_entity_elevations() -> void:
 	for unit in units:
-		unit["elevation"] = elevation_at(unit["pos"])
+		set_entity_field(unit, "elevation", elevation_at(unit["pos"]))
 	for resource in resource_nodes:
-		resource["elevation"] = elevation_at(resource["pos"])
+		set_entity_field(resource, "elevation", elevation_at(resource["pos"]))
 	for building in buildings:
-		building["elevation"] = elevation_at(building["pos"])
+		set_entity_field(building, "elevation", elevation_at(building["pos"]))
 	sync_all_components()
 
 
@@ -1237,7 +1268,10 @@ func update_fog_of_war() -> void:
 
 
 func _tick_fog(context: Dictionary) -> void:
+	entity_read_index.update_building_memory(self, true)
+	visibility_system.configure_source(self)
 	visibility_system.advance(context)
+	entity_read_index.update_building_memory(self, false)
 	var fog = get_fog_of_war()
 	# Sample sight even while units are idle. A planner first created much later
 	# must not learn hidden changes to terrain the player saw earlier.
@@ -1311,6 +1345,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	if probe != null:
 		probe.observe_microseconds("simulation.unit_orders.combat_reservations", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
+	pathfinder.configure_entity_change_source(self)
 	pathfinder.prepare_native_movement_snapshot(units if unit_activity_registry.has_movement_candidate() else [])
 	pathfinder.prepare_native_movement_batch(active_units, delta, task_coordinator, open_movement_envelopes_by_id)
 	if probe != null:
@@ -1354,9 +1389,9 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 			and Vector2(unit.get("target", position_before_tick)) == position_before_tick
 		)
 		if float(unit["cooldown"]) > 0.0:
-			unit["cooldown"] = maxf(0.0, float(unit["cooldown"]) - delta)
+			set_entity_field(unit, "cooldown", maxf(0.0, float(unit["cooldown"]) - delta))
 		if float(unit["work"]) > 0.0:
-			unit["work"] = maxf(0.0, float(unit["work"]) - delta)
+			set_entity_field(unit, "work", maxf(0.0, float(unit["work"]) - delta))
 		if bool(unit["components"]["conversion"]["enabled"]):
 			conversion_system.advance_faith(unit, delta)
 		if int(unit["retaliation_target_id"]) >= 0:
@@ -1414,7 +1449,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 					# Preserve the observable effects of move_unit's arrived branch
 					# without querying neighbours or rebuilding movement state.
 					if Vector2(unit.get("actual_velocity", Vector2.ZERO)) != Vector2.ZERO:
-						unit["actual_velocity"] = Vector2.ZERO
+						set_entity_field(unit, "actual_velocity", Vector2.ZERO)
 					if int(unit.get("stuck_ticks", 0)) != 0 or int(unit.get("push_priority", 0)) != int(unit.get("base_push_priority", unit.get("push_priority", 0))):
 						StuckRecovery.reset(unit)
 				else:
@@ -1432,7 +1467,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		if moving and animation_state != AnimationController.CARRY:
 			animation_state = AnimationController.MOVE
 		var restart_attack_clip := animation_state == AnimationController.ATTACK_WINDUP and String(unit.get("anim_state", "")) == AnimationController.ATTACK_RECOVER
-		AnimationController.update(unit, animation_state, delta, restart_attack_clip)
+		advance_entity_animation(unit, animation_state, delta, restart_attack_clip)
 		if attack_target != null:
 			apply_attack_frame_event(unit, attack_target, player_team)
 		if probe != null:
@@ -1465,6 +1500,9 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		probe.increment("movement.native_neighbor_candidates", movement_native_neighbor_candidates)
 	transport_system.finish_boarding_tick(boarding_ready)
 	transport_system.finish_unloading_tick(unloading_ready)
+	for unit in active_units:
+		# Private work/faith and pure movement helpers change nested state.
+		notify_entity_changed(unit, EntityChangeJournal.ACTIVITY | EntityChangeJournal.CONTROL)
 	unit_activity_registry.finish_tick()
 
 
@@ -1689,6 +1727,7 @@ func detach_unit_for_transport(id: int) -> Variant:
 	var unit: Variant = units_by_id.get(id)
 	if unit == null:
 		return null
+	entity_changes.mark(id, EntityChangeJournal.LIFECYCLE | EntityChangeJournal.ACTIVITY | EntityChangeJournal.CONTROL)
 	units.erase(unit)
 	units_by_id.erase(id)
 	spatial_sync_system.mark_roster_dirty()
@@ -1705,6 +1744,7 @@ func restore_unit_from_transport(unit: Dictionary) -> bool:
 		return false
 	units.append(unit)
 	units_by_id[id] = unit
+	entity_changes.mark(id, EntityChangeJournal.LIFECYCLE | EntityChangeJournal.POSITION | EntityChangeJournal.ACTIVITY | EntityChangeJournal.CONTROL)
 	spatial_sync_system.mark_roster_dirty()
 	mark_combat_roster_dirty()
 	unit_activity_registry.refresh(unit)
@@ -2107,7 +2147,7 @@ func get_cached_local_build_sites(team: int, kinds: Array, tick: int, maximum_ag
 		return _get_cached_local_build_sites_sequential(team, kinds, tick, maximum_age_ticks, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
 	if kinds.size() < 2:
 		return _get_cached_local_build_sites_sequential(team, kinds, tick, maximum_age_ticks, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
-	var dependencies := _build_site_query_dependencies(team)
+	var dependencies := _build_site_query_dependencies(team, search_radius, preferred_sites)
 	var queries: Array = []
 	var records: Array = []
 	var result: Dictionary = {}
@@ -2155,7 +2195,7 @@ func get_cached_local_build_sites(team: int, kinds: Array, tick: int, maximum_ag
 		var output: Dictionary = outputs[index]
 		var sites: Dictionary = output.get("sites", {})
 		_prune_local_build_site_cache(tick, maximum_age_ticks)
-		local_build_site_cache[record["key"]] = {"tick": tick, "query_signature": record["signature"], "sites": TaskData.copy(sites)}
+		_store_local_build_site_cache(record["key"], {"tick": tick, "query_signature": record["signature"], "sites": TaskData.copy(sites)})
 		placement.site_map_cache[record["kind"]] = output.get("static_cache", {})
 		placement.site_footprint_profiles.merge(output.get("static_profiles", {}), true)
 		if sites.has(record["kind"]):
@@ -2174,7 +2214,7 @@ func capture_ai_build_site_queries(team: int, kinds: Array, tick: int, maximum_a
 	var requests: Array = []
 	if kinds.is_empty():
 		return requests
-	var dependencies := _build_site_query_dependencies(team)
+	var dependencies := _build_site_query_dependencies(team, search_radius, preferred_sites)
 	var pending_kinds: Array = []
 	for kind_value in kinds:
 		var kind := String(kind_value)
@@ -2183,7 +2223,7 @@ func capture_ai_build_site_queries(team: int, kinds: Array, tick: int, maximum_a
 		var cache_key := hash([team, kind, maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap])
 		var signature := hash([dependencies, can_afford_resource_cost(team, building_cost(kind, team))])
 		var cached: Dictionary = local_build_site_cache.get(cache_key, {})
-		var request := {"kind": kind, "cache_key": cache_key, "signature": signature, "team": team}
+		var request := {"kind": kind, "cache_key": cache_key, "signature": signature, "team": team, "dependency_scope": {"radius": search_radius, "preferred": preferred_sites}}
 		if not cached.is_empty() and tick >= int(cached.get("tick", -1)) and tick - int(cached.get("tick", -1)) <= maxi(0, maximum_age_ticks) and int(cached.get("query_signature", -1)) == signature:
 			request["cached_sites"] = cached.get("sites", {}).get(kind, []).duplicate()
 		else:
@@ -2200,18 +2240,20 @@ func capture_ai_build_site_queries(team: int, kinds: Array, tick: int, maximum_a
 	return requests
 
 func commit_ai_build_site_queries(updates: Array, tick: int) -> void:
-	var dependencies_by_team: Dictionary = {}
+	var dependencies_by_scope: Dictionary = {}
 	# A moved worker, changed occupancy, exploration or technology invalidates
 	# a captured search. Build commands also validate the live site/worker.
 	for update in updates:
 		var team := int(update.get("team", 0))
 		var kind := String(update.get("kind", ""))
-		if not dependencies_by_team.has(team):
-			dependencies_by_team[team] = _build_site_query_dependencies(team)
-		var signature := hash([dependencies_by_team[team], can_afford_resource_cost(team, building_cost(kind, team))])
+		var scope: Dictionary = update["dependency_scope"]
+		var scope_key := hash([team, scope["radius"], scope["preferred"]])
+		if not dependencies_by_scope.has(scope_key):
+			dependencies_by_scope[scope_key] = _build_site_query_dependencies(team, int(scope["radius"]), scope["preferred"])
+		var signature := hash([dependencies_by_scope[scope_key], can_afford_resource_cost(team, building_cost(kind, team))])
 		if kind.is_empty() or signature != int(update.get("signature", -1)):
 			continue
-		local_build_site_cache[int(update["cache_key"])] = {"tick": tick, "query_signature": signature, "sites": TaskData.copy(update.get("sites", {}))}
+		_store_local_build_site_cache(int(update["cache_key"]), {"tick": tick, "query_signature": signature, "sites": TaskData.copy(update.get("sites", {}))})
 		_prune_local_build_site_cache(tick, 1200)
 
 func _get_cached_local_build_sites_sequential(team: int, kinds: Array, tick: int, maximum_age_ticks: int, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
@@ -2219,7 +2261,7 @@ func _get_cached_local_build_sites_sequential(team: int, kinds: Array, tick: int
 		return {}
 	# Retain each kind independently, including empty searches. Other priorities
 	# entering/leaving the request must not discard an unchanged failed dock search.
-	var dependencies := _build_site_query_dependencies(team)
+	var dependencies := _build_site_query_dependencies(team, search_radius, preferred_sites)
 	var result: Dictionary = {}
 	for kind_value in kinds:
 		var kind := String(kind_value)
@@ -2236,26 +2278,43 @@ func _get_cached_local_build_sites_sequential(team: int, kinds: Array, tick: int
 		else:
 			sites = get_local_build_sites(team, [kind], maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap)
 			_prune_local_build_site_cache(tick, maximum_age_ticks)
-			local_build_site_cache[cache_key] = {"tick": tick, "query_signature": signature, "sites": sites.duplicate(true)}
+			_store_local_build_site_cache(cache_key, {"tick": tick, "query_signature": signature, "sites": sites.duplicate(true)})
 		if sites.has(kind):
 			result[kind] = sites[kind].duplicate()
 	return result
 
 
-func _build_site_query_dependencies(team: int) -> Array:
-	var workers: Array = []
-	for unit_value in units:
-		var unit: Dictionary = unit_value
-		if int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land":
-			workers.append([int(unit.get("id", -1)), unit.get("pos", Vector2.ZERO), unit.get("footprint_radius", 0.3), unit.get("terrain_restriction", -1)])
-	var mobile_cells: Array = _mobile_foundation_obstructions().keys()
-	mobile_cells.sort_custom(func(left, right): return left.y < right.y or (left.y == right.y and left.x < right.x))
-	var structures: Array = []
-	for building_value in buildings:
-		var building: Dictionary = building_value
-		if float(building.get("hp", 0.0)) > 0.0:
-			structures.append([building.get("id", -1), building.get("team", 0), building.get("pos", Vector2.ZERO), building.get("footprint", {}), building.get("occupied_cells", []), building.get("footprint_radius", 1.0)])
-	return [navigation_grid.get_instance_id(), navigation_grid.revision, technology_system.revision(team), fog_of_war.exploration_revision_for_player(team), workers, mobile_cells, structures]
+func _build_site_query_dependencies(team: int, search_radius: int = 12, preferred_sites: Dictionary = {}) -> Array:
+	var scope: Dictionary = entity_read_index.build_query_scope(self, team, search_radius, preferred_sites)
+	var planner = movement_system.knowledge.planner(self, team)
+	var key := hash([team, search_radius, preferred_sites])
+	var cached: Dictionary = build_query_scopes.get(key, {})
+	var local_revision := int(cached.get("local_revision", 0))
+	var changes: Variant = planner.grid.changed_cells_since(int(cached.get("grid_revision", -1))) if not cached.is_empty() else null
+	var changed: bool = changes == null or cached.get("workers") != scope["workers"] or cached.get("versions") != scope["versions"]
+	if not changed:
+		for cell in changes:
+			var sector := Vector2i(floori(float(cell.x) / 4.0), floori(float(cell.y) / 4.0))
+			if scope["keys"].has(sector):
+				changed = true
+				break
+	if changed: local_revision += 1
+	var record := {"local_revision": local_revision, "grid_revision": planner.grid.revision, "workers": scope["workers"], "versions": scope["versions"]}
+	var bytes := var_to_bytes(record).size() + 64
+	if build_query_scopes.has(key):
+		build_query_scope_bytes -= int(build_query_scopes[key].get("bytes", 0))
+		build_query_scopes.erase(key)
+	if bytes <= MAX_BUILD_QUERY_SCOPE_BYTES:
+		while not build_query_scopes.is_empty() and (build_query_scopes.size() >= 64 or build_query_scope_bytes + bytes > MAX_BUILD_QUERY_SCOPE_BYTES):
+			var oldest: Variant = build_query_scopes.keys()[0]
+			build_query_scope_bytes -= int(build_query_scopes[oldest].get("bytes", 0))
+			build_query_scopes.erase(oldest)
+		record["bytes"] = bytes
+		build_query_scopes[key] = record
+		build_query_scope_bytes += bytes
+	else:
+		local_revision = hash([scope["workers"], scope["versions"], planner.grid.revision])
+	return [cache_epoch, team, key, local_revision, technology_system.revision(team), fog_of_war.exploration_revision_for_player(team)]
 
 
 func _prune_local_build_site_cache(tick: int, maximum_age_ticks: int) -> void:
@@ -2263,7 +2322,7 @@ func _prune_local_build_site_cache(tick: int, maximum_age_ticks: int) -> void:
 		var cached: Dictionary = local_build_site_cache[key]
 		var cached_tick := int(cached.get("tick", -1))
 		if cached_tick > tick or tick - cached_tick > maxi(0, maximum_age_ticks):
-			local_build_site_cache.erase(key)
+			_erase_local_build_site_cache(key)
 	while local_build_site_cache.size() >= MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES:
 		var oldest_key = local_build_site_cache.keys()[0]
 		var oldest_tick := int(local_build_site_cache[oldest_key].get("tick", -1))
@@ -2272,7 +2331,7 @@ func _prune_local_build_site_cache(tick: int, maximum_age_ticks: int) -> void:
 			if cached_tick < oldest_tick:
 				oldest_key = key
 				oldest_tick = cached_tick
-		local_build_site_cache.erase(oldest_key)
+		_erase_local_build_site_cache(oldest_key)
 
 
 func _append_bounded_sites(sites: Array, fallback_sites: Array, maximum: int) -> void:
@@ -2447,7 +2506,7 @@ func _update_huntable_reaction(unit: Dictionary) -> void:
 		return
 	var attacker: Variant = find_unit(int(unit.get("retaliation_target_id", -1)))
 	if attacker == null or float(attacker.get("hp", 0.0)) <= 0.0:
-		unit["retaliation_target_id"] = -1
+		set_entity_field(unit, "retaliation_target_id", -1)
 		return
 	match String(data_repository.runtime_metadata(String(unit.get("kind", ""))).get("hunt_behavior", "flee")):
 		"retaliate", "predator":
@@ -2459,8 +2518,8 @@ func _update_huntable_reaction(unit: Dictionary) -> void:
 				away = Vector2.RIGHT.rotated(float(int(unit.get("id", 0)) % 8) * PI / 4.0)
 			var destination := Coordinates.clamp_world(Vector2(unit["pos"]) + away.normalized() * 3.0, map_size)
 			assign_command_move([unit], destination)
-			unit["diagnostic_reason"] = "huntable_flee"
-	unit["retaliation_target_id"] = -1
+			set_entity_field(unit, "diagnostic_reason", "huntable_flee")
+	set_entity_field(unit, "retaliation_target_id", -1)
 
 func assign_command_move(selected: Array, target: Vector2) -> bool:
 	return movement_system.assign_command_move(selected, target)
@@ -2598,21 +2657,21 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 			var population_points_cost := int(entity.get("population_points_cost", int(entity.get("population_cost", 0)) * SimulationEconomySystem.POPULATION_POINT_SCALE))
 			economy_system.add_population_points(old_team, -population_points_cost)
 		if not bool(entity.get("population_released", false)):
-			entity["population_points_cost"] = expected_population_points_cost(entity, new_team)
+			set_entity_field(entity, "population_points_cost", expected_population_points_cost(entity, new_team))
 			economy_system.add_population_points(new_team, int(entity["population_points_cost"]))
 	player_registry.ensure(new_team, int(civilization_by_team.get(new_team, 13)))
-	entity["team"] = new_team
+	set_entity_field(entity, "team", new_team)
 	track_conquest_entity(entity)
 	if not is_building and transport_system.is_transport(entity):
 		transport_system.reconcile_ownership(entity)
-	entity["selected"] = false
+	set_entity_field(entity, "selected", false)
 	var owner_history: Array = entity.get("owner_history", [old_team]).duplicate()
 	owner_history.append(new_team)
-	entity["owner_history"] = owner_history
+	set_entity_field(entity, "owner_history", owner_history)
 	if ownership_reason == "conversion":
-		entity["conversion_origin_team"] = int(entity.get("conversion_origin_team", old_team))
-		entity["conversion_owner_history"] = owner_history.duplicate()
-		entity["technology_locked"] = true
+		set_entity_field(entity, "conversion_origin_team", int(entity.get("conversion_origin_team", old_team)))
+		set_entity_field(entity, "conversion_owner_history", owner_history.duplicate())
+		set_entity_field(entity, "technology_locked", true)
 	var ownership: Dictionary = entity.get("components", {}).get("ownership", {})
 	ownership["player_id"] = new_team
 	ownership["team_id"] = new_team
@@ -2656,36 +2715,36 @@ func stop_unit_motion(unit: Dictionary) -> void:
 
 func halt_unit(unit: Dictionary, reason: String = "stopped") -> void:
 	if reason in ["stop", "hold", "converted", "unit_died"]:
-		OrderPipeline.clear_queued(unit)
+		clear_entity_queued_orders(unit)
 	conversion_system.cancel(unit, reason)
 	healing_system.cancel(unit, reason)
 	trade_system.cancel(unit, reason)
 	transport_system.clear_pending_order(unit)
 	release_resource_approach_slot(unit)
 	release_building_approach_slot(unit)
-	unit["task"] = "idle"
-	unit["target_id"] = -1
-	unit["resource_id"] = -1
-	unit["gather_stage"] = "none"
-	unit["dropoff_id"] = -1
-	unit["dropoff_position"] = null
-	unit["target_building_id"] = -1
-	unit["retaliation_target_id"] = -1
-	unit["pending_hunt_target_id"] = -1
+	set_entity_field(unit, "task", "idle")
+	set_entity_field(unit, "target_id", -1)
+	set_entity_field(unit, "resource_id", -1)
+	set_entity_field(unit, "gather_stage", "none")
+	set_entity_field(unit, "dropoff_id", -1)
+	set_entity_field(unit, "dropoff_position", null)
+	set_entity_field(unit, "target_building_id", -1)
+	set_entity_field(unit, "retaliation_target_id", -1)
+	set_entity_field(unit, "pending_hunt_target_id", -1)
 	if entity_is_worker(unit):
 		worker_role_system.clear(unit)
 	_clear_combat_intent(unit)
 	stop_unit_motion(unit)
 	restore_formation_facing(unit)
-	OrderPipeline.complete(unit, reason)
+	complete_entity_order(unit, reason)
 	EntityComponents.sync_dynamic(unit)
 
 
 func _clear_combat_intent(unit: Dictionary) -> void:
-	unit["combat_pursuit"] = false
-	unit["attack_autonomous"] = false
-	unit["combat_resume"] = {}
-	unit["combat_leash_origin"] = unit.get("pos", Vector2.ZERO)
+	set_entity_field(unit, "combat_pursuit", false)
+	set_entity_field(unit, "attack_autonomous", false)
+	set_entity_field(unit, "combat_resume", {})
+	set_entity_field(unit, "combat_leash_origin", unit.get("pos", Vector2.ZERO))
 
 
 func clear_combat_intent(unit: Dictionary) -> void:
@@ -2777,7 +2836,7 @@ func expected_population_points_cost(entity: Dictionary, team: int) -> int:
 func reconcile_unit_population_points(entity: Dictionary) -> void:
 	var old_points := int(entity.get("population_points_cost", int(entity.get("population_cost", 0)) * SimulationEconomySystem.POPULATION_POINT_SCALE))
 	var new_points := expected_population_points_cost(entity, int(entity.get("team", 0)))
-	entity["population_points_cost"] = new_points
+	set_entity_field(entity, "population_points_cost", new_points)
 	if bool(entity.get("population_accounted", false)) and not bool(entity.get("population_released", false)):
 		economy_system.add_population_points(int(entity.get("team", 0)), new_points - old_points)
 
@@ -2973,6 +3032,7 @@ func apply_scenario_technology_nodes(team: int, nodes: Array) -> void:
 
 
 func apply_technology_state_to_entity(entity: Dictionary, team: int) -> void:
+	notify_entity_changed(entity)
 	var source_id := int(entity.get("source_unit_id", -1))
 	var resolved_id := technology_system.resolved_unit_id(team, source_id)
 	if resolved_id >= 0 and resolved_id != source_id:
@@ -2994,7 +3054,7 @@ func _sync_building_age_presentation(entity: Dictionary) -> void:
 	# facet. apply_attribute_effect owns that value for every civilization and
 	# every affected building; this hook only normalizes restored state.
 	if entity.has("presentation_facing"):
-		entity["presentation_facing"] = maxi(0, int(entity["presentation_facing"]))
+		set_entity_field(entity, "presentation_facing", maxi(0, int(entity["presentation_facing"])))
 
 
 func sync_building_age_presentation(entity: Dictionary) -> void:
@@ -3002,6 +3062,7 @@ func sync_building_age_presentation(entity: Dictionary) -> void:
 
 
 func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapply_persistent_effects: bool = true) -> void:
+	notify_entity_changed(entity)
 	if bool(entity.get("technology_locked", false)):
 		return
 	var team := int(entity.get("team", 0))
@@ -3015,29 +3076,29 @@ func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapp
 	var combat: Dictionary = source.get("combat", {})
 	var resources: Dictionary = source.get("resources", {})
 	var production: Dictionary = source.get("production", {})
-	entity["source_unit_id"] = target_unit_id
+	set_entity_field(entity, "source_unit_id", target_unit_id)
 	if entity.has("population_released"):
 		for cost_value in source.get("resources", {}).get("cost", []):
 			var cost: Dictionary = cost_value
 			if int(cost.get("type_id", -1)) == 4:
-				entity["population_base_cost"] = maxi(0, int(cost.get("amount", 0)))
+				set_entity_field(entity, "population_base_cost", maxi(0, int(cost.get("amount", 0))))
 				break
 	if not entity.get("unit_lineage", []).has(target_unit_id):
 		entity["unit_lineage"].append(target_unit_id)
-	entity["display_graphic_id"] = int(source.get("graphics", {}).get("idle", entity.get("display_graphic_id", -1)))
-	entity["max_hp"] = float(source.get("health", old_max))
-	entity["hp"] = float(entity["max_hp"]) * health_ratio
-	entity["speed"] = float(source.get("speed", entity.get("speed", 0.0)))
-	entity["attack_period"] = float(combat.get("attack_period", entity.get("attack_period", 0.0)))
-	entity["attack_range_min"] = float(combat.get("range_min", entity.get("attack_range_min", 0.0)))
-	entity["attack_range"] = float(combat.get("range_max", entity.get("attack_range", 0.0)))
-	entity["blast_range"] = float(combat.get("blast_range", entity.get("blast_range", 0.0)))
-	entity["projectile_id"] = int(combat.get("projectile_id", entity.get("projectile_id", -1)))
+	set_entity_field(entity, "display_graphic_id", int(source.get("graphics", {}).get("idle", entity.get("display_graphic_id", -1))))
+	set_entity_field(entity, "max_hp", float(source.get("health", old_max)))
+	set_entity_field(entity, "hp", float(entity["max_hp"]) * health_ratio)
+	set_entity_field(entity, "speed", float(source.get("speed", entity.get("speed", 0.0))))
+	set_entity_field(entity, "attack_period", float(combat.get("attack_period", entity.get("attack_period", 0.0))))
+	set_entity_field(entity, "attack_range_min", float(combat.get("range_min", entity.get("attack_range_min", 0.0))))
+	set_entity_field(entity, "attack_range", float(combat.get("range_max", entity.get("attack_range", 0.0))))
+	set_entity_field(entity, "blast_range", float(combat.get("blast_range", entity.get("blast_range", 0.0))))
+	set_entity_field(entity, "projectile_id", int(combat.get("projectile_id", entity.get("projectile_id", -1))))
 	var attacks: Array = combat.get("attacks", []).duplicate(true)
 	if not attacks.is_empty():
-		entity["attack_damage"] = CombatRules.primary_attack_damage(attacks, float(entity.get("attack_damage", 0.0)))
-	entity["carry_capacity"] = float(resources.get("capacity", entity.get("carry_capacity", 0.0)))
-	entity["corpse_source_id"] = int(source.get("links", {}).get("dead_unit_id", entity.get("corpse_source_id", -1)))
+		set_entity_field(entity, "attack_damage", CombatRules.primary_attack_damage(attacks, float(entity.get("attack_damage", 0.0))))
+	set_entity_field(entity, "carry_capacity", float(resources.get("capacity", entity.get("carry_capacity", 0.0))))
+	set_entity_field(entity, "corpse_source_id", int(source.get("links", {}).get("dead_unit_id", entity.get("corpse_source_id", -1))))
 	var components: Dictionary = entity.get("components", {})
 	components.get("identity", {})["source_unit_id"] = target_unit_id
 	components.get("identity", {})["source_key"] = String(source.get("key", ""))
@@ -3072,6 +3133,7 @@ func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapp
 
 
 func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
+	notify_entity_changed(entity)
 	if bool(entity.get("technology_locked", false)):
 		return
 	if not technology_effect_matches_entity(entity, command):
@@ -3085,33 +3147,33 @@ func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 		0:
 			var old_max := maxf(0.001, float(entity.get("max_hp", 1.0)))
 			var ratio := clampf(float(entity.get("hp", old_max)) / old_max, 0.0, 1.0)
-			entity["max_hp"] = maxf(1.0, apply_effect_operator(old_max, effect_type, value))
-			entity["hp"] = float(entity["max_hp"]) * ratio
+			set_entity_field(entity, "max_hp", maxf(1.0, apply_effect_operator(old_max, effect_type, value)))
+			set_entity_field(entity, "hp", float(entity["max_hp"]) * ratio)
 		1:
 			var vision: Dictionary = components.get("vision", {})
 			vision["range"] = maxf(0.0, apply_effect_operator(float(vision.get("range", 0.0)), effect_type, value))
 		5:
-			entity["speed"] = maxf(0.0, apply_effect_operator(float(entity.get("speed", 0.0)), effect_type, value))
+			set_entity_field(entity, "speed", maxf(0.0, apply_effect_operator(float(entity.get("speed", 0.0)), effect_type, value)))
 		8:
 			modify_combat_class_value(components.get("combat", {}).get("armors", []), effect_type, value)
 		9:
 			var attacks: Array = components.get("combat", {}).get("attacks", [])
 			modify_combat_class_value(attacks, effect_type, value)
 			if not attacks.is_empty():
-				entity["attack_damage"] = CombatRules.primary_attack_damage(attacks, float(entity.get("attack_damage", 0.0)))
+				set_entity_field(entity, "attack_damage", CombatRules.primary_attack_damage(attacks, float(entity.get("attack_damage", 0.0))))
 		10:
-			entity["attack_period"] = maxf(0.01, apply_effect_operator(float(entity.get("attack_period", 0.0)), effect_type, value))
+			set_entity_field(entity, "attack_period", maxf(0.01, apply_effect_operator(float(entity.get("attack_period", 0.0)), effect_type, value)))
 			components.get("combat", {})["attack_period"] = entity["attack_period"]
 		11:
 			var combat: Dictionary = components.get("combat", {})
 			combat["accuracy"] = clampi(roundi(apply_effect_operator(float(combat.get("accuracy", 0)), effect_type, value)), 0, 100)
 		12:
-			entity["attack_range"] = maxf(0.0, apply_effect_operator(float(entity.get("attack_range", 0.0)), effect_type, value))
+			set_entity_field(entity, "attack_range", maxf(0.0, apply_effect_operator(float(entity.get("attack_range", 0.0)), effect_type, value)))
 			components.get("combat", {})["range_max"] = entity["attack_range"]
 		13:
 			var worker: Dictionary = components.get("worker", {})
-			worker["work_rate"] = maxf(0.01, apply_effect_operator(float(worker.get("work_rate", 0.0)), effect_type, value))
-			entity["gather_interval"] = 1.0 / float(worker["work_rate"])
+			set_entity_field(worker, "work_rate", maxf(0.01, apply_effect_operator(float(worker.get("work_rate", 0.0)), effect_type, value)))
+			set_entity_field(entity, "gather_interval", 1.0 / float(worker["work_rate"]))
 			var conversion: Dictionary = components.get("conversion", {})
 			if bool(conversion.get("enabled", false)):
 				conversion["chance_multiplier"] = maxf(0.01, apply_effect_operator(float(conversion.get("chance_multiplier", 1.0)), effect_type, value))
@@ -3119,18 +3181,18 @@ func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 			if bool(healing.get("enabled", false)):
 				healing["rate_multiplier"] = maxf(0.01, apply_effect_operator(float(healing.get("rate_multiplier", 1.0)), effect_type, value))
 		14:
-			entity["carry_capacity"] = maxf(0.0, apply_effect_operator(float(entity.get("carry_capacity", 0.0)), effect_type, value))
+			set_entity_field(entity, "carry_capacity", maxf(0.0, apply_effect_operator(float(entity.get("carry_capacity", 0.0)), effect_type, value)))
 			components.get("resource_carrier", {})["capacity"] = entity["carry_capacity"]
 		15:
 			var combat: Dictionary = components.get("combat", {})
 			combat["base_armor"] = apply_effect_operator(float(combat.get("base_armor", 0.0)), effect_type, value)
 		16:
-			entity["projectile_id"] = roundi(apply_effect_operator(float(entity.get("projectile_id", -1)), effect_type, value))
+			set_entity_field(entity, "projectile_id", roundi(apply_effect_operator(float(entity.get("projectile_id", -1)), effect_type, value)))
 			components.get("combat", {})["projectile_id"] = entity["projectile_id"]
 		17:
 			var presentation_facing := roundi(apply_effect_operator(float(entity.get("presentation_facing", 0)), effect_type, value))
-			entity["graphic_angle_count"] = presentation_facing
-			entity["presentation_facing"] = maxi(0, presentation_facing)
+			set_entity_field(entity, "graphic_angle_count", presentation_facing)
+			set_entity_field(entity, "presentation_facing", maxi(0, presentation_facing))
 		19:
 			components.get("combat", {})["ballistics"] = value > 0.0
 		100:
@@ -3188,8 +3250,8 @@ func apply_harvestable_amount_delta(team: int, resource_amount_id: int, delta: i
 	for building in buildings:
 		if int(building.get("team", 0)) != team or int(building.get("resource_amount_id", -1)) != resource_amount_id or String(building.get("state", "complete")) != "complete" or String(building.get("resource_state", "")) == "depleted" or float(building.get("hp", 0.0)) <= 0.0:
 			continue
-		building["max_amount"] = maxi(0, int(building.get("max_amount", 0)) + delta)
-		building["amount"] = clampi(int(building.get("amount", 0)) + delta, 0, int(building["max_amount"]))
+		set_entity_field(building, "max_amount", maxi(0, int(building.get("max_amount", 0)) + delta))
+		set_entity_field(building, "amount", clampi(int(building.get("amount", 0)) + delta, 0, int(building["max_amount"])))
 		building.get("components", {}).get("resource_carrier", {})["capacity"] = float(building["max_amount"])
 		update_resource_state(building)
 		_emit_domain_event("harvestable_capacity_changed", {
@@ -3353,7 +3415,7 @@ func restore_known_resource_memory(encoded: Dictionary) -> void:
 
 
 func compact_render_projection(entity: Dictionary) -> Dictionary:
-	return render_entity_projection_cache.project(entity)
+	return render_entity_projection_cache.project(entity, entity_changes)
 
 
 func get_known_resources(observer_team: int) -> Array:
@@ -3863,6 +3925,7 @@ func add_victory_object(category: String, position: Vector2, team: int = 0, comp
 		"active": true,
 	}
 	victory_objectives.append(objective)
+	entity_changes.mark(int(objective["id"]), EntityChangeJournal.ALL)
 	victory_system.track_objective(objective)
 	if category == "ruin":
 		capturable_victory_objectives.append(objective)
@@ -3874,7 +3937,7 @@ func set_victory_object_owner(object_id: int, team: int) -> bool:
 		if int(objective.get("id", -1)) == object_id:
 			if int(objective.get("team", 0)) == team:
 				return true
-			objective["team"] = team
+			set_entity_field(objective, "team", team)
 			victory_system.track_objective(objective)
 			_emit_domain_event("victory_object_captured", {"object_id": object_id, "category": String(objective.get("category", "")), "team": team})
 			return true
@@ -3884,7 +3947,7 @@ func set_victory_object_owner(object_id: int, team: int) -> bool:
 func set_victory_object_completed(object_id: int, completed: bool) -> bool:
 	for objective in victory_objectives:
 		if int(objective.get("id", -1)) == object_id:
-			objective["completed"] = completed
+			set_entity_field(objective, "completed", completed)
 			victory_system.track_objective(objective)
 			return true
 	return false
@@ -3893,7 +3956,7 @@ func set_victory_object_completed(object_id: int, completed: bool) -> bool:
 func remove_victory_object(object_id: int) -> bool:
 	for objective in victory_objectives:
 		if int(objective.get("id", -1)) == object_id:
-			objective["active"] = false
+			set_entity_field(objective, "active", false)
 			victory_system.track_objective(objective)
 			return true
 	return false
@@ -3922,3 +3985,152 @@ func get_map_size() -> Vector2i:
 
 func get_last_battle_message() -> String:
 	return battle_message
+
+# The world owns authoritative dictionary writes and source group notifications.
+# Reads never notify; repeated scalar values do not create journal work.
+func set_entity_field(entity: Dictionary, field: String, value: Variant) -> void:
+	assert(read_generation_pins == 0, "Pinned observation generation is immutable")
+	if not (value is Array or value is Dictionary) and entity.has(field) and typeof(entity[field]) == typeof(value) and entity[field] == value: return
+	if runtime_task_capture and field in ["task", "hp", "state", "combat_enabled"]:
+		var id := int(entity.get("id", -1))
+		if not runtime_actor_eligibility.has(id): runtime_actor_eligibility[id] = bool(entity.get("combat_enabled", false)) and float(entity.get("hp", 0.0)) > 0.0 and (not entity_is_static(entity) or String(entity.get("state", "complete")) == "complete")
+		if field == "task" and bool(runtime_actor_eligibility[id]) and not runtime_previous_tasks.has(id): runtime_previous_tasks[id] = [entity, String(entity.get("task", "idle"))]
+	entity[field] = value
+	var mask := EntityChangeJournal.field_mask(field)
+	entity_changes.mark(int(entity.get("id", -1)), mask)
+	if mask & EntityChangeJournal.ACTIVITY: refresh_unit_activity(entity)
+
+func register_entity_changes(entity: Dictionary) -> void:
+	entity_changes.mark(int(entity.get("id", -1)), EntityChangeJournal.ALL)
+	refresh_unit_activity(entity)
+
+func rebuild_entity_change_tracking() -> void:
+	entity_changes.reset()
+	entity_read_index.clear()
+	unit_activity_registry.clear()
+	for entity in _entity_change_comparison_roster(): register_entity_changes(entity)
+	entity_changes.flush()
+	if entity_changes.comparison_enabled:
+		entity_changes.set_comparison_enabled(true, _entity_change_comparison_roster())
+
+func set_entity_change_comparison(enabled: bool) -> void:
+	entity_changes.flush()
+	entity_changes.set_comparison_enabled(enabled, _entity_change_comparison_roster())
+
+func _entity_change_comparison_roster() -> Array:
+	return get_all_units_including_embarked() + buildings + resource_nodes + victory_objectives
+
+func _mark_entity_order_changed(entity: Dictionary) -> void:
+	entity_changes.mark(int(entity.get("id", -1)), EntityChangeJournal.ACTIVITY | EntityChangeJournal.CONTROL)
+	refresh_unit_activity(entity)
+
+func begin_entity_order(entity: Dictionary, order_type: String, target_entity_id: int = -1, target_position: Vector2 = Vector2.ZERO, repeat: bool = false) -> Dictionary:
+	var result := OrderPipeline.begin(entity, order_type, target_entity_id, target_position, repeat)
+	_mark_entity_order_changed(entity)
+	return result
+
+func transition_entity_order(entity: Dictionary, phase: String) -> void:
+	var order := OrderPipeline.current(entity)
+	var changed := not bool(order.get("completed", true)) and String(order.get("phase", "")) != phase and OrderPipeline.PHASES.has(phase)
+	OrderPipeline.transition(entity, phase)
+	if changed: _mark_entity_order_changed(entity)
+
+func complete_entity_order(entity: Dictionary, reason: String = "complete") -> void:
+	var order := OrderPipeline.current(entity)
+	var changed := not bool(order.get("completed", true)) or String(order.get("completion_reason", "")) != reason or String(order.get("phase", "")) != OrderPipeline.REPEAT_OR_COMPLETE
+	OrderPipeline.complete(entity, reason)
+	if changed: _mark_entity_order_changed(entity)
+
+func restart_entity_order(entity: Dictionary) -> void:
+	var order := OrderPipeline.current(entity)
+	var changed := not bool(order.get("completed", true)) and bool(order.get("repeat", false))
+	OrderPipeline.restart(entity)
+	if changed: _mark_entity_order_changed(entity)
+
+func append_entity_queued_order(entity: Dictionary, entry: Dictionary) -> bool:
+	var result := OrderPipeline.append_queued(entity, entry)
+	if result: _mark_entity_order_changed(entity)
+	return result
+
+func pop_entity_queued_order(entity: Dictionary) -> Dictionary:
+	var result := OrderPipeline.pop_queued(entity)
+	if not result.is_empty(): _mark_entity_order_changed(entity)
+	return result
+
+func clear_entity_queued_orders(entity: Dictionary) -> void:
+	var changed := not OrderPipeline.queued(entity).is_empty()
+	OrderPipeline.clear_queued(entity)
+	if changed: _mark_entity_order_changed(entity)
+
+# Pinning is owner-thread isolation, not a saved gameplay cursor. The fixed-step
+# barrier holds source_tick until all deterministic capture portions are sealed.
+func pin_read_generation() -> Dictionary:
+	entity_changes.flush()
+	read_generation_pins += 1
+	return {"epoch": entity_changes.epoch, "revision": entity_changes.revision}
+
+func release_read_generation(token: Dictionary) -> void:
+	if int(token.get("epoch", -1)) == int(entity_changes.epoch): read_generation_pins = maxi(0, read_generation_pins - 1)
+
+func _erase_local_build_site_cache(key: Variant) -> void:
+	if local_build_site_cache.has(key):
+		local_build_site_cache_bytes -= int(local_build_site_cache[key].get("bytes", 0))
+		local_build_site_cache.erase(key)
+
+func _store_local_build_site_cache(key: Variant, record: Dictionary) -> void:
+	_erase_local_build_site_cache(key)
+	var bytes := var_to_bytes(record).size() + 64
+	if bytes > MAX_LOCAL_BUILD_SITE_CACHE_BYTES: return
+	while not local_build_site_cache.is_empty() and (local_build_site_cache.size() >= MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES or local_build_site_cache_bytes + bytes > MAX_LOCAL_BUILD_SITE_CACHE_BYTES): _erase_local_build_site_cache(local_build_site_cache.keys()[0])
+	record["bytes"] = bytes
+	local_build_site_cache[key] = record
+	local_build_site_cache_bytes += bytes
+
+func begin_runtime_task_capture() -> void:
+	runtime_previous_tasks.clear()
+	runtime_actor_eligibility.clear()
+	runtime_task_capture = true
+
+func end_runtime_task_capture() -> Array:
+	runtime_task_capture = false
+	var result: Array = []
+	var ids: Array = runtime_previous_tasks.keys()
+	ids.sort()
+	for id in ids:
+		var old: Array = runtime_previous_tasks[id]
+		var current := String(old[0].get("task", "idle"))
+		if not bool(old[0].get("removed", false)) and current != String(old[1]): result.append({"entity_id": int(id), "previous_task": old[1], "current_task": current, "issuer_id": 0, "command_sequence_id": 0})
+	runtime_previous_tasks.clear()
+	runtime_actor_eligibility.clear()
+	return result
+
+func notify_entity_changed(entity: Dictionary, mask: int = 254) -> void:
+	entity_changes.mark(int(entity.get("id", -1)), mask)
+	if mask & EntityChangeJournal.ACTIVITY: refresh_unit_activity(entity)
+
+func erase_entity_field(entity: Dictionary, field: String) -> void:
+	if entity.erase(field):
+		entity_changes.mark(int(entity.get("id", -1)), EntityChangeJournal.field_mask(field))
+		refresh_unit_activity(entity)
+
+func shutdown_derived_state() -> void:
+	task_coordinator.shutdown()
+	entity_read_index.clear()
+	unit_activity_registry.clear()
+	render_entity_projection_cache.clear()
+	ai_navigation_knowledge.clear()
+	ai_build_capture_cache.clear()
+	build_query_scopes.clear()
+	build_query_scope_bytes = 0
+	local_build_site_cache.clear()
+	local_build_site_cache_bytes = 0
+	pathfinder.clear_cache()
+	runtime_task_capture = false
+	runtime_previous_tasks.clear()
+	runtime_actor_eligibility.clear()
+
+func advance_entity_animation(entity: Dictionary, state: String, delta: float, restart_same_clip: bool = false) -> bool:
+	assert(read_generation_pins == 0, "Pinned observation generation is immutable")
+	var changed := AnimationController.update(entity, state, delta, restart_same_clip)
+	if changed: entity_changes.mark(int(entity["id"]), EntityChangeJournal.APPEARANCE)
+	return changed

@@ -112,12 +112,15 @@ func test_shared_movement() -> void:
 	b["terrain_restriction"] = int(a["terrain_restriction"]) + 1
 	var planner = world.pathfinder
 	planner.prepare_native_movement_snapshot(world.units)
+	var legacy_planner = preload("res://scripts/pathfinder.gd").new(world.navigation_grid)
+	legacy_planner.incremental_movement_enabled = false
+	legacy_planner.prepare_native_movement_snapshot(world.units)
 	for unit in world.units:
 		var kernel = planner.native_movement_kernels_by_unit_id.get(int(unit["id"]))
 		check(kernel != null, "heterogeneous movement mask has a kernel")
 		if kernel == null: continue
 		var reference = kernel.create_search_context()
-		reference.configure_movement_snapshot(planner.native_movement_ids, planner.native_movement_positions, planner.native_movement_radii, planner.native_movement_clearances, planner.native_movement_priorities, planner.native_movement_health, planner.native_movement_solid_animals)
+		reference.configure_movement_snapshot(legacy_planner.native_movement_ids, legacy_planner.native_movement_positions, legacy_planner.native_movement_radii, legacy_planner.native_movement_clearances, legacy_planner.native_movement_priorities, legacy_planner.native_movement_health, legacy_planner.native_movement_solid_animals)
 		var target: Vector2 = unit["pos"] + Vector2(5, 0)
 		check(kernel.calculate_movement(unit["id"], target, 1.0, 1.0, 0.05) == reference.calculate_movement(unit["id"], target, 1.0, 1.0, 0.05), "shared collision snapshot matches an independent complete snapshot")
 		var retained = kernel.create_search_context()

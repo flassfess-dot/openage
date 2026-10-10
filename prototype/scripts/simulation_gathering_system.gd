@@ -36,16 +36,16 @@ func assign_command(selected: Array, target_id: int) -> void:
 		simulation_world.healing_system.cancel(unit, "new_order")
 		release_resource_approach_slot(unit)
 		simulation_world.release_building_approach_slot(unit)
-		unit["target_building_id"] = -1
+		world.set_entity_field(unit, "target_building_id", -1)
 		simulation_world.destination_reservations.release(int(unit["id"]))
-		unit["reserved_destination"] = null
-		unit["task"] = "gather"
-		unit["resource_id"] = target_id
+		world.set_entity_field(unit, "reserved_destination", null)
+		world.set_entity_field(unit, "task", "gather")
+		world.set_entity_field(unit, "resource_id", target_id)
 		var resource: Variant = simulation_world.find_resource(target_id)
 		if resource != null and int(resource.get("amount", 0)) > 0 and simulation_world.resource_accessible_to_team(resource, int(unit.get("team", 0))) and simulation_world.resource_allows_worker(resource, unit):
 			simulation_world.worker_role_system.apply(unit, simulation_world.worker_role_system.profile_for_resource(unit, resource), false)
-			unit["pending_hunt_target_id"] = -1
-			OrderPipeline.begin(unit, "gather", target_id, resource["pos"], true)
+			world.set_entity_field(unit, "pending_hunt_target_id", -1)
+			world.begin_entity_order(unit, "gather", target_id, resource["pos"], true)
 			var carried_type := int(unit.get("carried_resource_type_id", -1))
 			var target_type := int(resource.get("resource_type_id", -1))
 			if float(unit.get("carried_amount", 0.0)) > 0.0 and carried_type != target_type:
@@ -103,24 +103,24 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 		in_work_range = at_slot if reservations.size() > 1 else in_work_range or at_slot
 	if not in_work_range:
 		var approach: Vector2 = worker["resource_approach_slot"]
-		worker["gather_stage"] = "approaching"
+		world.set_entity_field(worker, "gather_stage", "approaching")
 		simulation_world.ensure_navigation_destination(worker, approach)
 		return GATHER_UPDATE_MOVE if simulation_world.movement_system.move_unit(worker, delta) else GATHER_UPDATE_MOVE_IDLE
 
-	worker["gather_stage"] = "harvesting"
-	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
+	world.set_entity_field(worker, "gather_stage", "harvesting")
+	world.transition_entity_order(worker, OrderPipeline.FACE_TARGET)
 	simulation_world.movement_system.face_unit_toward(worker, resource["pos"])
 	if float(worker["work"]) > 0.0:
-		OrderPipeline.transition(worker, OrderPipeline.RECOVER)
+		world.transition_entity_order(worker, OrderPipeline.RECOVER)
 		return GATHER_UPDATE_ACTION
 
-	OrderPipeline.restart(worker)
-	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
-	OrderPipeline.transition(worker, OrderPipeline.PERFORM_ACTION)
+	world.restart_entity_order(worker)
+	world.transition_entity_order(worker, OrderPipeline.FACE_TARGET)
+	world.transition_entity_order(worker, OrderPipeline.PERFORM_ACTION)
 	gather(int(resource["id"]), worker)
-	worker["work"] = maxf(0.05, float(worker["gather_interval"]))
-	worker["gather_cycles"] = int(worker["gather_cycles"]) + 1
-	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
+	world.set_entity_field(worker, "work", maxf(0.05, float(worker["gather_interval"])))
+	world.set_entity_field(worker, "gather_cycles", int(worker["gather_cycles"]) + 1)
+	world.transition_entity_order(worker, OrderPipeline.RECOVER)
 	var exhausted := int(resource.get("amount", 0)) <= 0
 	var continued := exhausted and _continue_fishing(worker, resource)
 	if (exhausted and not continued) or (capacity > 0.0 and float(worker.get("carried_amount", 0.0)) >= capacity - 0.0001):
@@ -146,7 +146,7 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 	if float(worker["carried_amount"]) <= 0.0:
 		var empty_resource: Variant = simulation_world.find_resource(int(worker["resource_id"]))
 		if empty_resource != null and prepare_group_gather_approach(worker, empty_resource):
-			OrderPipeline.restart(worker)
+			world.restart_entity_order(worker)
 			return GATHER_UPDATE_IDLE
 		finish_gather_order(worker, "cycle_complete")
 		return GATHER_UPDATE_IDLE
@@ -160,25 +160,25 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 	var destination: Variant = worker["dropoff_position"]
 	if not destination is Vector2:
 		destination = dropoff_approach_position(worker, dropoff)
-		worker["dropoff_position"] = destination
+		world.set_entity_field(worker, "dropoff_position", destination)
 		if not destination is Vector2:
 			return GATHER_UPDATE_CARRY_IDLE
 	if worker["pos"].distance_squared_to(destination) > 0.0144:
 		simulation_world.ensure_navigation_destination(worker, destination)
 		return GATHER_UPDATE_CARRY_MOVE if simulation_world.movement_system.move_unit(worker, delta) else GATHER_UPDATE_CARRY_IDLE
 
-	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
+	world.transition_entity_order(worker, OrderPipeline.FACE_TARGET)
 	simulation_world.movement_system.face_unit_toward(worker, dropoff["pos"])
-	OrderPipeline.transition(worker, OrderPipeline.PERFORM_ACTION)
+	world.transition_entity_order(worker, OrderPipeline.PERFORM_ACTION)
 	deposit_carried_resources(worker)
-	worker["deposit_cycles"] = int(worker["deposit_cycles"]) + 1
+	world.set_entity_field(worker, "deposit_cycles", int(worker["deposit_cycles"]) + 1)
 	if String(OrderPipeline.current(worker).get("type", "")) == "return_resources":
 		finish_gather_order(worker, "resources_returned")
 		return GATHER_UPDATE_IDLE
-	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
+	world.transition_entity_order(worker, OrderPipeline.RECOVER)
 	var resource: Variant = simulation_world.find_resource(int(worker["resource_id"]))
 	if resource != null and prepare_group_gather_approach(worker, resource):
-		OrderPipeline.restart(worker)
+		world.restart_entity_order(worker)
 		return GATHER_UPDATE_IDLE
 	finish_gather_order(worker, "resource_depleted")
 	return GATHER_UPDATE_IDLE
@@ -208,9 +208,9 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 	if carried_type >= 0 and carried_type != resource_type_id and float(worker["carried_amount"]) > 0.0:
 		return 0.0
 	var amount_before := int(resource["amount"])
-	resource["amount"] = maxi(0, amount_before - int(amount))
-	worker["carried_amount"] = float(worker["carried_amount"]) + amount
-	worker["carried_resource_type_id"] = resource_type_id
+	world.set_entity_field(resource, "amount", maxi(0, amount_before - int(amount)))
+	world.set_entity_field(worker, "carried_amount", float(worker["carried_amount"]) + amount)
+	world.set_entity_field(worker, "carried_resource_type_id", resource_type_id)
 	if simulation_world.capture_domain_events:
 		simulation_world.emit_domain_event("resource_gathered", {
 			"worker_id": int(worker["id"]),
@@ -230,7 +230,7 @@ func chop_tree(tree: Dictionary, worker: Dictionary) -> void:
 		return
 	# Original trees have their own HP. Wood is harvested only after felling.
 	var damage := maxf(1.0, float(worker.get("attack_damage", 3.0)))
-	tree["hp"] = maxf(0.0, float(tree.get("hp", 25.0)) - damage)
+	world.set_entity_field(tree, "hp", maxf(0.0, float(tree.get("hp", 25.0)) - damage))
 	tree["tree_phase"] = "chopping" if float(tree["hp"]) > 0.0 else "falling"
 	if float(tree["hp"]) <= 0.0:
 		tree["tree_fall_elapsed"] = 0.0
@@ -264,21 +264,21 @@ func deposit_carried_resources(worker: Dictionary) -> int:
 			"amount": amount,
 			"stockpile": world.economy_system.get_resource_amount(team, resource_type_id),
 		})
-	worker["carried_amount"] = 0.0
-	worker["carried_resource_type_id"] = -1
-	worker["dropoff_id"] = -1
-	worker["dropoff_position"] = null
+	world.set_entity_field(worker, "carried_amount", 0.0)
+	world.set_entity_field(worker, "carried_resource_type_id", -1)
+	world.set_entity_field(worker, "dropoff_id", -1)
+	world.set_entity_field(worker, "dropoff_position", null)
 	world.release_building_approach_slot(worker)
-	worker["target_building_id"] = -1
+	world.set_entity_field(worker, "target_building_id", -1)
 	EntityComponents.sync_resource_carrier(worker)
 	return amount
 
 
 func prepare_resource_approach(worker: Dictionary, resource: Dictionary) -> bool:
 	var simulation_world = world
-	worker["gather_stage"] = "approaching"
-	worker["dropoff_id"] = -1
-	worker["dropoff_position"] = null
+	world.set_entity_field(worker, "gather_stage", "approaching")
+	world.set_entity_field(worker, "dropoff_id", -1)
+	world.set_entity_field(worker, "dropoff_position", null)
 	if worker.get("resource_approach_slot") is Vector2:
 		if simulation_world.approach_system.resume(worker, worker["resource_approach_slot"]):
 			return true
@@ -294,7 +294,7 @@ func prepare_resource_approach(worker: Dictionary, resource: Dictionary) -> bool
 		return false
 	reservations[int(worker["id"])] = slot
 	simulation_world.resource_approach_slots[resource_id] = reservations
-	worker["resource_approach_slot"] = slot
+	world.set_entity_field(worker, "resource_approach_slot", slot)
 	return true
 
 
@@ -324,9 +324,9 @@ func prepare_group_gather_approach(worker: Dictionary, requested_resource: Dicti
 	for candidate in neighbors:
 		if not prepare_resource_approach(worker, candidate):
 			continue
-		worker["resource_id"] = int(candidate["id"])
+		world.set_entity_field(worker, "resource_id", int(candidate["id"]))
 		world.worker_role_system.apply(worker, world.worker_role_system.profile_for_resource(worker, candidate), false)
-		OrderPipeline.begin(worker, "gather", int(candidate["id"]), candidate["pos"], true)
+		world.begin_entity_order(worker, "gather", int(candidate["id"]), candidate["pos"], true)
 		return true
 	return false
 
@@ -363,9 +363,9 @@ func _continue_fishing(worker: Dictionary, previous_resource: Variant = null) ->
 	for candidate in candidates:
 		if not prepare_resource_approach(worker, candidate):
 			continue
-		worker["resource_id"] = int(candidate["id"])
+		world.set_entity_field(worker, "resource_id", int(candidate["id"]))
 		world.worker_role_system.apply(worker, world.worker_role_system.profile_for_resource(worker, candidate), false)
-		OrderPipeline.begin(worker, "gather", int(candidate["id"]), candidate["pos"], true)
+		world.begin_entity_order(worker, "gather", int(candidate["id"]), candidate["pos"], true)
 		return true
 	return false
 
@@ -408,7 +408,7 @@ func release_resource_approach_slot(worker: Dictionary) -> void:
 			simulation_world.resource_approach_slots.erase(resource_id)
 		else:
 			simulation_world.resource_approach_slots[resource_id] = reservations
-	worker["resource_approach_slot"] = null
+	world.set_entity_field(worker, "resource_approach_slot", null)
 
 
 func begin_resource_return(worker: Dictionary) -> bool:
@@ -416,21 +416,21 @@ func begin_resource_return(worker: Dictionary) -> bool:
 	var dropoff: Variant = nearest_dropoff(worker)
 	if dropoff == null:
 		return false
-	worker["gather_stage"] = "returning"
-	worker["dropoff_id"] = int(dropoff["id"])
-	worker["dropoff_position"] = dropoff_approach_position(worker, dropoff)
+	world.set_entity_field(worker, "gather_stage", "returning")
+	world.set_entity_field(worker, "dropoff_id", int(dropoff["id"]))
+	world.set_entity_field(worker, "dropoff_position", dropoff_approach_position(worker, dropoff))
 	if not worker["dropoff_position"] is Vector2:
-		worker["gather_stage"] = "approaching"
+		world.set_entity_field(worker, "gather_stage", "approaching")
 		return false
 	if Vector2(worker["pos"]).distance_squared_to(Vector2(worker["dropoff_position"])) <= 0.0144:
 		# A worker already at the deposit slot has no route to request. An empty
 		# same-position route is arrival, not an unreachable automatic return.
-		worker["path"] = []
-		worker["path_index"] = 0
-		worker["target"] = worker["pos"]
-		worker["destination"] = worker["dropoff_position"]
-		worker["path_status"] = "idle"
-		worker["diagnostic_reason"] = ""
+		world.set_entity_field(worker, "path", [])
+		world.set_entity_field(worker, "path_index", 0)
+		world.set_entity_field(worker, "target", worker["pos"])
+		world.set_entity_field(worker, "destination", worker["dropoff_position"])
+		world.set_entity_field(worker, "path_status", "idle")
+		world.set_entity_field(worker, "diagnostic_reason", "")
 		return true
 	return world.assign_unit_destination(worker, worker["dropoff_position"], false)
 
@@ -493,18 +493,18 @@ func assign_command_return_resources(selected: Array, target_building_id: int = 
 		release_resource_approach_slot(worker)
 		world.release_building_approach_slot(worker)
 		world.release_unit_destination(worker)
-		worker["task"] = "gather"
+		world.set_entity_field(worker, "task", "gather")
 		# A manual deposit ends here; automatic harvesting keeps its resource ID.
-		worker["resource_id"] = -1
-		worker["target_building_id"] = -1
-		worker["pending_hunt_target_id"] = -1
-		worker["gather_stage"] = "returning"
-		worker["dropoff_id"] = int(dropoff["id"])
-		worker["dropoff_position"] = dropoff_approach_position(worker, dropoff)
+		world.set_entity_field(worker, "resource_id", -1)
+		world.set_entity_field(worker, "target_building_id", -1)
+		world.set_entity_field(worker, "pending_hunt_target_id", -1)
+		world.set_entity_field(worker, "gather_stage", "returning")
+		world.set_entity_field(worker, "dropoff_id", int(dropoff["id"]))
+		world.set_entity_field(worker, "dropoff_position", dropoff_approach_position(worker, dropoff))
 		if not worker["dropoff_position"] is Vector2:
 			finish_gather_order(worker, "no_dropoff_slot")
 			continue
-		OrderPipeline.begin(worker, "return_resources", int(dropoff["id"]), worker["dropoff_position"], false)
+		world.begin_entity_order(worker, "return_resources", int(dropoff["id"]), worker["dropoff_position"], false)
 		world.assign_unit_destination(worker, worker["dropoff_position"], false)
 		assigned += 1
 	return assigned > 0
@@ -542,8 +542,8 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Vari
 	if best is Vector2:
 		reservations[int(worker["id"])] = best
 		world.building_approach_slots[building_id] = reservations
-		worker["target_building_id"] = building_id
-		worker["building_approach_slot"] = best
+		world.set_entity_field(worker, "target_building_id", building_id)
+		world.set_entity_field(worker, "building_approach_slot", best)
 		return best
 	return null
 
@@ -551,16 +551,16 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Vari
 func finish_gather_order(worker: Dictionary, reason: String) -> void:
 	release_resource_approach_slot(worker)
 	world.release_building_approach_slot(worker)
-	worker["target_building_id"] = -1
+	world.set_entity_field(worker, "target_building_id", -1)
 	world.release_unit_destination(worker)
-	worker["task"] = "idle"
-	worker["resource_id"] = -1
-	worker["gather_stage"] = "none"
-	worker["dropoff_id"] = -1
-	worker["dropoff_position"] = null
-	worker["pending_hunt_target_id"] = -1
+	world.set_entity_field(worker, "task", "idle")
+	world.set_entity_field(worker, "resource_id", -1)
+	world.set_entity_field(worker, "gather_stage", "none")
+	world.set_entity_field(worker, "dropoff_id", -1)
+	world.set_entity_field(worker, "dropoff_position", null)
+	world.set_entity_field(worker, "pending_hunt_target_id", -1)
 	world.worker_role_system.clear(worker)
-	OrderPipeline.complete(worker, reason)
+	world.complete_entity_order(worker, reason)
 	EntityComponents.sync_dynamic(worker)
 
 
@@ -573,8 +573,8 @@ func update_resource_state(resource: Dictionary) -> void:
 	var previous_state := String(resource.get(state_key, ""))
 	if amount <= 0:
 		if String(resource.get("kind", "")) == "tree":
-			resource["tree_phase"] = "stump"
-			resource["hp"] = 0.0
+			world.set_entity_field(resource, "tree_phase", "stump")
+			world.set_entity_field(resource, "hp", 0.0)
 		resource[state_key] = "depleted"
 		resource[stage_key] = 2
 	elif float(amount) / float(maximum) <= 0.5:
@@ -608,17 +608,17 @@ func advance_resource_lifecycle(delta: float) -> void:
 		if decay_rate <= 0.0:
 			continue
 		var previous_age := float(resource.get("decay_elapsed", 0.0))
-		resource["decay_elapsed"] = previous_age + maxf(0.0, delta)
+		world.set_entity_field(resource, "decay_elapsed", previous_age + maxf(0.0, delta))
 		# Publish the slow corpse animation even when no whole food unit decays.
 		if floori(previous_age) != floori(float(resource["decay_elapsed"])):
 			world.mark_known_resource_dirty(resource)
 		var accumulator := float(resource.get("decay_accumulator", 0.0)) + decay_rate * maxf(0.0, delta)
 		var lost := mini(int(resource.get("amount", 0)), floori(accumulator))
-		resource["decay_accumulator"] = accumulator - float(lost)
+		world.set_entity_field(resource, "decay_accumulator", accumulator - float(lost))
 		if lost <= 0:
 			continue
 		var amount_before := int(resource["amount"])
-		resource["amount"] = maxi(0, amount_before - lost)
+		world.set_entity_field(resource, "amount", maxi(0, amount_before - lost))
 		# update_resource_state releases the depleted footprint incrementally.
 		update_resource_state(resource)
 		if world.capture_domain_events:

@@ -69,19 +69,29 @@ func report() -> Dictionary:
 
 static func summarize(values: Array) -> Dictionary:
 	if values.is_empty():
-		return {"count": 0, "mean": 0.0, "p50": 0, "p95": 0, "max": 0}
+		return {"count": 0, "mean": 0.0, "p50": 0, "p95": 0, "p99": 0, "max": 0, "over_50ms": 0, "over_100ms": 0, "over_200ms": 0}
 	var sorted: Array[int] = []
 	var total := 0
+	var over_50ms := 0
+	var over_100ms := 0
+	var over_200ms := 0
 	for value in values:
 		var measured := maxi(0, int(value))
 		sorted.append(measured)
 		total += measured
+		over_50ms += int(measured > 50000)
+		over_100ms += int(measured > 100000)
+		over_200ms += int(measured > 200000)
 	sorted.sort()
 	return {
 		"count": sorted.size(),
 		"mean": float(total) / float(sorted.size()),
 		"p50": _percentile(sorted, 0.50),
 		"p95": _percentile(sorted, 0.95),
+		"p99": _percentile(sorted, 0.99),
+		"over_50ms": over_50ms,
+		"over_100ms": over_100ms,
+		"over_200ms": over_200ms,
 		"max": sorted[sorted.size() - 1],
 	}
 

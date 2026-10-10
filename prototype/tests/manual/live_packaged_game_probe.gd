@@ -1,4 +1,4 @@
-extends SceneTree
+extends Node
 
 # Runs the real main scene in the root game window, drives the same input
 # adapter used by a player and records end-to-end frame pacing. The script is
@@ -17,13 +17,18 @@ const IDLE_FRAMES := 90
 const MOVEMENT_FRAMES := 150
 const PAN_FRAMES := 90
 
+var root: Window:
+	get: return get_tree().root
+func quit(code: int = 0) -> void:
+	get_tree().quit(code)
+
 var game: Node
 var output_directory := ""
 var frame_post_draw_received := false
 var boot_metrics: Dictionary = {}
 
 
-func _initialize() -> void:
+func _ready() -> void:
 	var options := _options(OS.get_cmdline_user_args())
 	var output_path := _absolute_path(String(options["output"]))
 	output_directory = output_path.get_base_dir()
@@ -32,7 +37,7 @@ func _initialize() -> void:
 	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	DisplayServer.window_set_size(options["size"])
 	root.size = options["size"]
-	await process_frame
+	await get_tree().process_frame
 
 	var boot_started := Time.get_ticks_usec()
 	var entry := MatchRegistry.resolve(String(options["match"]))
@@ -54,19 +59,21 @@ func _initialize() -> void:
 	var attach_started := Time.get_ticks_usec()
 	root.add_child(game)
 	boot_metrics["scene_attach_ready_microseconds"] = Time.get_ticks_usec() - attach_started
-	current_scene = game
-	await process_frame
+	get_tree().current_scene = game
+	await get_tree().process_frame
 	boot_metrics["first_frame_microseconds"] = Time.get_ticks_usec() - boot_started
 	var overlay_state := _dismiss_blocking_overlays()
 
 	for _frame in range(WARMUP_FRAMES):
-		await process_frame
+		await get_tree().process_frame
 	boot_metrics["warm_ready_microseconds"] = Time.get_ticks_usec() - boot_started
 	var subsystem_probe = PerformanceProbe.new(IDLE_FRAMES + MOVEMENT_FRAMES + PAN_FRAMES + 64)
 	game.game_controller.set_performance_probe(subsystem_probe)
 
 	var result := {
 		"schema_version": 1,
+		"runtime": {"debug": OS.is_debug_build(), "editor": Engine.is_editor_hint()},
+		"native_path": ClassDB.class_exists("RoRPathKernel"),
 		"kind": "live_packaged_game_probe",
 		"match": String(options["match"]),
 		"viewport_size": [int(options["size"].x), int(options["size"].y)],
@@ -81,12 +88,12 @@ func _initialize() -> void:
 	var selection := _select_local_group()
 	result["selection"] = selection
 	for _frame in range(3):
-		await process_frame
+		await get_tree().process_frame
 	result["captures"]["selected"] = await _capture("02-selected.png")
 
 	var command := _issue_formation_move()
 	result["command"] = command
-	await process_frame
+	await get_tree().process_frame
 	result["captures"]["command"] = await _capture("03-command.png")
 	result["stages"]["movement"] = await _measure_frames(MOVEMENT_FRAMES)
 	result["captures"]["movement"] = await _capture("04-movement.png")
@@ -173,7 +180,7 @@ func _measure_frames(count: int, pan: bool = false) -> Dictionary:
 	for index in range(count):
 		if pan:
 			_drag_middle_pan(index)
-		await process_frame
+		await get_tree().process_frame
 		var now := Time.get_ticks_usec()
 		frame_wall.append(now - previous)
 		previous = now
@@ -343,7 +350,7 @@ func _capture(filename: String) -> String:
 	if game.terrain_canvas != null:
 		game.terrain_canvas.queue_redraw()
 	for _attempt in range(12):
-		await process_frame
+		await get_tree().process_frame
 		if frame_post_draw_received:
 			break
 	if RenderingServer.frame_post_draw.is_connected(_on_frame_post_draw):

@@ -107,9 +107,10 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	# more than scanning a few hundred units. Switch to the bounded query only at
 	# the population scale where it becomes cheaper and enables future 500-unit
 	# players without penalizing today's campaign missions.
-	var use_bounded_unit_query: bool = has_entity_bounds and world.has_method("get_units_in_bounds") and world.get_units().size() >= 512
+	world.entity_read_index.synchronize(world)
+	var use_bounded_unit_query: bool = has_entity_bounds
 	var unit_substage_started := Time.get_ticks_usec() if snapshot_probe != null else 0
-	var detail_units: Array = world.get_units_in_bounds(entity_bounds) if use_bounded_unit_query else world.get_units()
+	var detail_units: Array = world.entity_read_index.in_bounds(entity_bounds, "units") if use_bounded_unit_query else world.entity_read_index.legal_entities(world, observer_team, "units")
 	if has_entity_bounds and not always_include_entity_lookup.is_empty():
 		var detailed_ids: Dictionary = {}
 		for unit_value in detail_units:
@@ -125,7 +126,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		unit_acquisition_microseconds = Time.get_ticks_usec() - unit_substage_started
 		unit_substage_started = Time.get_ticks_usec()
 	if include_overview:
-		for unit_value in world.get_units():
+		for unit_value in world.entity_read_index.legal_entities(world, observer_team, "units"):
 			var overview_unit: Dictionary = unit_value
 			if _entity_visible_to_observer(overview_unit, observer_team, observer_states, observer_allies, fog_map_size):
 				overview_units.append(_overview_entity(overview_unit))
@@ -238,7 +239,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var remembered_buildings: Dictionary = world.last_known_buildings_by_player.get(observer_team, {}) if observer_team > 0 else {}
 	var live_building_ids: Dictionary = {}
 	var blocked_population_queues := 0
-	for building in world.get_buildings():
+	for building in world.entity_read_index.legal_entities(world, observer_team, "buildings"):
 		if observer_team > 0 and int(building.get("team", 0)) == observer_team:
 			var own_queue: Array = building.get("production_queue", [])
 			if not own_queue.is_empty() and String(own_queue[0].get("status", "")) == "blocked_population":

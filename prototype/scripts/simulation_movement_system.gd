@@ -37,44 +37,44 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		if changed_region == null or segment_bounds.intersects(changed_region):
 			if planner.direct_cell_path(Vector2i(Vector2(unit["pos"]).floor()), Vector2i(Vector2(unit["target"]).floor()), String(unit["movement_domain"]), int(unit["terrain_restriction"]), float(unit["footprint_radius"])).is_empty():
 				assign_unit_destination(unit, unit["destination"], false)
-		unit["path_knowledge_revision"] = planner.grid.revision
+		world.set_entity_field(unit, "path_knowledge_revision", planner.grid.revision)
 	var difference: Vector2 = unit["target"] - unit["pos"]
 	if difference.length_squared() < 0.001225:
 		var arrival_displacement := difference
-		unit["pos"] = unit["target"]
+		world.set_entity_field(unit, "pos", unit["target"])
 		if simulation_world.terrain_elevation.nonzero_vertex_count > 0:
-			unit["elevation"] = simulation_world.elevation_at(unit["pos"])
+			world.set_entity_field(unit, "elevation", simulation_world.elevation_at(unit["pos"]))
 		elif float(unit["elevation"]) != 0.0:
-			unit["elevation"] = 0.0
-		unit["actual_velocity"] = arrival_displacement / delta if delta > 0.0 else Vector2.ZERO
+			world.set_entity_field(unit, "elevation", 0.0)
+		world.set_entity_field(unit, "actual_velocity", arrival_displacement / delta if delta > 0.0 else Vector2.ZERO)
 		if arrival_displacement.length_squared() > 0.000001:
 			var arrival_facing := facing_for_vector(arrival_displacement)
-			unit["movement_facing"] = arrival_facing
-			unit["desired_facing"] = arrival_facing
-			unit["facing"] = arrival_facing
+			world.set_entity_field(unit, "movement_facing", arrival_facing)
+			world.set_entity_field(unit, "desired_facing", arrival_facing)
+			world.set_entity_field(unit, "facing", arrival_facing)
 		var path: Array = unit.get("path", [])
 		var next_index := int(unit.get("path_index", 0)) + 1
 		if next_index < path.size():
 			StuckRecovery.reset(unit)
-			unit["path_index"] = next_index
-			unit["target"] = path[next_index]
-			unit["path_knowledge_revision"] = -1
-			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
+			world.set_entity_field(unit, "path_index", next_index)
+			world.set_entity_field(unit, "target", path[next_index])
+			world.set_entity_field(unit, "path_knowledge_revision", -1)
+			world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
 			if probe != null:
 				simulation_world.movement_arrival_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return true
-		unit["path"] = []
-		unit["path_index"] = 0
+		world.set_entity_field(unit, "path", [])
+		world.set_entity_field(unit, "path_index", 0)
 		StuckRecovery.reset(unit)
 		if unit["task"] in ["move", "attack_move"]:
 			if simulation_world.destination_reservations.is_occupied(unit):
-				unit["task"] = "idle"
-				OrderPipeline.complete(unit, "destination_reached")
+				world.set_entity_field(unit, "task", "idle")
+				world.complete_entity_order(unit, "destination_reached")
 				restore_formation_facing(unit)
 			else:
 				assign_unit_destination(unit, unit["reserved_destination"], false)
 		elif unit["task"] in ["attack", "gather"]:
-			OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+			world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
 		if probe != null:
 			simulation_world.movement_arrival_microseconds += Time.get_ticks_usec() - movement_phase_started
 		return false
@@ -118,8 +118,8 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		var native_state := roundi(native_result.z)
 		var native_difference: Vector2 = unit["target"] - unit["pos"]
 		var native_speed := maxf(0.0, float(unit["speed"]) * float(unit["cohesion_speed_scale"]))
-		unit["desired_velocity"] = native_difference.normalized() * native_speed if native_difference.length_squared() > 0.000001 else Vector2.ZERO
-		unit["actual_velocity"] = Vector2(native_result.x, native_result.y)
+		world.set_entity_field(unit, "desired_velocity", native_difference.normalized() * native_speed if native_difference.length_squared() > 0.000001 else Vector2.ZERO)
+		world.set_entity_field(unit, "actual_velocity", Vector2(native_result.x, native_result.y))
 		if native_state == 1:
 			movement_reason = "local_obstacle"
 		elif native_state == 2:
@@ -131,38 +131,38 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	if movement_reason == "local_blocked":
 		var escape_velocity := _escape_invalid_footprint(unit, delta)
 		if escape_velocity.length_squared() > 0.000001:
-			unit["actual_velocity"] = escape_velocity
+			world.set_entity_field(unit, "actual_velocity", escape_velocity)
 			movement_reason = "escaping_invalid_footprint"
 	if probe != null:
 		simulation_world.movement_local_calculation_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
 	if shared_motion and not bool(unit["formation_shared_isolated"]):
-		unit["actual_velocity"] = MobileCollision.constrain(unit, unit["actual_velocity"], simulation_world.movement_neighbor_buffer, delta)
+		world.set_entity_field(unit, "actual_velocity", MobileCollision.constrain(unit, unit["actual_velocity"], simulation_world.movement_neighbor_buffer, delta))
 		if not simulation_world.navigation_grid.is_position_walkable_for(Vector2(unit["pos"]) + Vector2(unit["actual_velocity"]) * delta, float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])):
-			unit["actual_velocity"] = Vector2.ZERO
+			world.set_entity_field(unit, "actual_velocity", Vector2.ZERO)
 	if Vector2(unit["desired_velocity"]).length_squared() > 0.000001:
-		unit["desired_facing"] = facing_for_vector(unit["desired_velocity"])
+		world.set_entity_field(unit, "desired_facing", facing_for_vector(unit["desired_velocity"]))
 	if movement_reason != "":
-		unit["diagnostic_reason"] = movement_reason
+		world.set_entity_field(unit, "diagnostic_reason", movement_reason)
 	var step: Vector2 = unit["actual_velocity"] * delta
 	if step.length_squared() >= difference.length_squared() and step.dot(difference) > 0.0:
-		unit["pos"] = unit["target"]
+		world.set_entity_field(unit, "pos", unit["target"])
 	else:
-		unit["pos"] += step
+		world.set_entity_field(unit, "pos", unit["pos"] + (step))
 	var position: Vector2 = unit["pos"]
 	if position.x < 0.5 or position.y < 0.5 or position.x > float(simulation_world.map_size.x) - 0.5 or position.y > float(simulation_world.map_size.y) - 0.5:
-		unit["pos"] = Coordinates.clamp_world(position, simulation_world.map_size)
+		world.set_entity_field(unit, "pos", Coordinates.clamp_world(position, simulation_world.map_size))
 	if simulation_world.terrain_elevation.nonzero_vertex_count > 0:
-		unit["elevation"] = simulation_world.elevation_at(unit["pos"])
+		world.set_entity_field(unit, "elevation", simulation_world.elevation_at(unit["pos"]))
 	elif float(unit["elevation"]) != 0.0:
-		unit["elevation"] = 0.0
+		world.set_entity_field(unit, "elevation", 0.0)
 	var actual_displacement: Vector2 = unit["pos"] - start_position
-	unit["actual_velocity"] = actual_displacement / delta if delta > 0.0 else Vector2.ZERO
+	world.set_entity_field(unit, "actual_velocity", actual_displacement / delta if delta > 0.0 else Vector2.ZERO)
 	var actual_displacement_squared := actual_displacement.length_squared()
 	if actual_displacement_squared > 0.000001:
 		var movement_facing := facing_for_vector(actual_displacement)
-		unit["movement_facing"] = movement_facing
-		unit["facing"] = movement_facing
+		world.set_entity_field(unit, "movement_facing", movement_facing)
+		world.set_entity_field(unit, "facing", movement_facing)
 	var recovery_action := StuckRecovery.update_route_progress(unit)
 	match recovery_action:
 		"local_repath":
@@ -174,16 +174,16 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			# Release work and formation reservations as well as movement slots;
 			# an abandoned approach must not block every following worker.
 			if String(unit["task"]) == "board":
-				unit["task"] = "idle"
+				world.set_entity_field(unit, "task", "idle")
 				stop_unit_motion(unit, false)
-				OrderPipeline.complete(unit, "stuck")
+				world.complete_entity_order(unit, "stuck")
 			else:
 				simulation_world.halt_unit(unit, "stuck_stopped_nearest_valid")
-			unit["diagnostic_reason"] = "stuck_stopped_nearest_valid"
-			unit["formation_shared_motion"] = false
-			unit["formation_slot_mode"] = "released"
-			unit["formation_group_id"] = -1
-			unit["formation_home"] = null
+			world.set_entity_field(unit, "diagnostic_reason", "stuck_stopped_nearest_valid")
+			world.set_entity_field(unit, "formation_shared_motion", false)
+			world.set_entity_field(unit, "formation_slot_mode", "released")
+			world.set_entity_field(unit, "formation_group_id", -1)
+			world.set_entity_field(unit, "formation_home", null)
 			if probe != null:
 				simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return false
@@ -224,18 +224,18 @@ func face_unit_toward(unit: Dictionary, target: Vector2) -> void:
 	var difference: Vector2 = target - unit["pos"]
 	if difference.length_squared() > 0.0001:
 		var action_facing := facing_for_vector(difference)
-		unit["desired_facing"] = action_facing
-		unit["action_facing"] = action_facing
-		unit["facing"] = action_facing
+		world.set_entity_field(unit, "desired_facing", action_facing)
+		world.set_entity_field(unit, "action_facing", action_facing)
+		world.set_entity_field(unit, "facing", action_facing)
 
 
 func restore_formation_facing(unit: Dictionary) -> void:
 	var forward: Vector2 = unit.get("formation_forward", Vector2.ZERO)
 	if forward.length_squared() > 0.0001:
 		var formation_front := int(unit.get("formation_facing", facing_for_vector(forward)))
-		unit["desired_facing"] = formation_front
-		unit["action_facing"] = formation_front
-		unit["facing"] = formation_front
+		world.set_entity_field(unit, "desired_facing", formation_front)
+		world.set_entity_field(unit, "action_facing", formation_front)
+		world.set_entity_field(unit, "facing", formation_front)
 
 
 func facing_for_vector(direction: Vector2) -> int:
@@ -249,16 +249,16 @@ func assign_command_move(selected: Array, target: Vector2) -> bool:
 		world.healing_system.cancel(unit, "new_order")
 		if world.entity_is_worker(unit):
 			world.worker_role_system.clear(unit)
-			unit["pending_hunt_target_id"] = -1
+			world.set_entity_field(unit, "pending_hunt_target_id", -1)
 		world.release_resource_approach_slot(unit)
 		world.release_building_approach_slot(unit)
-		unit["gather_stage"] = "none"
-		unit["resource_id"] = -1
-		unit["target_building_id"] = -1
-		unit["task"] = "move"
-		unit["target_id"] = -1
+		world.set_entity_field(unit, "gather_stage", "none")
+		world.set_entity_field(unit, "resource_id", -1)
+		world.set_entity_field(unit, "target_building_id", -1)
+		world.set_entity_field(unit, "task", "move")
+		world.set_entity_field(unit, "target_id", -1)
 		world.clear_combat_intent(unit)
-		OrderPipeline.begin(unit, "move", -1, target, false)
+		world.begin_entity_order(unit, "move", -1, target, false)
 	# Release the complete selection before assigning new endpoints so obsolete
 	# slots cannot fragment a mass command.
 	for unit in selected:
@@ -267,7 +267,7 @@ func assign_command_move(selected: Array, target: Vector2) -> bool:
 	for unit in selected:
 		var requested := Coordinates.clamp_world(target, world.map_size)
 		var reserved: Vector2 = world.destination_reservations.reserve(int(unit["id"]), requested, float(unit.get("footprint_radius", 0.3)), knowledge.planner(world, int(unit.get("team", 0))).grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
-		unit["reserved_destination"] = reserved
+		world.set_entity_field(unit, "reserved_destination", reserved)
 		reserved_by_id[int(unit["id"])] = reserved
 	var prevalidated_direct := _group_move_envelope_is_open(selected, reserved_by_id)
 	var prepared: Array = []
@@ -287,7 +287,7 @@ func assign_command_move(selected: Array, target: Vector2) -> bool:
 		var prepared_result: Dictionary = prepared[selected_index] if not prepared.is_empty() else {}
 		selected_index += 1
 		if not assign_unit_destination(unit, Vector2(reserved_by_id[int(unit["id"])]), false, prevalidated_direct, prepared_result):
-			OrderPipeline.complete(unit, "no_path")
+			world.complete_entity_order(unit, "no_path")
 		else:
 			resolved_count += 1
 	return resolved_count > 0
@@ -336,38 +336,38 @@ func assign_command_attack_move(selected: Array, target: Vector2) -> bool:
 		world.healing_system.cancel(unit, "new_order")
 		if world.entity_is_worker(unit):
 			world.worker_role_system.clear(unit)
-			unit["pending_hunt_target_id"] = -1
+			world.set_entity_field(unit, "pending_hunt_target_id", -1)
 		world.release_resource_approach_slot(unit)
 		world.release_building_approach_slot(unit)
-		unit["gather_stage"] = "none"
-		unit["resource_id"] = -1
-		unit["target_building_id"] = -1
-		unit["task"] = "attack_move"
-		unit["target_id"] = -1
+		world.set_entity_field(unit, "gather_stage", "none")
+		world.set_entity_field(unit, "resource_id", -1)
+		world.set_entity_field(unit, "target_building_id", -1)
+		world.set_entity_field(unit, "task", "attack_move")
+		world.set_entity_field(unit, "target_id", -1)
 		world.clear_combat_intent(unit)
-		unit["attack_move_destination"] = target
-		OrderPipeline.begin(unit, "attack_move", -1, target, false)
+		world.set_entity_field(unit, "attack_move_destination", target)
+		world.begin_entity_order(unit, "attack_move", -1, target, false)
 		if not assign_unit_destination(unit, target):
-			unit["task"] = "idle"
-			OrderPipeline.complete(unit, "no_path")
+			world.set_entity_field(unit, "task", "idle")
+			world.complete_entity_order(unit, "no_path")
 		else:
 			resolved_count += 1
 	return resolved_count > 0
 
 
 func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_destination: bool = true, prevalidated_direct: bool = false, prepared_result: Dictionary = {}) -> bool:
-	unit.erase("formation_steering_target")
+	world.erase_entity_field(unit, "formation_steering_target")
 	unit.erase("_formation_path_cache")
 	world.open_movement_envelopes_by_id.erase(int(unit["id"]))
 	if not OrderPipeline.is_active(unit):
-		OrderPipeline.begin(unit, String(unit.get("task", "move")), int(unit.get("target_id", -1)), destination, String(unit.get("task", "")) in ["attack", "gather"])
-	OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
+		world.begin_entity_order(unit, String(unit.get("task", "move")), int(unit.get("target_id", -1)), destination, String(unit.get("task", "")) in ["attack", "gather"])
+	world.transition_entity_order(unit, OrderPipeline.PLAN_PATH)
 	var planner = knowledge.planner(world, int(unit.get("team", 0)))
 	var clamped_destination := Coordinates.clamp_world(destination, world.map_size)
 	if reserve_destination:
 		clamped_destination = world.destination_reservations.reserve(int(unit["id"]), clamped_destination, float(unit.get("footprint_radius", 0.3)), planner.grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
-		unit["reserved_destination"] = clamped_destination
-	unit["destination"] = clamped_destination
+		world.set_entity_field(unit, "reserved_destination", clamped_destination)
+	world.set_entity_field(unit, "destination", clamped_destination)
 	var path_purpose := "replan" if not unit.get("path", []).is_empty() else String(unit.get("task", "move"))
 	var path_result: Dictionary
 	if not prepared_result.is_empty():
@@ -376,47 +376,47 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 		path_result = world.navigation_service.register_prevalidated_direct_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)))
 	else:
 		path_result = world.navigation_service.request_path(int(unit["id"]), unit["pos"], unit["destination"], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), path_purpose, float(unit.get("footprint_radius", 0.3)), planner)
-	unit["path_knowledge_revision"] = planner.grid.revision
-	unit["path_request_id"] = int(path_result["request_id"])
-	unit["path_status"] = String(path_result["status"])
-	unit["path_grid_revision"] = int(path_result["grid_revision"])
-	unit["path"] = path_result["path"]
-	unit["path_index"] = 0
+	world.set_entity_field(unit, "path_knowledge_revision", planner.grid.revision)
+	world.set_entity_field(unit, "path_request_id", int(path_result["request_id"]))
+	world.set_entity_field(unit, "path_status", String(path_result["status"]))
+	world.set_entity_field(unit, "path_grid_revision", int(path_result["grid_revision"]))
+	world.set_entity_field(unit, "path", path_result["path"])
+	world.set_entity_field(unit, "path_index", 0)
 	if unit["path"].is_empty():
-		unit["target"] = unit["pos"]
+		world.set_entity_field(unit, "target", unit["pos"])
 		if Vector2(unit["pos"]).distance_squared_to(clamped_destination) <= 0.001225:
-			unit["path_status"] = "arrived"
+			world.set_entity_field(unit, "path_status", "arrived")
 			if String(unit["task"]) in ["move", "attack_move"]:
-				unit["task"] = "idle"
+				world.set_entity_field(unit, "task", "idle")
 				release_unit_destination(unit)
-				OrderPipeline.complete(unit, "destination_reached")
+				world.complete_entity_order(unit, "destination_reached")
 				restore_formation_facing(unit)
 			else:
-				OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+				world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
 			return true
 		# Work orders need the same terminal failure as movement orders. Leaving
 		# a failed gather/build active retries A* every tick and holds its slot.
 		world.halt_unit(unit, "no_path")
-		unit["path_status"] = "unreachable"
-		unit["diagnostic_reason"] = "no_path"
+		world.set_entity_field(unit, "path_status", "unreachable")
+		world.set_entity_field(unit, "diagnostic_reason", "no_path")
 		return false
-	unit["target"] = unit["path"][0]
-	unit["diagnostic_reason"] = ""
-	OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
+	world.set_entity_field(unit, "target", unit["path"][0])
+	world.set_entity_field(unit, "diagnostic_reason", "")
+	world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
 	return true
 
 
 func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destination: Vector2, prevalidated_direct: bool = false, open_envelope: Dictionary = {}) -> bool:
 	world.open_movement_envelopes_by_id.erase(int(unit["id"]))
 	if not OrderPipeline.is_active(unit, "move"):
-		OrderPipeline.begin(unit, "move", -1, destination, false)
-	OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
+		world.begin_entity_order(unit, "move", -1, destination, false)
+	world.transition_entity_order(unit, OrderPipeline.PLAN_PATH)
 	var planner = knowledge.planner(world, int(unit.get("team", 0)))
 	var requested_destination := Coordinates.clamp_world(destination, world.map_size)
 	var reserved_destination: Vector2 = world.destination_reservations.reserve(int(unit["id"]), requested_destination, float(unit.get("footprint_radius", 0.3)), planner.grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
 	var direct_segments_allowed: bool = prevalidated_direct and reserved_destination.is_equal_approx(requested_destination)
-	unit["reserved_destination"] = reserved_destination
-	unit["destination"] = reserved_destination
+	world.set_entity_field(unit, "reserved_destination", reserved_destination)
+	world.set_entity_field(unit, "destination", reserved_destination)
 	var targets := waypoints.duplicate()
 	if targets.is_empty() or targets[targets.size() - 1].distance_squared_to(reserved_destination) > 0.0001:
 		targets.append(reserved_destination)
@@ -431,10 +431,10 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 			path_result = world.navigation_service.register_prevalidated_direct_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
 		else:
 			path_result = world.navigation_service.request_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)), planner)
-		unit["path_knowledge_revision"] = planner.grid.revision
-		unit["path_request_id"] = int(path_result["request_id"])
-		unit["path_status"] = String(path_result["status"])
-		unit["path_grid_revision"] = int(path_result["grid_revision"])
+		world.set_entity_field(unit, "path_knowledge_revision", planner.grid.revision)
+		world.set_entity_field(unit, "path_request_id", int(path_result["request_id"]))
+		world.set_entity_field(unit, "path_status", String(path_result["status"]))
+		world.set_entity_field(unit, "path_grid_revision", int(path_result["grid_revision"]))
 		var segment: Array[Vector2] = path_result["path"]
 		if segment.is_empty() and cursor.distance_squared_to(target) > 0.0001:
 			continue
@@ -442,26 +442,26 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 			if combined.is_empty() or combined[combined.size() - 1].distance_squared_to(waypoint) > 0.0001:
 				combined.append(waypoint)
 		cursor = target
-	unit["path"] = combined
-	unit["path_index"] = 0
+	world.set_entity_field(unit, "path", combined)
+	world.set_entity_field(unit, "path_index", 0)
 	if combined.is_empty():
-		unit["target"] = unit["pos"]
-		unit["task"] = "idle"
+		world.set_entity_field(unit, "target", unit["pos"])
+		world.set_entity_field(unit, "task", "idle")
 		# A member already on its slot (often the middle rider during a turn)
 		# has completed the order; an empty route here is not a path failure.
 		if Vector2(unit["pos"]).distance_squared_to(reserved_destination) <= 0.001225:
-			unit["path_status"] = "arrived"
-			unit["diagnostic_reason"] = ""
-			OrderPipeline.complete(unit, "destination_reached")
+			world.set_entity_field(unit, "path_status", "arrived")
+			world.set_entity_field(unit, "diagnostic_reason", "")
+			world.complete_entity_order(unit, "destination_reached")
 			restore_formation_facing(unit)
 			return true
-		unit["diagnostic_reason"] = "no_group_route"
+		world.set_entity_field(unit, "diagnostic_reason", "no_group_route")
 		return false
 	if direct_segments_allowed and bool(open_envelope.get("open", false)):
 		world.open_movement_envelopes_by_id[int(unit["id"])] = open_envelope
-	unit["target"] = combined[0]
-	unit["diagnostic_reason"] = "group_corridor" if waypoints.size() > 1 else ""
-	OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
+	world.set_entity_field(unit, "target", combined[0])
+	world.set_entity_field(unit, "diagnostic_reason", "group_corridor" if waypoints.size() > 1 else "")
+	world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
 	return true
 
 
@@ -474,15 +474,15 @@ func ensure_navigation_destination(unit: Dictionary, destination: Vector2) -> vo
 func stop_unit_motion(unit: Dictionary, reset_progress: bool = true) -> void:
 	world.open_movement_envelopes_by_id.erase(int(unit["id"]))
 	release_unit_destination(unit)
-	unit["path"] = []
+	world.set_entity_field(unit, "path", [])
 	unit.erase("_formation_path_cache")
-	unit.erase("formation_steering_target")
-	unit["path_index"] = 0
-	unit["path_status"] = "idle"
-	unit["target"] = unit["pos"]
-	unit["destination"] = unit["pos"]
-	unit["actual_velocity"] = Vector2.ZERO
-	unit["desired_velocity"] = Vector2.ZERO
+	world.erase_entity_field(unit, "formation_steering_target")
+	world.set_entity_field(unit, "path_index", 0)
+	world.set_entity_field(unit, "path_status", "idle")
+	world.set_entity_field(unit, "target", unit["pos"])
+	world.set_entity_field(unit, "destination", unit["pos"])
+	world.set_entity_field(unit, "actual_velocity", Vector2.ZERO)
+	world.set_entity_field(unit, "desired_velocity", Vector2.ZERO)
 	if reset_progress:
 		StuckRecovery.reset(unit)
 
@@ -490,4 +490,4 @@ func stop_unit_motion(unit: Dictionary, reset_progress: bool = true) -> void:
 func release_unit_destination(unit: Dictionary) -> void:
 	world.destination_reservations.release(int(unit.get("id", -1)))
 	world.open_movement_envelopes_by_id.erase(int(unit.get("id", -1)))
-	unit["reserved_destination"] = null
+	world.set_entity_field(unit, "reserved_destination", null)

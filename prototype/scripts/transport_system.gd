@@ -61,9 +61,9 @@ func board(passengers: Array, transport: Dictionary) -> String:
 	for passenger_value in ordered:
 		var passenger: Dictionary = passenger_value
 		world.halt_unit(passenger, "board_transport")
-		passenger["selected"] = false
-		passenger["transported_by_id"] = int(transport.get("id", -1))
-		passenger["cargo_state"] = "embarked"
+		world.set_entity_field(passenger, "selected", false)
+		world.set_entity_field(passenger, "transported_by_id", int(transport.get("id", -1)))
+		world.set_entity_field(passenger, "cargo_state", "embarked")
 		world.sync_unit_victory_objective(passenger)
 		var passenger_id := int(passenger.get("id", -1))
 		embarked_units[passenger_id] = passenger
@@ -133,9 +133,9 @@ func assign_board_order(passengers: Array, transport: Dictionary) -> String:
 	# Resolve the whole selection before replacing any existing order.
 	for passenger in ordered:
 		world.halt_unit(passenger, "new_board_order")
-		passenger["task"] = "board"
-		passenger["target_id"] = transport_id
-		OrderPipeline.begin(passenger, "board", transport_id, transport["pos"])
+		world.set_entity_field(passenger, "task", "board")
+		world.set_entity_field(passenger, "target_id", transport_id)
+		world.begin_entity_order(passenger, "board", transport_id, transport["pos"])
 	for plan in plans:
 		_set_boarding_approach(plan["passenger"], transport, plan["position"])
 	if not ready.is_empty():
@@ -155,7 +155,7 @@ func advance_board_order(passenger: Dictionary, delta: float, ready: Array) -> b
 		world.halt_unit(passenger, rejection)
 		return false
 	if is_in_boarding_range(passenger, transport):
-		OrderPipeline.transition(passenger, OrderPipeline.PERFORM_ACTION)
+		world.transition_entity_order(passenger, OrderPipeline.PERFORM_ACTION)
 		ready.append(passenger)
 		return false
 	var approach: Variant = passenger.get("boarding_position")
@@ -163,7 +163,7 @@ func advance_board_order(passenger: Dictionary, delta: float, ready: Array) -> b
 	var approach_blocked := not approach is Vector2
 	if not approach_blocked and int(passenger.get("boarding_navigation_revision", -1)) != world.navigation_grid.revision:
 		approach_blocked = not world.navigation_grid.is_position_walkable_for(approach, float(passenger["footprint_radius"]), String(passenger["movement_domain"]), int(passenger["terrain_restriction"]))
-		passenger["boarding_navigation_revision"] = world.navigation_grid.revision
+		world.set_entity_field(passenger, "boarding_navigation_revision", world.navigation_grid.revision)
 	var reached_old_approach: bool = approach is Vector2 and passenger.get("path", []).is_empty()
 	if ship_moved or approach_blocked or reached_old_approach:
 		if ship_moved:
@@ -174,27 +174,27 @@ func advance_board_order(passenger: Dictionary, delta: float, ready: Array) -> b
 			return false
 	var moving: bool = world.movement_system.move_unit(passenger, delta)
 	if is_in_boarding_range(passenger, transport):
-		OrderPipeline.transition(passenger, OrderPipeline.PERFORM_ACTION)
+		world.transition_entity_order(passenger, OrderPipeline.PERFORM_ACTION)
 		ready.append(passenger)
 	elif int(passenger["stuck_ticks"]) >= StuckRecovery.STOP_TICK:
 		var attempts := int(passenger.get("boarding_detour_attempts", 0)) + 1
-		passenger["boarding_detour_attempts"] = attempts
+		world.set_entity_field(passenger, "boarding_detour_attempts", attempts)
 		var goal: Variant = _boarding_approach(passenger, transport, false)
 		var detour: Array[Vector2] = BoardingDetour.find(world, passenger, goal) if goal is Vector2 and attempts <= MAX_BOARDING_RETRIES else []
 		if not detour.is_empty() and world.assign_unit_waypoints(passenger, detour, detour.back(), true):
-			passenger["task"] = "board"
-			passenger["boarding_position"] = goal
-			OrderPipeline.begin(passenger, "board", int(transport["id"]), transport["pos"])
-			OrderPipeline.transition(passenger, OrderPipeline.MOVE_INTO_RANGE)
+			world.set_entity_field(passenger, "task", "board")
+			world.set_entity_field(passenger, "boarding_position", goal)
+			world.begin_entity_order(passenger, "board", int(transport["id"]), transport["pos"])
+			world.transition_entity_order(passenger, OrderPipeline.MOVE_INTO_RANGE)
 			StuckRecovery.reset(passenger)
 			return moving
 		var failed: Array = passenger.get("boarding_failed_positions", [])
 		failed.append(passenger["boarding_position"])
-		passenger["boarding_failed_positions"] = failed
+		world.set_entity_field(passenger, "boarding_failed_positions", failed)
 		var alternate: Variant = _boarding_approach(passenger, transport) if failed.size() < MAX_BOARDING_RETRIES else null
 		if alternate is Vector2:
-			passenger["task"] = "board"
-			OrderPipeline.begin(passenger, "board", int(transport["id"]), transport["pos"])
+			world.set_entity_field(passenger, "task", "board")
+			world.begin_entity_order(passenger, "board", int(transport["id"]), transport["pos"])
 			if not _set_boarding_approach(passenger, transport, alternate):
 				world.halt_unit(passenger, "boarding_shore_unreachable")
 		else:
@@ -224,7 +224,7 @@ func finish_boarding_tick(ready: Array) -> void:
 			var entering := passengers.slice(0, free_seats)
 			for passenger in passengers.slice(free_seats):
 				world.stop_unit_motion(passenger)
-				passenger["diagnostic_reason"] = "waiting_for_transport_space"
+				world.set_entity_field(passenger, "diagnostic_reason", "waiting_for_transport_space")
 			if not entering.is_empty():
 				board(entering, transport)
 		else:
@@ -233,9 +233,9 @@ func finish_boarding_tick(ready: Array) -> void:
 
 
 func _set_boarding_approach(passenger: Dictionary, transport: Dictionary, approach: Vector2) -> bool:
-	passenger["boarding_position"] = approach
-	passenger["boarding_transport_position"] = Vector2(transport["pos"])
-	passenger["boarding_navigation_revision"] = world.navigation_grid.revision
+	world.set_entity_field(passenger, "boarding_position", approach)
+	world.set_entity_field(passenger, "boarding_transport_position", Vector2(transport["pos"]))
+	world.set_entity_field(passenger, "boarding_navigation_revision", world.navigation_grid.revision)
 	StuckRecovery.reset(passenger)
 	return world.assign_unit_destination(passenger, approach, false)
 
@@ -347,13 +347,13 @@ func assign_unload_order(transports: Array, target: Vector2, requested_ids: Arra
 	for plan in plans:
 		var transport: Dictionary = plan["transport"]
 		world.halt_unit(transport, "new_unload_order")
-		transport["task"] = "unload"
-		transport["unload_target"] = target
-		transport["unload_approach"] = plan["approach"]
-		transport["unload_passenger_ids"] = requested_ids.duplicate()
-		transport["unload_retries"] = 0
-		transport["unload_retry_ticks"] = 0
-		OrderPipeline.begin(transport, "unload", -1, target)
+		world.set_entity_field(transport, "task", "unload")
+		world.set_entity_field(transport, "unload_target", target)
+		world.set_entity_field(transport, "unload_approach", plan["approach"])
+		world.set_entity_field(transport, "unload_passenger_ids", requested_ids.duplicate())
+		world.set_entity_field(transport, "unload_retries", 0)
+		world.set_entity_field(transport, "unload_retry_ticks", 0)
+		world.begin_entity_order(transport, "unload", -1, target)
 		if not world.assign_unit_destination(transport, plan["approach"]):
 			world.halt_unit(transport, "landing_shore_unreachable")
 	return ""
@@ -368,7 +368,7 @@ func advance_unload_order(transport: Dictionary, delta: float, ready: Array) -> 
 		world.stop_unit_motion(transport)
 		var wait := int(transport.get("unload_retry_ticks", 0))
 		if wait > 0:
-			transport["unload_retry_ticks"] = wait - 1
+			world.set_entity_field(transport, "unload_retry_ticks", wait - 1)
 		else:
 			ready.append(transport)
 		return false
@@ -382,8 +382,8 @@ func finish_unloading_tick(ready: Array) -> void:
 		if result.is_empty():
 			world.halt_unit(transport, "unloaded")
 		elif result == "landing_blocked" and int(transport.get("unload_retries", 0)) < MAX_BOARDING_RETRIES:
-			transport["unload_retries"] = int(transport.get("unload_retries", 0)) + 1
-			transport["unload_retry_ticks"] = 20
+			world.set_entity_field(transport, "unload_retries", int(transport.get("unload_retries", 0)) + 1)
+			world.set_entity_field(transport, "unload_retry_ticks", 20)
 		else:
 			world.halt_unit(transport, result)
 
@@ -465,14 +465,15 @@ func destroy_cargo(transport: Dictionary) -> void:
 		var passenger: Variant = embarked_units.get(passenger_id)
 		if passenger == null:
 			continue
-		passenger["hp"] = 0.0
+		world.set_entity_field(passenger, "hp", 0.0)
 		world.track_conquest_entity(passenger)
-		passenger["death_phase"] = "removed"
-		passenger["removed"] = true
+		world.set_entity_field(passenger, "death_phase", "removed")
+		world.set_entity_field(passenger, "removed", true)
 		world.sync_unit_victory_objective(passenger)
 		if not bool(passenger.get("population_released", false)):
 			world.economy_system.add_population_points(int(passenger.get("team", 0)), -int(passenger.get("population_points_cost", int(passenger.get("population_cost", 0)) * 2)))
-			passenger["population_released"] = true
+			world.set_entity_field(passenger, "population_released", true)
+		world.entity_changes.remove(passenger_id)
 		embarked_units.erase(passenger_id)
 		world.emit_domain_event("cargo_destroyed", {
 			"passenger_id": passenger_id,
@@ -560,21 +561,21 @@ func _restore_passenger(transport: Dictionary, passenger: Dictionary, position: 
 	cargo["passenger_ids"] = ids
 	cargo["count"] = ids.size()
 	embarked_units.erase(passenger_id)
-	passenger["transported_by_id"] = -1
-	passenger["cargo_state"] = "deployed"
-	passenger["pos"] = position
+	world.set_entity_field(passenger, "transported_by_id", -1)
+	world.set_entity_field(passenger, "cargo_state", "deployed")
+	world.set_entity_field(passenger, "pos", position)
 	passenger["previous_pos"] = position
-	passenger["target"] = position
-	passenger["destination"] = position
-	passenger["path"] = []
-	passenger["path_index"] = 0
-	passenger["path_status"] = "idle"
-	passenger["reserved_destination"] = null
-	passenger["actual_velocity"] = Vector2.ZERO
-	passenger["desired_velocity"] = Vector2.ZERO
-	passenger["task"] = "idle"
-	passenger["selected"] = false
-	passenger["elevation"] = world.elevation_at(position)
+	world.set_entity_field(passenger, "target", position)
+	world.set_entity_field(passenger, "destination", position)
+	world.set_entity_field(passenger, "path", [])
+	world.set_entity_field(passenger, "path_index", 0)
+	world.set_entity_field(passenger, "path_status", "idle")
+	world.set_entity_field(passenger, "reserved_destination", null)
+	world.set_entity_field(passenger, "actual_velocity", Vector2.ZERO)
+	world.set_entity_field(passenger, "desired_velocity", Vector2.ZERO)
+	world.set_entity_field(passenger, "task", "idle")
+	world.set_entity_field(passenger, "selected", false)
+	world.set_entity_field(passenger, "elevation", world.elevation_at(position))
 	world.restore_unit_from_transport(passenger)
 	world.sync_unit_victory_objective(passenger)
 	EntityComponents.sync_dynamic(passenger)

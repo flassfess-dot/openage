@@ -128,8 +128,8 @@ func _run_case(options: Dictionary) -> Dictionary:
 			unit["attack_autonomous"] = false
 			unit["acquisition_range"] = 0.0
 			if workload == "combat_contact" or mixed_role == "combat":
-				unit["max_hp"] = 1000.0
-				unit["hp"] = 1000.0
+				unit["max_hp"] = float(options["combat_health"])
+				unit["hp"] = float(options["combat_health"])
 			team_unit_ids.append(int(unit["id"]))
 			if workload == "mixed_match":
 				role_ids[mixed_role].append(int(unit["id"]))
@@ -265,6 +265,9 @@ func _run_case(options: Dictionary) -> Dictionary:
 		var tick_started := Time.get_ticks_usec()
 		controller.advance_frame(0.05, 1, 2)
 		tick_wall_samples.append(Time.get_ticks_usec() - tick_started)
+		# Progress I/O stays outside the measured tick.
+		if sample_ticks >= 1000 and (_tick + 1) % 100 == 0:
+			print("E6_PROGRESS case=%s sample=%d/%d tick=%d wall_seconds=%.1f" % [String(options["case"]), _tick + 1, sample_ticks, controller.tick_index, float(Time.get_ticks_usec() - benchmark_started) / 1000000.0])
 	var benchmark_microseconds := Time.get_ticks_usec() - benchmark_started
 	var phase_split := maxi(1, floori(float(tick_wall_samples.size()) / 2.0))
 	var replay = ReplaySystem.new()
@@ -280,6 +283,8 @@ func _run_case(options: Dictionary) -> Dictionary:
 		"map_cells": map_side * map_side,
 		"warmup_ticks": warmup_ticks,
 		"sample_ticks": sample_ticks,
+		"combat_health": int(options["combat_health"]),
+		"battle_over_after_sample": world.battle_over,
 		"native_pathfinding": world.pathfinder.uses_native_kernel(),
 		"native_visibility": world.visibility_system.uses_native_kernel(),
 		"setup_microseconds": setup_microseconds,
@@ -290,6 +295,7 @@ func _run_case(options: Dictionary) -> Dictionary:
 		"sample_last_half_tick_wall_microseconds": PerformanceProbe.summarize(tick_wall_samples.slice(phase_split)),
 		"active_units_after_sample": world.get_units().filter(func(unit): return String(unit.get("task", "idle")) != "idle").size(),
 		"workload_state": _workload_state(world, player_count, workload, mixed_counts),
+		"entity_journal_enabled": true,
 		"canonical_hash": final_hash,
 		"probe": probe.report(),
 		"process": {
@@ -556,6 +562,7 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 		"map_side": 400,
 		"warmup_ticks": 2,
 		"sample_ticks": 10,
+		"combat_health": 1000,
 		"native_pathfinding": true,
 		"native_visibility": true,
 		"output": "res://qa/performance/e6-area-x4-2p.json",
@@ -566,7 +573,7 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 			continue
 		var key := argument.substr(2, separator - 2).replace("-", "_")
 		var value := argument.substr(separator + 1)
-		if key in ["players", "units_per_player", "map_side", "warmup_ticks", "sample_ticks"]:
+		if key in ["players", "units_per_player", "map_side", "warmup_ticks", "sample_ticks", "combat_health"]:
 			result[key] = maxi(0, int(value))
 		elif key == "native_pathfinding":
 			result[key] = value.to_lower() not in ["false", "0", "no", "off"]
@@ -581,4 +588,5 @@ func _options(arguments: PackedStringArray) -> Dictionary:
 	result["map_side"] = maxi(32, int(result["map_side"]))
 	result["warmup_ticks"] = maxi(0, int(result["warmup_ticks"]))
 	result["sample_ticks"] = maxi(1, int(result["sample_ticks"]))
+	result["combat_health"] = maxi(1, int(result["combat_health"]))
 	return result

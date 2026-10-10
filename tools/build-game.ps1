@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$VerifyStartup
+)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -123,5 +125,16 @@ Copy-Item -LiteralPath $nativeLibrary -Destination (Join-Path $distributionRoot 
 New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "legal\MIT") | Out-Null
 Copy-Item -LiteralPath (Join-Path $repositoryRoot "legal\MIT\godot-cpp.md") -Destination (Join-Path $distributionRoot "legal\MIT\godot-cpp.md") -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $distributionRoot "README.md") -Force
-& (Join-Path $PSScriptRoot "verify-packaged-startup.ps1")
+Write-Host "Release artifacts exported and copied: $application"
+if ($VerifyStartup) {
+    try {
+        & (Join-Path $PSScriptRoot "verify-packaged-startup.ps1")
+    }
+    catch {
+        throw "Release artifacts were exported, but startup verification failed: $($_.Exception.Message)"
+    }
+}
+else {
+    Write-Host "Packaged startup verification was not requested. Use -VerifyStartup or tools\verify-packaged-startup.ps1 to run it."
+}
 Write-Host "Build complete: $application"

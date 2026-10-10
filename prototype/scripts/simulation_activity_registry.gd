@@ -2,13 +2,19 @@ class_name RoRSimulationActivityRegistry
 extends RefCounted
 
 const AnimationController := preload("res://scripts/animation_controller.gd")
-const COMPATIBILITY_REFRESH_INTERVAL_TICKS := 200
+const Journal := preload("res://scripts/entity_change_journal.gd")
+var cursor := -1
+var epoch := -1
+var source_journal
+var idle_units_by_id: Dictionary = {}
+var idle_units: Array = []
+var idle_dirty := true
+var pending_units: Dictionary = {}
+var idle_position_resets: Dictionary = {}
+var animation_kernel: Variant = null
 
-# Keeps the expensive unit-order loop proportional to units that can actually
-# change authoritative state. Unit state is still sampled every fixed tick for
-# compatibility with exposed entity dictionaries and idle animation, while
-# roster/order bookkeeping is reconciled only on lifecycle changes or by a
-# slower compatibility pass.
+# Source events own membership; only active actors enter fixed-step dispatch.
+# Idle elapsed animation is advanced independently of factual classification.
 
 var active_units_by_id: Dictionary = {}
 var active_units: Array = []
@@ -16,68 +22,77 @@ var active_index_by_id: Dictionary = {}
 var unit_order_by_id: Dictionary = {}
 var order_dirty: bool = false
 var roster_dirty: bool = true
-var compatibility_ticks: int = 0
 var movement_candidate_active: bool = false
 var formation_active: bool = false
 var tick_prepared: bool = false
 
 
 func clear() -> void:
+	cursor = -1
+	epoch = -1
+	pending_units.clear()
+	idle_position_resets.clear()
+	animation_kernel = null
+	idle_units_by_id.clear()
+	idle_units.clear()
+	idle_dirty = true
 	active_units_by_id.clear()
 	active_units.clear()
 	active_index_by_id.clear()
 	unit_order_by_id.clear()
 	order_dirty = false
 	roster_dirty = true
-	compatibility_ticks = 0
 	movement_candidate_active = false
 	formation_active = false
 	tick_prepared = false
 
 
-func begin_tick(units: Array, delta: float) -> void:
+func synchronize(world) -> void:
+	var journal = world.entity_changes
+	source_journal = journal
+	var delta: Dictionary = journal.changes_since(cursor if epoch == journal.epoch else -1)
+	if bool(delta["full"]):
+		clear()
+		for index in range(world.units.size()):
+			var unit: Dictionary = world.units[index]
+			unit_order_by_id[int(unit["id"])] = index
+			refresh(unit)
+	else:
+		for id in delta["ids"]:
+			if not (int(delta["masks"][id]) & (Journal.LIFECYCLE | Journal.ACTIVITY | Journal.COMBAT | Journal.OWNERSHIP)): continue
+			var unit: Variant = world.find_unit(int(id))
+			if unit == null: forget(int(id))
+			else: refresh(unit)
+		if roster_dirty:
+			for index in range(world.units.size()): unit_order_by_id[int(world.units[index]["id"])] = index
+			order_dirty = true
+	cursor = int(delta["revision"])
+	epoch = journal.epoch
+	roster_dirty = false
+
+func begin_tick(_units: Array, delta: float) -> void:
 	tick_prepared = true
-	compatibility_ticks += 1
-	var reconcile_roster := roster_dirty or compatibility_ticks >= COMPATIBILITY_REFRESH_INTERVAL_TICKS or unit_order_by_id.size() != units.size()
-	var live_ids: Dictionary = {} if reconcile_roster else unit_order_by_id
+	for unit in idle_position_resets.values(): unit["previous_pos"] = unit.get("pos", Vector2.ZERO)
+	idle_position_resets.clear()
 	movement_candidate_active = false
 	formation_active = false
-	for index in range(units.size()):
-		var unit: Dictionary = units[index]
-		var entity_id := int(unit.get("id", -1))
-		if entity_id < 0:
-			continue
-		if reconcile_roster:
-			live_ids[entity_id] = true
-			if int(unit_order_by_id.get(entity_id, -1)) != index:
-				order_dirty = true
-			unit_order_by_id[entity_id] = index
-		var active := requires_update(unit)
-		# The overwhelmingly common case is a stable roster. Avoid a method call
-		# and index maintenance check for every unit on every tick; enter the
-		# mutation path only when its activity classification actually changes.
-		if active != active_units_by_id.has(entity_id):
-			_set_active(unit, active)
-		if active:
-			movement_candidate_active = movement_candidate_active or _is_movement_candidate(unit)
-			formation_active = formation_active or _has_active_formation(unit)
-		var position := Vector2(unit.get("pos", Vector2.ZERO))
-		if Vector2(unit.get("previous_pos", position)) != position:
-			unit["previous_pos"] = position
-		if not active and float(unit.get("hp", 0.0)) > 0.0:
-			# Preserve AnimationController's exact transition semantics without
-			# routing stable idle entities through task dispatch.
-			if String(unit.get("anim_state", AnimationController.IDLE)) == AnimationController.IDLE:
-				unit["anim"] = float(unit.get("anim", 0.0)) + delta
-			else:
-				AnimationController.update(unit, AnimationController.IDLE, delta)
-	if reconcile_roster:
-		for entity_id_value in unit_order_by_id.keys():
-			var entity_id := int(entity_id_value)
-			if not live_ids.has(entity_id):
-				forget(entity_id)
-		roster_dirty = false
-		compatibility_ticks = 0
+	for unit in ordered_units():
+		movement_candidate_active = movement_candidate_active or _is_movement_candidate(unit)
+		formation_active = formation_active or _has_active_formation(unit)
+		unit["previous_pos"] = unit.get("pos", Vector2.ZERO)
+	if idle_dirty:
+		idle_units = idle_units_by_id.values()
+		idle_dirty = false
+	# No classification or compatibility pass over the army. Idle animation is
+	# visual elapsed time only; native advancement preserves fixed-step addition.
+	if not idle_units.is_empty():
+		if ClassDB.class_exists("RoRReadModelKernel"):
+			if animation_kernel == null: animation_kernel = ClassDB.instantiate("RoRReadModelKernel")
+			var changed: PackedInt32Array = animation_kernel.advance_idle_animation(idle_units, delta)
+			for id in changed: source_journal.mark(int(id), Journal.APPEARANCE)
+		else:
+			for unit in idle_units:
+				if AnimationController.update(unit, AnimationController.IDLE, delta): source_journal.mark(int(unit["id"]), Journal.APPEARANCE)
 
 
 func ensure_tick(units: Array, delta: float) -> void:
@@ -87,14 +102,29 @@ func ensure_tick(units: Array, delta: float) -> void:
 
 func finish_tick() -> void:
 	tick_prepared = false
+	var pending: Array = pending_units.values()
+	pending_units.clear()
+	for unit in pending: refresh(unit)
 
 
 func refresh(unit: Dictionary) -> bool:
+	if tick_prepared:
+		pending_units[int(unit.get("id", -1))] = unit
+		return false
 	var entity_id := int(unit.get("id", -1))
 	if entity_id >= 0 and not unit_order_by_id.has(entity_id):
 		roster_dirty = true
 	var is_active := requires_update(unit)
 	_set_active(unit, is_active)
+	var idle := not is_active and float(unit.get("hp", 0.0)) > 0.0
+	if idle != idle_units_by_id.has(entity_id):
+		idle_dirty = true
+		if idle:
+			idle_position_resets[entity_id] = unit
+			idle_units_by_id[entity_id] = unit
+		else:
+			idle_units_by_id.erase(entity_id)
+			idle_position_resets.erase(entity_id)
 	if is_active:
 		movement_candidate_active = movement_candidate_active or _is_movement_candidate(unit)
 		formation_active = formation_active or _has_active_formation(unit)
@@ -102,6 +132,10 @@ func refresh(unit: Dictionary) -> bool:
 
 
 func forget(entity_id: int) -> void:
+	idle_position_resets.erase(entity_id)
+	pending_units.erase(entity_id)
+	idle_units_by_id.erase(entity_id)
+	idle_dirty = true
 	_remove_active(entity_id)
 	if unit_order_by_id.has(entity_id):
 		unit_order_by_id.erase(entity_id)
@@ -222,15 +256,7 @@ func _remove_active(entity_id: int) -> void:
 	active_units_by_id.erase(entity_id)
 	var index := int(active_index_by_id.get(entity_id, -1))
 	active_index_by_id.erase(entity_id)
-	if index < 0 or index >= active_units.size():
-		# Compatibility recovery for externally modified records. A later sort
-		# rebuilds the dense index after this rare linear fallback.
-		for fallback_index in range(active_units.size()):
-			if int(active_units[fallback_index].get("id", -1)) == entity_id:
-				index = fallback_index
-				break
-	if index < 0 or index >= active_units.size():
-		return
+	assert(index >= 0 and index < active_units.size(), "Activity dense index is owned by this registry")
 	var last_index := active_units.size() - 1
 	if index != last_index:
 		var moved: Dictionary = active_units[last_index]

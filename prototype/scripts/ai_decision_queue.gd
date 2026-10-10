@@ -7,7 +7,7 @@ extends RefCounted
 const Data := preload("res://scripts/isolated_task_data.gd")
 const PlanningTask := preload("res://scripts/ai_planning_task.gd")
 const LOOKAHEAD_TICKS := 8
-const STATE_VERSION := 1
+const STATE_VERSION := 2
 const MAX_INPUT_BYTES := 64 * 1024 * 1024
 
 var records: Array = []

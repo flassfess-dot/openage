@@ -54,6 +54,11 @@ var ai_decision_queue := AiDecisionQueue.new()
 var task_coordinator := TaskCoordinator.new()
 const AiPlayer := preload("res://scripts/ai_player.gd")
 const AiObservationStore := preload("res://scripts/ai_observation_store.gd")
+const AiObservationPreparation := preload("res://scripts/ai_observation_preparation.gd")
+const AiRuntimeCoordinator := preload("res://scripts/ai_runtime_coordinator.gd")
+const MatchLifecycle := preload("res://scripts/match_lifecycle_service.gd")
+const RenderSnapshotSource := preload("res://scripts/render_snapshot_source.gd")
+const InputCommandRouter := preload("res://scripts/input_command_router.gd")
 const SpriteGeometry := preload("res://scripts/sprite_geometry.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const FacingConvention := preload("res://scripts/facing_convention.gd")
@@ -105,6 +110,9 @@ var map_definition_override: Dictionary = {}
 var map_definition: Dictionary = {}
 var ai_players: Array = []
 var ai_observation_store := AiObservationStore.new()
+var ai_runtime := AiRuntimeCoordinator.new()
+var match_lifecycle := MatchLifecycle.new()
+var render_snapshot_source := RenderSnapshotSource.new()
 var input_adapter := InputAdapter.new()
 var picking_service := PickingService.new()
 var selection_preview_ids: Array[int] = []
@@ -438,10 +446,12 @@ func reset_game() -> void:
 	navigation_loading.shutdown()
 	background_saves.drain()
 	presentation_publication.clear()
+	ai_runtime.shutdown()
+	render_snapshot_source.clear()
 	ai_decision_queue.cancel(task_coordinator)
 	task_coordinator.shutdown()
 	if simulation_world != null:
-		simulation_world.task_coordinator.shutdown()
+		simulation_world.shutdown_derived_state()
 	if simulation_world == null:
 		return
 	var bootstrap: Dictionary = MatchBootstrap.apply(simulation_world, match_definition, map_definition)
@@ -653,11 +663,7 @@ func _start_network_match() -> void:
 
 
 func _queue_local_command(command) -> void:
-	if network_session == null:
-		game_controller.enqueue_command(command, true, local_player_team)
-		return
-	command.tick = maxi(int(command.tick), network_frame_submitted_tick + 1)
-	pending_network_commands.append(command)
+	InputCommandRouter.route(command, game_controller, local_player_team, network_session, pending_network_commands, network_frame_submitted_tick)
 
 
 func _register_local_feedback(command, accepted_message: String, sound_name: String, marker: Variant) -> void:
@@ -794,6 +800,7 @@ func _submit_network_chat(raw_text: String) -> void:
 
 
 func configure_ai_players() -> void:
+	ai_runtime.shutdown()
 	ai_observation_store.clear()
 	ai_players = _new_ai_players()
 	_configure_runtime_ai_cadence(ai_players)
@@ -824,96 +831,30 @@ func _new_ai_players(definition: Dictionary = {}) -> Array:
 	return result
 
 
-func _capture_ai_decision(ai, next_tick: int) -> Dictionary:
-	var probe: Variant = game_controller.performance_probe
-	var started := Time.get_ticks_usec()
-	var options: Dictionary = ai.presentation_options()
-	options["defer_build_sites"] = true
-	var navigation_ready := true
-	if bool(options.get("include_navigation", true)):
-		navigation_ready = simulation_world.ai_navigation_knowledge.prepare_snapshot(simulation_world, simulation_world.get_fog_of_war(), int(ai.team))
-	var resources_ready: bool = simulation_world.prepare_known_ai_resource_snapshot(int(ai.team))
-	if probe != null:
-		probe.observe_microseconds("presentation.ai.prepare", Time.get_ticks_usec() - started)
-	if not navigation_ready or not resources_ready:
-		return {"pending": true}
-	started = Time.get_ticks_usec() if probe != null else 0
-	if probe != null:
-		options["performance_probe"] = probe
-		options["performance_prefix"] = "presentation.ai.snapshot"
-	var knowledge := ai_observation_store.observe_with_queries(simulation_world, game_controller.tick_index, int(ai.team), options)
-	if probe != null:
-		probe.observe_microseconds("presentation.ai.snapshot", Time.get_ticks_usec() - started)
-	started = Time.get_ticks_usec() if probe != null else 0
-	var captured := AiPlanningTask.capture(ai, knowledge, next_tick)
-	if probe != null:
-		probe.observe_microseconds("presentation.ai.capture", Time.get_ticks_usec() - started)
-	return captured
+func _configure_ai_runtime() -> void:
+	ai_runtime.configure(simulation_world, game_controller, ai_players, ai_decision_queue, ai_observation_store, task_coordinator)
 
+func _capture_ai_decision(ai, next_tick: int) -> Dictionary:
+	_configure_ai_runtime()
+	return ai_runtime.capture_ai(ai, next_tick)
 
 func _next_ai_decision_tick(ai, next_tick: int) -> int:
-	if not ai.enabled or simulation_world.player_registry.status(int(ai.team)) != "active":
-		return -1
-	if int(ai.last_economic_tick) < 0 and int(ai.last_military_tick) < 0:
-		return maxi(next_tick, AiPlayer.initial_decision_tick(ai, ai_players))
-	var target := int(ai.last_economic_tick) + maxi(1, int(ai.economic_interval))
-	if ai.profile != "source_campaign_v1" or bool(ai.source_contract.get("runtime_support", {}).get("military_enabled", true)):
-		target = mini(target, int(ai.last_military_tick) + maxi(1, int(ai.military_interval)))
-	return maxi(next_tick, target)
+	_configure_ai_runtime()
+	return ai_runtime.next_decision_tick(ai, next_tick)
 
 
 func queue_ai_commands(next_tick: int = -1) -> Variant:
-	if next_tick < 0:
-		next_tick = game_controller.tick_index + 1
-	if ai_decision_queue.active:
-		return _poll_ai_decisions(next_tick)
-	var horizon: int = game_controller.tick_index + AiDecisionQueue.LOOKAHEAD_TICKS
-	var target := horizon + 1
-	var due: Array = []
-	for ai in ai_players:
-		var candidate := _next_ai_decision_tick(ai, next_tick)
-		if candidate < 0 or candidate > horizon:
-			continue
-		if candidate < target:
-			target = candidate
-			due = [ai]
-		elif candidate == target:
-			due.append(ai)
-	if due.is_empty():
-		return false
-	ai_decision_queue.begin(due, game_controller.tick_index, target, Callable(self, "_capture_ai_decision"))
-	return _poll_ai_decisions(next_tick)
+	_configure_ai_runtime()
+	var status: Variant = ai_runtime.queue_commands(next_tick)
+	if not ai_runtime.error.is_empty():
+		game_message = ai_runtime.error
+		message_time = 8.0
+	return status
 
 
 func _poll_ai_decisions(next_tick: int) -> Dictionary:
-	var status: Dictionary = ai_decision_queue.poll(task_coordinator, game_controller.tick_index, Engine.get_process_frames(), game_controller.performance_probe)
-	if status.has("error"):
-		game_message = "Ошибка расчёта ИИ: %s" % String(status["error"])
-		message_time = 8.0
-		game_controller.set_paused(true)
-		ai_decision_queue.cancel(task_coordinator)
-		return {"ready": false}
-	var gate: Dictionary = ai_decision_queue.gate(status, next_tick)
-	if not bool(gate["ready"]) or next_tick < ai_decision_queue.apply_tick:
-		return gate
-	var decisions := ai_decision_queue.take_ready()
-	# Decode and validate every proposal before changing any live player state.
-	for decision in decisions:
-		decision["commands"] = AiPlanningTask.decode_commands(decision["output"])
-		if decision["commands"].size() != decision["output"].get("commands", []).size() or decision["ai"].canonical_state() != decision["input"]["state"]:
-			game_message = "Ошибка согласования состояния ИИ"
-			message_time = 8.0
-			game_controller.set_paused(true)
-			return {"ready": false}
-	for decision in decisions:
-		var ai = decision["ai"]
-		if not ai.restore_state(decision["output"]["state"]):
-			game_controller.set_paused(true)
-			return {"ready": false}
-		simulation_world.commit_ai_build_site_queries(decision["output"].get("build_site_cache_updates", []), next_tick)
-		for command in decision["commands"]:
-			game_controller.enqueue_command(command, true, int(ai.team))
-	return {"ready": true, "planned": not decisions.is_empty()}
+	_configure_ai_runtime()
+	return ai_runtime._poll(next_tick)
 
 
 func enqueue_with_feedback(command: Variant, accepted_message: String, sound_name: String, marker: Variant = null) -> void:
@@ -971,6 +912,7 @@ func presentation_event_visible(payload: Dictionary) -> bool:
 
 func _sync_effect_snapshot() -> void:
 	if not presentation_snapshot.is_empty():
+		presentation_snapshot = presentation_snapshot.duplicate()
 		presentation_snapshot["effects"] = presentation_effect_timeline.snapshot()
 
 
@@ -1278,17 +1220,12 @@ func _capture_save_input(path: String, slot_name: String = "Быстрое со�
 	if game_controller == null or simulation_world == null or game_controller.replay_recorder == null:
 		last_save_error = "runtime_not_ready"
 		return {}
-	var ai_states: Array = []
-	for ai in ai_players:
-		ai_states.append(ai.canonical_state())
 	var view_state := {
 		"view_offset": view_offset,
 		"view_zoom": view_zoom,
 		"selection": player_control_state.selected_ids(),
 		"formation": formation,
 		"control_groups": control_groups.groups.duplicate(true),
-		"last_known_buildings": simulation_world.last_known_buildings_by_player.duplicate(true),
-		"last_known_resources": simulation_world.known_resource_memory_state(),
 		"last_recalled_group": control_groups.last_recalled_group,
 		"compact_status_visible": compact_status_visible,
 		"sound_cue_history": sound_cue_history.canonical_state(),
@@ -1298,23 +1235,7 @@ func _capture_save_input(path: String, slot_name: String = "Быстрое со�
 		"speed": game_controller.get_speed_multiplier(),
 		"paused": launcher_restore_paused if launcher_suspended else modal_restore_paused if hud_modal_overlay != null and hud_modal_overlay.is_blocking() else game_controller.paused,
 	}
-	var verifier := ReplaySystem.new()
-	# Capture and hash happen at one completed-tick boundary, before the world
-	# continues. Packing/compression/JSON/temp-file replacement belong to worker.
-	var checkpoint: Dictionary = TaskData.copy(GameCheckpoint.capture(simulation_world, game_controller, match_definition, map_definition))
-	var input := {
-		"path": path,
-		"slot_name": slot_name,
-		"match_path": match_path,
-		"definition": TaskData.copy(match_definition),
-		"tick": game_controller.tick_index,
-		"state_hash": verifier.world_state_hash(simulation_world, game_controller.tick_index, game_controller),
-		"replay": TaskData.copy(game_controller.replay_recorder.to_dictionary()),
-		"ai_states": TaskData.copy(ai_states),
-		"view": TaskData.copy(view_state),
-		"controller": TaskData.copy(controller_state),
-		"checkpoint": checkpoint,
-	}
+	var input: Dictionary = match_lifecycle.capture_save(simulation_world, game_controller, ai_players, ai_decision_queue, path, slot_name, match_path, match_definition, map_definition, view_state, controller_state)
 	if not TaskData.is_detached(input):
 		last_save_error = "capture_not_isolated"
 		return {}
@@ -1357,66 +1278,23 @@ func _poll_save_jobs() -> void:
 			hud_modal_overlay.set_named_saves(GameSaveArchive.list_named_saves())
 			hud_modal_overlay.set_menu_status("Игра сохранена" if String(result["path"]) == GameSaveArchive.SAVE_PATH else "Именованное сохранение создано")
 
-func load_game_from_path(path: String) -> bool:
+func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	background_saves.drain()
 	last_save_error = ""
 	if network_session != null:
 		return _load_failed("network_load_unsupported")
-	var loaded: Dictionary = GameSaveArchive.read(path)
-	if not bool(loaded.get("valid", false)):
-		return _load_failed(String(loaded.get("error", "archive_invalid")))
-	var archive: Dictionary = loaded.get("archive", {})
-	var checkpoint: Dictionary = {}
-	var restored_definition := match_definition
-	var restored_map := map_definition
-	if int(archive.get("format_version", 3)) == GameSaveArchive.CHECKPOINT_FORMAT_VERSION:
-		checkpoint = GameCheckpoint.unpack(archive.get("checkpoint", {}))
-		if checkpoint.is_empty(): return _load_failed("checkpoint_invalid")
-		restored_definition = checkpoint["match_definition"]
-		restored_map = checkpoint["map_definition"]
-		if GameSaveArchive.fingerprint(restored_definition) != String(archive.get("match_fingerprint", "")): return _load_failed("match_fingerprint_mismatch")
-	else:
-		if String(archive.get("match_path", "")) != match_path: return _load_failed("match_path_mismatch")
-		if String(archive.get("match_fingerprint", "")) != GameSaveArchive.fingerprint(match_definition): return _load_failed("match_fingerprint_mismatch")
-	# Validate an isolated world before publishing any map or runtime state.
-	var restored_world = _new_simulation_world(restored_map.get("size", map_size))
-	if checkpoint.is_empty(): MatchBootstrap.apply(restored_world, restored_definition, restored_map)
-	var restored_controller = GameController.new(restored_world)
-	var replay_data: Dictionary = archive.get("replay", {})
-	if checkpoint.is_empty():
-		restored_controller.reset_timing()
-		if not restored_controller.load_replay(replay_data): return _load_failed("replay_invalid")
-		if not restored_controller.replay_until_tick(int(archive.get("tick", 0)), local_player_team, ENEMY_TEAM): return _load_failed("replay_failed:%s" % restored_controller.last_replay_mismatch)
-	else:
-		if not GameCheckpoint.restore(checkpoint, restored_world, restored_controller): return _load_failed("checkpoint_invalid")
-	if restored_controller.tick_index != int(archive.get("tick", -1)): return _load_failed("checkpoint_invalid")
-	var verifier := ReplaySystem.new()
-	var restored_hash := verifier.world_state_hash(restored_world, restored_controller.tick_index, restored_controller, checkpoint.get("controller", {}).get("formation_groups") if not checkpoint.is_empty() else null)
-	if restored_hash != String(archive.get("state_sha256", "")):
-		return _load_failed("state_hash_mismatch:%s" % restored_hash)
-	restored_controller.replay_source = null
-	if not restored_controller.install_recording_history(replay_data, false):
-		return _load_failed("recording_history_invalid")
-
-	var restored_ai_players := _new_ai_players(restored_definition)
-	_configure_runtime_ai_cadence(restored_ai_players)
-	var ai_state_by_team: Dictionary = {}
-	for state_value in archive.get("ai_states", []):
-		var state: Dictionary = state_value
-		ai_state_by_team[int(state.get("team", 0))] = state
-	for ai in restored_ai_players:
-		if not ai_state_by_team.has(int(ai.team)):
-			return _load_failed("ai_state_missing:%d" % int(ai.team))
-		if not ai.restore_state(ai_state_by_team[int(ai.team)]):
-			return _load_failed("ai_state_invalid:%d" % int(ai.team))
-	var restored_decisions := AiDecisionQueue.new()
-	var saved_controller: Dictionary = archive.get("controller_state", {})
-	if not saved_controller.get("ai_decisions", {}) is Dictionary or not restored_decisions.restore_state(saved_controller.get("ai_decisions", {}), restored_ai_players, restored_controller.tick_index, Callable(self, "_capture_ai_decision")):
-		return _load_failed("ai_decision_state_invalid")
-	var saved_view: Dictionary = archive.get("view_state", {})
-	var restored_sound_history := SoundCueHistory.new()
-	if not restored_sound_history.restore_state(saved_view.get("sound_cue_history", {}), int(archive.get("tick", 0))):
-		return _load_failed("sound_cue_history_invalid")
+	var restored: Dictionary = match_lifecycle.restore(path, Callable(self, "_new_simulation_world"), Callable(self, "_new_ai_players"), Callable(self, "_configure_runtime_ai_cadence"), Callable(self, "_capture_ai_decision"), inspected)
+	if not String(restored["error"]).is_empty(): return _load_failed(String(restored["error"]))
+	var archive: Dictionary = restored["archive"]
+	var restored_definition: Dictionary = restored["definition"]
+	var restored_map: Dictionary = restored["map"]
+	var restored_world = restored["world"]
+	var restored_controller = restored["controller"]
+	var restored_ai_players: Array = restored["players"]
+	var restored_decisions = restored["decisions"]
+	var restored_sound_history = restored["sound_history"]
+	var saved_controller: Dictionary = archive["controller_state"]
+	var saved_view: Dictionary = archive["view_state"]
 
 	PickingService.SelectionResolver.clear_hit_images()
 	match_definition = restored_definition
@@ -1443,10 +1321,12 @@ func load_game_from_path(path: String) -> bool:
 	cached_environment_items.clear()
 	cached_environment_bounds = Rect2()
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
+	ai_runtime.shutdown()
+	render_snapshot_source.clear()
 	ai_decision_queue.cancel(task_coordinator)
 	task_coordinator.shutdown()
 	if simulation_world != null:
-		simulation_world.task_coordinator.shutdown()
+		simulation_world.shutdown_derived_state()
 	navigation_loading.shutdown()
 	simulation_world = restored_world
 	game_controller = restored_controller
@@ -1461,8 +1341,6 @@ func load_game_from_path(path: String) -> bool:
 	game_controller.set_speed_multiplier(float(saved_controller.get("speed", 1.5)))
 	game_controller.set_paused(bool(saved_controller.get("paused", false)))
 	modal_restore_paused = game_controller.paused
-	simulation_world.restore_last_known_buildings(saved_view.get("last_known_buildings", {}))
-	simulation_world.restore_known_resource_memory(saved_view.get("last_known_resources", {}))
 	navigation_loading.begin(simulation_world, match_definition.get("players", []))
 	view_offset = saved_view.get("view_offset", view_offset)
 	view_zoom = float(saved_view.get("view_zoom", view_zoom))
@@ -2304,40 +2182,12 @@ func sync_world_state(force: bool = true) -> void:
 	var sync_started := Time.get_ticks_usec() if probe != null else 0
 	var stage_started := sync_started
 	var snapshot_bounds := visible_tile_bounds(8)
-	var previous_overview: Dictionary = presentation_snapshot.get("overview", {})
-	var refresh_overview := cached_overview_tick < 0 or current_tick < cached_overview_tick or current_tick - cached_overview_tick >= OVERVIEW_REFRESH_TICKS
-	var current_resource_memory_revision := simulation_world.known_resource_revision(local_player_team)
-	var refresh_overview_resources := refresh_overview and (previous_overview.is_empty() or current_resource_memory_revision != cached_overview_resource_revision)
-	var snapshot_options := {
-		"include_navigation": false,
-		"include_build_sites": false,
-		"include_overview": refresh_overview,
-		"include_overview_resources": refresh_overview_resources,
-		"compact_render_entities": not diagnostics_enabled,
-		"include_production_overview": true,
-		"borrow_visible_render_entities": not diagnostics_enabled,
-		"borrow_overview_entities": not diagnostics_enabled and not task_coordinator.is_enabled("presentation"),
-		"entity_bounds": Rect2(Vector2(snapshot_bounds.position), Vector2(snapshot_bounds.size)),
-		"always_include_entity_ids": selected_ids,
-		"command_option_entity_ids": selected_ids,
-	}
-	if probe != null:
-		snapshot_options["performance_probe"] = probe
-		snapshot_options["performance_prefix"] = "presentation.local.snapshot"
-	var captured_snapshot := SimulationSnapshot.with_queries(simulation_world, current_tick, local_player_team, snapshot_options)
-	presentation_snapshot = presentation_publication.publish(captured_snapshot, selected_ids, task_coordinator) if not diagnostics_enabled else captured_snapshot
+	presentation_snapshot = render_snapshot_source.capture(simulation_world, current_tick, local_player_team, selected_ids, Rect2(Vector2(snapshot_bounds.position), Vector2(snapshot_bounds.size)), diagnostics_enabled, task_coordinator, probe)
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.snapshot", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
-	if refresh_overview:
-		cached_overview_tick = current_tick
-		if refresh_overview_resources:
-			cached_overview_resource_revision = int(presentation_snapshot.get("resource_memory_revision", current_resource_memory_revision))
-		elif previous_overview.has("resources"):
-			presentation_snapshot["overview"]["resources"] = previous_overview["resources"]
-	elif not previous_overview.is_empty():
-		presentation_snapshot["overview"] = previous_overview
-	presentation_snapshot["overview_tick"] = cached_overview_tick
+	cached_overview_tick = render_snapshot_source.overview_tick
+	cached_overview_resource_revision = render_snapshot_source.resource_revision
 	cached_presentation_tick = current_tick
 	cached_presentation_bounds = snapshot_bounds
 	cached_presentation_selection_signature = selection_signature
@@ -2454,6 +2304,8 @@ func _exit_tree() -> void:
 	background_saves.shutdown()
 	if resource_catalog != null:
 		resource_catalog.unit_presentations.shutdown_loading()
+	ai_runtime.shutdown()
+	render_snapshot_source.clear()
 	ai_decision_queue.cancel(task_coordinator)
 	task_coordinator.shutdown()
 	if simulation_world != null:

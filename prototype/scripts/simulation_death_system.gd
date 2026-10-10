@@ -52,46 +52,46 @@ func begin_death(unit: Dictionary) -> void:
 		"kind": String(unit.get("kind", "")),
 		"team": int(unit.get("team", 0)),
 	})
-	unit["hp"] = minf(0.0, float(unit.get("hp", 0.0)))
+	world.set_entity_field(unit, "hp", minf(0.0, float(unit.get("hp", 0.0))))
 	world.spatial_sync_system.mark_roster_dirty()
 	world.track_conquest_entity(unit)
 	world.sync_unit_victory_objective(unit)
-	unit["selected"] = false
-	unit["task"] = "die"
-	unit["target_id"] = -1
+	world.set_entity_field(unit, "selected", false)
+	world.set_entity_field(unit, "task", "die")
+	world.set_entity_field(unit, "target_id", -1)
 	world.release_resource_approach_slot(unit)
 	world.release_building_approach_slot(unit)
-	unit["resource_id"] = -1
-	unit["target_building_id"] = -1
-	unit["death_phase"] = "dying"
-	unit["death_elapsed"] = 0.0
-	unit["death_complete"] = false
+	world.set_entity_field(unit, "resource_id", -1)
+	world.set_entity_field(unit, "target_building_id", -1)
+	world.set_entity_field(unit, "death_phase", "dying")
+	world.set_entity_field(unit, "death_elapsed", 0.0)
+	world.set_entity_field(unit, "death_complete", false)
 	world.release_unit_destination(unit)
-	OrderPipeline.clear_queued(unit)
-	OrderPipeline.complete(unit, "unit_died")
-	unit["formation_group_id"] = -1
-	unit["formation_slot_id"] = -1
-	unit["formation_slot_capacity"] = 0.0
-	unit["formation_home"] = null
-	unit["formation_slot_mode"] = "none"
-	unit["formation_shared_motion"] = false
-	unit["formation_shared_isolated"] = false
-	unit["cohesion_speed_scale"] = 1.0
-	unit["combat_destination"] = null
+	world.clear_entity_queued_orders(unit)
+	world.complete_entity_order(unit, "unit_died")
+	world.set_entity_field(unit, "formation_group_id", -1)
+	world.set_entity_field(unit, "formation_slot_id", -1)
+	world.set_entity_field(unit, "formation_slot_capacity", 0.0)
+	world.set_entity_field(unit, "formation_home", null)
+	world.set_entity_field(unit, "formation_slot_mode", "none")
+	world.set_entity_field(unit, "formation_shared_motion", false)
+	world.set_entity_field(unit, "formation_shared_isolated", false)
+	world.set_entity_field(unit, "cohesion_speed_scale", 1.0)
+	world.set_entity_field(unit, "combat_destination", null)
 	if not bool(unit.get("population_released", false)):
 		var team := int(unit.get("team", 0))
 		world.economy_system.add_population_points(team, -int(unit.get("population_points_cost", int(unit.get("population_cost", 0)) * SimulationEconomySystem.POPULATION_POINT_SCALE)))
-		unit["population_released"] = true
-	AnimationController.update(unit, AnimationController.DIE, 0.0)
+		world.set_entity_field(unit, "population_released", true)
+	world.advance_entity_animation(unit, AnimationController.DIE, 0.0)
 	EntityComponents.sync_dynamic(unit)
 
 
 func begin_entity_death(entity: Dictionary, source_context: Dictionary = {}) -> void:
 	if world.find_unit(int(entity.get("id", -1))) != null:
 		if String(entity.get("death_phase", "alive")) == "alive" and world.entity_has_behavior_tag(entity, "huntable"):
-			entity["killed_by_worker"] = bool(source_context.get("is_worker", false))
-			entity["killer_entity_id"] = int(source_context.get("entity_id", -1))
-			entity["killer_team"] = int(source_context.get("team", 0))
+			world.set_entity_field(entity, "killed_by_worker", bool(source_context.get("is_worker", false)))
+			world.set_entity_field(entity, "killer_entity_id", int(source_context.get("entity_id", -1)))
+			world.set_entity_field(entity, "killer_team", int(source_context.get("team", 0)))
 		begin_death(entity)
 		return
 	begin_building_destruction(entity)
@@ -117,16 +117,16 @@ func begin_building_destruction(building: Dictionary) -> void:
 			var unit: Dictionary = unit_value
 			if int(unit.get("resource_id", -1)) == building_id:
 				world.finish_gather_order(unit, "resource_destroyed")
-		building["resource_state"] = "destroyed"
-	building["hp"] = 0.0
+		world.set_entity_field(building, "resource_state", "destroyed")
+	world.set_entity_field(building, "hp", 0.0)
 	world.spatial_sync_system.mark_roster_dirty()
 	world.track_conquest_entity(building)
-	building["state"] = "destroyed"
-	building["builders"] = {}
-	building["production_progress"] = 0.0
-	building["death_phase"] = "dying"
-	building["death_elapsed"] = 0.0
-	building["removed"] = false
+	world.set_entity_field(building, "state", "destroyed")
+	world.set_entity_field(building, "builders", {})
+	world.set_entity_field(building, "production_progress", 0.0)
+	world.set_entity_field(building, "death_phase", "dying")
+	world.set_entity_field(building, "death_elapsed", 0.0)
+	world.set_entity_field(building, "removed", false)
 	EntityComponents.sync_dynamic(building)
 	world.refresh_building_connectivity()
 	world.sync_building_navigation_occupancy(building)
@@ -135,20 +135,20 @@ func begin_building_destruction(building: Dictionary) -> void:
 func advance_death(unit: Dictionary, delta: float) -> void:
 	match String(unit.get("death_phase", "alive")):
 		"dying":
-			AnimationController.update(unit, AnimationController.DIE, delta)
-			unit["death_elapsed"] = float(unit.get("anim", 0.0))
+			world.advance_entity_animation(unit, AnimationController.DIE, delta)
+			world.set_entity_field(unit, "death_elapsed", float(unit.get("anim", 0.0)))
 			if float(unit["death_elapsed"]) + 0.000001 >= float(unit.get("death_duration", 0.1)):
-				unit["death_phase"] = "corpse"
-				unit["death_complete"] = true
+				world.set_entity_field(unit, "death_phase", "corpse")
+				world.set_entity_field(unit, "death_complete", true)
 				unit["animation_events_fired"]["death_complete_frame"] = true
-				unit["anim_state"] = AnimationController.DECAY
+				world.set_entity_field(unit, "anim_state", AnimationController.DECAY)
 				unit["anim"] = 0.0
 		"corpse":
-			unit["corpse_elapsed"] = float(unit.get("corpse_elapsed", 0.0)) + maxf(0.0, delta)
+			world.set_entity_field(unit, "corpse_elapsed", float(unit.get("corpse_elapsed", 0.0)) + maxf(0.0, delta))
 			unit["anim"] = unit["corpse_elapsed"]
 			if float(unit["corpse_elapsed"]) + 0.000001 >= float(unit.get("corpse_duration", 0.0)):
-				unit["death_phase"] = "removed"
-				unit["removed"] = true
+				world.set_entity_field(unit, "death_phase", "removed")
+				world.set_entity_field(unit, "removed", true)
 				world.unit_removal_pending = true
 	if String(unit.get("death_phase", "")) == "corpse" and world.entity_has_behavior_tag(unit, "huntable"):
 		_complete_huntable_death(unit)
@@ -201,14 +201,14 @@ func advance_death_only(delta: float) -> void:
 	for unit in world.dying_units:
 		advance_death(unit, delta)
 	for building in world.dying_buildings:
-		building["death_elapsed"] = float(building.get("death_elapsed", 0.0)) + maxf(0.0, delta)
+		world.set_entity_field(building, "death_elapsed", float(building.get("death_elapsed", 0.0)) + maxf(0.0, delta))
 		var death_duration := float(building.get("death_duration", 0.05))
 		if float(building["death_elapsed"]) + 0.000001 >= death_duration + 8.0:
-			building["death_phase"] = "removed"
-			building["removed"] = true
+			world.set_entity_field(building, "death_phase", "removed")
+			world.set_entity_field(building, "removed", true)
 			world.building_removal_pending = true
 		elif float(building["death_elapsed"]) + 0.000001 >= death_duration:
-			building["death_phase"] = "ruin"
+			world.set_entity_field(building, "death_phase", "ruin")
 		EntityComponents.sync_dynamic(building)
 
 
@@ -223,6 +223,7 @@ func purge_removed_units() -> void:
 				var removed_id := int(world.units[index].get("id", -1))
 				world.unit_activity_registry.forget(removed_id)
 				world.render_entity_projection_cache.erase(removed_id)
+				world.entity_changes.remove(removed_id)
 				world.units_by_id.erase(removed_id)
 				world.units.remove_at(index)
 		for index in range(world.dying_units.size() - 1, -1, -1):
@@ -238,6 +239,7 @@ func purge_removed_units() -> void:
 				removed_combat_building = removed_combat_building or bool(world.buildings[index].get("combat_enabled", false))
 				world.production_system.unregister_building(int(world.buildings[index].get("id", -1)))
 				world.render_entity_projection_cache.erase(int(world.buildings[index].get("id", -1)))
+				world.entity_changes.remove(int(world.buildings[index].get("id", -1)))
 				world.buildings_by_id.erase(int(world.buildings[index].get("id", -1)))
 				world.buildings.remove_at(index)
 		for index in range(world.dying_buildings.size() - 1, -1, -1):

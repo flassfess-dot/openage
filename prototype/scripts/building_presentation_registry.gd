@@ -232,7 +232,9 @@ func _frame_records(graphic_id: int, player: int) -> Array:
 func _source_record(building: Dictionary) -> Dictionary:
 	var source_unit_id := int(building.get("source_unit_id", -1))
 	var civilization_id := int(building.get("components", {}).get("ownership", {}).get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
-	var cache_key := "%d:%d" % [civilization_id, source_unit_id]
+	# Placement ghosts have no source unit ID and resolve through their kind.
+	# Keep that alias in the cache identity so their source records stay distinct.
+	var cache_key := "%d:%d:%s" % [civilization_id, source_unit_id, String(building.get("kind", ""))]
 	if source_records_by_key.has(cache_key):
 		return source_records_by_key[cache_key]
 	var direct: Dictionary = object_catalog.get("objects", {}).get("%d:%d" % [civilization_id, source_unit_id], {})

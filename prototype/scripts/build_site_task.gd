@@ -7,6 +7,7 @@ const Pathfinder := preload("res://scripts/pathfinder.gd")
 const Placement := preload("res://scripts/simulation_building_placement_system.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
+const MAX_ACTOR_BYTES := 8 * 1024 * 1024
 
 class Repository extends RefCounted:
 	var profiles: Dictionary = {}
@@ -69,14 +70,49 @@ static func capture(world, team: int, kinds: Array) -> Dictionary:
 		if technology_id >= 0:
 			researched[technology_id] = world.technology_system.is_researched(team, technology_id)
 		profiles[kind] = {"stats": Data.copy(world.unit_stats(kind)), "metadata": metadata, "exists": world.data_repository.has_archetype(kind), "category": world.data_repository.category(kind), "affordable": world.can_afford_resource_cost(team, world.building_cost(kind, team))}
+	var cache: Dictionary = world.ai_build_capture_cache.get(team, {})
+	if int(cache.get("epoch", -1)) != int(world.entity_changes.epoch): cache = {"epoch": world.entity_changes.epoch, "units": {}, "buildings": {}, "retained": {}, "bytes": 0}
+	if not world.ai_build_capture_cache.has(team) and world.ai_build_capture_cache.size() >= 8: world.ai_build_capture_cache.erase(world.ai_build_capture_cache.keys()[0])
+	world.ai_build_capture_cache[team] = cache
 	var workers: Array = []
-	for unit in world.get_units():
-		if int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and world.entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land":
-			workers.append({"id": unit["id"], "team": team, "hp": unit["hp"], "pos": unit["pos"], "movement_domain": "land", "terrain_restriction": unit.get("terrain_restriction", -1), "footprint_radius": unit.get("footprint_radius", 0.3)})
+	var mobile_cells: Dictionary[Vector2i, bool] = {}
+	var seen_units: Dictionary = {}
+	for unit in world.entity_read_index.legal_entities(world, team, "units"):
+		if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)): continue
+		var position := Vector2(unit["pos"])
+		var radius := float(unit.get("footprint_radius", 0.3))
+		for point in [position, position + Vector2(radius, 0), position - Vector2(radius, 0), position + Vector2(0, radius), position - Vector2(0, radius)]: mobile_cells[Vector2i(point.floor())] = true
+		if int(unit.get("team", 0)) != team or not world.entity_is_worker(unit) or String(unit.get("movement_domain", "land")) != "land": continue
+		var id := int(unit["id"])
+		seen_units[id] = true
+		var version := int(world.entity_changes.revision_for(id, 1 | 2 | 8 | 128))
+		var previous: Dictionary = cache["units"].get(id, {})
+		if int(previous.get("version", -1)) != version:
+			var row := {"id": id, "team": team, "hp": unit["hp"], "pos": position, "movement_domain": "land", "terrain_restriction": unit.get("terrain_restriction", -1), "footprint_radius": radius}
+			Data.freeze_detached(row, 0, false)
+			previous = {"version": version, "row": row}
+			_retain_actor(cache, "units", id, previous)
+		workers.append(previous["row"])
+	for id in cache["units"].keys():
+		if not seen_units.has(id): _erase_actor(cache, id)
 	var structures: Array = []
-	for building in world.get_buildings():
-		structures.append({"id": building["id"], "team": building.get("team", 0), "hp": building.get("hp", 0.0), "pos": building["pos"], "footprint": Data.copy(building.get("footprint", {})), "occupied_cells": Data.copy(building.get("occupied_cells", [])), "footprint_radius": building.get("footprint_radius", 1.0)})
-	return {"navigation": world.pathfinder.detached_task_topology(), "native_enabled": world.pathfinder.native_enabled, "profiles": profiles, "configured": world.data_repository.is_configured(), "researched": researched, "workers": workers, "buildings": structures, "mobile_cells": world._mobile_foundation_obstructions(), "fog": world.get_fog_of_war().states_by_player[team].duplicate()}
+	var seen_buildings: Dictionary = {}
+	for building in world.entity_read_index.legal_entities(world, team, "buildings"):
+		var id := int(building["id"])
+		seen_buildings[id] = true
+		var version := int(world.entity_changes.revision_for(id, 1 | 2 | 8 | 16 | 32 | 128))
+		var previous: Dictionary = cache["buildings"].get(id, {})
+		if int(previous.get("version", -1)) != version:
+			var row := {"id": id, "team": building.get("team", 0), "hp": building.get("hp", 0.0), "pos": building["pos"], "footprint": Data.copy(building.get("footprint", {})), "occupied_cells": Data.copy(building.get("occupied_cells", [])), "footprint_radius": building.get("footprint_radius", 1.0)}
+			Data.freeze_detached(row, 0, false)
+			previous = {"version": version, "row": row}
+			_retain_actor(cache, "buildings", id, previous)
+		structures.append(previous["row"])
+	for id in cache["buildings"].keys():
+		if not seen_buildings.has(id): _erase_actor(cache, id)
+	var planner = world.movement_system.knowledge.planner(world, team)
+	return {"navigation": planner.detached_task_topology(), "native_enabled": planner.native_enabled, "profiles": profiles, "configured": world.data_repository.is_configured(), "researched": researched, "workers": workers, "buildings": structures, "mobile_cells": mobile_cells, "fog": world.get_fog_of_war().states_by_player[team].duplicate()}
+
 
 static func calculate_queries(base: Dictionary, queries: Array, coordinator, tick: int, source_planner = null, probe = null) -> Array:
 	var prepare_started := Time.get_ticks_usec() if probe != null else 0
@@ -348,3 +384,19 @@ func _append_bounded_sites(sites: Array, fallback_sites: Array, maximum: int) ->
 		if sites.size() >= maximum:
 			break
 		sites.append(fallback_position)
+
+static func _erase_actor(cache: Dictionary, id: Variant) -> void:
+	var retained: Dictionary = cache["retained"]
+	if retained.has(id):
+		cache["bytes"] = int(cache["bytes"]) - int(retained[id]["bytes"])
+		cache[retained[id]["category"]].erase(id)
+		retained.erase(id)
+
+static func _retain_actor(cache: Dictionary, category: String, id: int, record: Dictionary) -> void:
+	_erase_actor(cache, id)
+	var bytes := var_to_bytes(record).size() + 96
+	if bytes > MAX_ACTOR_BYTES: return
+	while not cache["retained"].is_empty() and (cache["retained"].size() >= 8192 or int(cache["bytes"]) + bytes > MAX_ACTOR_BYTES): _erase_actor(cache, cache["retained"].keys()[0])
+	cache[category][id] = record
+	cache["retained"][id] = {"category": category, "bytes": bytes}
+	cache["bytes"] = int(cache["bytes"]) + bytes

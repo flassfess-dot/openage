@@ -2,7 +2,7 @@ class_name RoREntityReadContract
 extends RefCounted
 
 const Data := preload("res://scripts/isolated_task_data.gd")
-const SCHEMA_VERSION := 1
+const SCHEMA_VERSION := 2
 const RENDER_SCHEMA_KEY := "_ror_render_schema"
 # One schema for one-shot and retained projections. No live entity borrowing.
 const RENDER_FIELDS := [
@@ -83,6 +83,7 @@ static func is_render_record(entity: Dictionary) -> bool:
 
 static var native_kernel: Variant = null
 static var native_enabled := true
+static var native_ai_enabled := true
 const NESTED_FIELDS := ARRAY_FIELDS + NESTED_RENDER_FIELDS
 
 static func render(entity: Dictionary, previous: Dictionary = {}) -> Dictionary:
@@ -133,6 +134,14 @@ static func render_reference(entity: Dictionary, previous: Dictionary = {}) -> D
 
 
 static func ai(entity: Dictionary, observer_team: int = 0, previous: Dictionary = {}) -> Dictionary:
+	if native_enabled and native_ai_enabled and ClassDB.class_exists("RoRReadModelKernel"):
+		if native_kernel == null:
+			native_kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if native_kernel.has_method("project_ai"):
+			return native_kernel.project_ai(entity, previous, observer_team, AI_FIELDS, ARRAY_FIELDS, PRIVATE_TRADE_FIELDS)
+	return ai_reference(entity, observer_team, previous)
+
+static func ai_reference(entity: Dictionary, observer_team: int = 0, previous: Dictionary = {}) -> Dictionary:
 	var result: Dictionary = {}
 	for key in AI_FIELDS:
 		if entity.has(key):

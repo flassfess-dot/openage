@@ -80,6 +80,13 @@ func _ready() -> void:
 	_show_main_menu()
 	# Release templates do not support --script. Drive their real launcher
 	# through an explicit diagnostic entry point after the scene is ready.
+	for diagnostic in [["--profile-long-graphical-match", "res://tests/manual/profile_long_graphical_match.gd"], ["--live-packaged-probe", "res://tests/manual/live_packaged_game_probe.gd"]]:
+		if diagnostic[0] in OS.get_cmdline_user_args() and not get_tree().has_meta("graphical_verification_started"):
+			get_tree().set_meta("graphical_verification_started", true)
+			hide()
+			var verifier = load(diagnostic[1]).new()
+			get_tree().root.add_child.call_deferred(verifier)
+			return
 	if "--verify-packaged-startup" in OS.get_cmdline_user_args() and not get_tree().has_meta("startup_verification_started"):
 		get_tree().set_meta("startup_verification_started", true)
 		var verifier = load("res://tests/manual/verify_packaged_startup.gd").new()
@@ -968,20 +975,13 @@ func _load_selected_save() -> void:
 		_show_save_menu()
 		_set_save_status(GameSaveArchive.error_message(String(inspected.get("error", "archive_invalid"))), true)
 		return
-	var archive: Dictionary = inspected["archive"]
+	# The current checkpoint contains the match and map. Initialize the common
+	# scene/catalogs, then let its lifecycle owner restore that embedded state.
 	var game = GAME_SCENE.instantiate()
-	if int(archive.get("format_version", 3)) == GameSaveArchive.FORMAT_VERSION:
-		game.match_path = String(archive["match_path"])
-		var definition := MatchDefinition.load_json(game.match_path)
-		if not bool(definition.get("valid", false)):
-			game.free()
-			_show_save_menu()
-			_set_save_status("Исходная карта этого сохранения не найдена", true)
-			return
 	game.process_mode = Node.PROCESS_MODE_DISABLED
 	game.hide()
 	get_tree().root.add_child(game)
-	if not game.load_game_from_path(path):
+	if not game.load_game_from_path(path, inspected):
 		var message := GameSaveArchive.error_message(game.last_save_error)
 		game.queue_free()
 		_show_save_menu()

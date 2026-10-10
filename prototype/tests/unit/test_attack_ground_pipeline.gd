@@ -8,6 +8,8 @@ const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 
 class EffectRegistryStub extends RefCounted:
+	func has_graphic(graphic_id: int, _team: int = 0) -> bool:
+		return graphic_id == 270
 	func duration(_graphic_id: int) -> float:
 		return 0.5
 

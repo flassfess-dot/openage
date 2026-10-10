@@ -10,14 +10,20 @@ const CANDIDATE_BUCKET_SIZE := 4.0
 const AGGRESSIVE_SCAN_INTERVAL_TICKS := 4
 const GUARDED_SCAN_INTERVAL_TICKS := 2
 const ACTIVE_TARGET_VALIDATION_INTERVAL_TICKS := 2
-# Cached entries are live entity dictionaries, so movement, health, tasks and
-# ownership remain current without rebuilding both global combat lists. The
-# world revision handles supported membership changes immediately. This much
-# slower fallback retains compatibility with callers that mutate public entity
-# dictionaries directly.
-const ROSTER_COMPATIBILITY_REFRESH_INTERVAL_TICKS := 200
-const CANDIDATE_INDEX_REFRESH_INTERVAL_TICKS := 2
+# Source events maintain live candidates and metadata. Actor wake lanes retain
+# the original fixed tick cadence; direct external mutation is unsupported.
 
+const Journal := preload("res://scripts/entity_change_journal.gd")
+var cursor := -1
+var epoch := -1
+var attackers_by_id: Dictionary = {}
+var target_membership: Dictionary = {}
+var metadata_by_id: Dictionary = {}
+var assigned_targets: Dictionary = {}
+var retaliation_buckets: Dictionary = {}
+var wake_lanes: Array = [{}, {}, {}, {}]
+var lane_by_id: Dictionary = {}
+var roster_order_dirty := true
 var cached_attackers: Array = []
 var cached_targets: Array = []
 var cached_entity_count := -1
@@ -28,6 +34,16 @@ var cached_candidate_index_tick := -1
 
 
 func reset() -> void:
+	cursor = -1
+	epoch = -1
+	attackers_by_id.clear()
+	target_membership.clear()
+	metadata_by_id.clear()
+	assigned_targets.clear()
+	retaliation_buckets.clear()
+	wake_lanes = [{}, {}, {}, {}]
+	lane_by_id.clear()
+	roster_order_dirty = true
 	cached_attackers.clear()
 	cached_targets.clear()
 	cached_entity_count = -1
@@ -43,7 +59,8 @@ func collect_commands(world, tick: int) -> Array:
 	var probe: Variant = world.tick_pipeline.performance_probe
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	_refresh_combat_rosters(world, tick)
-	var units: Array = cached_attackers
+	var units: Array = wake_lanes[posmod(tick, 4)].values()
+	units.sort_custom(func(a, b): return int(a["id"]) < int(b["id"]))
 	var due_units: Array = []
 	for unit_value in units:
 		var unit: Dictionary = unit_value
@@ -162,25 +179,88 @@ func tracked_attackers() -> Array:
 
 
 func _refresh_combat_rosters(world, tick: int) -> void:
-	var entity_count: int = int(world.get_units().size()) + int(world.get_buildings().size())
-	var roster_revision := int(world.combat_roster_revision)
-	var refresh: bool = (
-		cached_roster_tick < 0
-		or tick < cached_roster_tick
-		or tick - cached_roster_tick >= ROSTER_COMPATIBILITY_REFRESH_INTERVAL_TICKS
-		or entity_count != cached_entity_count
-		or roster_revision != cached_roster_revision
-	)
-	if refresh:
-		cached_attackers = _combat_observers(world)
-		cached_targets = world.get_combat_targets(false)
-		cached_entity_count = entity_count
-		cached_roster_tick = tick
-		cached_roster_revision = roster_revision
-		# A roster refresh can replace targets without waiting for the spatial
-		# candidate index's normal movement cadence.
-		cached_candidate_index.clear()
-		cached_candidate_index_tick = -1
+	var delta: Dictionary = world.entity_changes.changes_since(cursor if epoch == world.entity_changes.epoch else -1)
+	if bool(delta["full"]):
+		reset()
+		cached_candidate_index = {"buckets": {}, "maximum_radius": 0.0}
+		for row in world.get_units(): _update_record(row, world)
+		for row in world.get_buildings(): _update_record(row, world)
+	else:
+		for id in delta["ids"]:
+			if not (int(delta["masks"][id]) & (Journal.LIFECYCLE | Journal.POSITION | Journal.ACTIVITY | Journal.COMBAT | Journal.OWNERSHIP)): continue
+			_remove_record(int(id), true)
+			var row: Variant = world.find_unit(int(id))
+			if row == null: row = world.find_building(int(id))
+			if row != null: _update_record(row, world)
+			elif attackers_by_id.erase(int(id)): roster_order_dirty = true
+	cursor = int(delta["revision"])
+	epoch = world.entity_changes.epoch
+	cached_roster_tick = tick
+	if roster_order_dirty:
+		cached_attackers = attackers_by_id.values()
+		cached_attackers.sort_custom(func(a, b): return int(a["id"]) < int(b["id"]))
+		roster_order_dirty = false
+
+func _remove_record(id: int, retain_attacker: bool = false) -> void:
+	if target_membership.has(id):
+		var old: Array = target_membership[id]
+		var bucket: Dictionary = cached_candidate_index["buckets"][old[0]]
+		bucket[old[1]].erase(old[2])
+		if bucket[old[1]].is_empty(): bucket.erase(old[1])
+		if bucket.is_empty(): cached_candidate_index["buckets"].erase(old[0])
+		target_membership.erase(id)
+	if attackers_by_id.has(id) and not retain_attacker:
+		attackers_by_id.erase(id)
+		roster_order_dirty = true
+	if metadata_by_id.has(id):
+		var metadata: Dictionary = metadata_by_id[id]
+		var target_id := int(metadata["assigned"])
+		if target_id >= 0:
+			assigned_targets[target_id] = int(assigned_targets[target_id]) - 1
+			if int(assigned_targets[target_id]) <= 0: assigned_targets.erase(target_id)
+		if metadata["retaliation"]:
+			retaliation_buckets[metadata["cell"]].erase(metadata["row"])
+			if retaliation_buckets[metadata["cell"]].is_empty(): retaliation_buckets.erase(metadata["cell"])
+		metadata_by_id.erase(id)
+	for lane in lane_by_id.get(id, []): wake_lanes[lane].erase(id)
+	lane_by_id.erase(id)
+
+func _update_record(row: Dictionary, world) -> void:
+	var id := int(row["id"])
+	var cell := _awareness_cell(Vector2(row.get("pos", Vector2.ZERO)))
+	var team := int(row.get("team", 0))
+	if float(row.get("hp", 0.0)) <= 0.0:
+		attackers_by_id.erase(id)
+		roster_order_dirty = true
+		return
+	if not world.entity_has_behavior_tag(row, "noncombat_target"):
+		if not cached_candidate_index["buckets"].has(cell): cached_candidate_index["buckets"][cell] = {}
+		var bucket: Dictionary = cached_candidate_index["buckets"][cell]
+		if not bucket.has(team): bucket[team] = []
+		bucket[team].append(row)
+		target_membership[id] = [cell, team, row]
+		cached_candidate_index["maximum_radius"] = maxf(float(cached_candidate_index["maximum_radius"]), float(row.get("footprint_radius", 0.0)))
+	if not bool(row.get("combat_enabled", false)):
+		if attackers_by_id.erase(id): roster_order_dirty = true
+		return
+	if not attackers_by_id.has(id): roster_order_dirty = true
+	attackers_by_id[id] = row
+	var task := String(row.get("task", "idle"))
+	var assigned := int(row.get("target_id", -1)) if task == "attack" else -1
+	if assigned >= 0: assigned_targets[assigned] = int(assigned_targets.get(assigned, 0)) + 1
+	var retaliating := int(row.get("retaliation_target_id", -1)) >= 0
+	if retaliating:
+		if not retaliation_buckets.has(cell): retaliation_buckets[cell] = []
+		retaliation_buckets[cell].append(row)
+	metadata_by_id[id] = {"assigned": assigned, "retaliation": retaliating, "cell": cell, "row": row}
+	var stance := "aggressive" if bool(row.get("combat_pursuit", false)) else String(row.get("stance", "passive"))
+	if stance == "passive" or task not in ["idle", "attack_move", "attack"] or (task == "attack" and not bool(row.get("attack_autonomous", false))): return
+	var lanes: Array = []
+	for phase in range(4):
+		if _awareness_due(row, phase, stance):
+			wake_lanes[phase][id] = row
+			lanes.append(phase)
+	lane_by_id[id] = lanes
 
 
 func _combat_observers(world) -> Array:
@@ -200,15 +280,7 @@ func _combat_observers(world) -> Array:
 	return result
 
 
-func _candidate_index(targets: Array, tick: int) -> Dictionary:
-	if (
-		cached_candidate_index_tick < 0
-		or tick < cached_candidate_index_tick
-		or tick - cached_candidate_index_tick >= CANDIDATE_INDEX_REFRESH_INTERVAL_TICKS
-		or cached_candidate_index.is_empty()
-	):
-		cached_candidate_index = _combat_candidate_index(targets)
-		cached_candidate_index_tick = tick
+func _candidate_index(_targets: Array, _tick: int) -> Dictionary:
 	return cached_candidate_index
 
 
@@ -272,23 +344,8 @@ func _assistance_target_id(world, unit: Dictionary, retaliation_index: Dictionar
 	return best_target_id
 
 
-func _attacker_metadata(units: Array) -> Dictionary:
-	var assigned: Dictionary = {}
-	var retaliation: Dictionary = {}
-	for unit_value in units:
-		var unit: Dictionary = unit_value
-		if float(unit.get("hp", 0.0)) <= 0.0:
-			continue
-		if String(unit.get("task", "")) == "attack":
-			var target_id := int(unit.get("target_id", -1))
-			if target_id >= 0:
-				assigned[target_id] = int(assigned.get(target_id, 0)) + 1
-		if float(unit.get("hp", 0.0)) > 0.0 and int(unit.get("retaliation_target_id", -1)) >= 0:
-			var cell := _awareness_cell(Vector2(unit.get("pos", Vector2.ZERO)))
-			if not retaliation.has(cell):
-				retaliation[cell] = []
-			retaliation[cell].append(unit)
-	return {"assigned": assigned, "retaliation": retaliation}
+func _attacker_metadata(_units: Array) -> Dictionary:
+	return {"assigned": assigned_targets.duplicate(), "retaliation": retaliation_buckets}
 
 
 func _combat_candidate_index(targets: Array) -> Dictionary:

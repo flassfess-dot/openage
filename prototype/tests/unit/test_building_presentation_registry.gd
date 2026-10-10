@@ -15,6 +15,7 @@ func _initialize() -> void:
 	test_distinct_buildings(catalog)
 	test_composite_only_house(catalog)
 	test_construction_graphics(catalog)
+	test_foundation_preview_switching(catalog)
 	test_damage_and_age_upgrade(catalog)
 	test_player_colors(catalog)
 
@@ -71,6 +72,23 @@ func test_construction_graphics(catalog) -> void:
 	var house_info: Dictionary = catalog.building_frame_info(house)
 	assert_equal(house_info.get("asset_name"), "graphic_86_p1", "House uses its own construction graphic")
 	assert_equal(int(house_info.get("frame_index", -1)), 3, "House completion selects final stage")
+
+
+func test_foundation_preview_switching(catalog) -> void:
+	# Main's placement ghost has neither an entity ID nor a source_unit_id.
+	# Select Dock first, then change kinds with the same catalog/cache alive.
+	catalog.building_presentations.source_records_by_key.clear()
+	var kinds := ["dock", "house", "barracks", "wall", "dock"]
+	var graphics := [85, 86, 82, 77, 85]
+	for index in range(kinds.size()):
+		var ghost := {"kind": kinds[index], "team": 1, "pos": Vector2(20, 20), "state": "foundation", "construction_stage": 0}
+		var info: Dictionary = catalog.building_frame_info(ghost, 0.0)
+		assert_equal(info.get("graphic_id"), graphics[index], "%s preview after Dock uses its construction graphic" % kinds[index])
+		assert_equal(info.get("asset_name"), "graphic_%d_p1" % graphics[index], "%s preview uses the matching source texture" % kinds[index])
+		assert_equal(info.get("frame_index"), 0, "%s preview stays at the initial construction stage" % kinds[index])
+		assert_true(info.get("texture") != null, "%s preview texture loads" % kinds[index])
+	var other_team := {"kind": "house", "team": 2, "state": "foundation", "construction_stage": 0}
+	assert_equal(catalog.building_frame_info(other_team).get("asset_name"), "graphic_86_p2", "preview switching retains player colours")
 
 
 func test_damage_and_age_upgrade(catalog) -> void:

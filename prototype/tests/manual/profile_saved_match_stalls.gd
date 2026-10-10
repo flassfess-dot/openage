@@ -17,13 +17,19 @@ func run() -> void:
 	var save_path := ""
 	var output := "res://qa/saved-match-stalls.json"
 	var disable_ai := false
+	var warmup_seconds := 15.0
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--seconds="): seconds = float(argument.trim_prefix("--seconds="))
 		elif argument.begins_with("--save="): save_path = argument.trim_prefix("--save=")
 		elif argument.begins_with("--output="): output = argument.trim_prefix("--output=")
 		elif argument == "--disable-ai": disable_ai = true
+		elif argument.begins_with("--warmup="): warmup_seconds = float(argument.trim_prefix("--warmup="))
 	if save_path.is_empty():
 		push_error("Pass --save=user://saves/named/<slot>.json (the save is read only)")
+		quit(1)
+		return
+	if FileAccess.file_exists(output):
+		push_error("Refusing to overwrite an existing profile: " + output)
 		quit(1)
 		return
 	Engine.max_fps = 60
@@ -80,13 +86,28 @@ func run() -> void:
 			var entry := {"time_us": frame_started - started, "tick": game.game_controller.tick_index, "work_us": work, "stages": stages.slice(0,16)}
 			slow.append(entry)
 			print("STALL_PROBE long_frame ", JSON.stringify(entry))
-		timeline.append({"work_us": work, "frame_us": elapsed, "tick": game.game_controller.tick_index, "waiting": waiting})
+		var ai_main_us := 0
+		for metric in ["presentation.ai.prepare", "presentation.ai.snapshot", "presentation.ai.capture", "presentation.ai.seal"]:
+			ai_main_us += int(probe.frame_metrics.get(metric, 0))
+		probe.observe_microseconds("presentation.ai.main_frame", ai_main_us)
+		timeline.append({"ai_main_us": ai_main_us, "work_us": work, "frame_us": elapsed, "tick": game.game_controller.tick_index, "waiting": waiting, "simulation_debt_seconds": game.game_controller.accumulator_seconds, "ai_queue_depth": game.ai_decision_queue.records.size(), "time_us": frame_started - started, "memory_static_bytes": Performance.get_monitor(Performance.MEMORY_STATIC)})
 		await process_frame
 	if not stall.is_empty():
 		stall["duration_us"] = Time.get_ticks_usec() - started - int(stall["start_us"])
 		stalls.append(stall)
 	var result := {"save": save_path, "ai_disabled": disable_ai, "initial_tick": initial_tick, "final_tick": game.game_controller.tick_index, "seconds": seconds, "timeline": timeline, "slow": slow, "stalls": stalls, "probe": probe.report()}
 	result["work_us"] = Probe.summarize(timeline.map(func(row): return row["work_us"]))
+	var steady: Array = timeline.filter(func(row): return int(row["time_us"] ) >= int(warmup_seconds * 1000000))
+	result["warmup_seconds"] = warmup_seconds
+	result["steady_work_us"] = Probe.summarize(steady.map(func(row): return row["work_us"] ))
+	result["ticks_completed"] = game.game_controller.tick_index - initial_tick
+	result["steady_ai_main_frame_us"] = Probe.summarize(steady.map(func(row): return row["ai_main_us"]))
+	result["native_classes"] = {"path": ClassDB.class_exists("RoRPathKernel"), "read_model": ClassDB.class_exists("RoRReadModelKernel"), "frozen_capture": ClassDB.class_exists("RoRReadModelKernel") and ClassDB.instantiate("RoRReadModelKernel").has_method("capture_frozen")}
+	result["runtime"] = Engine.get_version_info()
+	result["rendering_method"] = ProjectSettings.get_setting("rendering/renderer/rendering_method", "unknown")
+	result["entity_journal_enabled"] = true
+	result["headless"] = DisplayServer.get_name() == "headless"
+	result["speed"] = game.game_controller.GAME_SPEEDS[game.game_controller.speed_index]
 	result["frame_us"] = Probe.summarize(timeline.map(func(row): return row["frame_us"]))
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(output.get_base_dir()))
 	var file := FileAccess.open(output, FileAccess.WRITE)

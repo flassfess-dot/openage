@@ -13,6 +13,8 @@
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 namespace godot {
 
@@ -35,13 +37,19 @@ public:
         const PackedInt32Array &priorities,
         const PackedFloat32Array &health,
         const PackedByteArray &solid_animals = PackedByteArray());
+    Dictionary configure_movement_entities(const Array &units, bool incremental = true);
+    Dictionary update_movement_entities(const Array &units);
+    Dictionary configure_movement_entity_rows(const Array &units, bool incremental, bool delta);
+    void release_movement_snapshot();
     void share_movement_snapshot(const Ref<RoRPathKernel> &source);
     Vector4 calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) const;
     int64_t get_revision() const;
+    int64_t get_walkability_version() const;
     int32_t get_last_expanded_nodes() const;
     bool get_last_path_was_direct() const;
     bool is_configured() const;
     int32_t component_id(const Vector2i &cell, double clearance_radius = 0.0);
+    Dictionary group_points_by_component(const TypedArray<Vector2> &points, double clearance_radius = 0.0);
     bool cells_connected(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
 
 protected:
@@ -57,6 +65,7 @@ private:
     int32_t width_ = 0;
     int32_t height_ = 0;
     int64_t revision_ = -1;
+    int64_t walkability_version_ = 0;
     int32_t last_expanded_nodes_ = 0;
     bool last_path_was_direct_ = false;
     uint32_t search_generation_ = 0;

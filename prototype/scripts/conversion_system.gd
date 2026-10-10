@@ -45,26 +45,26 @@ func assign_command(selected: Array, target_id: int) -> String:
 		world.healing_system.cancel(unit, "new_conversion")
 		world.release_resource_approach_slot(unit)
 		world.release_building_approach_slot(unit)
-		unit["resource_id"] = -1
-		unit["gather_stage"] = "none"
-		unit["target_building_id"] = int(target_id) if world.find_building(target_id) != null else -1
-		unit["target_id"] = target_id
-		unit["task"] = "convert"
-		unit["retaliation_target_id"] = -1
+		world.set_entity_field(unit, "resource_id", -1)
+		world.set_entity_field(unit, "gather_stage", "none")
+		world.set_entity_field(unit, "target_building_id", int(target_id) if world.find_building(target_id) != null else -1)
+		world.set_entity_field(unit, "target_id", target_id)
+		world.set_entity_field(unit, "task", "convert")
+		world.set_entity_field(unit, "retaliation_target_id", -1)
 		world.clear_combat_intent(unit)
 		var target_direction: Vector2 = Vector2(target["pos"]) - Vector2(unit["pos"])
 		if target_direction.length_squared() > 0.0001:
-			unit["action_facing"] = world.facing_for_vector(target_direction)
-		OrderPipeline.begin(unit, "convert", target_id, target["pos"], true)
+			world.set_entity_field(unit, "action_facing", world.facing_for_vector(target_direction))
+		world.begin_entity_order(unit, "convert", target_id, target["pos"], true)
 		rejection = begin(unit, target)
 		if not rejection.is_empty():
 			last_rejection = rejection
 			world.halt_unit(unit, rejection)
 			continue
 		if is_in_range(unit, target):
-			OrderPipeline.transition(unit, OrderPipeline.PLAN_PATH)
-			OrderPipeline.transition(unit, OrderPipeline.MOVE_INTO_RANGE)
-			OrderPipeline.transition(unit, OrderPipeline.FACE_TARGET)
+			world.transition_entity_order(unit, OrderPipeline.PLAN_PATH)
+			world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
+			world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
 			resolved_count += 1
 		else:
 			var destination: Variant = conversion_destination(unit, target)
@@ -89,9 +89,9 @@ func finish_conversion(converter: Dictionary, reason: String) -> void:
 	world.release_unit_destination(converter)
 	converter["target_id"] = -1
 	converter["target_building_id"] = -1
-	converter["task"] = "idle"
+	world.set_entity_field(converter, "task", "idle")
 	converter["diagnostic_reason"] = "conversion_complete:%s" % reason
-	OrderPipeline.complete(converter, reason)
+	world.complete_entity_order(converter, reason)
 	world.restore_formation_facing(converter)
 
 
@@ -202,9 +202,9 @@ func advance_unit_order(converter: Dictionary, delta: float, result: Dictionary)
 			result["moving"] = world.move_unit(converter, delta)
 	else:
 		world.release_unit_destination(converter)
-		OrderPipeline.transition(converter, OrderPipeline.FACE_TARGET)
+		world.transition_entity_order(converter, OrderPipeline.FACE_TARGET)
 		world.face_unit_toward(converter, Vector2(target.get("pos", converter.get("pos", Vector2.ZERO))))
-		OrderPipeline.transition(converter, OrderPipeline.PERFORM_ACTION)
+		world.transition_entity_order(converter, OrderPipeline.PERFORM_ACTION)
 		result["animation_state"] = AnimationController.CONVERT
 		var conversion_result := advance_conversion(converter, target, delta)
 		if conversion_result == "success":
@@ -337,6 +337,6 @@ func perform_martyrdom(converter: Dictionary) -> String:
 		"old_team": old_team,
 		"new_team": new_team,
 	})
-	converter["hp"] = 0.0
+	world.set_entity_field(converter, "hp", 0.0)
 	world.begin_death(converter)
 	return ""

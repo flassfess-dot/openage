@@ -12,10 +12,20 @@ const ReadContract := preload("res://scripts/entity_read_contract.gd")
 # earlier observations. Each observer retains its own fog-filtered entity set.
 
 var observer_caches: Dictionary = {}
+var active_world
+var active_team := -1
+var active_versions: Dictionary = {}
+var active_cache: Dictionary = {}
+const MAX_OBSERVERS := 8
+const MAX_PROJECTION_BYTES := 8 * 1024 * 1024
+const MAX_PROJECTIONS := 16384
 
 
 func clear() -> void:
 	observer_caches.clear()
+	active_world = null
+	active_versions.clear()
+	active_cache = {}
 
 
 func observe_with_queries(world, tick: int, observer_team: int, options: Dictionary = {}) -> Dictionary:
@@ -34,10 +44,18 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 	var observer_states: PackedByteArray = fog.states_by_player[observer_team]
 	var fog_map_size: Vector2i = fog.map_size
 	var cache: Dictionary = _cache_for(observer_team)
+	if int(cache.get("epoch", -1)) != int(world.entity_changes.epoch):
+		cache = {"units": {}, "buildings": {}, "objectives": {}, "versions": {}, "epoch": int(world.entity_changes.epoch)}
+		observer_caches[observer_team] = cache
+	active_cache = cache
+	active_world = world
+	active_team = observer_team
+	active_versions = cache.get("versions", {})
+	cache["versions"] = active_versions
 
 	var units: Array = []
 	var seen_unit_ids: Dictionary = {}
-	for unit_value in world.get_units():
+	for unit_value in world.entity_read_index.legal_entities(world, observer_team, "units"):
 		var unit: Dictionary = unit_value
 		if not _entity_visible(unit, observer_team, observer_states, fog_map_size):
 			continue
@@ -68,7 +86,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 
 	var objectives: Array = []
 	var seen_objective_ids: Dictionary = {}
-	for objective_value in world.victory_objectives:
+	for objective_value in world.entity_read_index.legal_entities(world, observer_team, "objectives"):
 		var objective: Dictionary = objective_value
 		if not bool(objective.get("active", true)) or not _entity_visible(objective, observer_team, observer_states, fog_map_size):
 			continue
@@ -84,7 +102,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 	var seen_building_ids: Dictionary = {}
 	var remembered_buildings: Dictionary = world.last_known_buildings_by_player.get(observer_team, {})
 	var blocked_population_queues := 0
-	for building_value in world.get_buildings():
+	for building_value in world.entity_read_index.legal_entities(world, observer_team, "buildings"):
 		var building: Dictionary = building_value
 		var building_id := int(building.get("id", -1))
 		var own_building := int(building.get("team", 0)) == observer_team
@@ -123,7 +141,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 	remembered_ids.sort()
 	for missing_id_value in remembered_ids:
 		var missing_id := int(missing_id_value)
-		if world.find_building(missing_id) != null:
+		if seen_building_ids.has(missing_id):
 			continue
 		var memory: Dictionary = remembered_buildings[missing_id]
 		var memory_position := Vector2(memory.get("pos", Vector2.ZERO))
@@ -196,6 +214,7 @@ func _supports_retained_projection(options: Dictionary) -> bool:
 func _cache_for(observer_team: int) -> Dictionary:
 	var cache: Dictionary = observer_caches.get(observer_team, {})
 	if cache.is_empty():
+		if observer_caches.size() >= MAX_OBSERVERS: observer_caches.erase(observer_caches.keys()[0])
 		cache = {"units": {}, "buildings": {}, "objectives": {}}
 		observer_caches[observer_team] = cache
 	return cache
@@ -203,21 +222,51 @@ func _cache_for(observer_team: int) -> Dictionary:
 
 func _project_entity(entity_cache: Dictionary, source: Dictionary, observer_team: int) -> Dictionary:
 	var entity_id := int(source.get("id", -1))
-	var immutable := ReadContract.ai(source, observer_team, entity_cache.get(entity_id, {}))
-	if entity_id >= 0:
-		entity_cache[entity_id] = immutable
+	var immutable: Dictionary
+	var memory := ReadContract.is_render_record(source)
+	var version: int = active_world.entity_changes.revision_for(entity_id, 255) if active_world != null and not memory else -1
+	var key := Vector2i(entity_id, 1 if memory else 0)
+	if not memory and entity_cache.has(entity_id) and active_versions.get(key, -2) == version:
+		immutable = entity_cache[entity_id]
+	else:
+		immutable = ReadContract.ai(source, observer_team, entity_cache.get(entity_id, {}))
+		active_versions[key] = version
+	if entity_id >= 0 and not active_cache.is_empty():
+		var category := "units"
+		for key_name in ["units", "buildings", "objectives"]:
+			if is_same(entity_cache, active_cache[key_name]):
+				category = key_name
+				break
+		var bookkeeping: Dictionary = active_cache.get("retained", {})
+		active_cache["retained"] = bookkeeping
+		var old: Dictionary = bookkeeping.get(entity_id, {})
+		if not is_same(entity_cache.get(entity_id), immutable):
+			var bytes := var_to_bytes(immutable).size() + 96
+			var total := int(active_cache.get("bytes", 0)) - int(old.get("bytes", 0))
+			bookkeeping.erase(entity_id)
+			entity_cache.erase(entity_id)
+			while not bookkeeping.is_empty() and (bookkeeping.size() >= MAX_PROJECTIONS or total + bytes > MAX_PROJECTION_BYTES):
+				var evicted: Variant = bookkeeping.keys()[0]
+				var record: Dictionary = bookkeeping[evicted]
+				active_cache[record["category"]].erase(evicted)
+				total -= int(record["bytes"])
+				bookkeeping.erase(evicted)
+				active_versions.erase(Vector2i(int(evicted), 0))
+				active_versions.erase(Vector2i(int(evicted), 1))
+			if bytes <= MAX_PROJECTION_BYTES:
+				entity_cache[entity_id] = immutable
+				bookkeeping[entity_id] = {"bytes": bytes, "category": category}
+				total += bytes
+			active_cache["bytes"] = total
+			if not entity_cache.has(entity_id):
+				active_versions.erase(Vector2i(entity_id, 0))
+				active_versions.erase(Vector2i(entity_id, 1))
 	# Decorations belong to this observation and cannot mutate retained rows.
 	return immutable.duplicate()
 
 
 func _remember_visible_building(memories: Dictionary, building_id: int, building: Dictionary) -> void:
-	var existing: Dictionary = memories.get(building_id, {})
-	var source := building
-	if not existing.is_empty() and AnimationController.clip_for_state(String(building.get("anim_state", AnimationController.IDLE))) != "attack":
-		source = building.duplicate()
-		if existing.has("anim"):
-			source["anim"] = existing["anim"]
-	memories[building_id] = ReadContract.render(source, existing)
+	memories[building_id] = active_world.compact_render_projection(building)
 
 
 func _add_population_point_costs(world, projected: Dictionary, observer_team: int) -> void:
@@ -239,6 +288,12 @@ func _prune_entity_cache(entity_cache: Dictionary, seen_ids: Dictionary) -> void
 	for entity_id_value in entity_cache.keys():
 		if not seen_ids.has(int(entity_id_value)):
 			entity_cache.erase(entity_id_value)
+			var retained: Dictionary = active_cache.get("retained", {})
+			if retained.has(entity_id_value):
+				active_cache["bytes"] = int(active_cache.get("bytes", 0)) - int(retained[entity_id_value]["bytes"])
+				retained.erase(entity_id_value)
+			active_versions.erase(Vector2i(int(entity_id_value), 0))
+			active_versions.erase(Vector2i(int(entity_id_value), 1))
 
 
 func _sync_array_field(target: Dictionary, source: Dictionary, field: String) -> void:
@@ -285,3 +340,24 @@ func _entity_visible(entity: Dictionary, observer_team: int, states: PackedByteA
 func _observe_stage(probe: Variant, metric: String, started: int) -> void:
 	if probe != null:
 		probe.observe_microseconds(metric, Time.get_ticks_usec() - started)
+
+func prepare_projection(world, team: int, pending: Dictionary, maximum: int = 96) -> bool:
+	var cache: Dictionary = _cache_for(team)
+	if int(cache.get("epoch", -1)) != int(world.entity_changes.epoch):
+		cache = {"units": {}, "buildings": {}, "objectives": {}, "versions": {}, "epoch": int(world.entity_changes.epoch)}
+		observer_caches[team] = cache
+	active_world = world
+	active_team = team
+	active_versions = cache.get("versions", {})
+	cache["versions"] = active_versions
+	if not pending.has("rows"):
+		pending["rows"] = []
+		pending["cursor"] = 0
+		for category in ["units", "buildings", "objectives"]:
+			for row in world.entity_read_index.legal_entities(world, team, category): pending["rows"].append({"source": row, "category": category})
+	var finish := mini(pending["rows"].size(), int(pending["cursor"]) + maxi(1, maximum))
+	for index in range(int(pending["cursor"]), finish):
+		var item: Dictionary = pending["rows"][index]
+		_project_entity(cache[item["category"]], item["source"], team)
+	pending["cursor"] = finish
+	return finish == pending["rows"].size()

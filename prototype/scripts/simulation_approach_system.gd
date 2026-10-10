@@ -57,10 +57,10 @@ func available_slots(worker: Dictionary, candidates: Array[Vector2], reservation
 
 func resume(worker: Dictionary, slot: Vector2) -> bool:
 	if Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(slot) <= 0.0144:
-		worker["destination"] = slot
-		worker["target"] = slot
-		worker["path"] = []
-		worker["path_index"] = 0
+		world.set_entity_field(worker, "destination", slot)
+		world.set_entity_field(worker, "target", slot)
+		world.set_entity_field(worker, "path", [])
+		world.set_entity_field(worker, "path_index", 0)
 		return true
 	if Vector2(worker.get("destination", worker.get("pos", Vector2.ZERO))).distance_squared_to(slot) <= 0.0001 and not worker.get("path", []).is_empty():
 		return true

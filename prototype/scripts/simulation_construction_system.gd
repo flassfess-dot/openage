@@ -47,15 +47,15 @@ func assign_workers_to_building(selected: Array, building: Dictionary, order_typ
 		if not world.entity_is_worker(worker) or (order_type == "build" and int(worker.get("team", 0)) != int(building.get("team", 0))) or (order_type == "repair" and not can_worker_repair(worker, building)):
 			continue
 		world.worker_role_system.apply(worker, world.worker_role_system.profile_for_task(worker, order_type), false)
-		worker["pending_hunt_target_id"] = -1
+		world.set_entity_field(worker, "pending_hunt_target_id", -1)
 		world.release_resource_approach_slot(worker)
 		release_building_approach_slot(worker)
 		world.release_unit_destination(worker)
-		worker["resource_id"] = -1
-		worker["gather_stage"] = "none"
-		worker["task"] = order_type
-		worker["target_building_id"] = int(building["id"])
-		OrderPipeline.begin(worker, order_type, int(building["id"]), building["pos"], true)
+		world.set_entity_field(worker, "resource_id", -1)
+		world.set_entity_field(worker, "gather_stage", "none")
+		world.set_entity_field(worker, "task", order_type)
+		world.set_entity_field(worker, "target_building_id", int(building["id"]))
+		world.begin_entity_order(worker, order_type, int(building["id"]), building["pos"], true)
 		if not _worker_in_building_range(worker, building) and not prepare_building_approach(worker, building):
 			finish_building_order(worker, "no_approach_slot")
 
@@ -99,16 +99,16 @@ func advance_unit_order(worker: Dictionary, delta: float, result: Dictionary) ->
 		return
 
 	var was_building := String(worker.get("task", "")) == "build"
-	OrderPipeline.transition(worker, OrderPipeline.FACE_TARGET)
+	world.transition_entity_order(worker, OrderPipeline.FACE_TARGET)
 	world.face_unit_toward(worker, building["pos"])
-	OrderPipeline.transition(worker, OrderPipeline.PERFORM_ACTION)
+	world.transition_entity_order(worker, OrderPipeline.PERFORM_ACTION)
 	var worker_rate := maxf(0.01, float(worker.get("components", {}).get("worker", {}).get("work_rate", 1.0)))
 	if worker["task"] == "build":
 		building["builders"][int(worker["id"])] = true
 		var progress_delta := delta * worker_rate / maxf(0.05, float(building.get("construction_required", 1.0)))
-		building["construction_progress"] = minf(1.0, float(building.get("construction_progress", 0.0)) + progress_delta)
-		building["construction_stage"] = clampi(floori(float(building["construction_progress"]) * 4.0), 0, 3)
-		building["hp"] = maxf(float(building["hp"]), float(building["max_hp"]) * maxf(0.1, float(building["construction_progress"])))
+		world.set_entity_field(building, "construction_progress", minf(1.0, float(building.get("construction_progress", 0.0)) + progress_delta))
+		world.set_entity_field(building, "construction_stage", clampi(floori(float(building["construction_progress"]) * 4.0), 0, 3))
+		world.set_entity_field(building, "hp", maxf(float(building["hp"]), float(building["max_hp"]) * maxf(0.1, float(building["construction_progress"]))))
 		EntityComponents.sync_dynamic(building)
 		if float(building["construction_progress"]) >= 1.0 - 0.000001:
 			world.complete_foundation(building)
@@ -116,9 +116,9 @@ func advance_unit_order(worker: Dictionary, delta: float, result: Dictionary) ->
 		var repair_rate := maxf(0.0, float(world.data_repository.runtime_metadata(String(building.get("kind", ""))).get("repair_hp_per_work", 10.0)))
 		advance_repair(worker, building, delta * worker_rate * repair_rate)
 		if float(building["hp"]) >= float(building["max_hp"]) - 0.0001:
-			building["hp"] = building["max_hp"]
+			world.set_entity_field(building, "hp", building["max_hp"])
 			finish_building_order(worker, "repair_complete")
-	OrderPipeline.transition(worker, OrderPipeline.RECOVER)
+	world.transition_entity_order(worker, OrderPipeline.RECOVER)
 	result["animation_state"] = AnimationController.BUILD if was_building else AnimationController.REPAIR
 
 
@@ -133,6 +133,7 @@ func _worker_in_building_range(worker: Dictionary, building: Dictionary) -> bool
 
 
 func advance_repair(worker: Dictionary, target: Dictionary, requested_hp: float) -> float:
+	world.notify_entity_changed(target)
 	if not can_worker_repair(worker, target):
 		return 0.0
 	var repair_policy: Dictionary = world.data_repository.runtime_metadata(String(target.get("kind", "")))
@@ -172,8 +173,8 @@ func advance_repair(worker: Dictionary, target: Dictionary, requested_hp: float)
 			world.economy_system.change_resource_amount(payer, resource_id, -whole)
 			spent[resource_id] = whole
 	fractions_by_payer[payer] = fractions
-	target["repair_cost_fractions"] = fractions_by_payer
-	target["hp"] = minf(max_hp, float(target.get("hp", 0.0)) + restored_hp)
+	world.set_entity_field(target, "repair_cost_fractions", fractions_by_payer)
+	world.set_entity_field(target, "hp", minf(max_hp, float(target.get("hp", 0.0)) + restored_hp))
 	EntityComponents.sync_dynamic(target)
 	world.emit_domain_event("entity_repaired", {"entity_id": int(target.get("id", -1)), "payer_team": payer, "restored_hp": restored_hp, "resource_spent": spent})
 	return restored_hp
@@ -191,7 +192,7 @@ func reserve_building_approach_slot(worker: Dictionary, building: Dictionary) ->
 			continue
 		reservations[int(worker["id"])] = candidate
 		world.building_approach_slots[building_id] = reservations
-		worker["building_approach_slot"] = candidate
+		world.set_entity_field(worker, "building_approach_slot", candidate)
 		return candidate
 	return null
 
@@ -206,7 +207,7 @@ func prepare_building_approach(worker: Dictionary, building: Dictionary) -> bool
 		return false
 	reservations[int(worker["id"])] = slot
 	world.building_approach_slots[building_id] = reservations
-	worker["building_approach_slot"] = slot
+	world.set_entity_field(worker, "building_approach_slot", slot)
 	return true
 
 
@@ -222,14 +223,14 @@ func release_building_approach_slot(worker: Dictionary) -> void:
 			world.building_approach_slots.erase(building_id)
 		else:
 			world.building_approach_slots[building_id] = reservations
-	worker["building_approach_slot"] = null
+	world.set_entity_field(worker, "building_approach_slot", null)
 
 
 func finish_building_order(worker: Dictionary, reason: String) -> void:
 	release_building_approach_slot(worker)
 	world.release_unit_destination(worker)
-	worker["target_building_id"] = -1
-	worker["task"] = "idle"
+	world.set_entity_field(worker, "target_building_id", -1)
+	world.set_entity_field(worker, "task", "idle")
 	world.worker_role_system.clear(worker)
-	OrderPipeline.complete(worker, reason)
+	world.complete_entity_order(worker, reason)
 	EntityComponents.sync_dynamic(worker)
