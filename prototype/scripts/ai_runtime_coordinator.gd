@@ -37,7 +37,7 @@ func shutdown() -> void:
 	error = ""
 
 func capture_ai(ai, target_tick: int) -> Dictionary:
-	return preparation.capture(world, store, ai, controller.tick_index, target_tick, controller.performance_probe)
+	return preparation.capture(world, store, ai, controller.tick_index, target_tick, controller.performance_probe, mini(Preparation.CAPTURE_BUDGET_USEC, decisions.preparation_usec_left))
 
 func next_decision_tick(ai, next_tick: int) -> int:
 	if not ai.enabled or world.player_registry.status(int(ai.team)) != "active":

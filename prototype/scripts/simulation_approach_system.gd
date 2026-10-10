@@ -67,10 +67,16 @@ func resume(worker: Dictionary, slot: Vector2) -> bool:
 	var simulation_world = world
 	# The grid may resolve an inaccessible subcell goal to a neighbouring cell.
 	# Such a route cannot service this exact work slot and must not be reserved.
-	var route: Array[Vector2] = simulation_world.pathfinder.find_path(Vector2(worker["pos"]), slot, String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1)), float(worker.get("footprint_radius", 0.3)))
+	var domain := String(worker.get("movement_domain", "land"))
+	var restriction := int(worker.get("terrain_restriction", -1))
+	var radius := float(worker.get("footprint_radius", 0.3))
+	var planner = simulation_world.movement_system.knowledge.planner(simulation_world, int(worker.get("team", 0)))
+	var route: Array[Vector2] = planner.find_path(Vector2(worker["pos"]), slot, domain, restriction, radius)
 	if route.is_empty() or route.back().distance_squared_to(slot) > 0.0144:
 		return false
-	if not simulation_world.movement_system.assign_unit_destination(worker, slot, false):
+	var purpose := "replan" if not worker.get("path", []).is_empty() else String(worker.get("task", "move"))
+	var prepared: Dictionary = simulation_world.navigation_service.register_resolved_path(int(worker["id"]), worker["pos"], slot, route, domain, restriction, purpose, radius)
+	if not simulation_world.movement_system.assign_unit_destination(worker, slot, false, false, prepared):
 		return false
 	return not worker["path"].is_empty() and Vector2(worker["path"].back()).distance_squared_to(slot) <= 0.0144
 

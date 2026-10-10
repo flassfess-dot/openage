@@ -354,7 +354,11 @@ func prepare_projection(world, team: int, pending: Dictionary, maximum: int = 96
 		pending["rows"] = []
 		pending["cursor"] = 0
 		for category in ["units", "buildings", "objectives"]:
-			for row in world.entity_read_index.legal_entities(world, team, category): pending["rows"].append({"source": row, "category": category})
+			for row in world.entity_read_index.legal_entities(world, team, category):
+				var entity_id := int(row.get("id", -1))
+				if not ReadContract.is_render_record(row) and cache[category].has(entity_id) and active_versions.get(Vector2i(entity_id, 0), -2) == world.entity_changes.revision_for(entity_id, 255):
+					continue
+				pending["rows"].append({"source": row, "category": category})
 	var finish := mini(pending["rows"].size(), int(pending["cursor"]) + maxi(1, maximum))
 	for index in range(int(pending["cursor"]), finish):
 		var item: Dictionary = pending["rows"][index]

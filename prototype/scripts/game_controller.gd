@@ -18,7 +18,9 @@ const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 # doc/reverse_engineering/networking/13-other.md.
 const FIXED_STEP_SECONDS: float = 0.05
 const GAME_SPEEDS := [1.0, 1.5, 2.0]
-const MAX_STEPS_PER_FRAME: int = 12
+const MAX_STEPS_PER_FRAME: int = 4
+const FRAME_SIMULATION_BUDGET_USEC: int = 8000
+const MAX_ACCUMULATED_SECONDS: float = FIXED_STEP_SECONDS * MAX_STEPS_PER_FRAME
 const FORMATION_RECONCILE_INTERVAL_TICKS: int = 2
 const QUEUEABLE_ORDERS := ["move", "formation_move", "attack_move", "gather", "return_resources", "build", "repair", "attack", "unload"]
 const REPLACING_ORDERS := ["move", "formation_move", "attack_move", "attack", "attack_ground", "convert", "heal", "gather", "return_resources", "board", "unload", "trade", "build", "repair", "stop", "hold"]
@@ -1316,9 +1318,15 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	# the debt that reached its barrier, but do not turn wall-clock waiting
 	# into ever more catch-up work after the worker completes.
 	if not preparation_waiting:
-		accumulator_seconds += minf(frame_delta, 0.25) * get_speed_multiplier()
+		# Under sustained overload, slow wall-clock progress instead of growing
+		# an unbounded catch-up debt. Commands and simulation ticks stay ordered.
+		accumulator_seconds = minf(MAX_ACCUMULATED_SECONDS, accumulator_seconds + maxf(0.0, minf(frame_delta, 0.25)) * get_speed_multiplier())
+	var frame_started := Time.get_ticks_usec()
 	var steps := 0
 	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
+		# Complete at least one whole tick, then return time to input/rendering.
+		if steps > 0 and Time.get_ticks_usec() - frame_started >= FRAME_SIMULATION_BUDGET_USEC:
+			break
 		if not _run_fixed_tick(player_team, enemy_team):
 			preparation_waiting = true
 			break

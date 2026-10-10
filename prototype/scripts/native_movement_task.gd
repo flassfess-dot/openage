@@ -1,8 +1,8 @@
 class_name RoRNativeMovementTask
 extends RefCounted
 
-# The owner configures the numeric native snapshot before dispatch and joins
-# every job before any subsequent configure/update. Native scratch is thread-local.
+# A private context retains immutable terrain and neighbor generations.
+# Results can be polled or discarded while the owner continues its unit loop.
 var kernel
 
 func run(input: Dictionary) -> Dictionary:

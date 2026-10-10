@@ -467,8 +467,25 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 
 func ensure_navigation_destination(unit: Dictionary, destination: Vector2) -> void:
 	var previous_destination: Vector2 = unit.get("destination", unit["pos"])
-	if previous_destination.distance_squared_to(destination) > 0.25 or unit.get("path", []).is_empty():
-		assign_unit_destination(unit, destination, false)
+	if previous_destination.distance_squared_to(destination) <= 0.25 and not unit.get("path", []).is_empty():
+		return
+	var path: Array = unit.get("path", [])
+	var path_index := int(unit.get("path_index", 0))
+	if not path.is_empty() and path_index >= 0 and path_index < path.size() and int(unit.get("formation_group_id", -1)) < 0 and not bool(unit.get("formation_shared_motion", false)) and Vector2i(previous_destination.floor()) == Vector2i(destination.floor()) and Vector2i(Vector2(path.back()).floor()) == Vector2i(destination.floor()):
+		var planner = knowledge.planner(world, int(unit.get("team", 0)))
+		if int(unit.get("path_knowledge_revision", -1)) == int(planner.grid.revision) and planner.grid.is_position_walkable_for(destination, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+			# Movement within the same endpoint cell changes no route edges.
+			# Replace only the final subcell goal using the route's original mask.
+			var updated: Array = path.duplicate()
+			updated[updated.size() - 1] = destination
+			world.set_entity_field(unit, "path", updated)
+			world.set_entity_field(unit, "destination", destination)
+			if path_index == updated.size() - 1:
+				world.set_entity_field(unit, "target", destination)
+			world.open_movement_envelopes_by_id.erase(int(unit["id"]))
+			unit.erase("_formation_path_cache")
+			return
+	assign_unit_destination(unit, destination, false)
 
 
 func stop_unit_motion(unit: Dictionary, reset_progress: bool = true) -> void:

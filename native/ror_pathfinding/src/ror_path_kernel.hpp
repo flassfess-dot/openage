@@ -23,6 +23,7 @@ class RoRPathKernel : public RefCounted {
 
 public:
     Ref<RoRPathKernel> create_search_context() const;
+    Ref<RoRPathKernel> create_movement_context() const;
     PackedInt32Array connectivity_labels(double radius = 0.0);
     bool install_connectivity(const PackedInt32Array &labels, double radius = 0.0);
     void configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable);
@@ -76,6 +77,8 @@ private:
     std::vector<FrontierEntry> frontier_;
     std::unordered_map<uint64_t, std::shared_ptr<const std::vector<int32_t>>> components_by_radius_;
     const std::vector<int32_t> &components(double clearance_radius);
+    bool patch_components(double radius, const std::vector<int32_t> &changed,
+        std::shared_ptr<const std::vector<int32_t>> &labels) const;
     // All terrain-specific kernels borrow the same immutable neighbor generation.
     struct MovementSnapshot {
         std::vector<int32_t> ids;

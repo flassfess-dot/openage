@@ -6,6 +6,7 @@ const Data := preload("res://scripts/isolated_task_data.gd")
 const MAX_CAPTURES := 8
 const ACTORS_PER_PORTION := 96
 const PRODUCERS_PER_PORTION := 12
+const CAPTURE_BUDGET_USEC := 4000
 var captures: Dictionary = {}
 
 func clear() -> void:
@@ -14,7 +15,7 @@ func clear() -> void:
 		if world != null: world.release_read_generation(pending["token"])
 	captures.clear()
 
-func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant = null) -> Dictionary:
+func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant = null, budget_usec: int = CAPTURE_BUDGET_USEC) -> Dictionary:
 	var team := int(ai.team)
 	var pending: Dictionary = captures.get(team, {})
 	if pending.is_empty():
@@ -26,9 +27,9 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 	if int(pending["source_tick"]) != source_tick or int(pending["apply_tick"]) != apply_tick or pending["world"].get_ref() != world or int(pending["token"]["epoch"]) != int(world.entity_changes.epoch):
 		clear()
 		return {}
-	var frame_started := Time.get_ticks_usec() if probe != null else 0
-	# Stage boundaries are not frame barriers. In a small observation all
-	# bounded stages finish in one call; large stages retain their quotas.
+	var frame_started := Time.get_ticks_usec()
+	# Quotas bound individual operations; elapsed time bounds the whole call.
+	# Cheap portions continue on the same pinned generation in this frame.
 	while true:
 		var started := Time.get_ticks_usec() if probe != null else 0
 		var options: Dictionary = pending["options"]
@@ -97,9 +98,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 			pending[metric] = int(pending[metric]) + elapsed
 			probe.observe_microseconds("presentation.ai.portion", elapsed)
 			probe.increment("ai.capture.portions")
-		# Yield only when this phase has unfinished work after its fixed quota.
-		# Completed phases continue immediately on the same pinned generation.
-		if String(pending["phase"]) == phase:
+		if Time.get_ticks_usec() - frame_started >= maxi(1, budget_usec):
 			if probe != null:
 				probe.observe_microseconds("presentation.ai.capture_frame", Time.get_ticks_usec() - frame_started)
 			return {"pending": true}

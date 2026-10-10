@@ -4,6 +4,12 @@ extends RefCounted
 const Coordinates := preload("res://scripts/coordinates.gd")
 const EntityComponents := preload("res://scripts/entity_components.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
+const MAX_DROPOFF_ROSTERS := 64
+
+var dropoff_rosters: Dictionary = {}
+var dropoff_building_ids: Dictionary = {}
+var dropoff_roster_epoch := -1
+var dropoff_roster_revision := -1
 
 const GATHER_UPDATE_IDLE := 0
 const GATHER_UPDATE_MOVE := 1
@@ -305,7 +311,7 @@ func prepare_group_gather_approach(worker: Dictionary, requested_resource: Dicti
 		return _continue_fishing(worker, requested_resource)
 	var neighbors: Array = []
 	var requested_position := Vector2(requested_resource["pos"])
-	for candidate_value in world.get_resources():
+	for candidate_value in _resources_near(requested_position, 6.0):
 		var candidate: Dictionary = candidate_value
 		if int(candidate.get("id", -1)) == int(requested_resource["id"]) or String(candidate.get("kind", "")) != String(requested_resource.get("kind", "")):
 			continue
@@ -435,6 +441,50 @@ func begin_resource_return(worker: Dictionary) -> bool:
 	return world.assign_unit_destination(worker, worker["dropoff_position"], false)
 
 
+func _resources_near(origin: Vector2, radius: float) -> Array:
+	var resources: Array = []
+	var simulation_world = world
+	for y in range(maxi(0, floori(origin.y - radius)), mini(simulation_world.map_size.y, floori(origin.y + radius) + 1)):
+		for x in range(maxi(0, floori(origin.x - radius)), mini(simulation_world.map_size.x, floori(origin.x + radius) + 1)):
+			for resource in simulation_world.resource_nodes_by_cell.get(y * simulation_world.map_size.x + x, []):
+				if origin.distance_squared_to(Vector2(resource["pos"])) <= radius * radius:
+					resources.append(resource)
+	# Retain the old global roster order before the existing distance ranking.
+	resources.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
+	return resources
+
+
+func _dropoff_candidates(team: int, resource_type: int, allowed: Dictionary) -> Array:
+	var simulation_world = world
+	var journal = simulation_world.entity_changes
+	var delta: Dictionary = journal.changes_since(dropoff_roster_revision if dropoff_roster_epoch == journal.epoch else -1)
+	var changed: bool = bool(delta["full"])
+	if not changed:
+		for id in delta["ids"]:
+			if simulation_world.buildings_by_id.has(id) or dropoff_building_ids.has(id):
+				changed = true
+				break
+	if changed:
+		dropoff_rosters.clear()
+		dropoff_building_ids.clear()
+		for building in simulation_world.get_buildings():
+			dropoff_building_ids[int(building["id"])] = true
+	dropoff_roster_epoch = journal.epoch
+	dropoff_roster_revision = int(delta["revision"])
+	var source_ids: Array = allowed.keys()
+	source_ids.sort()
+	var key := str([team, resource_type, source_ids])
+	if not dropoff_rosters.has(key):
+		var candidates: Array = []
+		for building in simulation_world.get_buildings():
+			if int(building.get("team", 0)) == team and dropoff_accepts_resource(building, resource_type, allowed):
+				candidates.append(building)
+		if dropoff_rosters.size() >= MAX_DROPOFF_ROSTERS:
+			dropoff_rosters.erase(dropoff_rosters.keys()[0])
+		dropoff_rosters[key] = candidates
+	return dropoff_rosters[key]
+
+
 func nearest_dropoff(worker: Dictionary) -> Variant:
 	var drop_site_ids: Array = worker.get("components", {}).get("worker", {}).get("drop_site_ids", [])
 	var carried_resource_type := int(worker.get("carried_resource_type_id", -1))
@@ -445,12 +495,8 @@ func nearest_dropoff(worker: Dictionary) -> Variant:
 	var nearest: Variant = null
 	var nearest_distance := INF
 	var nearest_id := 2147483647
-	for building_value in world.get_buildings():
+	for building_value in _dropoff_candidates(int(worker.get("team", 0)), carried_resource_type, allowed):
 		var building: Dictionary = building_value
-		if int(building.get("team", 0)) != int(worker.get("team", 0)) or float(building.get("hp", 0.0)) <= 0.0:
-			continue
-		if not dropoff_accepts_resource(building, carried_resource_type, allowed):
-			continue
 		var distance: float = worker["pos"].distance_squared_to(building["pos"])
 		var building_id := int(building["id"])
 		if (distance < nearest_distance and not is_equal_approx(distance, nearest_distance)) or (is_equal_approx(distance, nearest_distance) and building_id < nearest_id):
@@ -518,6 +564,7 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Vari
 	var best: Variant = null
 	var best_length := INF
 	var origin := Vector2(worker["pos"])
+	var planner = world.movement_system.knowledge.planner(world, int(worker.get("team", 0)))
 	for candidate in candidates:
 		# Euclidean distance bounds every route, so a direct nearest slot ends the search.
 		if origin.distance_to(candidate) >= best_length:
@@ -526,7 +573,7 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Vari
 			best = candidate
 			best_length = 0.0
 			break
-		var route: Array[Vector2] = world.pathfinder.find_path(origin, candidate, String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1)), float(worker.get("footprint_radius", 0.3)))
+		var route: Array[Vector2] = planner.find_path(origin, candidate, String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1)), float(worker.get("footprint_radius", 0.3)))
 		if route.is_empty() and origin.distance_squared_to(candidate) > 0.0144:
 			continue
 		if not route.is_empty() and route.back().distance_squared_to(candidate) > 0.0144:

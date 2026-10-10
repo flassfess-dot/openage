@@ -9,12 +9,14 @@ const PlanningTask := preload("res://scripts/ai_planning_task.gd")
 const LOOKAHEAD_TICKS := 8
 const STATE_VERSION := 2
 const MAX_INPUT_BYTES := 64 * 1024 * 1024
+const PREPARATION_BUDGET_USEC := 4000
 
 var records: Array = []
 var source_tick := -1
 var apply_tick := -1
 var prepare: Callable
 var last_prepared_frame := -1
+var preparation_usec_left := 0
 var error := ""
 var active := false
 
@@ -54,13 +56,17 @@ func poll(coordinator, current_source_tick: int, frame_id: int, probe: Variant =
 	if not error.is_empty():
 		return {"ready": false, "error": error}
 	if last_prepared_frame != frame_id:
+		last_prepared_frame = frame_id
+		preparation_usec_left = PREPARATION_BUDGET_USEC
+	if preparation_usec_left > 0:
 		for record in records:
 			if bool(record["submitted"]):
 				continue
-			last_prepared_frame = frame_id
+			var preparation_started := Time.get_ticks_usec()
 			if record["input"].is_empty():
 				var captured: Dictionary = prepare.call(record["ai"], apply_tick)
 				if bool(captured.get("pending", false)):
+					preparation_usec_left = 0
 					return {"ready": false, "planned": true}
 				var seal_started := Time.get_ticks_usec() if probe != null else 0
 				record["input"] = Data.seal(captured) if not captured.is_empty() else {}
@@ -80,8 +86,10 @@ func poll(coordinator, current_source_tick: int, frame_id: int, probe: Variant =
 				if request_id >= 0:
 					record["request_id"] = request_id
 					record["submitted"] = true
+			preparation_usec_left -= Time.get_ticks_usec() - preparation_started
 			# Capacity exhaustion keeps the input queued without inline work.
-			break
+			if not bool(record["submitted"]) or preparation_usec_left <= 0:
+				break
 	if not error.is_empty():
 		return {"ready": false, "error": error}
 	return {"ready": records.all(func(record): return not record["output"].is_empty()), "planned": not records.is_empty()}

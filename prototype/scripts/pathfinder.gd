@@ -1,6 +1,10 @@
 class_name RoRPathfinder
 const NativeMovementTask := preload("res://scripts/native_movement_task.gd")
 var native_batch_results: Dictionary = {}
+var native_movement_jobs: Array = []
+var native_movement_job_by_unit: Dictionary = {}
+var native_movement_coordinator: Variant = null
+const MAX_MOVEMENT_JOBS := 4
 const PathBatchTask := preload("res://scripts/path_batch_task.gd")
 const PerformanceProbe := preload("res://scripts/performance_probe.gd")
 const NavigationTaskData := preload("res://scripts/navigation_task_data.gd")
@@ -27,6 +31,8 @@ var cell_cache: Dictionary = {}
 var smoothed_cell_cache: Dictionary = {}
 var geometry_metadata: Dictionary = {"world": {}, "cells": {}, "smooth": {}}
 var fallback_components: Dictionary = {}
+var resolved_endpoints: Dictionary = {}
+var endpoint_cache_revision := -1
 var cache_hits: int = 0
 var route_cache_revision: int = -1
 var performance_probe: Variant = null
@@ -66,6 +72,7 @@ func path_query_tick_microseconds() -> int:
 
 
 func clear_cache() -> void:
+	finish_native_movement_batch()
 	movement_owner = null
 	movement_cursor = -1
 	movement_epoch = -1
@@ -86,6 +93,8 @@ func clear_route_cache() -> void:
 	# but the revisioned walkability mask remains valid. Topology changes call
 	# clear_cache(), which additionally invalidates native kernels.
 	cache.clear()
+	resolved_endpoints.clear()
+	endpoint_cache_revision = -1
 	cell_cache.clear()
 	smoothed_cell_cache.clear()
 	geometry_metadata = {"world": {}, "cells": {}, "smooth": {}}
@@ -340,16 +349,18 @@ func has_native_movement_for(unit_id: int) -> bool:
 
 
 func prepare_native_movement_batch(units: Array, delta: float, coordinator, excluded_ids: Dictionary = {}) -> void:
+	finish_native_movement_batch()
 	native_batch_results.clear()
 	if not coordinator.is_enabled("movement") or units.size() < 64:
 		return
 	var groups: Dictionary = {}
 	for unit in units:
 		var unit_id := int(unit["id"])
-		if String(unit.get("task", "")) != "move" or float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("formation_shared_motion", false)) or int(unit.get("formation_group_id", -1)) >= 0 or excluded_ids.has(unit_id) or Vector2(unit["target"]).distance_squared_to(Vector2(unit["pos"])) < 0.001225:
+		if unit.get("path", []).is_empty() or float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("formation_shared_motion", false)) or int(unit.get("formation_group_id", -1)) >= 0 or excluded_ids.has(unit_id) or Vector2(unit["target"]).distance_squared_to(Vector2(unit["pos"])) < 0.001225:
 			continue
 		var kernel = native_shared_movement_kernel if native_shared_movement_kernel != null else native_movement_kernels_by_unit_id.get(unit_id)
-		if kernel == null:
+		# Older extensions keep the safe owner-thread calculation.
+		if kernel == null or not kernel.has_method("create_movement_context"):
 			continue
 		var key: int = kernel.get_instance_id()
 		if not groups.has(key):
@@ -360,30 +371,56 @@ func prepare_native_movement_batch(units: Array, delta: float, coordinator, excl
 		candidate_count += group["requests"].size()
 	if candidate_count < 64:
 		return
-	var jobs: Array = []
-	var inputs: Array = []
-	var requests: Array[int] = []
+	native_movement_coordinator = coordinator
 	for group in groups.values():
+		var context = group["kernel"].create_movement_context()
 		var chunk_size := maxi(32, ceili(float(group["requests"].size()) / 4.0))
-		for first in range(0, group["requests"].size(), chunk_size):
+		# The original ordered loop calculates the first chunk on the owner
+		# while workers prepare later units. This gives jobs useful headroom.
+		for first in range(chunk_size, group["requests"].size(), chunk_size):
+			if native_movement_jobs.size() >= MAX_MOVEMENT_JOBS:
+				return
 			var job := NativeMovementTask.new()
-			job.kernel = group["kernel"]
+			job.kernel = context
 			var input := {"requests": group["requests"].slice(first, mini(first + chunk_size, group["requests"].size()))}
-			jobs.append(job)
-			inputs.append(input)
-			requests.append(coordinator.submit("movement", input, job.run, -1, -1, {}, true))
-	# One barrier before the original ordered unit loop. Query signatures are
-	# checked again at the actual movement call; changed orders/targets fall back.
-	for index in range(requests.size()):
-		var collected: Dictionary = coordinator.collect(requests[index], true) if requests[index] >= 0 else {}
-		if collected.is_empty():
-			continue
-		var output: Array = collected["data"]["results"]
-		for request_index in range(inputs[index]["requests"].size()):
-			var request: Dictionary = inputs[index]["requests"][request_index]
-			native_batch_results[request["id"]] = {"request": request, "result": output[request_index]}
+			var request_id: int = coordinator.submit("movement", input, job.run, -1, -1, {}, true)
+			if request_id < 0:
+				continue
+			var record := {"request_id": request_id, "requests": input["requests"], "collected": false}
+			native_movement_jobs.append(record)
+			for request in input["requests"]:
+				native_movement_job_by_unit[int(request["id"])] = record
+
+
+func _poll_native_movement(unit_id: int) -> void:
+	var job: Dictionary = native_movement_job_by_unit.get(unit_id, {})
+	if job.is_empty() or bool(job["collected"]) or native_movement_coordinator == null:
+		return
+	var collected: Dictionary = native_movement_coordinator.collect(int(job["request_id"]), false)
+	if collected.is_empty():
+		return
+	job["collected"] = true
+	var output: Array = collected["data"].get("results", [])
+	if output.size() != job["requests"].size():
+		return
+	for index in range(output.size()):
+		var request: Dictionary = job["requests"][index]
+		native_batch_results[int(request["id"])] = {"request": request, "result": output[index]}
+
+
+func finish_native_movement_batch() -> void:
+	if native_movement_coordinator != null:
+		for job in native_movement_jobs:
+			if not bool(job["collected"]):
+				native_movement_coordinator.discard(int(job["request_id"]))
+	native_movement_jobs.clear()
+	native_movement_job_by_unit.clear()
+	native_batch_results.clear()
+	native_movement_coordinator = null
+
 
 func calculate_native_movement(unit: Dictionary, target: Vector2, delta: float) -> Vector4:
+	_poll_native_movement(int(unit["id"]))
 	var batch: Dictionary = native_batch_results.get(int(unit["id"]), {})
 	if not batch.is_empty():
 		var request: Dictionary = batch["request"]
@@ -419,7 +456,7 @@ func find_paths_batch(requests: Array, coordinator) -> Array:
 		configurations["%s:%d" % [request["domain"], request["restriction"]]] = true
 	var arrays_per_worker := maxi(1, configurations.size())
 	var width := mini(4, mini(maxi(1, OS.get_processor_count() - 2), maxi(1, int(67108864 / maxi(1, cells * 16 * arrays_per_worker)))))
-	if cells * 16 * arrays_per_worker > 67108864:
+	if width <= 1 or cells * 16 * arrays_per_worker > 67108864:
 		var sequential: Array = []
 		for request in requests:
 			sequential.append(find_path(request["start"], request["goal"], String(request["domain"]), int(request["restriction"]), float(request["clearance"])))
@@ -449,10 +486,13 @@ func find_paths_batch(requests: Array, coordinator) -> Array:
 		job.planner = private_planner
 		jobs.append(job)
 		chunks.append(input)
-		ids.append(coordinator.submit("navigation_paths", input, job.run, -1, -1, {"topology": grid.revision}, true))
+		# Reserve the last chunk for the owner instead of idling at the barrier.
+		ids.append(coordinator.submit("navigation_paths", input, job.run, -1, -1, {"topology": grid.revision}, true) if first + chunk_size < requests.size() else -1)
+	var owner_index := jobs.size() - 1
+	var owner_output: Dictionary = jobs[owner_index].run(chunks[owner_index])
 	var result: Array = []
 	for index in range(ids.size()):
-		var collected: Dictionary = coordinator.collect(ids[index], true, {"topology": grid.revision}) if ids[index] >= 0 else {}
+		var collected: Dictionary = {"data": owner_output} if index == owner_index else (coordinator.collect(ids[index], true, {"topology": grid.revision}) if ids[index] >= 0 else {})
 		var output: Dictionary = collected.get("data", {})
 		if output.is_empty():
 			var fallback: Array = []
@@ -656,6 +696,22 @@ func component_id(cell: Vector2i, domain: String = "land", restriction: int = -1
 					queue.append(next)
 		fallback_components[key] = labels
 	return int(fallback_components[key][cell.y * grid.size.x + cell.x])
+
+
+func can_reach(start_world: Vector2, goal_world: Vector2, domain: String = "land", restriction: int = -1, radius: float = 0.0) -> bool:
+	if grid == null:
+		return false
+	_sync_route_revision()
+	var start := Vector2i(floori(start_world.x), floori(start_world.y))
+	if not grid.contains(start):
+		return false
+	var goal := nearest_walkable(Vector2i(floori(goal_world.x), floori(goal_world.y)), domain, restriction, radius)
+	if goal.x < 0:
+		return false
+	if uses_native_kernel() or fallback_components.has("%s:%d:%.8f" % [domain, restriction, radius]):
+		return cells_connected(start, goal, domain, restriction, radius)
+	# Avoid a cold full-map GDScript flood for one local reference query.
+	return not find_path(start_world, goal_world, domain, restriction, radius).is_empty()
 
 
 func cells_connected(start: Vector2i, goal: Vector2i, domain: String = "land", restriction: int = -1, radius: float = 0.0) -> bool:
@@ -926,6 +982,12 @@ func direct_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String =
 func nearest_walkable(requested: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Vector2i:
 	if grid.contains(requested) and _cell_walkable(requested, movement_domain, restriction_id, clearance_radius):
 		return requested
+	if endpoint_cache_revision != int(grid.revision):
+		resolved_endpoints.clear()
+		endpoint_cache_revision = int(grid.revision)
+	var key := "%d,%d:%s:%d:%.8f" % [requested.x, requested.y, movement_domain, restriction_id, clearance_radius]
+	if resolved_endpoints.has(key):
+		return resolved_endpoints[key]
 	var maximum_radius := maxi(grid.size.x, grid.size.y)
 	for radius in range(1, maximum_radius + 1):
 		var candidates: Array[Vector2i] = []
@@ -940,8 +1002,16 @@ func nearest_walkable(requested: Vector2i, movement_domain: String = "land", res
 				var left_distance: int = left.distance_squared_to(requested)
 				var right_distance: int = right.distance_squared_to(requested)
 				return left_distance < right_distance or (left_distance == right_distance and (left.y < right.y or (left.y == right.y and left.x < right.x))))
+			_remember_endpoint(key, candidates[0])
 			return candidates[0]
+	_remember_endpoint(key, Vector2i(-1, -1))
 	return Vector2i(-1, -1)
+
+
+func _remember_endpoint(key: String, cell: Vector2i) -> void:
+	if resolved_endpoints.size() >= MAX_ROUTE_CACHE_ENTRIES:
+		resolved_endpoints.erase(resolved_endpoints.keys()[0])
+	resolved_endpoints[key] = cell
 
 
 func _can_step(current: Vector2i, next: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> bool:

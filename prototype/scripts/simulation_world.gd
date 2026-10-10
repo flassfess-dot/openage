@@ -1476,6 +1476,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		# boundaries. Authoritative systems above operate on the unit runtime
 		# fields, so rewriting the same nested Dictionaries for every entity on
 		# every tick only duplicates state and dominates large moving groups.
+	pathfinder.finish_native_movement_batch()
 	if probe != null:
 		presentation_microseconds = animation_microseconds + component_sync_microseconds
 		probe.observe_microseconds("simulation.unit_orders.preparation", preparation_microseconds)
@@ -3894,8 +3895,7 @@ func can_unit_reach_entity(unit: Dictionary, target: Dictionary) -> bool:
 		return false
 	var start := Vector2(unit.get("pos", Vector2.ZERO))
 	var goal := Vector2(target.get("pos", Vector2.ZERO))
-	var route: Array[Vector2] = pathfinder.find_path(start, goal, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), float(unit.get("footprint_radius", 0.3)))
-	return not route.is_empty()
+	return pathfinder.can_reach(start, goal, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), float(unit.get("footprint_radius", 0.3)))
 
 
 func is_unit_in_attack_range(unit: Dictionary, target: Dictionary) -> bool:

@@ -23,6 +23,7 @@ constexpr int32_t DIRECTIONS[8][2] = {
 
 void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("create_search_context"), &RoRPathKernel::create_search_context);
+    ClassDB::bind_method(D_METHOD("create_movement_context"), &RoRPathKernel::create_movement_context);
     ClassDB::bind_method(D_METHOD("connectivity_labels", "radius"), &RoRPathKernel::connectivity_labels, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("install_connectivity", "labels", "radius"), &RoRPathKernel::install_connectivity, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("configure", "width", "height", "revision", "walkable"), &RoRPathKernel::configure);
@@ -58,6 +59,19 @@ Ref<RoRPathKernel> RoRPathKernel::create_search_context() const {
     context->seen_generation_.assign(walkable_->size(), 0);
     context->components_by_radius_ = components_by_radius_;
     // Completed connectivity labels are immutable and shared by contexts.
+    return context;
+}
+
+Ref<RoRPathKernel> RoRPathKernel::create_movement_context() const {
+    Ref<RoRPathKernel> context;
+    context.instantiate();
+    context->width_ = width_;
+    context->height_ = height_;
+    context->revision_ = revision_;
+    context->walkability_version_ = walkability_version_;
+    context->walkable_ = walkable_;
+    context->movement_ = movement_;
+    // Movement has thread-local scratch and needs no map-sized A* arrays.
     return context;
 }
 
@@ -253,8 +267,8 @@ void RoRPathKernel::share_movement_snapshot(const Ref<RoRPathKernel> &source) {
 }
 
 Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) const {
-    // One scratch vector per executing thread. Snapshot/mask configuration
-    // is prohibited until the owner has joined the entire movement batch.
+    // One scratch vector per executing thread. Private movement contexts
+    // retain immutable generations while the owner updates its own snapshot.
     thread_local std::vector<int32_t> movement_candidates_;
     const auto own_entry = movement_->index_by_id.find(unit_id);
     if (own_entry == movement_->index_by_id.end() || !is_configured()) {
@@ -371,19 +385,97 @@ Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target
 
 bool RoRPathKernel::update_walkable(int64_t revision, const PackedInt32Array &indices, const PackedByteArray &values) {
     if (!is_configured() || revision < revision_ || indices.size() != values.size()) return false;
+    bool differs = false;
     // Validate the entire patch before changing the authoritative mask.
     for (int64_t i = 0; i < indices.size(); ++i) {
         if (indices[i] < 0 || static_cast<size_t>(indices[i]) >= walkable_->size()) return false;
+        differs = differs || (*walkable_)[indices[i]] != (values[i] != 0);
     }
+    if (!differs) { revision_ = revision; return true; }
     if (!walkable_.unique()) walkable_ = std::make_shared<std::vector<uint8_t>>(*walkable_);
-    bool changed = false;
+    std::vector<int32_t> changed;
+    changed.reserve(static_cast<size_t>(indices.size()));
     for (int64_t i = 0; i < indices.size(); ++i) {
         const uint8_t value = values[i] != 0;
-        changed = changed || (*walkable_)[static_cast<size_t>(indices[i])] != value;
-        (*walkable_)[static_cast<size_t>(indices[i])] = value;
+        if ((*walkable_)[indices[i]] != value) changed.push_back(indices[i]);
+        (*walkable_)[indices[i]] = value;
     }
-    if (changed) { components_by_radius_.clear(); ++walkability_version_; }
+    for (auto it = components_by_radius_.begin(); it != components_by_radius_.end();) {
+        double radius = 0.0;
+        std::memcpy(&radius, &it->first, sizeof(radius));
+        if (patch_components(radius, changed, it->second)) ++it;
+        else it = components_by_radius_.erase(it);
+    }
+    ++walkability_version_;
     revision_ = revision;
+    return true;
+}
+
+// Keep a component only when a bounded local flood proves that its surviving
+// cells remain connected and that no two old components have been joined.
+// The unchanged outer ring contains every connection to the rest of the map.
+bool RoRPathKernel::patch_components(double radius, const std::vector<int32_t> &changed,
+        std::shared_ptr<const std::vector<int32_t>> &labels) const {
+    if (changed.empty()) return true;
+    if (!std::isfinite(radius) || radius > std::max(width_, height_)) return false;
+    const int32_t margin = static_cast<int32_t>(std::ceil(std::max(0.0, radius))) + 2;
+    int32_t min_x = width_ - 1, min_y = height_ - 1, max_x = 0, max_y = 0;
+    for (const int32_t index : changed) {
+        min_x = std::min(min_x, index % width_);
+        max_x = std::max(max_x, index % width_);
+        min_y = std::min(min_y, index / width_);
+        max_y = std::max(max_y, index / width_);
+    }
+    min_x = std::max(0, min_x - margin);
+    min_y = std::max(0, min_y - margin);
+    max_x = std::min(width_ - 1, max_x + margin);
+    max_y = std::min(height_ - 1, max_y + margin);
+    const int32_t local_width = max_x - min_x + 1, local_height = max_y - min_y + 1;
+    const int64_t area = static_cast<int64_t>(local_width) * local_height;
+    if (area > 4096) return false;
+    std::vector<uint8_t> passable(static_cast<size_t>(area), 0);
+    std::vector<int32_t> groups(static_cast<size_t>(area), -1);
+    for (int32_t local = 0; local < area; ++local) {
+        passable[local] = cell_walkable_for(min_x + local % local_width, min_y + local / local_width, radius);
+    }
+    std::vector<int32_t> group_labels;
+    std::unordered_map<int32_t, int32_t> group_by_old_label;
+    std::vector<int32_t> queue;
+    for (int32_t root = 0; root < area; ++root) {
+        if (!passable[root] || groups[root] >= 0) continue;
+        const int32_t group = static_cast<int32_t>(group_labels.size());
+        int32_t old_label = -1;
+        queue.clear();
+        queue.push_back(root);
+        groups[root] = group;
+        for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
+            const int32_t local = queue[cursor], x = local % local_width, y = local / local_width;
+            const int32_t previous = (*labels)[(min_y + y) * width_ + min_x + x];
+            if (previous >= 0) {
+                if (old_label >= 0 && old_label != previous) return false; // Possible merge.
+                old_label = previous;
+            }
+            for (const auto &d : DIRECTIONS) {
+                const int32_t nx = x + d[0], ny = y + d[1];
+                if (nx < 0 || ny < 0 || nx >= local_width || ny >= local_height) continue;
+                const int32_t next = ny * local_width + nx;
+                if (!passable[next] || groups[next] >= 0) continue;
+                if (d[0] && d[1] && (!passable[y * local_width + nx] || !passable[ny * local_width + x])) continue;
+                groups[next] = group;
+                queue.push_back(next);
+            }
+        }
+        if (old_label < 0) return false; // A new isolated component needs a full relabel.
+        if (!group_by_old_label.emplace(old_label, group).second) return false; // Possible split.
+        group_labels.push_back(old_label);
+    }
+    // Search contexts retain their immutable old generation.
+    auto patched = std::make_shared<std::vector<int32_t>>(*labels);
+    for (int32_t local = 0; local < area; ++local) {
+        (*patched)[(min_y + local / local_width) * width_ + min_x + local % local_width] =
+            groups[local] < 0 ? -1 : group_labels[groups[local]];
+    }
+    labels = std::move(patched);
     return true;
 }
 
@@ -469,6 +561,11 @@ Dictionary RoRPathKernel::group_points_by_component(const TypedArray<Vector2> &p
 
 bool RoRPathKernel::cells_connected(const Vector2i &start, const Vector2i &goal, double radius) {
     if (!is_configured() || !contains(start.x, start.y) || !contains(goal.x, goal.y)) return false;
+    double normalized_radius = radius < 0.5 ? 0.0 : radius;
+    uint64_t key = 0;
+    std::memcpy(&key, &normalized_radius, sizeof(key));
+    if (components_by_radius_.find(key) == components_by_radius_.end() &&
+            direct_path(start.y * width_ + start.x, goal.y * width_ + goal.x, radius)) return true;
     const auto &labels = components(radius);
     const int32_t target = labels[goal.y * width_ + goal.x];
     if (target < 0) return false;

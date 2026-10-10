@@ -59,11 +59,8 @@ func best_target(observer: Dictionary, candidates: Array, options: Dictionary = 
 
 
 func best_combat_target(world, observer: Dictionary, candidates: Array, assigned_attackers: Dictionary, query_range: float, stance: String, allowed_target_id: int = -1, hostility_prevalidated: bool = false) -> Variant:
-	# Reachability runs a full route query per candidate, which dominated dense
-	# awareness loops. The ranking is a total order (entity ID breaks ties), so
-	# when the globally best candidate is reachable it is also the best of the
-	# reachable subset. Probe once; only an unreachable winner pays the exact
-	# filtered rescan.
+	# Check the globally best candidate first. The fallback pass checks only
+	# candidates that can improve its current reachable winner.
 	var best: Variant = _best_combat_target_pass(world, observer, candidates, assigned_attackers, query_range, stance, allowed_target_id, hostility_prevalidated, false)
 	if best == null:
 		return null
@@ -126,12 +123,12 @@ func _best_combat_target_pass(world, observer: Dictionary, candidates: Array, as
 		var combined_range := maxf(0.0, query_range) + observer_radius + float(candidate.get("footprint_radius", 0.0))
 		if distance_squared > combined_range * combined_range + 0.000001:
 			continue
-		if check_reachability and not world.can_unit_reach_entity(observer, candidate):
-			continue
 		var threat_rank := _threat_rank(observer_id, candidate)
 		var assigned_count := int(assigned_attackers.get(candidate_id, 0))
 		var class_rank := _class_rank(candidate)
 		if _combat_rank_precedes(threat_rank, assigned_count, class_rank, distance_squared, candidate_id, best_threat_rank, best_assigned, best_class_rank, best_distance_squared, best_id):
+			if check_reachability and not world.can_unit_reach_entity(observer, candidate):
+				continue
 			best = candidate
 			best_threat_rank = threat_rank
 			best_assigned = assigned_count

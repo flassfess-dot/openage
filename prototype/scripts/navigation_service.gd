@@ -55,13 +55,17 @@ func request_paths(requests: Array, planner, coordinator) -> Array:
 	return results
 
 func request_path(entity_id: int, start: Vector2, requested_goal: Vector2, movement_domain: String = "land", restriction_id: int = -1, purpose: String = "move", clearance_radius: float = 0.0, known_planner: Variant = null) -> Dictionary:
-	var request_id := next_request_id
-	next_request_id += 1
-	var grid_revision := int(pathfinder.grid.revision) if pathfinder != null and pathfinder.grid != null else -1
 	var path: Array[Vector2] = []
 	var planner: Variant = known_planner if known_planner != null else pathfinder
 	if planner != null:
 		path = planner.find_path(start, requested_goal, movement_domain, restriction_id, clearance_radius)
+	return register_resolved_path(entity_id, start, requested_goal, path, movement_domain, restriction_id, purpose, clearance_radius)
+
+
+func register_resolved_path(entity_id: int, start: Vector2, requested_goal: Vector2, path: Array[Vector2], movement_domain: String = "land", restriction_id: int = -1, purpose: String = "move", clearance_radius: float = 0.0) -> Dictionary:
+	var request_id := next_request_id
+	next_request_id += 1
+	var grid_revision := int(pathfinder.grid.revision) if pathfinder != null and pathfinder.grid != null else -1
 	var status := "resolved" if not path.is_empty() else "unreachable"
 	var result := {
 		"request_id": request_id,

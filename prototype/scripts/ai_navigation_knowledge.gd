@@ -42,7 +42,6 @@ func snapshot(world, fog, team: int, probe: Variant = null, maximum_region_units
 	var topology := CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
 	var exploration := CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
 	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
-	var changed_cells: Array = topology["cells"]
 	if full_rebuild:
 		entry = _new_entry(size)
 		entry["building_full"] = true
@@ -55,23 +54,7 @@ func snapshot(world, fog, team: int, probe: Variant = null, maximum_region_units
 		if probe != null:
 			probe.increment("ai.navigation.full_rebuilds")
 	else:
-		var dirty: Dictionary = {}
-		for changed_cell_value in changed_cells:
-			var changed_cell: Vector2i = changed_cell_value
-			dirty[changed_cell.y * size.x + changed_cell.x] = true
-		for cell_value in exploration["cells"]:
-			var cell := Vector2i(cell_value)
-			var index := cell.y * size.x + cell.x
-			dirty[index] = true
-			for offset in OFFSETS:
-				var neighbor: Vector2i = cell + offset
-				if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y:
-					dirty[neighbor.y * size.x + neighbor.x] = true
-		if entry.get("reach_signature") != reach["signature"]:
-			for index in entry["known"]:
-				dirty[index] = true
-		var changed_indices: Array = dirty.keys()
-		changed_indices.sort()
+		var changed_indices := _dirty_cell_indices(entry, topology, exploration, reach, size)
 		var states: PackedByteArray = fog.states_by_player[team]
 		for index_value in changed_indices:
 			_refresh_cell(entry, int(index_value), size, states, grid, reach)
@@ -105,8 +88,7 @@ func snapshot(world, fog, team: int, probe: Variant = null, maximum_region_units
 	return entry["result"]
 
 
-# Cold or widespread invalidations are prepared while the simulation tick is
-# held. Camera and UI keep rendering, and every frame scans a bounded slice.
+# Both full and exact incremental updates retain bounded cell portions.
 func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPARE_CELLS) -> bool:
 	last_prepared_cells = 0
 	fog.ensure_player(team)
@@ -116,42 +98,69 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 	var topology := CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
 	var exploration := CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
 	var reach := _reachable_components(world, team)
-	var cold: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"]) or entry.get("reach_signature") != reach["signature"] or topology["cells"].size() + exploration["cells"].size() * 5 > maxi(1, maximum_cells)
-	if not cold:
-		pending_preparations.erase(team)
-		return not snapshot(world, fog, team, null, 96).is_empty()
+	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
 	var signature := [topology["stamp"], CacheDependency.stamp(world, CacheDependency.NAVIGATION_SURFACE), exploration["stamp"], reach["signature"]]
 	var pending: Dictionary = pending_preparations.get(team, {})
 	if pending.is_empty() or pending.get("signature") != signature:
-		entry = _new_entry(size)
-		entry["building_full"] = true
-		pending = {"signature": signature, "cursor": 0, "entry": entry, "reach": reach}
+		var indices: Array = []
+		if full_rebuild:
+			entry = _new_entry(size)
+			entry["building_full"] = true
+		else:
+			indices = _dirty_cell_indices(entry, topology, exploration, reach, size)
+		pending = {"signature": signature, "cursor": 0, "entry": entry, "reach": reach, "full": full_rebuild, "indices": indices, "cells_ready": false}
 		pending_preparations[team] = pending
 	entry = pending["entry"]
-	var states: PackedByteArray = fog.states_by_player[team]
-	var start := int(pending["cursor"])
-	var finish := mini(states.size(), start + maxi(1, maximum_cells))
-	for index in range(start, finish):
-		if states[index] != 0:
-			_refresh_cell(entry, index, size, states, grid, pending["reach"])
-	last_prepared_cells = finish - start
-	pending["cursor"] = finish
-	if finish < states.size():
-		return false
-	entry.erase("building_full")
-	entry["grid_revision"] = int(grid.revision)
-	entry["surface_revision"] = int(grid.surface_revision)
-	entry["exploration_revision"] = int(fog.exploration_revision_for_player(team))
-	entry["reach_signature"] = reach["signature"]
-	entry["topology_stamp"] = topology["stamp"]
-	entry["exploration_stamp"] = exploration["stamp"]
-	fog.track_navigation_exploration(team)
-	_refresh_result_buckets(entry)
+	if not bool(pending["cells_ready"]):
+		var states: PackedByteArray = fog.states_by_player[team]
+		var total: int = states.size() if bool(pending["full"]) else pending["indices"].size()
+		var start := int(pending["cursor"])
+		var finish := mini(total, start + maxi(1, maximum_cells))
+		for cursor in range(start, finish):
+			var index: int = cursor if bool(pending["full"]) else int(pending["indices"][cursor])
+			if not bool(pending["full"]) or states[index] != 0:
+				_refresh_cell(entry, index, size, states, grid, pending["reach"])
+		last_prepared_cells = finish - start
+		pending["cursor"] = finish
+		if finish < total:
+			return false
+		entry.erase("building_full")
+		entry["grid_revision"] = int(grid.revision)
+		entry["surface_revision"] = int(grid.surface_revision)
+		entry["exploration_revision"] = int(fog.exploration_revision_for_player(team))
+		entry["reach_signature"] = reach["signature"]
+		entry["topology_stamp"] = topology["stamp"]
+		entry["exploration_stamp"] = exploration["stamp"]
+		fog.track_navigation_exploration(team)
+		fog.consume_navigation_exploration(team)
+		_apply_bucket_changes(entry)
+		_refresh_result_buckets(entry)
+		pending["cells_ready"] = true
 	if not _region_targets(world, team, entry, 96): return false
 	_freeze_publication(entry["result"])
 	entries[team] = entry
 	pending_preparations.erase(team)
 	return true
+
+
+func _dirty_cell_indices(entry: Dictionary, topology: Dictionary, exploration: Dictionary, reach: Dictionary, size: Vector2i) -> Array:
+	var dirty: Dictionary = {}
+	for cell_value in topology["cells"]:
+		var cell := Vector2i(cell_value)
+		dirty[cell.y * size.x + cell.x] = true
+	for cell_value in exploration["cells"]:
+		var cell := Vector2i(cell_value)
+		dirty[cell.y * size.x + cell.x] = true
+		for offset in OFFSETS:
+			var neighbor: Vector2i = cell + offset
+			if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y:
+				dirty[neighbor.y * size.x + neighbor.x] = true
+	if entry.get("reach_signature") != reach["signature"]:
+		for index in entry["known"]:
+			dirty[index] = true
+	var indices: Array = dirty.keys()
+	indices.sort()
+	return indices
 
 
 func _refresh_result_buckets(entry: Dictionary) -> void:
