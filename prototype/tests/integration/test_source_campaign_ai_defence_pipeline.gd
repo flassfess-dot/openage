@@ -1,5 +1,6 @@
 extends SceneTree
 
+const Ready := preload("res://tests/support/match_ready.gd")
 const AiPlayer := preload("res://scripts/ai_player.gd")
 const AssignmentGroup := preload("res://scripts/source_ai_assignment_group.gd")
 const GameController := preload("res://scripts/game_controller.gd")
@@ -11,6 +12,10 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
+	call_deferred("_run")
+
+
+func _run() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load()
 	var world = SimulationWorld.new(Vector2i(24, 24))
@@ -44,33 +49,48 @@ func _initialize() -> void:
 		},
 	})
 	var controller = GameController.new(world)
+	controller.set_speed_multiplier(1.0)
 	var snapshot := SimulationSnapshot.with_queries(world, 0, 2, ai.presentation_options())
 	var commands: Array = ai.collect_commands(snapshot, 1)
 	assert_equal(commands.map(func(command): return command.command_type()), ["build"], "local defend assignment does not add a redundant route beside the economy command")
+	if commands.is_empty():
+		finish()
+		return
 	assert_true(commands[0].unit_ids == [int(worker.get("id", -1))], "economy keeps ownership of its worker")
 	assert_equal(ai.source_assignment_groups.size(), 1, "defend group persists after its rally command")
 	for command in commands:
 		controller.enqueue_command(command, true, 2)
-	controller.advance_frame(0.05, 1, 2)
-	first["pos"] = Vector2(town.get("pos", Vector2.ZERO)) + Vector2(-3.0, -3.0)
-	second["pos"] = Vector2(town.get("pos", Vector2.ZERO)) + Vector2(-2.5, -3.0)
-	enemy["pos"] = Vector2(town.get("pos", Vector2.ZERO)) + Vector2(3.0, 3.0)
+	if not await Ready.advance_to_tick(self, controller, controller.tick_index + 1, 1, 2):
+		finish()
+		return
+	world.set_entity_field(first, "pos", Vector2(town.get("pos", Vector2.ZERO)) + Vector2(-3.0, -3.0))
+	world.set_entity_field(second, "pos", Vector2(town.get("pos", Vector2.ZERO)) + Vector2(-2.5, -3.0))
+	world.set_entity_field(enemy, "pos", Vector2(town.get("pos", Vector2.ZERO)) + Vector2(3.0, 3.0))
 	world.sync_all_components()
 	world.update_fog_of_war()
 
 	snapshot = SimulationSnapshot.with_queries(world, controller.tick_index, 2, ai.presentation_options())
 	commands = ai.collect_commands(snapshot, controller.tick_index + 1)
 	assert_equal(commands.size(), 1, "persistent defend group intercepts a newly visible local threat")
+	if commands.size() != 1:
+		finish()
+		return
 	assert_equal(commands[0].command_type(), "attack", "defence interception enters the authoritative combat pipeline")
 	assert_equal(commands[0].unit_ids, [int(first.get("id", -1)), int(second.get("id", -1))], "the exact reserved defend roster receives the interception")
 	var group = ai.source_assignment_groups.values()[0]
 	assert_equal(group.state, AssignmentGroup.ENGAGING, "AI state records the live defensive engagement")
 	assert_equal(group.target_id, int(enemy.get("id", -1)), "AI state records the exact local threat")
 	controller.enqueue_command(commands[0], true, 2)
-	controller.advance_frame(0.05, 1, 2)
+	if not await Ready.advance_to_tick(self, controller, controller.tick_index + 1, 1, 2):
+		finish()
+		return
 	var accepted := controller.get_command_result(int(commands[0].sequence_id))
 	assert_true(bool(accepted.get("accepted", false)), "defence command is accepted by the shared game controller: %s" % [accepted])
 
+	finish()
+
+
+func finish() -> void:
 	if failures.is_empty():
 		print("I12-020L source defence assignment pipeline tests passed")
 		quit(0)

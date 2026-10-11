@@ -59,9 +59,12 @@ func _run() -> void:
 	var players: Array = [Ai.new({"team": 1}), Ai.new({"team": 2})]
 	var queue := DecisionQueue.new()
 	queue.begin(players, 0, 1, Callable(self, "_capture"))
+	# A one-microsecond remaining budget allows one whole capture, then yields.
+	queue.last_prepared_frame = 100
+	queue.preparation_usec_left = 1
 	queue.poll(coordinator, 0, 100)
 	queue.poll(coordinator, 0, 100)
-	check(capture_count == 1, "one frame prepares at most one AI observation")
+	check(capture_count == 1, "exhausting the shared frame budget defers the next AI observation")
 	queue.poll(coordinator, 0, 101)
 	check(capture_count == 2, "next frame prepares the second AI without repeating the first capture")
 	var frame_id := 102
@@ -75,6 +78,8 @@ func _run() -> void:
 	for decision in decisions:
 		var expected: Dictionary = Task.run(decision["input"])
 		check(decision["output"] == expected, "deferred planning preserves commands, state, and simulation tick")
+	# Model another preparation operation consuming this frame's remaining budget.
+	queue.preparation_usec_left = 0
 	queue.begin([players[0]], 1, 2, Callable(self, "_pending_capture"))
 	status = queue.poll(coordinator, 1, queue.last_prepared_frame)
 	check(not status["ready"] and pending_capture_count == 0, "adjacent batch preserves the rendered frame's capture budget")

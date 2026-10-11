@@ -109,12 +109,14 @@ func tree_lifecycle(catalog) -> void:
 	var tree: Dictionary = world.add_resource("tree", Vector2(18.5, 15.5), 3)
 	var projection: Dictionary = world.compact_render_projection(tree)
 	check(projection.get("tree_phase") == "standing", "retained render projection starts with standing tree")
+	var standing_projection := projection
 	world.assign_command_gather([worker], int(tree["id"]))
 	world.gather(int(tree["id"]), worker)
 	check(tree["hp"] < tree["max_hp"] and tree["hp"] > 0, "initial chop damages original tree HP")
 	projection = world.compact_render_projection(tree)
 	check(projection.get("tree_phase") == "chopping" and projection.get("hp") == tree["hp"], "cached tree exposes damage while chopping")
 	check(tree["amount"] == 3 and worker["carried_amount"] == 0, "standing tree yields no wood before felling")
+	check(standing_projection.get("tree_phase") == "standing" and standing_projection.get("hp") == tree["max_hp"], "chopping never rewrites an earlier immutable tree projection")
 	for step in range(100):
 		if tree["tree_phase"] == "falling": break
 		world.gather(int(tree["id"]), worker)
@@ -126,10 +128,12 @@ func tree_lifecycle(catalog) -> void:
 	check(tree["tree_phase"] == "falling", "fall is visible for a finite animation interval")
 	projection = world.compact_render_projection(tree)
 	check(projection.get("tree_phase") == "falling" and projection.get("tree_fall_elapsed") == 0.25, "cached projection advances visible fall animation")
+	var falling_projection := projection
 	world.advance_resource_lifecycle(0.5)
 	check(tree["tree_phase"] == "felled" and world.falling_resource_nodes.is_empty(), "landed tree leaves active lifecycle list")
 	projection = world.compact_render_projection(tree)
 	check(projection.get("tree_phase") == "felled", "cached projection changes to landed trunk")
+	check(falling_projection.get("tree_phase") == "falling" and falling_projection.get("tree_fall_elapsed") == 0.25, "landing never rewrites an earlier falling frame")
 	check(catalog.resource_frame_info(projection).get("asset_name") == "graphic_636", "retained renderer receives original felled branches asset")
 	check(not catalog.resource_frame_info(tree).is_empty(), "felled trunk uses original branches graphic")
 	for step in range(3): world.gather(int(tree["id"]), worker)

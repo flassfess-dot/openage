@@ -12,17 +12,17 @@ func _initialize() -> void:
 	var worker: Dictionary = world.add_unit(1, "villager", Vector2(5.5, 5.5), false)
 	check(not worker["components"]["health"].has("current") and not worker["components"]["transform"].has("position"), "live entities have no second mutable owner for health/position")
 	var view := Components.view(worker)
-	worker["hp"] = 17.0
+	world.set_entity_field(worker, "hp", 17.0)
 	check(float(view["health"]["current"]) != 17.0 and float(Components.component_view(worker, "health")["current"]) == 17.0, "component views derive current values and preserve earlier views")
-	worker["path"] = [Vector2(8, 8)]
+	world.set_entity_field(worker, "path", [Vector2(8, 8)])
 	var movement := Components.component_view(worker, "movement")
 	movement["path"][0] = Vector2(19, 19)
 	check(worker["path"][0] == Vector2(8, 8), "compatibility views own their nested arrays")
-	worker["path"] = []
+	world.set_entity_field(worker, "path", [])
 	var first := world.compact_render_projection(worker)
 	check(first.is_read_only() and first["components"].is_read_only(), "retained render contract is enforced by immutable containers")
 	check(is_same(first, world.compact_render_projection(worker)), "unchanged entities reuse the same immutable record")
-	worker["hp"] = 12.0
+	world.set_entity_field(worker, "hp", 12.0)
 	var second := world.compact_render_projection(worker)
 	check(not is_same(first, second) and float(first["hp"]) == 17.0 and float(second["hp"]) == 12.0, "updates cannot mutate an earlier published record")
 	var schema_building := {"id": 90, "entity_type": "foundation", "state": "foundation", "construction_stage": 1, "construction_progress": 0.25, "environment_variant": 3}
@@ -36,7 +36,7 @@ func _initialize() -> void:
 	var store := Store.new()
 	var options := {"compact_entities": true, "include_projectiles": false, "include_fog_cells": false}
 	var knowledge := store.observe(world, 1, 1, options)
-	worker["hp"] = 9.0
+	world.set_entity_field(worker, "hp", 9.0)
 	var later := store.observe(world, 2, 1, options)
 	check(float(knowledge["units"][0]["hp"]) == 12.0 and float(later["units"][0]["hp"]) == 9.0, "retained AI observations never mutate earlier factual rows")
 
@@ -52,7 +52,7 @@ func _initialize() -> void:
 		quit(1)
 		return
 	var memory: Dictionary = remembered[0]
-	tree["amount"] = 50
+	world.set_entity_field(tree, "amount", 50)
 	world.mark_known_resource_dirty(tree)
 	var after := Snapshot.presentation(world, 4, 1, {"compact_render_entities": true, "borrow_visible_render_entities": true, "include_overview": true, "borrow_overview_entities": true})
 	check(int(memory["amount"]) == 75 and int(before["resources"][0]["amount"]) == 75 and int(after["resources"][0]["amount"]) == 50, "legal resource memory uses replacement rather than mutating historical records")

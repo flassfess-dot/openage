@@ -6,7 +6,9 @@ const TradeProfitPolicy := preload("res://scripts/trade_profit_policy.gd")
 const MANIFEST_PATH := "res://data/parity/naval_executable_gate.json"
 const EXPECTED_SHIPS := [13, 14, 15, 16, 17, 18, 19, 20, 21, 250, 277]
 const EXPECTED_COMBAT_SHIPS := [19, 20, 21, 250, 277]
-const MODERN_GOLDEN_FILE_SHA256 := "e99b47a29954b21600951b0e56acf7dd073d38a84c8681367b402665af1694d3"
+# Corrected southeast facets from 9886d491, verified against the independent
+# source-frame oracle in test_naval_presentation_golden.gd.
+const MODERN_GOLDEN_FILE_SHA256 := "711e6bef4241f12ddfbb7fc1cf5ed3c238f17192805e6f5842bc48c22192f13a"
 
 var failures: Array[String] = []
 

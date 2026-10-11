@@ -33,7 +33,10 @@ func _initialize() -> void:
 	for item in drawables:
 		if item["kind"] == "unit":
 			var team := int(item["data"]["team"])
-			check(item["player_color"] == Palette.shade(6 if team == 1 else 3, 3), "rendered player colour follows generation settings")
+			if team == 0:
+				check(item["player_color"] == Color.WHITE, "neutral wildlife keeps its neutral colour")
+			else:
+				check(item["player_color"] == Palette.shade(6 if team == 1 else 3, 3), "rendered player colour follows generation settings")
 	# Compare actual player-colour pixels against independent blue/red source decodes.
 	var players: Array = []
 	for team in range(1, 9): players.append({"team": team, "color_index": 9 - team})
@@ -46,12 +49,12 @@ func _initialize() -> void:
 		check_frame(info.get("texture"), blue, red, 9 - team, "unit colour %d" % (9 - team))
 		var foundation := {"kind": "barracks", "team": team, "state": "foundation", "construction_stage": 0}
 		var foundation_info: Dictionary = catalog.building_frame_info(foundation)
-		check_frame(foundation_info.get("texture"), load("res://assets/generated/graphic_82_p1_00.png"), load("res://assets/generated/graphic_82_p2_00.png"), 9 - team, "foundation colour %d" % (9 - team))
+		check_frame(foundation_info.get("texture"), load("res://assets/generated/graphic_82_p1_00.png"), load("res://assets/generated/graphic_82_p2_00.png"), 9 - team, "neutral initial foundation for colour %d" % (9 - team), false)
 		var flag: Dictionary = catalog.rally_flag_frame_info(team, 0.0)
 		check_frame(flag.get("texture"), load("res://assets/generated/graphic_322_p1_00.png"), load("res://assets/generated/graphic_322_p2_00.png"), 9 - team, "rally flag colour %d" % (9 - team))
 	finish("Live gameplay skirmish colours")
 
-func check_frame(texture: Texture2D, blue: Texture2D, red: Texture2D, player: int, label: String) -> void:
+func check_frame(texture: Texture2D, blue: Texture2D, red: Texture2D, player: int, label: String, has_player_pixels: bool = true) -> void:
 	check(texture != null and blue != null and red != null, label + " has all source textures")
 	if texture == null or blue == null or red == null: return
 	var actual := texture.get_image()
@@ -66,9 +69,16 @@ func check_frame(texture: Texture2D, blue: Texture2D, red: Texture2D, player: in
 			if source.a <= 0.0 or source == second.get_pixel(x, y): continue
 			for shade_index in range(10):
 				if source.is_equal_approx(Palette.shade(1, shade_index)):
-					check(actual.get_pixel(x, y).is_equal_approx(Palette.shade(player, shade_index)), label + " preserves the exact source shade")
+					# Existing blue/red decodes are the reference, including their source
+					# player-colour and outline commands. Other players use palette ramps.
+					var expected := second.get_pixel(x, y) if player == 2 else Palette.shade(player, shade_index)
+					check(actual.get_pixel(x, y).is_equal_approx(expected), label + " preserves the exact source shade")
 					checked += 1
-	check(checked > 0, label + " contains tested player pixels")
+	if has_player_pixels:
+		check(checked > 0, label + " contains tested player pixels")
+	else:
+		check(checked == 0 and first.get_data() == second.get_data(), label + " uses an independently verified neutral source")
+		check(actual.get_data() == first.get_data(), label + " preserves every neutral pixel")
 
 func finish(label: String) -> void:
 	if failures.is_empty():

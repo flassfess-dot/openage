@@ -168,7 +168,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		"local_repath":
 			assign_unit_destination(unit, unit["destination"], false)
 		"global_repath":
-			simulation_world.pathfinder.clear_route_cache()
+			planner.clear_route_cache()
 			assign_unit_destination(unit, unit["destination"], false)
 		"stop":
 			# Release work and formation reservations as well as movement slots;
@@ -203,20 +203,12 @@ func _escape_invalid_footprint(unit: Dictionary, delta: float) -> Vector2:
 	var restriction := int(unit["terrain_restriction"])
 	if not grid.is_position_walkable_for(origin, 0.0, domain, restriction) or grid.is_position_walkable_for(origin, radius, domain, restriction):
 		return Vector2.ZERO
-	var offsets := [Vector2.ZERO, Vector2(radius, 0), Vector2(-radius, 0), Vector2(0, radius), Vector2(0, -radius)]
-	var existing: Dictionary = {}
-	for offset in offsets:
-		var cell := Vector2i((origin + offset).floor())
-		if not grid.is_walkable_for(cell, domain, restriction): existing[cell] = true
 	var difference := Vector2(unit["target"]) - origin
 	var velocity := difference.normalized() * minf(float(unit["speed"]), difference.length() / maxf(0.0001, delta))
 	var neighbors: Array = world.query_units_near(origin, radius + 2.0).filter(func(other): return int(other["id"]) != int(unit["id"]))
 	velocity = MobileCollision.constrain(unit, velocity, neighbors, delta)
 	var next := origin + velocity * delta
-	if not grid.is_position_walkable_for(next, 0.0, domain, restriction): return Vector2.ZERO
-	for offset in offsets:
-		var cell := Vector2i((next + offset).floor())
-		if not grid.is_walkable_for(cell, domain, restriction) and not existing.has(cell): return Vector2.ZERO
+	if not grid.is_footprint_escape_walkable_for(origin, next, radius, domain, restriction): return Vector2.ZERO
 	return velocity
 
 
@@ -394,6 +386,14 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 			else:
 				world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
 			return true
+		# Newly explored obstacles can invalidate one optimistic work slot while
+		# other positions around the known resource remain reachable.
+		if String(unit["task"]) == "gather" and String(unit.get("gather_stage", "")) == "approaching" and prepared_result.is_empty():
+			var resource: Variant = world.find_resource(int(unit.get("resource_id", -1)))
+			if resource != null:
+				world.release_resource_approach_slot(unit)
+				if world.gathering_system.prepare_group_gather_approach(unit, resource):
+					return true
 		# Work orders need the same terminal failure as movement orders. Leaving
 		# a failed gather/build active retries A* every tick and holds its slot.
 		world.halt_unit(unit, "no_path")
@@ -426,8 +426,12 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 	var cursor: Vector2 = unit["pos"]
 	for target in targets:
 		var clamped_target := Coordinates.clamp_world(target, world.map_size)
+		# A duplicate waypoint needs no query. An empty zero-length query would
+		# otherwise overwrite the last successful segment's navigation status.
+		if cursor.distance_squared_to(clamped_target) <= 0.0001:
+			continue
 		var path_result: Dictionary
-		if direct_segments_allowed and cursor.distance_squared_to(clamped_target) > 0.0001:
+		if direct_segments_allowed:
 			path_result = world.navigation_service.register_prevalidated_direct_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
 		else:
 			path_result = world.navigation_service.request_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)), planner)
@@ -436,33 +440,41 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 		world.set_entity_field(unit, "path_status", String(path_result["status"]))
 		world.set_entity_field(unit, "path_grid_revision", int(path_result["grid_revision"]))
 		var segment: Array[Vector2] = path_result["path"]
-		if segment.is_empty() and cursor.distance_squared_to(target) > 0.0001:
-			continue
+		if segment.is_empty():
+			return _fail_group_route(unit)
 		for waypoint in segment:
 			if combined.is_empty() or combined[combined.size() - 1].distance_squared_to(waypoint) > 0.0001:
 				combined.append(waypoint)
-		cursor = target
+		# Endpoint resolution may move a blocked intermediate target. The next
+		# segment must start at the actual endpoint to keep the route continuous.
+		cursor = segment.back()
+	# Publish only complete routes. A reachable prefix or a substituted final
+	# endpoint cannot fulfil the member's reserved formation destination.
+	if cursor.distance_squared_to(reserved_destination) > 0.001225:
+		return _fail_group_route(unit)
 	world.set_entity_field(unit, "path", combined)
 	world.set_entity_field(unit, "path_index", 0)
 	if combined.is_empty():
 		world.set_entity_field(unit, "target", unit["pos"])
 		world.set_entity_field(unit, "task", "idle")
-		# A member already on its slot (often the middle rider during a turn)
-		# has completed the order; an empty route here is not a path failure.
-		if Vector2(unit["pos"]).distance_squared_to(reserved_destination) <= 0.001225:
-			world.set_entity_field(unit, "path_status", "arrived")
-			world.set_entity_field(unit, "diagnostic_reason", "")
-			world.complete_entity_order(unit, "destination_reached")
-			restore_formation_facing(unit)
-			return true
-		world.set_entity_field(unit, "diagnostic_reason", "no_group_route")
-		return false
+		world.set_entity_field(unit, "path_status", "arrived")
+		world.set_entity_field(unit, "diagnostic_reason", "")
+		world.complete_entity_order(unit, "destination_reached")
+		restore_formation_facing(unit)
+		return true
 	if direct_segments_allowed and bool(open_envelope.get("open", false)):
 		world.open_movement_envelopes_by_id[int(unit["id"])] = open_envelope
 	world.set_entity_field(unit, "target", combined[0])
 	world.set_entity_field(unit, "diagnostic_reason", "group_corridor" if waypoints.size() > 1 else "")
 	world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
 	return true
+
+
+func _fail_group_route(unit: Dictionary) -> bool:
+	world.halt_unit(unit, "no_group_route")
+	world.set_entity_field(unit, "path_status", "unreachable")
+	world.set_entity_field(unit, "diagnostic_reason", "no_group_route")
+	return false
 
 
 func ensure_navigation_destination(unit: Dictionary, destination: Vector2) -> void:
@@ -473,9 +485,10 @@ func ensure_navigation_destination(unit: Dictionary, destination: Vector2) -> vo
 	var path_index := int(unit.get("path_index", 0))
 	if not path.is_empty() and path_index >= 0 and path_index < path.size() and int(unit.get("formation_group_id", -1)) < 0 and not bool(unit.get("formation_shared_motion", false)) and Vector2i(previous_destination.floor()) == Vector2i(destination.floor()) and Vector2i(Vector2(path.back()).floor()) == Vector2i(destination.floor()):
 		var planner = knowledge.planner(world, int(unit.get("team", 0)))
-		if int(unit.get("path_knowledge_revision", -1)) == int(planner.grid.revision) and planner.grid.is_position_walkable_for(destination, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
-			# Movement within the same endpoint cell changes no route edges.
-			# Replace only the final subcell goal using the route's original mask.
+		var final_segment_origin: Vector2 = unit["pos"] if path_index == path.size() - 1 else path[-2]
+		if int(unit.get("path_knowledge_revision", -1)) == int(planner.grid.revision) and planner.grid.is_segment_walkable_for(final_segment_origin, destination, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+			# A same-cell endpoint adjustment can still cut an obstacle corner.
+			# Reuse the route only when its new incoming segment remains clear.
 			var updated: Array = path.duplicate()
 			updated[updated.size() - 1] = destination
 			world.set_entity_field(unit, "path", updated)

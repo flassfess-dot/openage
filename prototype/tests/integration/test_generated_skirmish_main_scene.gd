@@ -3,6 +3,7 @@ extends SceneTree
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
+const GameCheckpoint := preload("res://scripts/game_checkpoint.gd")
 
 var failures: Array[String] = []
 
@@ -39,7 +40,9 @@ func _run() -> void:
 	assert_equal(game.simulation_world.technology_system.current_age(1), 101, "selected starting age reaches simulation")
 	assert_equal(game.simulation_world.economy_system.get_population_limit(1), 75, "selected population limit reaches simulation")
 	assert_equal(game.simulation_world.get_buildings().filter(func(building): return String(building.get("kind", "")) == "town_center").size(), 2, "both generated starting towns bootstrap")
-	var archive := GameSaveArchive.create(game.match_path, game.match_definition, 0, "0".repeat(64), game.game_controller.replay_recorder.to_dictionary(), [], {}, {})
+	var checkpoint := GameCheckpoint.pack(GameCheckpoint.capture(game.simulation_world, game.game_controller, game.match_definition, game.map_definition_override))
+	var archive := GameSaveArchive.create(game.match_path, game.match_definition, game.game_controller.tick_index, String(checkpoint["sha256"]), game.game_controller.replay_recorder.to_dictionary(), [], {}, {}, "Generated match", checkpoint)
+	assert_equal(GameSaveArchive.validate(archive), "", "generated match creates a valid current archive")
 	assert_equal(String(archive.get("match_fingerprint", "")), GameSaveArchive.fingerprint(game.match_definition), "generated match participates in ordinary save fingerprinting")
 	for index in range(16500):
 		game.game_controller.event_stream.emit(index, "presentation_retention_probe")

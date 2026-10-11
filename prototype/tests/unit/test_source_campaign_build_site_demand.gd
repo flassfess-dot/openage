@@ -173,7 +173,7 @@ func test_observation_requests() -> void:
 	check(not observed.get("build_sites", {}).get("barracks", []).is_empty(), "demanded building still gets authoritative legal sites")
 	world.queries.clear()
 	for unit in world.units:
-		unit["task"] = "gather"
+		world.set_entity_field(unit, "task", "gather")
 	store.observe_with_queries(world, 160, 2, ai.presentation_options())
 	check(world.queries.is_empty(), "busy workers do not start a placement search")
 	world.task_coordinator.shutdown()

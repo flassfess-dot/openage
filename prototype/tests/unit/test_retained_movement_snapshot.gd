@@ -10,12 +10,12 @@ func _initialize() -> void:
 	var reference := Pathfinder.new(world.navigation_grid)
 	reference.incremental_movement_enabled = false
 	candidate.prepare_native_movement_snapshot(world.units)
-	check(candidate.native_shared_movement_kernel.has_method("configure_movement_entities"), "retained movement module is installed")
+	check(candidate.movement_owner.has_method("configure_movement_entities"), "retained movement module is installed")
 	check(candidate.last_movement_snapshot_stats.get("full_rebuilds") == 1, "new roster builds a full generation")
 	candidate.prepare_native_movement_snapshot(world.units)
 	check(candidate.last_movement_snapshot_stats.get("updated") == 0 and candidate.last_movement_snapshot_stats.get("generation_copies") == 0, "idle roster neither repacks nor copies a generation")
-	var old_context = candidate.native_shared_movement_kernel.create_search_context()
-	old_context.share_movement_snapshot(candidate.native_shared_movement_kernel)
+	var old_context = candidate.movement_owner.create_search_context()
+	old_context.share_movement_snapshot(candidate.movement_owner)
 	var old_result: Vector4 = old_context.calculate_movement(int(world.units[0]["id"]), Vector2(22, 22), 1.0, 1.0, 0.05)
 	for step in range(9):
 		var unit: Dictionary = world.units[step]

@@ -17,6 +17,8 @@ func _run() -> void:
 		var unit: Dictionary = world.add_unit(1, "villager", Vector2(4 + index % 10, 4 + index / 10), false)
 		unit["task"] = "move"
 		unit["target"] = unit["pos"] + Vector2(10, 8)
+		var route: Array[Vector2] = [unit["target"]]
+		unit["path"] = route
 		unit["formation_group_id"] = -1
 		unit["formation_shared_motion"] = false
 	var planner = world.pathfinder
@@ -24,7 +26,9 @@ func _run() -> void:
 	var coordinator := Coordinator.new()
 	var expected: Array = []
 	for unit in world.units: expected.append(planner.calculate_native_movement(unit, unit["target"], 0.05))
+	var before_requests := coordinator.next_request_id
 	planner.prepare_native_movement_batch(world.units, 0.05, coordinator)
+	check(coordinator.next_request_id > before_requests, "movement test dispatches actual background jobs")
 	for index in range(world.units.size()):
 		var unit: Dictionary = world.units[index]
 		check(planner.calculate_native_movement(unit, unit["target"], 0.05) == expected[index], "velocity, state and neighbor count match exactly")
@@ -32,5 +36,7 @@ func _run() -> void:
 		var kernel = planner.native_shared_movement_kernel
 		if kernel != null:
 			check(planner.calculate_native_movement(unit, changed_target, 0.05) == kernel.calculate_movement(int(unit["id"]), changed_target, float(unit["speed"]), float(unit["cohesion_speed_scale"]), 0.05), "changed target bypasses speculative result")
+	planner.finish_native_movement_batch()
 	coordinator.shutdown()
+	check(coordinator.pending.is_empty(), "finished movement jobs are released")
 	finish()

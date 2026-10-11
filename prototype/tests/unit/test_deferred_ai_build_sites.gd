@@ -48,7 +48,7 @@ func _initialize() -> void:
 	world.commit_ai_build_site_queries(output["build_site_cache_updates"], 10)
 	var cached: Array = world.capture_ai_build_site_queries(1, ["house", "dock"], 11, 1200, 4, 12, {}, [], 0.0)
 	check(cached.all(func(query): return query.has("cached_sites") and not query.has("input")), "unchanged results become compact cached queries")
-	world.units[0]["pos"] += Vector2(1, 0)
+	world.set_entity_field(world.units[0], "pos", Vector2(world.units[0]["pos"]) + Vector2(1, 0))
 	world.local_build_site_cache.clear()
 	world.commit_ai_build_site_queries(output["build_site_cache_updates"], 12)
 	check(world.local_build_site_cache.is_empty(), "results captured before worker motion cannot enter the live cache")

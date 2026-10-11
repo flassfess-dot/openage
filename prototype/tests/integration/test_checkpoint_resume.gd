@@ -27,7 +27,7 @@ func _initialize() -> void:
 	var saved_hash := verifier.world_state_hash(game.simulation_world, tick, game.game_controller)
 	check(game.save_game_to_path(PATH), "complete checkpoint writes")
 	var archive: Dictionary = Archive.read(PATH).get("archive", {})
-	check(int(archive.get("format_version", 0)) == 4 and "world_checkpoint" in archive.get("schema_features", []), "new saves declare complete checkpoint schema")
+	check(int(archive.get("format_version", 0)) == Archive.FORMAT_VERSION and "world_checkpoint" in archive.get("schema_features", []), "new saves declare complete checkpoint schema")
 	var data: Dictionary = Checkpoint.unpack(archive.get("checkpoint", {}))
 	check(not data.is_empty(), "typed compressed state decodes")
 	var continued_ticks := []

@@ -82,10 +82,11 @@ func legal_entities(world, team: int, category: String) -> Array:
 	var candidates: Dictionary = {}
 	var entity_delta: Dictionary = world.entity_changes.changes_since(int(observer.get("entity_cursor", -1)))
 	if int(observer["generation"]) < 0 or bool(fog_delta["full"]):
-		candidates = entities
+		for id in entities: candidates[id] = true
 	else:
 		# Each observer owns its entity cursor: another reader cannot consume it.
-		if bool(entity_delta["full"]): candidates = entities
+		if bool(entity_delta["full"]):
+			for id in entities: candidates[id] = true
 		else:
 			for id in entity_delta["ids"]: candidates[id] = true
 		if bool(fog_delta["exact"]):

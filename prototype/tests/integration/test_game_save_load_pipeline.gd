@@ -3,6 +3,7 @@ extends SceneTree
 const Commands := preload("res://scripts/commands.gd")
 const ReplaySystem := preload("res://scripts/replay_system.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
+const MatchReady := preload("res://tests/support/match_ready.gd")
 
 const TEST_PATH := "res://qa/e3-game-save-load-test.json"
 const NAMED_DIRECTORY := "res://qa/e3-game-save-named-tests"
@@ -28,8 +29,11 @@ func _initialize() -> void:
 	var target := Vector2(unit.get("pos", Vector2.ZERO)) + Vector2(1.0, 0.0)
 	var command = Commands.MoveCommand.new(game.game_controller.tick_index + 1, [selected[0]], target)
 	game.game_controller.enqueue_command(command, true, game.PLAYER_TEAM)
-	for _step in range(8):
-		game.game_controller.advance_frame(game.game_controller.FIXED_STEP_SECONDS, game.PLAYER_TEAM, game.ENEMY_TEAM)
+	var target_tick: int = game.game_controller.tick_index + 8
+	if not await MatchReady.advance_to_tick(self, game.game_controller, target_tick, game.PLAYER_TEAM, game.ENEMY_TEAM):
+		finish(game)
+		return
+	assert_true(game.game_controller.command_queue.is_empty(), "the initial move is consumed before the checkpoint")
 	game.sync_world_state()
 	game.view_offset = Vector2(321, 222)
 	game.view_zoom = 1.12

@@ -3,7 +3,7 @@ extends SceneTree
 const Catalog := preload("res://scripts/resource_catalog.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 const ReadContract := preload("res://scripts/entity_read_contract.gd")
-const Animation := preload("res://scripts/animation_controller.gd")
+const AnimationController := preload("res://scripts/animation_controller.gd")
 const DIRECTIONS := [Vector2(1, 1), Vector2(0, 1), Vector2(-1, 1), Vector2(-1, 0), Vector2(-1, -1), Vector2(0, -1), Vector2(1, -1), Vector2(1, 0)]
 const BLOCKS_8 := [0, 1, 2, 3, 4, 3, 2, 1]
 const BLOCKS_16 := [0, 2, 4, 6, 8, 6, 4, 2]
@@ -41,11 +41,13 @@ func verify_movement_and_attack(catalog, source_id: int, team: int) -> void:
 	var ship: Dictionary = world.add_unit(team, kind, Vector2(14.5, 14.5), false)
 	world.apply_unit_upgrade_to_entity(ship, source_id)
 	world.set_entity_field(ship, "stance", "passive")
+	var opponent: Dictionary = world.add_unit(3 - team, "scout_ship", Vector2(2.5, 2.5), false)
+	world.set_entity_field(opponent, "stance", "passive")
 	check(ship.get("movement_domain") == "water", "test uses actual ship water navigation")
 	# Successive commands exercise turns and reversals without manually setting
 	# facing, including the north/east sectors which used to select west frames.
 	for facing in range(8):
-		var target := Vector2(ship["pos"]) + DIRECTIONS[facing].normalized() * 4.0
+		var target: Vector2 = Vector2(ship["pos"]) + Vector2(DIRECTIONS[facing]).normalized() * 4.0
 		world.assign_command_move([ship], target)
 		var movement_samples := 0
 		for _step in range(12):
@@ -59,7 +61,7 @@ func verify_movement_and_attack(catalog, source_id: int, team: int) -> void:
 			check(actual_facing == facing, "open-water route preserves requested direction")
 			var render_record: Dictionary = ReadContract.render(ship)
 			check(render_record.is_read_only(), "render consumes an immutable simulation projection")
-			verify_presentation(catalog, render_record, Animation.clip_for_state(String(ship["anim_state"])), actual_facing, source_id, "moving")
+			verify_presentation(catalog, render_record, AnimationController.clip_for_state(String(ship["anim_state"])), actual_facing, source_id, "moving")
 		check(movement_samples > 0, "ship %d moves after direction %d command" % [source_id, facing])
 	world.halt_unit(ship)
 	verify_presentation(catalog, ReadContract.render(ship), "idle", int(ship["facing"]), source_id, "stopped")

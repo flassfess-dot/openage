@@ -310,6 +310,11 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 	# Worker batches have already joined at this owner-thread tick boundary.
 	for kernel in movement_kernels:
 		if kernel != movement_owner: kernel.release_movement_snapshot()
+	# Direct world updates also use this entry point. Retained movement kernels
+	# must observe removed resources and new buildings without another path query.
+	for key in movement_kernels_by_configuration:
+		var configuration := String(key).rsplit(":", true, 1)
+		_native_kernel_for(configuration[0], int(configuration[1]))
 	if rebuild:
 		movement_configuration_by_id.clear()
 		movement_kernels_by_configuration.clear()
@@ -579,7 +584,16 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		if start_world.distance_squared_to(same_cell_destination) > 0.0001:
 			result.append(same_cell_destination)
 	if goal == requested_goal and not result.is_empty() and grid.is_position_walkable_for(goal_world, clearance_radius, movement_domain, restriction_id):
-		result[result.size() - 1] = goal_world
+		var before_goal := result[result.size() - 2] if result.size() > 1 else start_world
+		if result[-1].is_equal_approx(goal_world) or grid.is_segment_walkable_for(before_goal, goal_world, clearance_radius, movement_domain, restriction_id):
+			result[result.size() - 1] = goal_world
+		elif not result[-1].is_equal_approx(goal_world):
+			result.append(goal_world)
+	# Cell smoothing assumes a centred origin. A worker leaving its off-centre
+	# work slot can otherwise cut through the obstacle beside its starting cell.
+	var start_center := Vector2(start) + Vector2(0.5, 0.5)
+	if not result.is_empty() and not start_world.is_equal_approx(start_center) and not grid.is_segment_walkable_for(start_world, result[0], clearance_radius, movement_domain, restriction_id):
+		result.push_front(start_center)
 	cache[key] = result.duplicate()
 	_record_geometry("world", key, result, start, requested_goal, clearance_radius)
 	# Opening a closer endpoint can occur outside the previous route bounds.

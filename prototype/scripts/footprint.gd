@@ -100,3 +100,36 @@ static func displacement_share(unit: Dictionary, other: Dictionary) -> float:
 	if own_priority == other_priority:
 		return 0.5
 	return 0.75 if own_priority < other_priority else 0.25
+
+
+# Squared distance to a cell's closed unit square. Circle tangency is legal;
+# only a distance strictly below radius squared means footprint penetration.
+static func circle_cell_distance_squared(position: Vector2, cell: Vector2i) -> float:
+	var dx := maxf(maxf(float(cell.x) - position.x, 0.0), position.x - float(cell.x + 1))
+	var dy := maxf(maxf(float(cell.y) - position.y, 0.0), position.y - float(cell.y + 1))
+	return dx * dx + dy * dy
+
+
+# Exact distance from a segment to the closed square, including corner grazes.
+static func segment_cell_distance_squared(start: Vector2, finish: Vector2, cell: Vector2i) -> float:
+	var lower := Vector2(cell)
+	var upper := lower + Vector2.ONE
+	var delta := finish - start
+	var enter := 0.0
+	var leave := 1.0
+	for axis in range(2):
+		if is_zero_approx(delta[axis]):
+			if start[axis] < lower[axis] or start[axis] > upper[axis]:
+				enter = 2.0
+				break
+		else:
+			var first := (lower[axis] - start[axis]) / delta[axis]
+			var last := (upper[axis] - start[axis]) / delta[axis]
+			enter = maxf(enter, minf(first, last))
+			leave = minf(leave, maxf(first, last))
+	if enter <= leave:
+		return 0.0
+	var distance := minf(circle_cell_distance_squared(start, cell), circle_cell_distance_squared(finish, cell))
+	for corner in [lower, upper, Vector2(lower.x, upper.y), Vector2(upper.x, lower.y)]:
+		distance = minf(distance, Vector2(corner).distance_squared_to(Geometry2D.get_closest_point_to_segment(corner, start, finish)))
+	return distance

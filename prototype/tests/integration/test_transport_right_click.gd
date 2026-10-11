@@ -186,6 +186,7 @@ func test_full_passenger_group(catalog, native: bool) -> void:
 
 func test_boarding_replay(catalog) -> void:
 	var first := coast_fixture(catalog)
+	first["controller"].set_speed_multiplier(1.0)
 	var recorder = first["controller"].start_recording(1337)
 	var command = Commands.BoardCommand.new(1, [int(first["worker"]["id"])], int(first["ship"]["id"]))
 	first["controller"].enqueue_command(command, true, 1)
@@ -193,6 +194,7 @@ func test_boarding_replay(catalog) -> void:
 		first["controller"].advance_frame(0.05, 1, 2)
 	check(first["worker"]["task"] == "board", "replay fixture captures an approach before boarding completes")
 	var second := coast_fixture(catalog)
+	second["controller"].set_speed_multiplier(1.0)
 	check(second["controller"].load_replay(recorder.to_json()), "boarding replay loads")
 	check(second["controller"].replay_until_tick(first["controller"].tick_index, 1, 2), "boarding approach reconstructs to the saved tick")
 	check(Replay.new().world_state_hash(first["world"], first["controller"].tick_index) == Replay.new().world_state_hash(second["world"], second["controller"].tick_index), "pending boarding state survives replay reconstruction")

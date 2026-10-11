@@ -4,6 +4,13 @@ const Coordinator := preload("res://scripts/isolated_task_coordinator.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 var failures: Array[String] = []
 
+class TransientExecutor extends RefCounted:
+	var gate := Semaphore.new()
+
+	func run(input: Dictionary) -> Dictionary:
+		gate.wait()
+		return {"value": input["value"]}
+
 func _initialize() -> void:
 	call_deferred("_run")
 
@@ -15,6 +22,26 @@ static func calculate(input: Dictionary) -> Dictionary:
 
 func _run() -> void:
 	var coordinator := Coordinator.new()
+	var executor := TransientExecutor.new()
+	var owner_ref: WeakRef = weakref(executor)
+	var gate := executor.gate
+	var request := coordinator.submit("test", {"value": 31}, executor.run)
+	check(request >= 0, "transient executor is dispatched")
+	executor = null
+	check(owner_ref.get_ref() != null, "pending job retains its Callable owner")
+	gate.post()
+	check(coordinator.collect(request, true).get("data", {}) == {"value": 31}, "transient executor completes after caller releases it")
+	check(owner_ref.get_ref() == null, "collect releases the Callable owner")
+	executor = TransientExecutor.new()
+	owner_ref = weakref(executor)
+	gate = executor.gate
+	request = coordinator.submit("test", {"value": 32}, executor.run)
+	executor = null
+	coordinator.discard(request)
+	check(owner_ref.get_ref() != null, "discard retains an unfinished Callable owner")
+	gate.post()
+	coordinator.shutdown()
+	check(owner_ref.get_ref() == null, "shutdown releases the discarded Callable owner")
 	var source := {"nested": [{"value": 1}], "bytes": PackedByteArray([1, 2])}
 	var detached: Dictionary = Data.copy(source)
 	source["nested"][0]["value"] = 9

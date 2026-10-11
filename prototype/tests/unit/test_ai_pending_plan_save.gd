@@ -5,6 +5,9 @@ const Coordinator := preload("res://scripts/isolated_task_coordinator.gd")
 const Ai := preload("res://scripts/ai_player.gd")
 const Replay := preload("res://scripts/replay_system.gd")
 const Archive := preload("res://scripts/game_save_archive.gd")
+const Checkpoint := preload("res://scripts/game_checkpoint.gd")
+const World := preload("res://scripts/simulation_world.gd")
+const Controller := preload("res://scripts/game_controller.gd")
 var failures: Array[String] = []
 var captures := 0
 
@@ -19,7 +22,14 @@ func _initialize() -> void:
 	var expected: Dictionary = queue.records[0]["output"]
 	var saved := queue.canonical_state()
 	var codec := Replay.new()
-	var archive := Archive.create("fixture", {"players": []}, 5, "0".repeat(64), {}, [ai.canonical_state()], {}, {"ai_decisions": saved})
+	var world := World.new(Vector2i(12, 12))
+	var controller := Controller.new(world)
+	controller.tick_index = 5
+	controller.start_recording(1337, false)
+	var definition := {"players": [{"team": 2}]}
+	var checkpoint := Checkpoint.pack(Checkpoint.capture(world, controller, definition, {"size": world.map_size}))
+	var archive := Archive.create("fixture", definition, 5, String(checkpoint["sha256"]), controller.replay_recorder.to_dictionary(), [ai.canonical_state()], {}, {"ai_decisions": saved}, "Pending AI", checkpoint)
+	check(Archive.validate(archive).is_empty(), "pending plan uses a valid current checkpoint archive")
 	var persisted: Dictionary = JSON.parse_string(JSON.stringify(archive, "", true, true))
 	var saved_ai := Ai.new({"team": 2})
 	check(saved_ai.restore_state(codec.decode_variant(persisted["ai_states"])[0]) and saved_ai.canonical_state() == ai.canonical_state(), "AI archive preserves fractional state without hash quantization")
@@ -48,10 +58,11 @@ func _initialize() -> void:
 	uncaptured.begin([ai], 2, 10, Callable(self, "capture"))
 	check(Queue.new().restore_state(uncaptured.canonical_state(), [ai], 2, Callable(self, "capture")), "save during bounded capture can resume at its frozen boundary")
 	check(not Queue.new().restore_state(uncaptured.canonical_state(), [ai], 5, Callable(self, "capture")), "missing older facts cannot be silently rebuilt from a newer world")
-	check(Queue.new().restore_state({}, [ai], 5, Callable(self, "capture")), "older saves without a pending queue remain supported")
+	check(Queue.new().restore_state({}, [ai], 5, Callable(self, "capture")), "a current save without a pending queue remains valid")
 	queue.cancel(coordinator)
 	restored.cancel(coordinator)
 	coordinator.shutdown()
+	world.shutdown_derived_state()
 	for failure in failures: push_error(failure)
 	quit(0 if failures.is_empty() else 1)
 

@@ -2,6 +2,7 @@ class_name RoRNavigationGrid
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const ChangeJournal := preload("res://scripts/cell_change_journal.gd")
+const Footprint := preload("res://scripts/footprint.gd")
 
 var cache_epoch := 0
 var size: Vector2i
@@ -280,16 +281,63 @@ func is_walkable_for(cell: Vector2i, movement_domain: String = "land", restricti
 
 
 func is_position_walkable_for(position: Vector2, radius: float, movement_domain: String = "land", restriction_id: int = -1) -> bool:
-	if not is_walkable_for(Vector2i(floori(position.x), floori(position.y)), movement_domain, restriction_id):
+	var center := Vector2i(position.floor())
+	if not is_walkable_for(center, movement_domain, restriction_id):
 		return false
 	if radius <= 0.0001:
 		return true
-	return (
-		is_walkable_for(Vector2i(floori(position.x + radius), floori(position.y)), movement_domain, restriction_id)
-		and is_walkable_for(Vector2i(floori(position.x - radius), floori(position.y)), movement_domain, restriction_id)
-		and is_walkable_for(Vector2i(floori(position.x), floori(position.y + radius)), movement_domain, restriction_id)
-		and is_walkable_for(Vector2i(floori(position.x), floori(position.y - radius)), movement_domain, restriction_id)
-	)
+	var minimum := Vector2i(floori(position.x - radius), floori(position.y - radius))
+	var maximum := Vector2i(floori(position.x + radius), floori(position.y + radius))
+	var radius_squared := radius * radius
+	# Inspect every cell intersected by the circle, including diagonal cells
+	# and cells between its centre and perimeter for large hulls.
+	for y in range(minimum.y, maximum.y + 1):
+		for x in range(minimum.x, maximum.x + 1):
+			var cell := Vector2i(x, y)
+			if cell == center: continue
+			if Footprint.circle_cell_distance_squared(position, cell) < radius_squared and not is_walkable_for(cell, movement_domain, restriction_id):
+				return false
+	return true
+
+
+# Check the swept circle between arbitrary world-space endpoints. Sampling
+# selects candidate cells only; the collision test itself uses exact geometry.
+func is_segment_walkable_for(start: Vector2, finish: Vector2, radius: float, movement_domain: String = "land", restriction_id: int = -1) -> bool:
+	if not is_position_walkable_for(start, radius, movement_domain, restriction_id) or not is_position_walkable_for(finish, radius, movement_domain, restriction_id):
+		return false
+	var delta := finish - start
+	var steps := maxi(1, ceili(maxf(absf(delta.x), absf(delta.y))))
+	var margin := maxi(1, ceili(radius))
+	var visited: Dictionary = {}
+	var radius_squared := radius * radius
+	for index in range(steps + 1):
+		var center := Vector2i(start.lerp(finish, float(index) / float(steps)).floor())
+		for y in range(center.y - margin, center.y + margin + 1):
+			for x in range(center.x - margin, center.x + margin + 1):
+				var cell := Vector2i(x, y)
+				if visited.has(cell): continue
+				visited[cell] = true
+				if is_walkable_for(cell, movement_domain, restriction_id): continue
+				var distance := Footprint.segment_cell_distance_squared(start, finish, cell)
+				if distance < radius_squared or (radius <= 0.0001 and is_zero_approx(distance)):
+					return false
+	return true
+
+func is_footprint_escape_walkable_for(origin: Vector2, position: Vector2, radius: float, movement_domain: String = "land", restriction_id: int = -1) -> bool:
+	if not is_position_walkable_for(origin, 0.0, movement_domain, restriction_id) or not is_position_walkable_for(position, 0.0, movement_domain, restriction_id):
+		return false
+	var minimum := Vector2i(floori(position.x - radius), floori(position.y - radius))
+	var maximum := Vector2i(floori(position.x + radius), floori(position.y + radius))
+	var radius_squared := radius * radius
+	# Old saves may already overlap an obstacle. A retreat can retain an old
+	# overlap temporarily, but may never introduce a new obstructed cell.
+	for y in range(minimum.y, maximum.y + 1):
+		for x in range(minimum.x, maximum.x + 1):
+			var cell := Vector2i(x, y)
+			if Footprint.circle_cell_distance_squared(position, cell) < radius_squared and not is_walkable_for(cell, movement_domain, restriction_id):
+				if Footprint.circle_cell_distance_squared(origin, cell) >= radius_squared:
+					return false
+	return true
 
 
 func is_world_rect_walkable_for(minimum: Vector2, maximum: Vector2, margin: float, movement_domain: String = "land", restriction_id: int = -1) -> bool:

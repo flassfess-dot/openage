@@ -83,10 +83,10 @@ func test_foundation_observations() -> void:
 		var world = fixture()
 		var worker: Dictionary = world.add_unit(2, "villager", Vector2(6.5, 6.5), false)
 		var foundation: Dictionary = world.add_building(500, "house", Vector2(12.5, 12.5), 2)
-		foundation["state"] = "foundation"
-		foundation["builders"] = {}
-		worker["task"] = "build"
-		worker["target_building_id"] = 500
+		world.set_entity_field(foundation, "state", "foundation")
+		world.set_entity_field(foundation, "builders", {})
+		world.set_entity_field(worker, "task", "build")
+		world.set_entity_field(worker, "target_building_id", 500)
 		var options: Dictionary = make_ai(2).presentation_options()
 		options["include_navigation"] = false
 		var store := Store.new()
@@ -94,11 +94,11 @@ func test_foundation_observations() -> void:
 		check(world.builder_queries == 0, "assigned but walking builder needs no reachability search (retained=%s)" % retained)
 		check(not snapshot["buildings"][0].has("reachable_builder_ids"), "assigned foundation has no redundant builder list")
 		check(world.train_queries == 0 and world.research_queries == 0, "foundation never projects unusable production choices")
-		worker["task"] = "idle"
-		worker["target_building_id"] = -1
+		world.set_entity_field(worker, "task", "idle")
+		world.set_entity_field(worker, "target_building_id", -1)
 		snapshot = store.observe_with_queries(world, 40, 2, options) if retained else Snapshot.with_queries(world, 40, 2, options)
 		check(world.builder_queries == 1 and int(worker["id"]) in snapshot["buildings"][0].get("reachable_builder_ids", []), "abandoned foundation still receives reachable builders")
-		foundation["builders"][int(worker["id"])] = true
+		world.set_entity_field(foundation, "builders", {int(worker["id"]): true})
 		snapshot = store.observe_with_queries(world, 60, 2, options) if retained else Snapshot.with_queries(world, 60, 2, options)
 		check(world.builder_queries == 1 and not snapshot["buildings"][0].has("reachable_builder_ids"), "active foundation clears the previous recovery projection")
 

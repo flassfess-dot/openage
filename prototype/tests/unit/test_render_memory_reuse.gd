@@ -4,18 +4,22 @@ const Cache := preload("res://scripts/render_entity_projection_cache.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 const World := preload("res://scripts/simulation_world.gd")
 const Snapshot := preload("res://scripts/simulation_snapshot.gd")
+const Journal := preload("res://scripts/entity_change_journal.gd")
 var failures: Array[String] = []
 
 func _initialize() -> void:
 	var cache := Cache.new()
 	var live := {"id": 7, "entity_type": "resource", "pos": Vector2(5.5, 5.5), "amount": 100, "resource_type_id": 1, "path": [Vector2.ZERO]}
-	var memory := cache.project(live)
+	var journal := Journal.new()
+	journal.mark(7, Journal.ALL)
+	var memory := cache.project(live, journal)
 	check(Contract.is_render_record(memory) and not memory.has("path"), "resource memory is a compact readonly render record")
 	check(is_same(cache.project(memory), memory) and is_same(Contract.render(memory), memory), "reusing memory retains its exact record rather than rebuilding the schema")
 	live["amount"] = 50
-	var updated := cache.project(live)
+	journal.mark(7, Journal.ECONOMY)
+	var updated := cache.project(live, journal)
 	check(memory["amount"] == 100 and updated["amount"] == 50 and not is_same(memory, updated), "live updates replace records without changing remembered facts")
-	check(is_same(cache.project(memory), memory) and is_same(cache.project(live), updated), "projecting old fog memory does not overwrite the live entity cache")
+	check(is_same(cache.project(memory), memory) and is_same(cache.project(live, journal), updated), "projecting old fog memory does not overwrite the live entity cache")
 	var forged := {Contract.RENDER_SCHEMA_KEY: Contract.SCHEMA_VERSION, "object": RefCounted.new()}
 	forged.make_read_only()
 	check(not Data.is_detached(forged), "render schema never bypasses worker object isolation")
@@ -30,7 +34,7 @@ func _initialize() -> void:
 	check(first["resources"].size() == 1 and is_same(first["resources"][0], second["resources"][0]), "unchanged presentation ticks share already projected resources")
 	var known: Array = world.get_known_resources(1)
 	check(not known.is_empty() and is_same(known[0], second["resources"][0]), "resource fog memory and render publication share one immutable record")
-	tree["amount"] = 25
+	world.set_entity_field(tree, "amount", 25)
 	world.mark_known_resource_dirty(tree)
 	var third := Snapshot.presentation(world, 3, 1, options)
 	check(first["resources"][0]["amount"] == 75 and third["resources"][0]["amount"] == 25, "dirty resource replaces only its new publication")

@@ -19,7 +19,7 @@ func _initialize() -> void:
 	test_same_tick_command_order(catalog)
 	test_issue_tick_preserves_autonomous_sequence(catalog)
 	test_incremental_recording_preserves_both_orders()
-	test_legacy_replay_envelope_migration(catalog)
+	test_old_replay_formats_are_rejected(catalog)
 	test_cancel_production_round_trip()
 	test_resign_round_trip()
 	test_diplomacy_round_trip()
@@ -143,23 +143,23 @@ func test_incremental_recording_preserves_both_orders() -> void:
 	assert_equal(recorder.issuance_records.map(func(record): return int(record["issued_tick"])), [1, 2], "incremental replay index remains ordered by issuance tick")
 
 
-func test_legacy_replay_envelope_migration(catalog) -> void:
+func test_old_replay_formats_are_rejected(catalog) -> void:
 	var source := setup_match(catalog, 551)
 	var recorder = source["controller"].start_recording(551)
 	var unit_id := int(source["player_ids"][0])
 	source["controller"].enqueue_command(Commands.StopCommand.new(1, [unit_id]), true, 1)
 	source["controller"].enqueue_command(Commands.MoveCommand.new(1, [unit_id], Vector2(9.0, 7.0)), true, 1)
-	var legacy: Dictionary = recorder.to_dictionary().duplicate(true)
-	legacy["format_version"] = 1
-	for record in legacy["commands"]:
-		record.erase("issuer_id")
-		record.erase("sequence_id")
+	var current: Dictionary = recorder.to_dictionary().duplicate(true)
 	var loaded := ReplaySystem.new()
-	assert_true(loaded.load_dictionary(legacy), "legacy replay remains readable")
-	assert_equal(int(loaded.command_records[0]["sequence_id"]), 1, "legacy first record receives file-order sequence")
-	assert_equal(int(loaded.command_records[1]["sequence_id"]), 2, "legacy second record receives file-order sequence")
-	assert_equal(int(loaded.command_records[0]["issuer_id"]), 0, "legacy issuer uses neutral default")
-
+	assert_true(loaded.load_dictionary(current), "current replay remains readable")
+	for version in [1, 2, 3]:
+		var legacy: Dictionary = current.duplicate(true)
+		legacy["format_version"] = version
+		for record in legacy["commands"]:
+			record.erase("issuer_id")
+			record.erase("sequence_id")
+		assert_true(not loaded.load_dictionary(legacy), "old replay version %s is explicitly rejected" % version)
+		assert_equal(loaded.command_records, current["commands"], "rejected old replay leaves the current command history unchanged")
 
 func test_cancel_production_round_trip() -> void:
 	var recorder := ReplaySystem.new()

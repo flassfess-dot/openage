@@ -27,8 +27,8 @@ func _run() -> void:
 	var publication := Publication.new()
 	var previous: Array = []
 	for index in range(8):
-		building["construction_stage"] = index % 4
-		building["construction_progress"] = float(index % 4) / 4.0
+		world.set_entity_field(building, "construction_stage", index % 4)
+		world.set_entity_field(building, "construction_progress", float(index % 4) / 4.0)
 		var snapshot := Snapshot.with_queries(world, index, 1, {"compact_render_entities": true, "include_navigation": false, "include_build_sites": false, "borrow_visible_render_entities": true})
 		var captured: Dictionary = snapshot["buildings"][0]
 		var published := publication.publish(snapshot, [], coordinator)
@@ -46,8 +46,8 @@ func _run() -> void:
 			check(String(catalog.resource_frame_info(resource).get("asset_name", "")).begins_with("aoe2_temperate:"), "imported trees retain imported artwork")
 		previous.append(projected)
 		if index > 1: check(previous[0].get("construction_stage") == 0, "reusing publication slots cannot rewrite earlier foundation")
-	building["state"] = "complete"
-	building["hp"] = building["max_hp"]
+	world.set_entity_field(building, "state", "complete")
+	world.set_entity_field(building, "hp", building["max_hp"])
 	var snapshot := Snapshot.with_queries(world, 9, 1, {"compact_render_entities": true, "include_navigation": false, "include_build_sites": false})
 	var published := publication.publish(snapshot, [], coordinator)
 	check(published["buildings"][0].get("state") == "complete", "completed building leaves construction art")

@@ -19,7 +19,7 @@ func advance_tick(game) -> void:
 	game.sync_world_state()
 	game.process_presentation_events()
 
-const Projection := preload("res://scripts/minimap_projection.gd")
+const MinimapProjection := preload("res://scripts/minimap_projection.gd")
 const Aperture := preload("res://scripts/minimap_aperture.gd")
 const Fog := preload("res://scripts/fog_of_war.gd")
 const Replay := preload("res://scripts/replay_system.gd")
@@ -41,13 +41,13 @@ func _initialize() -> void:
 	var geometry: Dictionary = game.minimap_geometry()
 	var target := Vector2(-1, -1)
 	for candidate in [Vector2(25.5, 2.5), Vector2(22.5, 3.5), Vector2(19.5, 2.5)]:
-		var screen := Projection.world_to_minimap(candidate, geometry["center"], geometry["scale"])
+		var screen := MinimapProjection.world_to_minimap(candidate, geometry["center"], geometry["scale"])
 		if game.simulation_world.get_fog_of_war().state_at_world(1, candidate) == Fog.UNKNOWN and Aperture.contains(screen, geometry["rectangle"]):
 			target = candidate
 			break
 	check(target.x >= 0.0, "fixture contains an unknown point inside the minimap aperture")
 	if target.x >= 0.0:
-		var pointer := Projection.world_to_minimap(target, geometry["center"], geometry["scale"])
+		var pointer := MinimapProjection.world_to_minimap(target, geometry["center"], geometry["scale"])
 		var camera: Vector2 = game.view_offset
 		var count: int = game.game_controller.replay_recorder.command_records.size()
 		var click := InputEventMouseButton.new()
@@ -58,7 +58,7 @@ func _initialize() -> void:
 		check(game.game_controller.replay_recorder.command_records.size() == count + 1, "minimap emits exactly one squad order")
 		var record: Dictionary = game.game_controller.replay_recorder.command_records[-1]
 		check(record["type"] == "formation_move", "minimap uses the ordinary formation movement command")
-		var params: Dictionary = Replay.decode_variant(record["params"])
+		var params: Dictionary = Replay.new().decode_variant(record["params"])
 		check(Vector2(params["target"]).is_equal_approx(target), "command targets the clicked world location")
 		check(game.view_offset == camera, "right click preserves the camera")
 		advance_tick(game)
@@ -74,7 +74,7 @@ func _initialize() -> void:
 		click.shift_pressed = true
 		check(game.handle_minimap_input(click), "Shift + right minimap click is consumed")
 		var queued: Dictionary = game.game_controller.replay_recorder.command_records[-1]
-		var queued_params: Dictionary = Replay.decode_variant(queued["params"])
+		var queued_params: Dictionary = Replay.new().decode_variant(queued["params"])
 		check(queued["type"] == "move" and bool(queued_params.get("queue_order", false)), "Shift preserves the order queue contract")
 		advance_tick(game)
 		check(bool(game.game_controller.get_command_result(int(queued["sequence_id"])).get("accepted", false)), "queued minimap movement is accepted")

@@ -89,7 +89,7 @@ bool RoRPathKernel::install_connectivity(const PackedInt32Array &labels, double 
     for (int64_t i = 0; i < labels.size(); ++i) {
         if (labels[i] < -1 || labels[i] >= labels.size()) return false;
     }
-    radius = radius < 0.5 ? 0.0 : radius;
+    radius = radius <= 0.5 ? 0.0 : radius;
     uint64_t key = 0;
     std::memcpy(&key, &radius, sizeof(key));
     if (components_by_radius_.size() >= 16 && components_by_radius_.find(key) == components_by_radius_.end()) components_by_radius_.clear();
@@ -502,7 +502,7 @@ void RoRPathKernel::configure(int32_t width, int32_t height, int64_t revision, c
 // Connectivity uses precisely the same radius and corner rules as A*. Unknown
 // terrain remains optimistic because this kernel only receives observer masks.
 const std::vector<int32_t> &RoRPathKernel::components(double radius) {
-    radius = radius < 0.5 ? 0.0 : radius;
+    radius = radius <= 0.5 ? 0.0 : radius;
     uint64_t key = 0;
     std::memcpy(&key, &radius, sizeof(key));
     auto found = components_by_radius_.find(key);
@@ -561,7 +561,7 @@ Dictionary RoRPathKernel::group_points_by_component(const TypedArray<Vector2> &p
 
 bool RoRPathKernel::cells_connected(const Vector2i &start, const Vector2i &goal, double radius) {
     if (!is_configured() || !contains(start.x, start.y) || !contains(goal.x, goal.y)) return false;
-    double normalized_radius = radius < 0.5 ? 0.0 : radius;
+    double normalized_radius = radius <= 0.5 ? 0.0 : radius;
     uint64_t key = 0;
     std::memcpy(&key, &normalized_radius, sizeof(key));
     if (components_by_radius_.find(key) == components_by_radius_.end() &&
@@ -734,18 +734,7 @@ bool RoRPathKernel::cell_walkable(int32_t x, int32_t y) const {
 }
 
 bool RoRPathKernel::cell_walkable_for(int32_t x, int32_t y, double clearance_radius) const {
-    if (!cell_walkable(x, y)) {
-        return false;
-    }
-    if (clearance_radius <= 0.0001) {
-        return true;
-    }
-    const double center_x = static_cast<double>(x) + 0.5;
-    const double center_y = static_cast<double>(y) + 0.5;
-    return cell_walkable(static_cast<int32_t>(std::floor(center_x + clearance_radius)), y)
-        && cell_walkable(static_cast<int32_t>(std::floor(center_x - clearance_radius)), y)
-        && cell_walkable(x, static_cast<int32_t>(std::floor(center_y + clearance_radius)))
-        && cell_walkable(x, static_cast<int32_t>(std::floor(center_y - clearance_radius)));
+    return position_walkable(Vector2(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5), clearance_radius);
 }
 
 bool RoRPathKernel::can_step(int32_t current, int32_t next, double clearance_radius) const {
@@ -880,18 +869,26 @@ int64_t RoRPathKernel::movement_bucket_key(int32_t x, int32_t y) const {
 }
 
 bool RoRPathKernel::position_walkable(const Vector2 &position, double radius) const {
-    const int32_t x = static_cast<int32_t>(std::floor(position.x));
-    const int32_t y = static_cast<int32_t>(std::floor(position.y));
-    if (!cell_walkable(x, y)) {
-        return false;
+    const int32_t center_x = static_cast<int32_t>(std::floor(position.x));
+    const int32_t center_y = static_cast<int32_t>(std::floor(position.y));
+    if (!cell_walkable(center_x, center_y)) return false;
+    if (radius <= 0.0001) return true;
+    const int32_t min_x = static_cast<int32_t>(std::floor(position.x - radius));
+    const int32_t min_y = static_cast<int32_t>(std::floor(position.y - radius));
+    const int32_t max_x = static_cast<int32_t>(std::floor(position.x + radius));
+    const int32_t max_y = static_cast<int32_t>(std::floor(position.y + radius));
+    const double radius_squared = radius * radius;
+    // Match RoRNavigationGrid's circle-to-cell geometry, including diagonal
+    // overlaps and interior cells of large footprints. Tangency is legal.
+    for (int32_t y = min_y; y <= max_y; ++y) {
+        const double dy = std::max(std::max(static_cast<double>(y) - position.y, 0.0), static_cast<double>(position.y) - (y + 1.0));
+        for (int32_t x = min_x; x <= max_x; ++x) {
+            if (x == center_x && y == center_y) continue;
+            const double dx = std::max(std::max(static_cast<double>(x) - position.x, 0.0), static_cast<double>(position.x) - (x + 1.0));
+            if (dx * dx + dy * dy < radius_squared && !cell_walkable(x, y)) return false;
+        }
     }
-    if (radius <= 0.0001) {
-        return true;
-    }
-    return cell_walkable(static_cast<int32_t>(std::floor(position.x + radius)), y)
-        && cell_walkable(static_cast<int32_t>(std::floor(position.x - radius)), y)
-        && cell_walkable(x, static_cast<int32_t>(std::floor(position.y + radius)))
-        && cell_walkable(x, static_cast<int32_t>(std::floor(position.y - radius)));
+    return true;
 }
 
 Vector2 RoRPathKernel::walkable_alternative(int32_t unit_id, const Vector2 &desired, const Vector2 &position, double speed, double delta, double radius) const {

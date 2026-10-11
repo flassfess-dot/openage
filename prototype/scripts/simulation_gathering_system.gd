@@ -237,9 +237,9 @@ func chop_tree(tree: Dictionary, worker: Dictionary) -> void:
 	# Original trees have their own HP. Wood is harvested only after felling.
 	var damage := maxf(1.0, float(worker.get("attack_damage", 3.0)))
 	world.set_entity_field(tree, "hp", maxf(0.0, float(tree.get("hp", 25.0)) - damage))
-	tree["tree_phase"] = "chopping" if float(tree["hp"]) > 0.0 else "falling"
+	world.set_entity_field(tree, "tree_phase", "chopping" if float(tree["hp"]) > 0.0 else "falling")
 	if float(tree["hp"]) <= 0.0:
-		tree["tree_fall_elapsed"] = 0.0
+		world.set_entity_field(tree, "tree_fall_elapsed", 0.0)
 		world.falling_resource_nodes.append(tree)
 		world.emit_domain_event("tree_felled", {"resource_id": int(tree["id"]), "worker_id": int(worker["id"])})
 	EntityComponents.sync_dynamic(tree)
@@ -249,9 +249,9 @@ func chop_tree(tree: Dictionary, worker: Dictionary) -> void:
 func advance_falling_trees(delta: float) -> void:
 	for index in range(world.falling_resource_nodes.size() - 1, -1, -1):
 		var tree: Dictionary = world.falling_resource_nodes[index]
-		tree["tree_fall_elapsed"] = float(tree.get("tree_fall_elapsed", 0.0)) + maxf(0.0, delta)
+		world.set_entity_field(tree, "tree_fall_elapsed", float(tree.get("tree_fall_elapsed", 0.0)) + maxf(0.0, delta))
 		if float(tree["tree_fall_elapsed"]) >= float(tree.get("tree_fall_duration", 0.65)):
-			tree["tree_phase"] = "felled" if int(tree.get("amount", 0)) > 0 else "stump"
+			world.set_entity_field(tree, "tree_phase", "felled" if int(tree.get("amount", 0)) > 0 else "stump")
 			world.falling_resource_nodes.remove_at(index)
 		world.mark_known_resource_dirty(tree)
 

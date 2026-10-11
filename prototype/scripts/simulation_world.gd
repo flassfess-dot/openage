@@ -1310,6 +1310,8 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	# The regular fixed-tick pipeline prepares activity before entering this
 	# method. Keep the public method self-contained as well: scenarios, tools and
 	# compatibility callers are allowed to advance unit orders directly.
+	if not unit_activity_registry.tick_prepared:
+		unit_activity_registry.synchronize(self)
 	unit_activity_registry.ensure_tick(units, delta)
 	var probe: Variant = tick_pipeline.performance_probe
 	movement_neighbor_query_microseconds = 0

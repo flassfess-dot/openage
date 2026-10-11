@@ -11,6 +11,9 @@ class Job extends RefCounted:
 	var envelope: Dictionary = {}
 	var input: Dictionary = {}
 	var action: Callable
+	# Callable does not keep a RefCounted executor alive. Retain it until the
+	# completion barrier, including while a discarded job is still running.
+	var action_owner: RefCounted
 	var result: Dictionary = {}
 	var task_id := -1
 
@@ -60,6 +63,7 @@ func submit(kind: String, input: Dictionary, action: Callable, source_tick: int 
 	job.envelope = {"kind": kind, "request_id": request_id, "generation": generation, "source_tick": source_tick, "apply_tick": apply_tick, "revisions": Data.copy(revisions)}
 	job.input = input if take_ownership else Data.copy(input)
 	job.action = action
+	job.action_owner = action.get_object() as RefCounted
 	job.task_id = WorkerThreadPool.add_task(job.run, false, "RoR " + kind)
 	if job.task_id < 0:
 		rejected_count += 1

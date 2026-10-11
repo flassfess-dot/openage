@@ -14,7 +14,9 @@ Gate не разрешает переносить устаревшие поис�
 - `EMPIRESX.EXE`: SHA-256 `b5bc3050ee50cf1b548d21da0509bf5bbe8904eb766705084ab8a2fcdf6d8a9f`.
 - `data2/empires.dat`: SHA-256 `d47c59d9ecaf5b83b467c647a69d28eced6a0dc5b2fa873e930c86136df5eb9d`.
 - Машинный контракт: `res://data/parity/naval_executable_gate.json`.
-- Современный RGBA-эталон: `res://qa/golden/naval-presentations.png`, file SHA-256 `61a90b6e50f3b96438c8271ac0ac4e7c6550af05371f3a6c9d8e7c3ee933eb58`.
+- Современный RGBA-эталон: `res://qa/golden/naval-presentations.png`, file SHA-256 `711e6bef4241f12ddfbb7fc1cf5ed3c238f17192805e6f5842bc48c22192f13a`.
+
+Современный эталон содержит исправленные юго-восточные направления кораблей из изменения 9886d491. Его пиксели сверяются с независимым набором исходных кадров в test_naval_presentation_golden.gd.
 
 Абсолютный путь локальной установки намеренно не сохраняется: gate переносим и идентифицирует эталон содержимым, а не расположением на одном ПК.
 

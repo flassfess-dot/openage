@@ -62,11 +62,11 @@ func test_hash_covers_authoritative_subsystems() -> void:
 func test_builder_presentation_projection() -> void:
 	var world = SimulationWorld.new(Vector2i(12, 12))
 	var worker: Dictionary = world.add_unit(1, "villager", Vector2(4.0, 4.0), false)
-	worker["anim_state"] = "Build"
-	worker["presentation_state_overrides"] = {"Build": "builder_work"}
+	world.set_entity_field(worker, "anim_state", "Build")
+	world.set_entity_field(worker, "presentation_state_overrides", {"Build": "builder_work"})
 	var selected: Dictionary = SimulationSnapshot._compact_control_entity(worker, 1, Callable(world, "compact_render_projection"))
 	assert_equal(selected.get("presentation_state_overrides", {}).get("Build", ""), "builder_work", "selected builders retain the work clip override")
-	worker["presentation_state_overrides"] = {"Gather": "forager_work"}
+	world.set_entity_field(worker, "presentation_state_overrides", {"Gather": "forager_work"})
 	var updated: Dictionary = world.compact_render_projection(worker)
 	assert_true(not updated.get("presentation_state_overrides", {}).has("Build"), "render cache updates a worker's changed task profile")
 
@@ -119,7 +119,7 @@ func test_navigation_cache_reachable_domain_switch() -> void:
 	var world = SimulationWorld.new(Vector2i(12, 8))
 	world.navigation_grid.configure_terrain(func(cell): return "water" if cell.x in [1, 2, 8, 9] else "grass")
 	var ship: Dictionary = world.add_unit(1, "clubman", Vector2(1.5, 3.5), false)
-	ship["movement_domain"] = "water"
+	world.set_entity_field(ship, "movement_domain", "water")
 	var fog = world.get_fog_of_war()
 	for x in [1, 2, 8, 9]:
 		fog.reveal_explored_cell(1, Vector2i(x, 3))
@@ -128,7 +128,7 @@ func test_navigation_cache_reachable_domain_switch() -> void:
 	var first: Dictionary = SimulationSnapshot.with_queries(world, 1, 1, options)["navigation"]
 	assert_true(Vector2(1.5, 3.5) in first["reachable"]["water"], "ship reaches its own water component")
 	assert_true(Vector2(8.5, 3.5) not in first["reachable"]["water"], "distant island is not falsely reachable")
-	ship["pos"] = Vector2(8.5, 3.5)
+	world.set_entity_field(ship, "pos", Vector2(8.5, 3.5))
 	var moved: Dictionary = SimulationSnapshot.with_queries(world, 2, 1, options)["navigation"]
 	assert_true(Vector2(8.5, 3.5) in moved["reachable"]["water"], "moving between disconnected domains updates reachability")
 	assert_true(Vector2(1.5, 3.5) not in moved["reachable"]["water"], "old water component loses reachability")
@@ -206,11 +206,15 @@ func test_presentation_snapshot_is_filtered_and_detached() -> void:
 	assert_equal(render_enemy.get("pos"), visible_enemy.get("pos"), "compact render projection retains the entity anchor")
 	var original_selection_radius: Variant = visible_enemy.get("footprint", {}).get("selection_radius")
 	assert_true(render_enemy["footprint"].is_read_only(), "published compact footprints are immutable")
-	visible_enemy["footprint"]["selection_radius"] = Vector2(99.0, 99.0)
+	var changed_footprint: Dictionary = visible_enemy["footprint"].duplicate(true)
+	changed_footprint["selection_radius"] = Vector2(99.0, 99.0)
+	world.set_entity_field(visible_enemy, "footprint", changed_footprint)
 	var refreshed_enemy: Dictionary = world.compact_render_projection(visible_enemy)
 	assert_equal(render_enemy["footprint"]["selection_radius"], original_selection_radius, "live footprint changes preserve the previous compact render snapshot")
 	assert_equal(refreshed_enemy["footprint"]["selection_radius"], Vector2(99.0, 99.0), "new compact render snapshot receives the changed footprint")
-	visible_enemy["footprint"]["selection_radius"] = original_selection_radius
+	changed_footprint = visible_enemy["footprint"].duplicate(true)
+	changed_footprint["selection_radius"] = original_selection_radius
+	world.set_entity_field(visible_enemy, "footprint", changed_footprint)
 	snapshot["player_state"]["food"] = 0
 	snapshot["fog"]["cells"][0] = 99
 	assert_equal(world.get_food(), 180, "player economy snapshot is detached")
@@ -242,7 +246,7 @@ func test_known_resource_cache_tracks_incremental_exploration() -> void:
 	assert_true(int(first["id"]) in initial_ids, "initial resource cache includes explored resources")
 	assert_true(int(second["id"]) not in initial_ids, "initial resource cache excludes unknown resources")
 
-	scout["pos"] = Vector2(23.0, 24.0)
+	world.set_entity_field(scout, "pos", Vector2(23.0, 24.0))
 	world.update_fog_of_war()
 	var expanded_ids: Array = world.get_known_resources(1).map(func(resource): return int(resource["id"]))
 	assert_true(int(first["id"]) in expanded_ids, "resource cache preserves explored resources outside current vision")
@@ -264,9 +268,9 @@ func test_known_resource_memory_freezes_under_fog() -> void:
 	assert_equal(initial_memory.size(), 1, "visible resource enters exploration memory")
 	assert_equal(int(initial_memory[0].get("amount", -1)), 75, "resource memory captures the observed amount")
 
-	scout["pos"] = Vector2(24.0, 24.0)
+	world.set_entity_field(scout, "pos", Vector2(24.0, 24.0))
 	world.update_fog_of_war()
-	gold["amount"] = 0
+	world.set_entity_field(gold, "amount", 0)
 	world.update_resource_state(gold)
 	var hidden_memory: Array = world.get_known_resources(1).filter(func(resource): return int(resource.get("id", -1)) == int(gold["id"]))
 	assert_equal(hidden_memory.size(), 1, "depleted resource remains remembered while its cell is fogged")
@@ -279,7 +283,7 @@ func test_known_resource_memory_freezes_under_fog() -> void:
 	var restored_memory: Array = world.get_known_resources(1).filter(func(resource): return int(resource.get("id", -1)) == int(gold["id"]))
 	assert_equal(int(restored_memory[0].get("amount", -1)), 75, "save/load view state preserves frozen resource memory")
 
-	scout["pos"] = Vector2(4.0, 4.0)
+	world.set_entity_field(scout, "pos", Vector2(4.0, 4.0))
 	world.update_fog_of_war()
 	var revealed_again: Array = world.get_known_resources(1).filter(func(resource): return int(resource.get("id", -1)) == int(gold["id"]))
 	assert_true(revealed_again.is_empty(), "depleted resource disappears only after the cell becomes visible again")

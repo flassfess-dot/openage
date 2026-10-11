@@ -27,6 +27,21 @@ func configure_source(world) -> void:
 		source_epoch = -1
 		pending_motion.clear()
 
+# Rebase journal cursors after checkpoint replacement. Cached source positions
+# preserve deferred motion; a full refresh here would advance fog early.
+func restore_source_tracking(world) -> void:
+	world_ref = weakref(world)
+	world.entity_changes.flush()
+	source_cursor = world.entity_changes.revision
+	source_epoch = world.entity_changes.epoch
+	pending_motion.clear()
+	for key in fog.vision_sources:
+		if int(key) & 1: continue
+		var source: Dictionary = fog.vision_sources[key]
+		var unit: Variant = world.find_unit(int(key) >> 1)
+		if unit != null and not Vector2(source["center"]).is_equal_approx(Vector2(unit["pos"])):
+			pending_motion[int(unit["id"])] = true
+
 func advance(context: Dictionary = {}) -> void:
 	var world: Variant = world_ref.get_ref() if world_ref != null else null
 	if world == null:

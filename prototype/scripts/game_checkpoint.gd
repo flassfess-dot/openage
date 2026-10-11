@@ -313,4 +313,5 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	world.restore_last_known_buildings(data["observation_memory"]["buildings"])
 	world.restore_known_resource_memory(data["observation_memory"]["resources"])
 	_restore_runtime(data["runtime"], world, controller, entities)
+	world.visibility_system.restore_source_tracking(world)
 	return true
