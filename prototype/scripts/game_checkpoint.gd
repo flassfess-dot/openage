@@ -244,6 +244,9 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	world.ai_build_capture_cache.clear()
 	world.render_entity_projection_cache.clear()
 	world.rebuild_entity_change_tracking()
+	# Connectivity is derived from owner and source type. Older checkpoints
+	# may contain masks computed across different wall levels.
+	world.refresh_building_connectivity()
 	world.terrain_elevation.revision += 1
 	world.terrain_elevation.nonzero_vertex_count = 0
 	world.terrain_elevation.maximum_vertex_level = 0

@@ -47,8 +47,17 @@ func _initialize() -> void:
 			var before: int = game.game_controller.command_queue.size()
 			game.handle_input_action({"type": "selection_committed", "from": game.world_to_screen(start), "to": game.world_to_screen(start + Vector2(2, 0)), "queue_order": false})
 			var added: int = game.game_controller.command_queue.size() - before
-			if added != 5:
-				failures.append("three-cell drag must enqueue three foundations and two builder follow-ups, got %d" % added)
+			if added != 1:
+				failures.append("three-cell drag must enqueue one complete wall plan, got %d" % added)
+			game.game_controller.tick_index += 1
+			game.game_controller.process_commands()
+			for offset in range(3):
+				var found := false
+				for building in game.simulation_world.get_buildings():
+					if String(building.get("kind", "")) == "wall" and Vector2(building["pos"]).distance_squared_to(start + Vector2(offset, 0)) < 0.01:
+						found = true
+				if not found:
+					failures.append("wall gesture must reserve every legal foundation")
 			if not game.pending_build_kind.is_empty():
 				failures.append("unshifted wall drag exits placement mode")
 	game.free()

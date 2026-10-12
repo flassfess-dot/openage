@@ -12,6 +12,10 @@ const TacticalPlanner := preload("res://scripts/ai_tactical_planner.gd")
 const TransportPlanner := preload("res://scripts/ai_transport_planner.gd")
 const SupportPlanner := preload("res://scripts/ai_support_planner.gd")
 const Commands := preload("res://scripts/commands.gd")
+const StrategyState := preload("res://scripts/ai_strategy_state.gd")
+const AdaptiveEconomy := preload("res://scripts/ai_adaptive_economy.gd")
+const PlanBudget := preload("res://scripts/ai_plan_budget.gd")
+const Operations := preload("res://scripts/ai_operations.gd")
 
 var team: int
 var enabled: bool
@@ -40,6 +44,11 @@ var next_source_assignment_group_id: int = 1
 var source_city_plan
 var failed_gather_targets: Dictionary = {}
 var navigation_policy := NavigationPolicy.new()
+var strategy := StrategyState.new()
+var operations := Operations.new()
+var failed_gather_expiry: Dictionary = {}
+var failed_gather_seen: Dictionary = {}
+var last_gather_topology: Variant = null
 
 
 func _init(player_definition: Dictionary) -> void:
@@ -74,6 +83,10 @@ func _init(player_definition: Dictionary) -> void:
 		"tribute_reserve": maxi(0, int(settings.get("tribute_reserve", 0))),
 		"tribute_cooldown_ticks": maxi(1, int(settings.get("tribute_cooldown_ticks", 600))),
 	}
+	# Keep policy extensions in captured definitions; normalized legacy fields win.
+	var normalized := economic_policy
+	economic_policy = settings.duplicate(true)
+	economic_policy.merge(normalized, true)
 	source_contract = player_definition.get("source_ai", {}).duplicate(true)
 	source_city_plan = SourceCityPlan.new(team)
 
@@ -162,6 +175,9 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 				command.unit_ids = ids
 				filtered.append(command)
 		return filtered
+	if bool(economic_policy.get("adaptive_strategy", false)):
+		result.append_array(_collect_adaptive(snapshot, next_tick, navigation_reserved))
+		return result
 	var skirmish_reserved_ids: Dictionary = navigation_reserved
 	if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
 		_remember_failed_gather_targets(snapshot)
@@ -211,6 +227,98 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 	return result
 
 
+func _collect_adaptive(snapshot: Dictionary, next_tick: int, reserved: Dictionary) -> Array:
+	strategy.observe(snapshot, team, economic_policy)
+	var goal: Dictionary = strategy.choose_goal(snapshot, team, economic_policy, decision_index)
+	decision_index += 1
+	var owned := AdaptiveEconomy.own(snapshot.get("buildings", []), team)
+	var budget := PlanBudget.new(snapshot.get("player_state", {}), owned)
+	var result: Array = []
+	if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
+		_expire_failed_gathers(snapshot)
+		_remember_failed_gather_targets(snapshot)
+		var policy := economic_policy.duplicate()
+		policy["failed_gather_targets"] = failed_gather_targets
+		result.append_array(AdaptiveEconomy.plan(snapshot, next_tick, team, policy, strategy, budget, reserved))
+		var support_snapshot := snapshot.duplicate()
+		support_snapshot["units"] = snapshot.get("units", []).filter(func(u): return not reserved.has(int(u.get("id", -1))))
+		# Repair costs are charged over time. Keep a wood reserve before assigning
+		# repair work; authoritative simulation still charges every repair step.
+		var support: Array = SupportPlanner.plan(support_snapshot, next_tick, team, economic_policy, strategy)
+		for command in support:
+			if String(command.command_type()) == "repair" and int(budget.remaining.get(1, 0)) < int(economic_policy.get("repair_wood_reserve", 60)): continue
+			result.append(command)
+			for id in command.unit_ids: reserved[int(id)] = true
+		var previous_tribute_tick := last_tribute_tick
+		var tribute: Variant = _plan_tribute(snapshot, next_tick)
+		if tribute != null:
+			var cost := {int(tribute.params.get("resource_type_id", -1)): int(tribute.params.get("amount", 0))}
+			if budget.reserve(cost):
+				tribute.params["_ai_feedback"] = {"key": "tribute", "cost": cost}
+				result.append(tribute)
+			else: last_tribute_tick = previous_tribute_tick
+		last_economic_tick = next_tick
+	if last_military_tick < 0 or next_tick - last_military_tick >= military_interval:
+		var responding := String(goal.get("type", "")) == "defend"
+		var attack_allowed := responding or (next_tick >= initial_attack_delay and (last_attack_tick < 0 or next_tick - last_attack_tick >= attack_separation))
+		goal["landing_threats"] = strategy.enemies(int(snapshot.get("tick", 0)), economic_policy)
+		goal["expeditions"] = strategy.expeditions
+		goal["minimum_landing_group"] = minimum_attack_group_size
+		goal["minimum_naval_escort"] = int(economic_policy.get("minimum_naval_escort", 2))
+		goal["landing_danger_limit"] = float(economic_policy.get("landing_danger_limit", 12.0))
+		if attack_allowed:
+			var transport: Array = TransportPlanner.plan(snapshot, next_tick, team, goal, formation_name, reserved)
+			result.append_array(transport)
+			for command in transport:
+				for id in command.unit_ids: reserved[int(id)] = true
+		for unit in snapshot.get("units", []):
+			if int(unit.get("team", 0)) == team and String(unit.get("task", "")) == "board": reserved[int(unit["id"])] = true
+		var policy := economic_policy.duplicate()
+		policy["minimum_attack_group_size"] = minimum_attack_group_size
+		policy["maximum_attack_group_size"] = maximum_attack_group_size
+		var military: Array = operations.plan(snapshot, next_tick, team, goal, policy, strategy, reserved, formation_name, attack_allowed)
+		result.append_array(military)
+		if military.any(func(c): return String(c.command_type()) == "attack_move") and last_attack_tick < 0: last_attack_tick = next_tick
+		last_military_tick = next_tick
+	return result
+
+
+func collect_feedback(controller, tick: int) -> void:
+	if bool(economic_policy.get("adaptive_strategy", false)):
+		strategy.feedback(controller, team, tick, economic_policy)
+
+
+func register_proposal(command, metadata: Dictionary = {}) -> void:
+	if bool(economic_policy.get("adaptive_strategy", false)):
+		strategy.register(command, metadata if not metadata.is_empty() else {"key": String(command.command_type()) + ":" + str(command.unit_ids), "cost": {}})
+
+
+func _expire_failed_gathers(snapshot: Dictionary) -> void:
+	var tick := int(snapshot.get("tick", 0))
+	var alive: Dictionary = {}
+	for unit in snapshot.get("units", []):
+		if int(unit.get("team", 0)) != team: continue
+		alive[int(unit["id"])] = true
+		for id in unit.get("components", {}).get("cargo", {}).get("passenger_ids", []): alive[int(id)] = true
+	for worker in failed_gather_seen.keys():
+		if not alive.has(int(worker)):
+			failed_gather_seen.erase(worker)
+			failed_gather_expiry.erase(worker)
+			failed_gather_targets.erase(worker)
+	var navigation: Dictionary = snapshot.get("navigation", {})
+	var topology: Variant = hash([navigation.get("land", []), navigation.get("water", []), navigation.get("reachable", {})])
+	if topology != null and last_gather_topology != null and topology != last_gather_topology:
+		failed_gather_targets.clear()
+		failed_gather_expiry.clear()
+	last_gather_topology = topology
+	for worker in failed_gather_expiry.keys():
+		for resource in failed_gather_expiry[worker].keys():
+			if tick >= int(failed_gather_expiry[worker][resource]):
+				failed_gather_expiry[worker].erase(resource)
+				if failed_gather_targets.has(worker): failed_gather_targets[worker].erase(resource)
+		if failed_gather_expiry[worker].is_empty(): failed_gather_expiry.erase(worker)
+
+
 func _remember_failed_gather_targets(snapshot: Dictionary) -> void:
 	if not failed_gather_targets.is_empty():
 		var live_workers: Dictionary = {}
@@ -222,9 +330,15 @@ func _remember_failed_gather_targets(snapshot: Dictionary) -> void:
 		for resource_value in snapshot.get("resources", []):
 			if int(resource_value.get("amount", 0)) > 0:
 				available_resources[int(resource_value.get("id", -1))] = true
+		if bool(economic_policy.get("adaptive_strategy", false)):
+			for building in snapshot.get("buildings", []):
+				if int(building.get("team", 0)) == team and bool(building.get("harvestable", false)) and int(building.get("amount", 0)) > 0:
+					available_resources[int(building.get("id", -1))] = true
 		for worker_id_value in failed_gather_targets.keys():
 			if not live_workers.has(int(worker_id_value)):
 				failed_gather_targets.erase(worker_id_value)
+				failed_gather_expiry.erase(worker_id_value)
+				failed_gather_seen.erase(worker_id_value)
 				continue
 			var failures: Dictionary = failed_gather_targets[worker_id_value]
 			for resource_id_value in failures.keys():
@@ -244,6 +358,15 @@ func _remember_failed_gather_targets(snapshot: Dictionary) -> void:
 			continue
 		var worker_id := int(unit.get("id", -1))
 		var failures: Dictionary = failed_gather_targets.get(worker_id, {})
+		if bool(economic_policy.get("adaptive_strategy", false)):
+			var expiry: Dictionary = failed_gather_expiry.get(worker_id, {})
+			# A completed order remains visible after failure. Remember its path
+			# request so it cannot renew the blacklist on every observation.
+			var token := [target_id, int(unit.get("path_request_id", 0))]
+			if failed_gather_seen.get(worker_id, []) == token: continue
+			failed_gather_seen[worker_id] = token
+			expiry[target_id] = int(snapshot.get("tick", 0)) + int(economic_policy.get("gather_retry_ticks", 200))
+			failed_gather_expiry[worker_id] = expiry
 		failures[target_id] = true
 		failed_gather_targets[worker_id] = failures
 
@@ -335,7 +458,11 @@ func presentation_options() -> Dictionary:
 	# the skirmish planners. Keep their observation contract equally explicit so
 	# imported or future fallback profile names never regress to the expensive
 	# presentation defaults.
+	var known_positions: Dictionary = {}
+	if bool(economic_policy.get("adaptive_strategy", false)):
+		for id in strategy.memory: known_positions[int(id)] = strategy.memory[id]["entity"].get("pos", Vector2.ZERO)
 	return {
+		"ai_memory_positions": known_positions,
 		"compact_entities": true,
 		"include_navigation": true,
 		"include_build_sites": false,
@@ -346,9 +473,11 @@ func presentation_options() -> Dictionary:
 		"requested_build_site_kinds": economic_policy.get("construction_priorities", []).duplicate(),
 		"build_site_filter": Callable(self, "_construction_site_kinds"),
 		"build_site_filter_navigation": true,
-		"build_site_candidate_filter": Callable(self, "_has_usable_build_site"),
+		"build_site_candidate_filter": Callable() if bool(economic_policy.get("adaptive_strategy", false)) else Callable(self, "_has_usable_build_site"),
 		"build_site_cache_ticks": 1200,
 		"economic_production_options_only": true,
+		"include_ai_profiles": bool(economic_policy.get("adaptive_strategy", false)),
+		"build_site_filter_snapshot": bool(economic_policy.get("adaptive_strategy", false)),
 		"recover_abandoned_foundations_only": true,
 		"planning_technology_ids": economic_policy.get("age_advance_technology_ids", []).duplicate(),
 		"maximum_build_sites_per_kind": 12,
@@ -361,7 +490,11 @@ func _source_construction_site_kinds(kinds: Array, units: Array, buildings: Arra
 	return SourceCampaignPlanner.construction_site_kinds(kinds, units, buildings, player_state, team, source_contract)
 
 
-func _construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary, navigation: Dictionary = {}) -> Array:
+func _construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary, navigation: Dictionary = {}, snapshot: Dictionary = {}) -> Array:
+	if bool(economic_policy.get("adaptive_strategy", false)):
+		var facts := snapshot.duplicate()
+		facts.merge({"units": units, "buildings": buildings, "player_state": player_state, "navigation": navigation}, true)
+		return AdaptiveEconomy.site_kinds(kinds, facts, team, economic_policy, strategy)
 	return EconomicPlanner.construction_site_kinds(kinds, units, buildings, player_state, team, economic_policy, navigation)
 
 
@@ -415,11 +548,21 @@ func canonical_state() -> Dictionary:
 		"source_assignment_groups": assignment_groups,
 		"failed_gather_targets": failed_gathers,
 		"navigation_failures": navigation_policy.canonical_state(),
+		"adaptive_strategy": strategy.canonical_state(),
+		"adaptive_operations": operations.canonical_state(),
+		"failed_gather_expiry": failed_gather_expiry.duplicate(true),
+		"last_gather_topology": last_gather_topology,
+		"failed_gather_seen": failed_gather_seen.duplicate(true),
 		"source_city_plan": source_city_plan.canonical_state() if source_city_plan != null else {},
 	}
 
 
 func restore_state(data: Dictionary) -> bool:
+	if data.has("adaptive_strategy") and not strategy.restore_state(data["adaptive_strategy"]): return false
+	if data.has("adaptive_operations") and not operations.restore_state(data["adaptive_operations"], team): return false
+	failed_gather_expiry = data.get("failed_gather_expiry", {}).duplicate(true)
+	last_gather_topology = data.get("last_gather_topology")
+	failed_gather_seen = data.get("failed_gather_seen", {}).duplicate(true)
 	if not navigation_policy.restore_state(data.get("navigation_failures", [])):
 		return false
 	if int(data.get("team", team)) != team or String(data.get("profile", profile)) != profile:

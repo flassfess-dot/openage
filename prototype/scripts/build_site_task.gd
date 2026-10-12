@@ -111,7 +111,7 @@ static func capture(world, team: int, kinds: Array) -> Dictionary:
 	for id in cache["buildings"].keys():
 		if not seen_buildings.has(id): _erase_actor(cache, id)
 	var planner = world.movement_system.knowledge.planner(world, team)
-	return {"navigation": planner.detached_task_topology(), "native_enabled": planner.native_enabled, "profiles": profiles, "configured": world.data_repository.is_configured(), "researched": researched, "workers": workers, "buildings": structures, "mobile_cells": mobile_cells, "fog": world.get_fog_of_war().states_by_player[team].duplicate()}
+	return {"navigation": capture_build_topology(world, cache, planner), "native_enabled": planner.native_enabled, "profiles": profiles, "configured": world.data_repository.is_configured(), "researched": researched, "workers": workers, "buildings": structures, "mobile_cells": mobile_cells, "fog": world.get_fog_of_war().states_by_player[team].duplicate()}
 
 
 static func calculate_queries(base: Dictionary, queries: Array, coordinator, tick: int, source_planner = null, probe = null) -> Array:
@@ -400,3 +400,16 @@ static func _retain_actor(cache: Dictionary, category: String, id: int, record: 
 	cache[category][id] = record
 	cache["retained"][id] = {"category": category, "bytes": bytes}
 	cache["bytes"] = int(cache["bytes"]) + bytes
+
+
+static func capture_build_topology(world, cache: Dictionary, planner) -> Dictionary:
+	var started := Time.get_ticks_usec() if world.tick_pipeline.performance_probe != null else 0
+	if cache.get("topology_source") != planner.grid:
+		cache["topology_source"] = planner.grid
+		cache["topology_generation"] = int(cache.get("topology_generation", -1)) + 1
+		cache.erase("topology")
+	var topology := NavigationData.capture_chunked(planner.grid, cache.get("topology", {}), int(cache["topology_generation"]))
+	cache["topology"] = topology
+	if world.tick_pipeline.performance_probe != null:
+		world.tick_pipeline.performance_probe.observe_microseconds("navigation.task_topology.capture", Time.get_ticks_usec() - started)
+	return topology

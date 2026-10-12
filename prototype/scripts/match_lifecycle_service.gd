@@ -30,6 +30,16 @@ func restore(path: String, new_world: Callable, new_players: Callable, configure
 		if not states.has(int(ai.team)) or not ai.restore_state(states[int(ai.team)]): return _failed(world, "ai_state_invalid:%d" % int(ai.team))
 	var decisions := Decisions.new()
 	var saved_controller: Dictionary = archive["controller_state"]
+	var expected_feedback: Dictionary = {}
+	for ai in players:
+		for entry in ai.strategy.pending: expected_feedback[int(entry["sequence"])] = int(ai.team)
+	var saved_feedback: Variant = saved_controller.get("ai_feedback_results", [])
+	if not saved_feedback is Array or saved_feedback.size() > expected_feedback.size(): return _failed(world, "ai_feedback_invalid")
+	for result in saved_feedback:
+		if not result is Dictionary: return _failed(world, "ai_feedback_invalid")
+		var sequence := int(result.get("sequence_id", -1))
+		if not expected_feedback.has(sequence) or int(result.get("issuer_id", -1)) != int(expected_feedback[sequence]) or int(result.get("applied_tick", -1)) < 0 or int(result.get("applied_tick", -1)) > controller.tick_index or controller.command_results.has(sequence): return _failed(world, "ai_feedback_invalid")
+		controller.command_results[sequence] = result.duplicate(true)
 	if not saved_controller.get("ai_decisions", {}) is Dictionary or not decisions.restore_state(saved_controller.get("ai_decisions", {}), players, controller.tick_index, capture_ai): return _failed(world, "ai_decision_state_invalid")
 	var sound_history := SoundHistory.new()
 	if not sound_history.restore_state(archive["view_state"]["sound_cue_history"], int(archive["tick"])): return _failed(world, "sound_cue_history_invalid")
@@ -44,6 +54,12 @@ func capture_save(world, controller, players: Array, decisions, path: String, sl
 	for ai in players: ai_states.append(ai.canonical_state())
 	runtime = runtime.duplicate()
 	runtime["ai_decisions"] = decisions.canonical_state()
+	var feedback: Array = []
+	for ai in players:
+		for entry in ai.strategy.pending:
+			var result: Dictionary = controller.get_command_result(int(entry["sequence"]))
+			if not result.is_empty() and int(result.get("issuer_id", -1)) == int(ai.team): feedback.append(result)
+	runtime["ai_feedback_results"] = feedback
 	# Capture one detached checkpoint at the completed source boundary. Its
 	# checksum, compression and archive encoding belong to the save worker.
 	var checkpoint: Dictionary = Checkpoint.capture(world, controller, definition, map)

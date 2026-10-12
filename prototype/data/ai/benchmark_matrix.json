@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "status": "prepared_not_executed",
+  "maximum_ticks": 36000,
+  "seeds": [
+    41721,
+    91073,
+    28319,
+    73157,
+    105337
+  ],
+  "map_type_ids": [
+    "grasslands",
+    "coastal",
+    "islands",
+    "narrows"
+  ],
+  "map_size_ids": [
+    "compact",
+    "standard"
+  ],
+  "resource_preset_ids": [
+    "standard",
+    "high"
+  ],
+  "starting_age_ids": [
+    "stone",
+    "bronze"
+  ],
+  "difficulty_ids": [
+    "standard",
+    "hard"
+  ],
+  "civilization_pairs": [
+    [
+      1,
+      9
+    ],
+    [
+      2,
+      10
+    ],
+    [
+      3,
+      11
+    ],
+    [
+      4,
+      12
+    ],
+    [
+      5,
+      13
+    ],
+    [
+      6,
+      14
+    ],
+    [
+      7,
+      15
+    ],
+    [
+      8,
+      16
+    ],
+    [
+      9,
+      1
+    ],
+    [
+      10,
+      2
+    ],
+    [
+      11,
+      3
+    ],
+    [
+      12,
+      4
+    ],
+    [
+      13,
+      5
+    ],
+    [
+      14,
+      6
+    ],
+    [
+      15,
+      7
+    ],
+    [
+      16,
+      8
+    ]
+  ],
+  "opponent_policy_ids": [
+    "random_map_balanced",
+    "early_pressure",
+    "economic_growth"
+  ],
+  "swap_positions": [
+    false,
+    true
+  ],
+  "subject_policy_id": "random_map_balanced",
+  "metrics": [
+    "outcome",
+    "age_ticks",
+    "idle_worker_ratio",
+    "command_rejection_ratio",
+    "losses",
+    "budget_rejections",
+    "simulation_ticks",
+    "wall_seconds"
+  ],
+  "comparison": "paired_by_case_id_with_wilson_win_interval"
+}

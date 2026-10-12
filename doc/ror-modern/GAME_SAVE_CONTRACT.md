@@ -10,7 +10,7 @@ Replay сохраняет историю команд и продолжение 
 
 ## Состав архива
 
-- format_version = 5 и обязательные schema_features, включая incremental_runtime_v2 и world_checkpoint.
+- format_version = 6 и обязательные schema_features, включая incremental_runtime_v2 и world_checkpoint.
 - metadata — имя слота, время записи и сведения о настройках матча.
 - match_path и match_fingerprint — идентичность определения матча; само определение и карта входят в checkpoint.
 - tick — завершённый фиксированный такт.
@@ -58,3 +58,21 @@ RoRMatchLifecycleService один раз захватывает отделённ
 По указанию пользователя агент не запускал тесты, профили, компиляцию DLL и экспорт в этой итерации. Пользовательский экспорт 10 октября завершился, но автоматическая проверка пакета обнаружила устаревшее требование внешнего файла карты при загрузке нового сохранения. Этот путь исправлен в исходниках; повторная сборка и проверка после исправления не запускались. Подготовлен test_current_checkpoint_archive.gd для отказа старым форматам и текущего digest; test_incremental_runtime_generation.gd охватывает отмену и восстановление незавершённого захвата. Прежние результаты тестов относятся к предыдущему пакету и не подтверждают этот контракт.
 
 [Полная исходная реализация и её ограничения](INCREMENTAL_SIMULATION_IMPLEMENTATION_2026-10-10.md). [План и отложенная приёмка](INCREMENTAL_SIMULATION_OPTIMIZATION_PLAN_2026-10-09.md).
+
+
+## Adaptive AI state — 2026-10-11
+
+Archive version 6 adds the required `adaptive_ai_v1` feature. Checkpoint payload version 2, replay version 4 and pending decision queue version 2 remain unchanged. As with the existing archive policy, older archive versions are rejected; there is no automatic migration.
+
+Each AI state contains versioned strategic knowledge, observation timestamps, confidence inputs, income samples, spending feedback, retry cooldowns, worker rotation, telemetry, scout visits and transport missions. Persistent skirmish operations serialize the existing attack-group state plus their phase, movement region and last order tick. Enemy observations are retained only from the legal observer snapshot. Derived threat caches are rebuilt and never serialized.
+
+Own pending proposals retain their issuer, sequence, command tick and detached feedback metadata. Saving copies already completed results for these exact proposals into `controller_state.ai_feedback_results`. Loading validates sequence ownership, uniqueness and applied tick before restoring those results. It does not inspect results issued by other players. An unfinished command remains in the normal checkpoint command queue.
+
+Feedback is consumed only when the AI decision queue is inactive. Saving never drains feedback or changes a live/captured AI state. This preserves the exact `input.state` equality required at the source/apply barrier. Planner feedback metadata is removed before controller enqueue and replay recording, so it does not become gameplay command parameters or affect pending-command hashes.
+
+The initial 2026-10-11 validation was static only. Runtime validation on 2026-10-12 exposed JSON numeric-type loss in nested AI state; the archive now uses one `__exact_variant_v1` descriptor per AI dictionary, containing a base64 binary Variant without object deserialization. Payloads are bounded to 64 MiB. This preserves nested integer values, float values, dictionary key types and typed arrays before a pending plan compares its input state. Normal replay parameters and hash encoding keep their existing representation.
+
+
+The follow-up includes `test_ai_adaptive_strategy.gd` for exact JSON state restoration and feedback counted once, and `test_adaptive_ai_save_resume.gd` for a generated skirmish saved after accepted AI commands but before feedback consumption. The latter loads through the normal game boundary and compares the continued world hash, complete AI state and public command history. The completed run results are recorded in `prototype/qa/ai-validation-20261012-final/results.json`; no Release export or native DLL build was performed.
+
+The completed targeted validation passed 49 tests with no actionable Godot errors. Subsequent scout fixes were checked with affected reruns, including ordinary-resource progression, inland/naval exploration, deterministic outcomes and adaptive save/resume. The consolidated result is `prototype/qa/ai-validation-20261012-summary.json`.

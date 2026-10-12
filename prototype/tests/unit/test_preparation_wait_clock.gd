@@ -62,6 +62,21 @@ func _initialize() -> void:
 	var restored_tick: int = controller.tick_index
 	controller.advance_frame(0.025, 1, 2)
 	check(controller.tick_index == restored_tick + 1, "replay playback advances after a deferred live tick")
+	var short_actual := fixture()
+	var short_reference := fixture()
+	var short_gate := {"ready": false}
+	short_actual["controller"].set_before_fixed_tick(func(_tick): return {"ready": short_gate["ready"]})
+	short_actual["controller"].advance_frame(0.05, 1, 2)
+	for _frame in range(3): short_actual["controller"].advance_frame(0.016, 1, 2)
+	check(short_actual["controller"].tick_index == 0, "short waiting frames cannot mutate the source generation")
+	check(short_actual["controller"].accumulator_seconds <= Controller.MAX_ACCUMULATED_SECONDS, "short-wait debt is bounded")
+	short_gate["ready"] = true
+	short_actual["controller"].advance_frame(0.002, 1, 2)
+	short_reference["controller"].advance_frame(0.1, 1, 2)
+	check(short_actual["controller"].tick_index == short_reference["controller"].tick_index, "short AI waits recover selected game speed")
+	check(Replay.new().world_state_hash(short_actual["world"], short_actual["controller"].tick_index, short_actual["controller"]) == Replay.new().world_state_hash(short_reference["world"], short_reference["controller"].tick_index, short_reference["controller"]), "short-wait recovery preserves authoritative tick order and movement")
+	short_actual["world"].shutdown_derived_state()
+	short_reference["world"].shutdown_derived_state()
 	actual["world"].task_coordinator.shutdown()
 	reference["world"].task_coordinator.shutdown()
 	for failure in failures:

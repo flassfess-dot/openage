@@ -40,6 +40,8 @@ func _initialize() -> void:
 	var input := Data.seal(Task.capture(ai, snapshot, 10))
 	check(is_same(input["snapshot"]["build_site_queries"][0]["input"]["base"], input["snapshot"]["build_site_queries"][1]["input"]["base"]), "multiple kinds share one immutable topology/occupancy capture")
 	var output := Task.run(input)
+	var executor := Task.Executor.new()
+	check(executor.run(input) == output and executor.run(input) == output, "retained private planner preserves full commands, state and sites across jobs")
 	var actual: Dictionary = {}
 	for update in output["build_site_cache_updates"]:
 		actual.merge(update["sites"])

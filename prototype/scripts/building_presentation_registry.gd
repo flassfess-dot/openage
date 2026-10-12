@@ -5,6 +5,7 @@ const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
 const CompositeGraphic := preload("res://scripts/composite_graphic.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const DamageSelector := preload("res://scripts/presentation_damage_selector.gd")
+const WallPlacement := preload("res://scripts/wall_placement.gd")
 
 var player_palette
 var runtime_catalog: Dictionary = {}
@@ -99,7 +100,7 @@ func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary
 				part["presentation_layer"] = "upright"
 				if not part.has("depth_world_offset"):
 					part["depth_world_offset"] = Vector2(0.75, -0.5)
-	var damage_part := _damage_part(building, source, player, presentation_time)
+	var damage_part := _damage_part(building, source, player, presentation_time, presentation_facing)
 	if not damage_part.is_empty():
 		if base_graphic == 273 and String(result.get("asset_name", "")).contains("_field_"):
 			damage_part["presentation_layer"] = "upright"
@@ -259,6 +260,8 @@ func _source_record(building: Dictionary) -> Dictionary:
 
 
 func _presentation_facing(building: Dictionary, graphic_id: int) -> int:
+	if String(building.get("kind", "")) == "wall":
+		return WallPlacement.presentation_facing(int(building.get("connection_mask", 0)))
 	if building.has("presentation_facing"):
 		return maxi(0, int(building["presentation_facing"]))
 	var civilization_id := int(building.get("components", {}).get("ownership", {}).get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
@@ -353,11 +356,11 @@ func _delta_records(value: Variant) -> Array:
 	return []
 
 
-func _damage_part(building: Dictionary, source: Dictionary, player: int, animation_time: float) -> Dictionary:
+func _damage_part(building: Dictionary, source: Dictionary, player: int, animation_time: float, logical_facing: int = 0) -> Dictionary:
 	var selected_graphic := DamageSelector.select_graphic_id(building, source)
 	if selected_graphic < 0:
 		return {}
-	var result := _resolved_frame(selected_graphic, player, 0, animation_time)
+	var result := _resolved_frame(selected_graphic, player, logical_facing, animation_time)
 	if result.get("texture") == null:
 		return {}
 	result["graphic_id"] = selected_graphic

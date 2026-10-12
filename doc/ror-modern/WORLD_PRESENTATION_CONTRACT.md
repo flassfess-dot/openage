@@ -41,6 +41,7 @@ runtime/object/graphics catalog
 - `source_unit_id` и civilization сущности;
 - `display_graphic_id`, уже изменённый технологией или эпохой;
 - `state`, `construction_stage`, `hp/max_hp` и `death_phase`;
+- `connection_mask` и `connection_revision` для стен;
 - исходные graphics/deltas/layer/sequence metadata.
 
 Полное здание использует `display_graphic_id`. Фундамент использует исходный construction graphic и дискретную стадию. Для цивилизаций с expansion architecture (`icon_set == 4`) статическое здание берётся из последнего source angle: именно там данные RoR хранят римский вариант. Это правило находится в реестре, а не в `main.gd`.
@@ -59,7 +60,7 @@ runtime/object/graphics catalog
 
 ## 5. Порядок отрисовки
 
-`RenderItem` формирует стабильный ключ из логического слоя, экранной глубины, стабильного entity ID и sub-order. Внутри одного здания исходный graphic layer определяет порядок основания, rubble, основного корпуса, damage и прочих delta.
+`RenderItem` формирует стабильный ключ из логического слоя, экранной глубины, elevation, sub-order и стабильного entity ID. Для стен при равной глубине и sub-order перед ID учитывается положение на карте; стены образуют отдельную группу разрешения такой ничьей. Это сохраняет одинаковое перекрытие плотных рядов при противоположном порядке строительства. Внутри одного здания исходный graphic layer определяет порядок основания, rubble, основного корпуса, damage и прочих delta.
 
 Основные классы drawables разделены: terrain, overlays/resources, shadows, units/buildings, projectiles/effects, selection и health/UI. Picking читает обратный фактический render order и сворачивает composite-слои в одну логическую сущность.
 
@@ -107,3 +108,17 @@ I9 имеет уровень `INTEGRATED`, но не `PARITY`:
 Замер CPU после прогрева, 120 тиков на случай: максимум presentation.minimap.resources 134,071 → 3,511 мс; p95 полной отрисовки 97,602 → 12,008 мс; p95 подготовки snapshot 25,741 → 6,906 мс. В отдельном прогоне с графическим выводом максимум обновления отметок 4,320 мс, p95 отрисовки 12,332 мс; 0 повторных обходов ресурсов при уменьшении древесины. Это локальные диагностические замеры, не гарантия общей частоты кадров для любых машин и партий.
 
 Проверены test_minimap_resource_index, simulation snapshot, minimap projection/fog, fog terrain boundary, viewport culling, performance observability, deterministic replay, game save archive, save/load pipeline, generated skirmish main scene, AI player и long-session performance — 13 успешных сценариев. Логи, результаты до/после и кадр с графическим выводом: prototype/qa/exploration-performance-20261003.
+
+## Стены — 2026-10-11
+
+Завершённые стены выбирают одну из трёх исходных форм по четырём боковым соседям того же владельца и source unit ID: маска 5 — форма 0, маска 10 — форма 1, остальные — объёмная форма 2. В двух соседних рядах все сегменты получают форму 2 и образуют сплошной массив. Основа, delta-слои и повреждения используют одну логическую форму. Это правило приоритетнее обычного presentation_facing здания.
+
+Маска и ревизия входят в компактную render-проекцию; обновления соседства меняют retained projection. Улучшение стены пересчитывает связи после обновления типов. Предпросмотр будущей стены, включая существующих соседей, использует тот же RenderWorld и исходные hotspot/offsets. Реальный фундамент сохраняет исходную construction graphic.
+
+Источник и пределы доказательств, планирование, бюджет, Shift и продолжение после сохранения определены в WALL_BEHAVIOR_CONTRACT.md. Сохранённые оригинальные формы проверены по 5 482 стенам в 55 миссиях. test_wall_parity_pipeline проверяет 16 цивилизаций, три уровня и 16 масок для native/reference-проекций, а также равенство изображения плотных рядов при противоположном порядке создания с одинаковой фазой анимации. test_wall_drag_main_scene проверяет основной ввод. Ветка предпросмотра основной сцены проверяется test_wall_parity_pipeline через адаптер canvas-вызовов с реальными кадровыми данными и сортировкой RenderWorld.
+
+### Retained resource drawables — 2026-10-12
+
+Resource frame descriptors and draw items are retained per legal resource ID in the current viewport. Entering/leaving resources, depletion/felling, artwork, position/elevation and highlight changes replace only affected records. Pan/zoom reprojects retained anchors before the depth merge. Departing and explicitly empty resource views release their records; effects-only projections preserve the cache. Carcass, falling-tree and marine animation frames continue to advance, and fish selection groups are rebuilt from the current legal members. The cache never reads foreign live resource state or restricts simulation to the camera.
+
+`test_retained_resource_drawables.gd` checks local invalidation, eviction, pan/depth order, depletion shadows, selection and carcass animation. Existing fish-shoal and presentation tests cover grouped selection and fog memory.

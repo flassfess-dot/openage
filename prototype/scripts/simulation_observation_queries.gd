@@ -1,5 +1,6 @@
 class_name RoRSimulationObservationQueries
 extends RefCounted
+const AiProfile := preload("res://scripts/ai_observation_profile.gd")
 
 # Explicit owner-thread queries. Snapshot projection never calls these services.
 # Only IDs already present in an observer's legal read model may be enriched.
@@ -45,6 +46,9 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 					worker_options_ready = true
 				row["command_options"] = {"build": worker_options}
 			replacements[int(row.get("id", -1))] = row
+		if bool(options.get("include_ai_profiles", false)) and not row.has("ai_profile") and (not restricted or command_ids.has(int(row.get("id", -1)))):
+			row = row.duplicate()
+			row["ai_profile"] = AiProfile.actor(world, row, team)
 		units.append(row)
 	result["units"] = units
 	var buildings: Array = []
@@ -69,7 +73,17 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 				var technologies: Array = options.get("planning_technology_ids", [])
 				if not technologies.is_empty():
 					append_planning_research_options(world, row, source, team, technologies)
-				replacements[int(row.get("id", -1))] = row
+				if bool(options.get("include_ai_profiles", false)):
+					row["command_options"] = AiProfile.decorate_options(world, row.get("command_options", {}), team, options.get("foundation_units", units))
+					row["ai_drop_site"] = world.entity_has_behavior_tag(source, "drop_site")
+					var accepted: Array = []
+					for type_id in range(4):
+						if world.dropoff_accepts_resource(source, type_id): accepted.append(type_id)
+					row["ai_drop_resources"] = accepted
+			replacements[int(row.get("id", -1))] = row
+		if bool(options.get("include_ai_profiles", false)) and not row.has("ai_profile") and (not restricted or command_ids.has(int(row.get("id", -1)))):
+			row = row.duplicate()
+			row["ai_profile"] = AiProfile.actor(world, row, team)
 		buildings.append(row)
 	result["buildings"] = buildings
 	for category in ["control_units", "control_buildings"]:
@@ -83,11 +97,19 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	started = Time.get_ticks_usec() if probe != null else 0
 	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, world.get_fog_of_war(), team, probe) if bool(options.get("include_navigation", true)) else {}
 	result["navigation"] = navigation
+	if bool(options.get("include_ai_profiles", false)):
+		var visible: Dictionary = {}
+		var fog = world.get_fog_of_war()
+		for id in options.get("ai_memory_positions", {}):
+			if fog.state_at_world(team, Vector2(options["ai_memory_positions"][id])) == 2: visible[int(id)] = true
+		result["ai_visible_memory_locations"] = visible
 	_observe(probe, prefix + ".navigation", started)
 	started = Time.get_ticks_usec() if probe != null else 0
 	var site_filter: Callable = options.get("build_site_filter", Callable())
 	if site_filter.is_valid() and not available_kinds.is_empty():
-		if bool(options.get("build_site_filter_navigation", false)):
+		if bool(options.get("build_site_filter_snapshot", false)):
+			available_kinds = site_filter.call(available_kinds, units, buildings, result.get("player_state", {}), navigation, result)
+		elif bool(options.get("build_site_filter_navigation", false)):
 			available_kinds = site_filter.call(available_kinds, units, buildings, result.get("player_state", {}), navigation)
 		else:
 			available_kinds = site_filter.call(available_kinds, units, buildings, result.get("player_state", {}))

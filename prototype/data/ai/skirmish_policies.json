@@ -11,12 +11,42 @@
         "relative_path": "CP_AI/PER/RANDOM MAP.PER",
         "sha256": "f8de47add86018854ce423f39cad1450d5ddd07aba8d34431b48d783733d225d",
         "selected_parameters": [
-          {"source_id": 16, "source_value": 3, "runtime_field": "minimum_attack_group_size", "conversion": "identity"},
-          {"source_id": 26, "source_value": 20, "runtime_field": "maximum_attack_group_size", "conversion": "identity"},
-          {"source_id": 46, "source_value": 8, "runtime_field": "attack_separation_ticks", "conversion": "seconds_to_ticks"},
-          {"source_id": 88, "source_value": 1, "runtime_field": "military_interval_ticks", "conversion": "seconds_to_ticks"},
-          {"source_id": 104, "source_value": 2, "runtime_field": "initial_attack_delay_ticks", "conversion": "seconds_to_ticks"},
-          {"source_id": 20, "source_value": 22, "runtime_field": "enemy_response_distance", "conversion": "identity"}
+          {
+            "source_id": 16,
+            "source_value": 3,
+            "runtime_field": "minimum_attack_group_size",
+            "conversion": "identity"
+          },
+          {
+            "source_id": 26,
+            "source_value": 20,
+            "runtime_field": "maximum_attack_group_size",
+            "conversion": "identity"
+          },
+          {
+            "source_id": 46,
+            "source_value": 8,
+            "runtime_field": "attack_separation_ticks",
+            "conversion": "seconds_to_ticks"
+          },
+          {
+            "source_id": 88,
+            "source_value": 1,
+            "runtime_field": "military_interval_ticks",
+            "conversion": "seconds_to_ticks"
+          },
+          {
+            "source_id": 104,
+            "source_value": 2,
+            "runtime_field": "initial_attack_delay_ticks",
+            "conversion": "seconds_to_ticks"
+          },
+          {
+            "source_id": 20,
+            "source_value": 22,
+            "runtime_field": "enemy_response_distance",
+            "conversion": "identity"
+          }
         ]
       },
       "runtime": {
@@ -40,7 +70,9 @@
           "government_center",
           "temple",
           "siege_workshop",
-          "dock"
+          "dock",
+          "farm",
+          "town_center"
         ],
         "building_limits": {
           "house": 4,
@@ -53,17 +85,277 @@
           "government_center": 1,
           "temple": 1,
           "siege_workshop": 1,
-          "dock": 1
+          "dock": 1,
+          "farm": 12,
+          "town_center": 3
         },
         "housing_buffer": 2,
         "land_worker_target": 8,
         "water_worker_target": 2,
         "minimum_workers_before_age_up": 6,
-        "age_advance_technology_ids": [101, 102, 103],
-        "age_saving_construction_exceptions": ["house", "granary", "storage_pit", "dock"],
-        "age_saving_production_exceptions": ["fishing_boat", "scout_ship"],
-        "structure_gap_fallback_kinds": ["house"],
-        "minimum_structure_gap": 1.0
+        "age_advance_technology_ids": [
+          101,
+          102,
+          103
+        ],
+        "age_saving_construction_exceptions": [
+          "house",
+          "granary",
+          "storage_pit",
+          "dock",
+          "farm"
+        ],
+        "age_saving_production_exceptions": [
+          "fishing_boat",
+          "scout_ship"
+        ],
+        "structure_gap_fallback_kinds": [
+          "house"
+        ],
+        "minimum_structure_gap": 1.0,
+        "adaptive_strategy": true,
+        "forecast_seconds": 45,
+        "maximum_workers": 40,
+        "worker_population_ratio": 0.45,
+        "maximum_farms": 12,
+        "maximum_bases": 3,
+        "maximum_foundations": 2,
+        "memory_ticks": 1200,
+        "maximum_enemy_memory": 256,
+        "goal_inertia": 18,
+        "gather_inertia": 12,
+        "gather_retry_ticks": 200,
+        "command_retry_ticks": 60,
+        "worker_search_budget": 32,
+        "resource_candidate_budget": 12,
+        "gather_command_budget": 8,
+        "combat_sample_budget": 32,
+        "maximum_operations": 8,
+        "attack_ratio": 1.15,
+        "retreat_ratio": 0.75,
+        "retreat_loss_percent": 45,
+        "regroup_ticks": 160,
+        "assembly_timeout_ticks": 240,
+        "operation_order_interval_ticks": 80,
+        "scout_interval_ticks": 160,
+        "scout_candidate_budget": 64,
+        "scout_priority": 4,
+        "minimum_naval_escort": 2,
+        "landing_danger_limit": 12,
+        "maximum_economic_danger": 8,
+        "repair_wood_reserve": 60,
+        "research_priority": 1.1,
+        "economic_research_priority": 1.4
+      }
+    },
+    {
+      "id": "early_pressure",
+      "name": "Раннее давление",
+      "source_evidence": {
+        "source_role": "engine_owned_variant_no_source_parity_claim"
+      },
+      "runtime": {
+        "economic_interval_ticks": 20,
+        "military_interval_ticks": 20,
+        "initial_attack_delay_ticks": 20,
+        "attack_separation_ticks": 160,
+        "minimum_attack_group_size": 3,
+        "maximum_attack_group_size": 20,
+        "enemy_response_distance": 22.0,
+        "formation": "RECTANGLE",
+        "use_workers_in_attack_groups": false,
+        "construction_priorities": [
+          "house",
+          "barracks",
+          "granary",
+          "storage_pit",
+          "archery_range",
+          "stable",
+          "market",
+          "government_center",
+          "temple",
+          "siege_workshop",
+          "dock",
+          "farm",
+          "town_center"
+        ],
+        "building_limits": {
+          "house": 4,
+          "barracks": 1,
+          "granary": 1,
+          "storage_pit": 1,
+          "archery_range": 1,
+          "stable": 1,
+          "market": 1,
+          "government_center": 1,
+          "temple": 1,
+          "siege_workshop": 1,
+          "dock": 1,
+          "farm": 12,
+          "town_center": 3
+        },
+        "housing_buffer": 2,
+        "land_worker_target": 6,
+        "water_worker_target": 2,
+        "minimum_workers_before_age_up": 6,
+        "age_advance_technology_ids": [
+          101,
+          102,
+          103
+        ],
+        "age_saving_construction_exceptions": [
+          "house",
+          "granary",
+          "storage_pit",
+          "dock",
+          "farm"
+        ],
+        "age_saving_production_exceptions": [
+          "fishing_boat",
+          "scout_ship"
+        ],
+        "structure_gap_fallback_kinds": [
+          "house"
+        ],
+        "minimum_structure_gap": 1.0,
+        "adaptive_strategy": true,
+        "forecast_seconds": 45,
+        "maximum_workers": 40,
+        "worker_population_ratio": 0.35,
+        "maximum_farms": 12,
+        "maximum_bases": 3,
+        "maximum_foundations": 2,
+        "memory_ticks": 1200,
+        "maximum_enemy_memory": 256,
+        "goal_inertia": 18,
+        "gather_inertia": 12,
+        "gather_retry_ticks": 200,
+        "command_retry_ticks": 60,
+        "worker_search_budget": 32,
+        "resource_candidate_budget": 12,
+        "gather_command_budget": 8,
+        "combat_sample_budget": 32,
+        "maximum_operations": 8,
+        "attack_ratio": 1.0,
+        "retreat_ratio": 0.75,
+        "retreat_loss_percent": 45,
+        "regroup_ticks": 160,
+        "assembly_timeout_ticks": 240,
+        "operation_order_interval_ticks": 80,
+        "scout_interval_ticks": 160,
+        "scout_candidate_budget": 64,
+        "scout_priority": 4,
+        "minimum_naval_escort": 2,
+        "landing_danger_limit": 12,
+        "maximum_economic_danger": 8,
+        "repair_wood_reserve": 60,
+        "research_priority": 1.1,
+        "economic_research_priority": 0.7
+      }
+    },
+    {
+      "id": "economic_growth",
+      "name": "Развитие экономики",
+      "source_evidence": {
+        "source_role": "engine_owned_variant_no_source_parity_claim"
+      },
+      "runtime": {
+        "economic_interval_ticks": 20,
+        "military_interval_ticks": 20,
+        "initial_attack_delay_ticks": 600,
+        "attack_separation_ticks": 160,
+        "minimum_attack_group_size": 3,
+        "maximum_attack_group_size": 20,
+        "enemy_response_distance": 22.0,
+        "formation": "RECTANGLE",
+        "use_workers_in_attack_groups": false,
+        "construction_priorities": [
+          "house",
+          "barracks",
+          "granary",
+          "storage_pit",
+          "archery_range",
+          "stable",
+          "market",
+          "government_center",
+          "temple",
+          "siege_workshop",
+          "dock",
+          "farm",
+          "town_center"
+        ],
+        "building_limits": {
+          "house": 4,
+          "barracks": 1,
+          "granary": 1,
+          "storage_pit": 1,
+          "archery_range": 1,
+          "stable": 1,
+          "market": 1,
+          "government_center": 1,
+          "temple": 1,
+          "siege_workshop": 1,
+          "dock": 1,
+          "farm": 12,
+          "town_center": 3
+        },
+        "housing_buffer": 2,
+        "land_worker_target": 12,
+        "water_worker_target": 2,
+        "minimum_workers_before_age_up": 6,
+        "age_advance_technology_ids": [
+          101,
+          102,
+          103
+        ],
+        "age_saving_construction_exceptions": [
+          "house",
+          "granary",
+          "storage_pit",
+          "dock",
+          "farm"
+        ],
+        "age_saving_production_exceptions": [
+          "fishing_boat",
+          "scout_ship"
+        ],
+        "structure_gap_fallback_kinds": [
+          "house"
+        ],
+        "minimum_structure_gap": 1.0,
+        "adaptive_strategy": true,
+        "forecast_seconds": 45,
+        "maximum_workers": 40,
+        "worker_population_ratio": 0.55,
+        "maximum_farms": 12,
+        "maximum_bases": 3,
+        "maximum_foundations": 2,
+        "memory_ticks": 1200,
+        "maximum_enemy_memory": 256,
+        "goal_inertia": 18,
+        "gather_inertia": 12,
+        "gather_retry_ticks": 200,
+        "command_retry_ticks": 60,
+        "worker_search_budget": 32,
+        "resource_candidate_budget": 12,
+        "gather_command_budget": 8,
+        "combat_sample_budget": 32,
+        "maximum_operations": 8,
+        "attack_ratio": 1.4,
+        "retreat_ratio": 0.75,
+        "retreat_loss_percent": 45,
+        "regroup_ticks": 160,
+        "assembly_timeout_ticks": 240,
+        "operation_order_interval_ticks": 80,
+        "scout_interval_ticks": 160,
+        "scout_candidate_budget": 64,
+        "scout_priority": 4,
+        "minimum_naval_escort": 2,
+        "landing_danger_limit": 12,
+        "maximum_economic_danger": 8,
+        "repair_wood_reserve": 60,
+        "research_priority": 1.1,
+        "economic_research_priority": 2.0
       }
     }
   ],
@@ -78,10 +370,21 @@
         "attack_separation_ticks": 240,
         "minimum_attack_group_size": 3,
         "maximum_attack_group_size": 12,
-        "enemy_response_distance": 18.0
+        "enemy_response_distance": 18.0,
+        "worker_search_budget": 16,
+        "gather_command_budget": 4,
+        "combat_sample_budget": 16,
+        "forecast_seconds": 30,
+        "attack_ratio": 1.35,
+        "retreat_ratio": 0.65,
+        "scout_interval_ticks": 240
       }
     },
-    {"id": "standard", "name": "Стандартная", "overrides": {}},
+    {
+      "id": "standard",
+      "name": "Стандартная",
+      "overrides": {}
+    },
     {
       "id": "hard",
       "name": "Сложная",
@@ -92,7 +395,14 @@
         "attack_separation_ticks": 80,
         "minimum_attack_group_size": 4,
         "maximum_attack_group_size": 24,
-        "enemy_response_distance": 26.0
+        "enemy_response_distance": 26.0,
+        "worker_search_budget": 48,
+        "gather_command_budget": 12,
+        "combat_sample_budget": 48,
+        "forecast_seconds": 60,
+        "attack_ratio": 1.05,
+        "retreat_ratio": 0.85,
+        "scout_interval_ticks": 100
       }
     }
   ]

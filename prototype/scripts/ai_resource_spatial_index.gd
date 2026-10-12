@@ -8,10 +8,12 @@ extends RefCounted
 const CELL_SIZE := 8.0
 
 var bucket_lists_by_domain: Dictionary = {}
+var buckets_by_resource_type: Dictionary = {}
 
 
-func rebuild(resources: Array, movement_domains: Array, empty_domains_are_unrestricted: bool = true) -> void:
+func rebuild(resources: Array, movement_domains: Array, empty_domains_are_unrestricted: bool = true, index_by_type: bool = false) -> void:
 	bucket_lists_by_domain.clear()
+	buckets_by_resource_type.clear()
 	var unique_domains: Dictionary = {}
 	for domain_value in movement_domains:
 		unique_domains[String(domain_value)] = true
@@ -46,6 +48,19 @@ func rebuild(resources: Array, movement_domains: Array, empty_domains_are_unrest
 			return left_cell.y < right_cell.y or (left_cell.y == right_cell.y and left_cell.x < right_cell.x)
 		)
 		bucket_lists_by_domain[domain] = bucket_list
+		if not index_by_type: continue
+		var typed: Dictionary = {}
+		for bucket in bucket_list:
+			var entries_by_type: Dictionary = {}
+			for entry in bucket["entries"]:
+				var type_id := int(entry["resource"].get("resource_type_id", -1))
+				if not entries_by_type.has(type_id): entries_by_type[type_id] = []
+				entries_by_type[type_id].append(entry)
+			for type_id in entries_by_type:
+				if not typed.has(type_id): typed[type_id] = []
+				entries_by_type[type_id].sort_custom(func(a, b): return int(a["resource"].get("id", -1)) < int(b["resource"].get("id", -1)))
+				typed[type_id].append({"cell": bucket["cell"], "entries": entries_by_type[type_id]})
+		buckets_by_resource_type[domain] = typed
 
 
 func nearest(position: Vector2, movement_domain: String) -> Variant:
@@ -99,3 +114,22 @@ static func _distance_squared_to_cell(position: Vector2, cell: Vector2i) -> floa
 
 static func _cell(position: Vector2) -> Vector2i:
 	return Vector2i(floori(position.x / CELL_SIZE), floori(position.y / CELL_SIZE))
+
+# Bounded candidate query for adaptive worker allocation. The immutable index
+# includes every known resource; only each query's comparisons are bounded.
+func candidates(position: Vector2, domain: String, resource_type: int, maximum: int = 12) -> Array:
+	var buckets: Array = buckets_by_resource_type.get(domain, {}).get(resource_type, []).duplicate()
+	buckets.sort_custom(func(a, b):
+		var ad := _distance_squared_to_cell(position, a["cell"])
+		var bd := _distance_squared_to_cell(position, b["cell"])
+		return ad < bd if ad != bd else (a["cell"].y < b["cell"].y or (a["cell"].y == b["cell"].y and a["cell"].x < b["cell"].x)))
+	var result: Array = []
+	for bucket in buckets.slice(0, 16):
+		for entry in bucket["entries"].slice(0, 64):
+			var resource: Dictionary = entry["resource"]
+			if int(resource.get("resource_type_id", -1)) == resource_type: result.append(resource)
+	result.sort_custom(func(a, b):
+		var ad := position.distance_squared_to(Vector2(a.get("pos", Vector2.ZERO)))
+		var bd := position.distance_squared_to(Vector2(b.get("pos", Vector2.ZERO)))
+		return ad < bd if ad != bd else int(a.get("id", -1)) < int(b.get("id", -1)))
+	return result.slice(0, maxi(1, maximum))

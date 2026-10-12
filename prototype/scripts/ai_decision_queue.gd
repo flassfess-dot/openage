@@ -12,6 +12,7 @@ const MAX_INPUT_BYTES := 64 * 1024 * 1024
 const PREPARATION_BUDGET_USEC := 4000
 
 var records: Array = []
+var executors: Dictionary = {}
 var source_tick := -1
 var apply_tick := -1
 var prepare: Callable
@@ -75,14 +76,19 @@ func poll(coordinator, current_source_tick: int, frame_id: int, probe: Variant =
 				if record["input"].is_empty():
 					error = "ai_capture_not_isolated"
 					return {"ready": false, "error": error}
+			var player_key: int = record["ai"].get_instance_id()
+			if not executors.has(player_key):
+				if executors.size() >= 8: executors.erase(executors.keys()[0])
+				executors[player_key] = PlanningTask.Executor.new()
+			var executor = executors[player_key]
 			if not coordinator.is_enabled("ai_planning"):
 				# The reference path uses exactly the same snapshot and target.
-				record["output"] = PlanningTask.run(record["input"])
+				record["output"] = executor.run(record["input"])
 				record["submitted"] = true
 				if not bool(record["output"].get("valid", false)):
 					error = "ai_invalid_proposal"
 			else:
-				var request_id: int = coordinator.submit("ai_planning", record["input"], PlanningTask.run, source_tick, apply_tick, {"team": int(record["ai"].team)}, true)
+				var request_id: int = coordinator.submit("ai_planning", record["input"], executor.run, source_tick, apply_tick, {"team": int(record["ai"].team)}, true)
 				if request_id >= 0:
 					record["request_id"] = request_id
 					record["submitted"] = true
@@ -174,6 +180,7 @@ func restore_state(data: Dictionary, players: Array, current_tick: int, capture:
 	return true
 
 func cancel(coordinator) -> void:
+	executors.clear()
 	for record in records:
 		if bool(record["submitted"]) and record["output"].is_empty() and int(record["request_id"]) >= 0:
 			coordinator.discard(int(record["request_id"]))

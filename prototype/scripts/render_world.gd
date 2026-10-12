@@ -26,6 +26,8 @@ func team_color(team: int) -> Color:
 var cached_resource_signature: int = 0
 var cached_resource_drawables: Array = []
 var cached_resource_projection: Variant = null
+var cached_resource_records: Dictionary = {}
+var cached_resource_raw_drawables: Array = []
 var cached_environment_signature: int = 0
 var cached_environment_drawables: Array = []
 var cached_environment_signature_valid := false
@@ -42,6 +44,8 @@ func clear_caches() -> void:
 	cached_resource_signature = 0
 	cached_resource_drawables.clear()
 	cached_resource_projection = null
+	cached_resource_records.clear()
+	cached_resource_raw_drawables.clear()
 	cached_environment_signature = 0
 	cached_environment_drawables.clear()
 	cached_environment_signature_valid = false
@@ -81,7 +85,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	var source_markers: Array = world_source.get("markers", []) if from_snapshot else []
 	var source_environment: Array = world_source.get("environment", []) if from_snapshot else []
 	var source_units: Array = world_source.get("units", []) if from_snapshot else world_source.get_units()
-	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids + selected_ids) if from_snapshot else []
+	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids + selected_ids) if from_snapshot and world_source.has("resources") else []
 	_observe_stage("resources", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	var environment_projection := _snapshot_environment_drawables(source_environment, world_to_screen, frame_info_provider, int(world_source.get("environment_revision", -1))) if from_snapshot and world_source.has("environment") else {"static": [], "animated": source_environment}
@@ -350,57 +354,71 @@ static func resource_layer(resource: Dictionary) -> int:
 func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, frame_info_provider: Callable, preview_ids: Array[int]) -> Array:
 	var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
 	if cached_resource_projection != projection:
-		_reproject_statics(cached_resource_drawables, world_to_screen)
+		_reproject_statics(cached_resource_raw_drawables, world_to_screen)
 		cached_resource_projection = projection
-	if resources.is_empty():
-		return []
-	var signature := 17
-	for resource_value in resources:
-		var resource: Dictionary = resource_value
-		signature = signature * 31 + int(resource.get("id", -1))
-		signature = signature * 31 + int(resource.get("depletion_stage", 0))
-		signature = signature * 31 + hash(String(resource.get("tree_phase", "")))
-		signature = signature * 31 + hash(String(resource.get("environment_asset", "")))
-		signature = signature * 31 + int(resource.get("environment_variant", 0))
-		signature = signature * 31 + hash(String(resource.get("source_graphic_asset_name", "")))
-		signature = signature * 31 + int(resource.get("source_frame", 0))
-		signature = signature * 31 + (1 if int(resource.get("amount", 0)) > 0 else 0)
-	signature = signature * 31 + hash(preview_ids)
-	if signature == cached_resource_signature and not cached_resource_drawables.is_empty():
-		var current_by_id: Dictionary = {}
-		for resource_value in resources:
-			var resource: Dictionary = resource_value
-			current_by_id[int(resource.get("id", -1))] = resource
-		for drawable_value in cached_resource_drawables:
-			var drawable: Dictionary = drawable_value
-			var resource_id := int(drawable.get("stable_id", -1))
-			if current_by_id.has(resource_id):
-				if drawable.get("data", {}).has("selection_members"): continue
-				drawable["data"] = current_by_id[resource_id]
-				if String(drawable.get("kind", "")) != "resource_shadow" and (ResourcePresentationRegistry.is_carcass(current_by_id[resource_id]) or String(current_by_id[resource_id].get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS or String(current_by_id[resource_id].get("tree_phase", "")) == "falling"):
-					var frame_info := _frame_info(frame_info_provider, "resource", current_by_id[resource_id])
-					drawable["frame_info"] = frame_info
-					drawable["frame"] = int(frame_info.get("frame_index", 0))
-					drawable["hotspot"] = frame_info.get("hotspot", Vector2.ZERO)
-		return cached_resource_drawables
-	cached_resource_signature = signature
-	cached_resource_drawables = []
-	var preview_id_lookup: Variant = _id_lookup(preview_ids)
+	var next_records: Dictionary = {}
+	var retained: Dictionary = {}
+	var added: Array = []
+	var highlighted: Variant = _id_lookup(preview_ids)
+	var has_fish := false
+	var resolved := 0
 	for resource_value in resources:
 		var resource: Dictionary = resource_value
 		if int(resource.get("amount", 0)) <= 0 and not bool(resource.get("visible_when_depleted", false)):
 			continue
+		var id := int(resource.get("id", -1))
+		var selected: bool = highlighted.has(id) and PickingService.resource_is_selectable(resource)
+		var previous: Dictionary = cached_resource_records.get(id, {})
+		var identical: bool = resource.is_read_only() and is_same(previous.get("source"), resource) and (not resource.has("behavior_tags") or resource["behavior_tags"].is_read_only())
+		var signature := int(previous.get("signature", 0))
+		if not identical or bool(previous.get("selected", false)) != selected:
+			signature = hash([resource.get("kind", ""), resource.get("pos", Vector2.ZERO), resource.get("elevation", 0.0), resource.get("depletion_stage", 0), resource.get("tree_phase", ""), resource.get("environment_asset", ""), resource.get("environment_variant", 0), resource.get("tree_condition", ""), resource.get("source_graphic_asset_name", ""), resource.get("source_depleted_asset_name", ""), resource.get("source_graphic_id", -1), resource.get("source_unit_id", -1), ResourcePresentationRegistry.is_carcass(resource), resource.get("source_frame", 0), int(resource.get("amount", 0)) > 0, selected])
+		var animated: bool = bool(previous.get("animated", false)) if identical else ResourcePresentationRegistry.is_carcass(resource) or String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS or String(resource.get("tree_phase", "")) == "falling"
+		var fish: bool = bool(previous.get("fish", false)) if identical else FishShoalSelection.is_fish(resource)
+		has_fish = has_fish or fish
+		if not previous.is_empty() and int(previous["signature"]) == signature:
+			for item in previous["drawables"]:
+				if not identical: item["data"] = resource
+				if fish: item.erase("selection_group")
+				if animated and String(item["kind"]) != "resource_shadow":
+					var info := _frame_info(frame_info_provider, "resource", resource)
+					item["frame_info"] = info
+					item["frame"] = int(info.get("frame_index", 0))
+					item["hotspot"] = info.get("hotspot", Vector2.ZERO)
+			previous["source"] = resource
+			next_records[id] = previous
+			retained[id] = true
+			continue
 		var position: Vector2 = resource.get("pos", Vector2.ZERO)
-		var resource_id := int(resource.get("id", -1))
-		var resource_info := _frame_info(frame_info_provider, "resource", resource)
-		var resource_screen: Vector2 = world_to_screen.call(position)
+		var screen: Vector2 = world_to_screen.call(position)
+		var info := _frame_info(frame_info_provider, "resource", resource)
 		var elevation := float(resource.get("elevation", 0.0))
-		cached_resource_drawables.append(RenderItem.create("resource", resource_layer(resource), position, resource_screen, resource_id, resource, resource_info, elevation))
-		_append_resource_shadow(cached_resource_drawables, resource, resource_info, position, resource_screen)
-		if preview_id_lookup.has(resource_id) and PickingService.resource_is_selectable(resource):
-			cached_resource_drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, resource_screen, resource_id, resource, resource_info, elevation, Color("d6bc63"), 1.0, 1))
-	cached_resource_drawables = FishShoalSelection.group_drawables(cached_resource_drawables, preview_ids, world_to_screen)
-	cached_resource_drawables.sort_custom(RenderItem.less)
+		var items: Array = [RenderItem.create("resource", resource_layer(resource), position, screen, id, resource, info, elevation)]
+		_append_resource_shadow(items, resource, info, position, screen)
+		if selected:
+			items.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, screen, id, resource, info, elevation, Color("d6bc63"), 1.0, 1))
+		next_records[id] = {"signature": signature, "drawables": items, "source": resource, "selected": selected, "animated": animated, "fish": fish}
+		added.append_array(items)
+		resolved += 1
+
+	if added.is_empty() and next_records.size() == cached_resource_records.size() and not has_fish:
+		if performance_probe != null: performance_probe.increment("presentation.resources.frames_reused", next_records.size())
+		return cached_resource_raw_drawables
+	var kept: Array = []
+	for item in cached_resource_raw_drawables:
+		if retained.has(int(item["stable_id"])): kept.append(item)
+	added.sort_custom(RenderItem.less)
+	cached_resource_raw_drawables = merge_sorted_drawables(kept, added)
+	# Retain only the current viewport's legal records. A single entering tree or
+	# depletion change never reloads all remaining resource frame descriptors.
+	cached_resource_records = next_records
+	cached_resource_drawables = cached_resource_raw_drawables
+	if has_fish:
+		cached_resource_drawables = FishShoalSelection.group_drawables(cached_resource_raw_drawables, preview_ids, world_to_screen)
+		cached_resource_drawables.sort_custom(RenderItem.less)
+	if performance_probe != null:
+		performance_probe.increment("presentation.resources.frames_resolved", resolved)
+		performance_probe.increment("presentation.resources.frames_reused", retained.size())
 	return cached_resource_drawables
 
 

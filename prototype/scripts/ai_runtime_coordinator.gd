@@ -53,6 +53,9 @@ func queue_commands(next_tick: int = -1) -> Variant:
 		next_tick = controller.tick_index + 1
 	if decisions.active:
 		return _poll(next_tick)
+	# Live feedback is drained only between jobs. Captured input.state remains
+	# byte-for-byte stable until the source/apply barrier commits its output.
+	for ai in players: ai.collect_feedback(controller, controller.tick_index)
 	var horizon: int = controller.tick_index + AiDecisionQueue.LOOKAHEAD_TICKS
 	var target := horizon + 1
 	var due: Array = []
@@ -97,5 +100,10 @@ func _poll(next_tick: int) -> Dictionary:
 			return {"ready": false}
 		world.commit_ai_build_site_queries(decision["output"].get("build_site_cache_updates", []), next_tick)
 		for command in decision["commands"]:
+			# Planner metadata belongs to AI state, not replayed gameplay params.
+			# Strip it before recording/queueing so save and replay hashes agree.
+			var metadata: Dictionary = command.params.get("_ai_feedback", {})
+			command.params.erase("_ai_feedback")
 			controller.enqueue_command(command, true, int(ai.team))
+			ai.register_proposal(command, metadata)
 	return {"ready": true, "planned": not batch.is_empty()}

@@ -30,6 +30,8 @@ func _initialize() -> void:
 	var definition: Dictionary = built["definition"]
 	var ai_settings: Dictionary = definition["players"][1]["ai"]
 	ai_settings["land_worker_target"] = 3
+	# This fixture measures one fishing cycle, so suppress adaptive land growth.
+	ai_settings["maximum_workers"] = 3
 	ai_settings["water_worker_target"] = 1
 	ai_settings["minimum_workers_before_age_up"] = 999
 	ai_settings["construction_priorities"] = []

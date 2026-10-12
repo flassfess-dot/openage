@@ -60,6 +60,9 @@ func _initialize() -> void:
 		ai.attack_separation = 1
 		ai.minimum_attack_group_size = 1
 		ai.maximum_attack_group_size = 8
+		# Controlled weapon matchup: both sides commit; default retreat is tested separately.
+		ai.economic_policy["retreat_ratio"] = 0.1
+		ai.economic_policy["retreat_loss_percent"] = 99.0
 	var controller = GameController.new(world)
 	controller.set_speed_multiplier(3.0)
 	var accepted_attacks := {1: 0, 2: 0}
@@ -80,7 +83,7 @@ func _initialize() -> void:
 			var entry: Dictionary = entry_value
 			var command = entry["command"]
 			var result: Dictionary = controller.get_command_result(int(command.sequence_id))
-			if bool(result.get("accepted", false)) and String(command.command_type()) == "attack":
+			if bool(result.get("accepted", false)) and String(command.command_type()) in ["attack", "attack_move"]:
 				accepted_attacks[int(entry["team"])] = int(accepted_attacks.get(int(entry["team"]), 0)) + 1
 			elif not bool(result.get("accepted", false)):
 				var reason := String(result.get("reason", "unknown"))

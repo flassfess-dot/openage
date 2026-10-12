@@ -106,3 +106,16 @@ static func _validate_runtime(runtime: Dictionary, errors: Array[String]) -> voi
 		errors.append("skirmish_ai_policy_field_invalid:minimum_structure_gap")
 	if not runtime.has("use_workers_in_attack_groups") or not runtime["use_workers_in_attack_groups"] is bool:
 		errors.append("skirmish_ai_policy_field_invalid:use_workers_in_attack_groups")
+
+	if bool(runtime.get("adaptive_strategy", false)):
+		for field in ["maximum_workers", "maximum_farms", "maximum_bases", "maximum_foundations", "memory_ticks", "maximum_enemy_memory", "gather_retry_ticks", "command_retry_ticks", "worker_search_budget", "resource_candidate_budget", "gather_command_budget", "combat_sample_budget", "maximum_operations", "regroup_ticks", "assembly_timeout_ticks", "operation_order_interval_ticks", "scout_interval_ticks", "scout_candidate_budget", "minimum_naval_escort"]:
+			if int(runtime.get(field, 0)) <= 0: errors.append("skirmish_ai_policy_field_invalid:%s" % field)
+		if int(runtime.get("maximum_enemy_memory", 0)) > 1024 or int(runtime.get("maximum_operations", 0)) > 8: errors.append("skirmish_ai_policy_state_bound_invalid")
+		if float(runtime.get("forecast_seconds", 0.0)) < 30.0 or float(runtime.get("forecast_seconds", 0.0)) > 60.0: errors.append("skirmish_ai_policy_forecast_invalid")
+		if float(runtime.get("retreat_ratio", 0.0)) <= 0.0 or float(runtime.get("retreat_ratio", 0.0)) >= float(runtime.get("attack_ratio", 0.0)): errors.append("skirmish_ai_policy_strength_hysteresis_invalid")
+		if float(runtime.get("worker_population_ratio", 0.0)) <= 0.0 or float(runtime.get("worker_population_ratio", 0.0)) >= 1.0: errors.append("skirmish_ai_policy_worker_ratio_invalid")
+
+		for field in ["worker_search_budget", "resource_candidate_budget", "gather_command_budget", "combat_sample_budget", "scout_candidate_budget"]:
+			if int(runtime.get(field, 0)) > 256: errors.append("skirmish_ai_policy_search_bound_invalid:%s" % field)
+		if int(runtime.get("gather_command_budget", 0)) > int(runtime.get("worker_search_budget", 0)): errors.append("skirmish_ai_policy_gather_bound_invalid")
+		if float(runtime.get("retreat_loss_percent", 0.0)) <= 0.0 or float(runtime.get("retreat_loss_percent", 0.0)) >= 100.0: errors.append("skirmish_ai_policy_loss_threshold_invalid")

@@ -129,6 +129,16 @@ static func append_queued(entity: Dictionary, entry: Dictionary) -> bool:
 	return true
 
 
+static func prepend_queued(entity: Dictionary, entry: Dictionary) -> bool:
+	var order := current(entity)
+	var pending: Array = order.get("queued", [])
+	if pending.size() >= MAX_QUEUED_ORDERS: return false
+	pending.push_front(entry.duplicate(true))
+	order["queued"] = pending
+	set_order(entity, order)
+	return true
+
+
 static func pop_queued(entity: Dictionary) -> Dictionary:
 	var order := current(entity)
 	var pending: Array = order.get("queued", [])

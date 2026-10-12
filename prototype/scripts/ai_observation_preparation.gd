@@ -57,12 +57,15 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 				# Foundation recovery depends on all workers from the pinned facts.
 				portion_options["foundation_units"] = snapshot["units"]
 				var decorated: Dictionary = Queries.enrich(world, portion, portion_options)
-				for row in decorated["units"]:
-					Data.freeze_detached(row, 0, false)
-					pending["units"].append(row)
-				for row in decorated["buildings"]:
-					Data.freeze_detached(row, 0, false)
-					pending["buildings"].append(row)
+				# Validate/detach this small portion in the existing native kernel.
+				# Recursively freezing every actor in GDScript repeated thousands
+				# of registry probes on an otherwise already immutable read model.
+				var frozen := Data.capture_frozen({"units": decorated["units"], "buildings": decorated["buildings"]})
+				if frozen.is_empty():
+					clear()
+					return {}
+				pending["units"].append_array(frozen["units"])
+				pending["buildings"].append_array(frozen["buildings"])
 				pending["unit_cursor"] = unit_finish
 				pending["building_cursor"] = building_finish
 				if unit_finish == snapshot["units"].size() and building_finish == snapshot["buildings"].size():

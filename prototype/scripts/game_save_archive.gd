@@ -3,13 +3,13 @@ extends RefCounted
 
 const ReplaySystem := preload("res://scripts/replay_system.gd")
 const SoundCueHistory := preload("res://scripts/sound_cue_history.gd")
-const FORMAT_VERSION := 5
+const FORMAT_VERSION := 6
 const CHECKPOINT_FORMAT_VERSION := FORMAT_VERSION
 const SAVE_PATH := "user://saves/quicksave.json"
 const NAMED_SAVE_DIRECTORY := "user://saves/named"
 const MAX_SLOT_NAME_LENGTH := 64
 const MAX_TICK := 20_000_000
-const REQUIRED_FEATURES := ["incremental_runtime_v2", "world_checkpoint", "population_points", "order_queues", "fog_memory", "sound_cue_history", "match_rules"]
+const REQUIRED_FEATURES := ["incremental_runtime_v2", "world_checkpoint", "population_points", "order_queues", "fog_memory", "sound_cue_history", "match_rules", "adaptive_ai_v1"]
 
 
 static func create(match_path: String, match_definition: Dictionary, tick: int, _state_hash: String, replay: Dictionary, ai_states: Array, view_state: Dictionary, controller_state: Dictionary, slot_name: String = "Быстрое сохранение", checkpoint: Dictionary = {}) -> Dictionary:
@@ -37,7 +37,7 @@ static func create(match_path: String, match_definition: Dictionary, tick: int, 
 		"state_sha256": String(checkpoint["sha256"]),
 		"replay": replay.duplicate(true),
 		# Pending plans compare against the exact captured AI state on restore.
-		"ai_states": codec.encode_variant(ai_states, false),
+		"ai_states": ai_states.map(func(state): return codec.encode_exact_variant(state)),
 		"view_state": codec.encode_variant(saved_view),
 		"controller_state": codec.encode_variant(controller_state),
 	}
@@ -95,6 +95,8 @@ static func decoded(data: Dictionary) -> Dictionary:
 	var codec := ReplaySystem.new()
 	var archive := data.duplicate(true)
 	archive["ai_states"] = codec.decode_variant(data.get("ai_states", []))
+	if not archive["ai_states"].all(func(state): return state is Dictionary):
+		return {"valid": false, "error": "ai_state_invalid", "archive": {}}
 	archive["view_state"] = codec.decode_variant(data.get("view_state", {}))
 	archive["controller_state"] = codec.decode_variant(data.get("controller_state", {}))
 	return {"valid": true, "error": "", "archive": archive}

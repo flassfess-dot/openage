@@ -155,6 +155,9 @@ var resource_feedback_id := -1
 var resource_feedback_time := 0.0
 var placement_preview_key := ""
 var placement_preview_valid := false
+var wall_placement_preview_key := ""
+var wall_placement_preview: Dictionary = {}
+var wall_preview_renderer := RenderWorld.new()
 var pending_target_command := ""
 var pending_target_queue_order := false
 var game_message := "Выберите отряд и отдайте приказ правой кнопкой"
@@ -2066,6 +2069,7 @@ func request_train_shortcut(unit_kind: String) -> void:
 
 
 func begin_build_placement(building_kind: String) -> void:
+	wall_placement_preview_key = ""
 	if building_kind.is_empty() or selected_units().is_empty():
 		return
 	pending_target_command = ""
@@ -2088,16 +2092,16 @@ func commit_build_placement(screen_position: Vector2, queue_order: bool = false,
 		return
 	var target := Coordinates.clamp_world(screen_to_world(screen_position).round(), map_size)
 	var kind := pending_build_kind
-	if kind == "wall" and start_screen_position != Vector2.INF:
-		var start := Coordinates.clamp_world(screen_to_world(start_screen_position).round(), map_size)
-		var cells := WallPlacement.cells(Vector2i(start), Vector2i(target), OrderPipeline.MAX_QUEUED_ORDERS + 1)
+	if kind == "wall":
+		var start := Coordinates.clamp_world(screen_to_world(start_screen_position).round(), map_size) if start_screen_position != Vector2.INF else target
+		var cells := WallPlacement.cells(Vector2i(start), Vector2i(target))
 		if not queue_order:
 			pending_build_kind = ""
 			pending_build_started = false
 		else:
 			pending_build_started = true
 		update_interaction_cursor(input_adapter.pointer_position)
-		queue_wall_line(workers, cells)
+		queue_wall_line(workers, cells, queue_order)
 		return
 	var defer_order := queue_order and pending_build_started
 	if not queue_order:
@@ -2114,23 +2118,13 @@ func commit_build_placement(screen_position: Vector2, queue_order: bool = false,
 	enqueue_with_feedback(command, "Строительство: %s" % kind, "command:%s" % String(workers[0].get("kind", "villager")), null)
 
 
-func queue_wall_line(workers: Array, cells: Array[Vector2i]) -> void:
+func queue_wall_line(workers: Array, cells: Array[Vector2i], queue_order: bool = false) -> void:
 	if cells.is_empty():
 		return
-	var worker_ids := _selection_ids(workers)
-	# Place foundations together, then let the builders finish the line from its
-	# clicked anchor. Deferred BuildCommands reattach to existing foundations.
-	for index in range(cells.size() - 1, -1, -1):
-		var target := Vector2(cells[index])
-		var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, worker_ids, "wall", target)
-		if index == 0:
-			enqueue_with_feedback(command, "Стена: %d секций" % cells.size(), "command:%s" % String(workers[0].get("kind", "villager")), null)
-		else:
-			_queue_local_command(command)
-	for index in range(1, cells.size()):
-		var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, worker_ids, "wall", Vector2(cells[index]))
-		command.params["queue_order"] = true
-		_queue_local_command(command)
+	var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, _selection_ids(workers), "wall", Vector2(cells[0]))
+	command.params["wall_cells"] = cells.duplicate()
+	command.params["queue_order"] = queue_order
+	enqueue_with_feedback(command, "Строительство стены", "command:%s" % String(workers[0].get("kind", "villager")), null)
 
 
 func train_unit_from_hud(unit_kind: String, building_id: int) -> void:
@@ -2546,29 +2540,54 @@ func draw_build_placement_preview() -> void:
 	if pending_build_kind.is_empty() or simulation_world == null or not is_world_interaction_area(input_adapter.pointer_position):
 		return
 	var center := Coordinates.clamp_world(screen_to_world(input_adapter.pointer_position).round(), map_size)
-	if pending_build_kind == "wall" and input_adapter.pointer.is_selecting():
-		var start := Coordinates.clamp_world(screen_to_world(input_adapter.pointer.anchor).round(), map_size)
-		for cell in WallPlacement.cells(Vector2i(start), Vector2i(center), OrderPipeline.MAX_QUEUED_ORDERS + 1):
-			draw_foundation_preview_at("wall", Vector2(cell))
+	if pending_build_kind == "wall":
+		var start := Coordinates.clamp_world(screen_to_world(input_adapter.pointer.anchor).round(), map_size) if input_adapter.pointer.is_selecting() else center
+		var key := str([start, center, local_player_team, game_controller.tick_index, simulation_world.navigation_grid.revision])
+		if key != wall_placement_preview_key:
+			wall_placement_preview_key = key
+			wall_placement_preview = simulation_world.plan_wall_line(local_player_team, WallPlacement.cells(Vector2i(start), Vector2i(center)))
+		var ghosts: Array = []
+		for entry in wall_placement_preview.get("previews", []):
+			draw_foundation_preview_at("wall", entry["position"], entry, false)
+			var ghost: Dictionary = entry["ghost"].duplicate()
+			ghost["id"] = -1 - ghosts.size()
+			ghost["elevation"] = simulation_world.elevation_at(ghost["pos"])
+			ghosts.append(ghost)
+		var provider := func(_kind, data): return resource_catalog.building_frame_info(data, 0.0)
+		for item in wall_preview_renderer.create_world_drawables({"buildings": ghosts}, Callable(self, "world_to_screen"), 1.0, provider):
+			item["opacity"] = 0.55
+			draw_render_body(item)
 		return
 	draw_foundation_preview_at(pending_build_kind, center)
 
 
-func draw_foundation_preview_at(kind: String, center: Vector2) -> void:
+func draw_foundation_preview_at(kind: String, center: Vector2, wall_entry: Dictionary = {}, draw_sprite: bool = true) -> void:
 	var key := "%s:%d:%d:%d:%d" % [kind, roundi(center.x), roundi(center.y), game_controller.tick_index, simulation_world.navigation_grid.revision]
-	if key != placement_preview_key:
+	if wall_entry.is_empty() and key != placement_preview_key:
 		placement_preview_key = key
 		placement_preview_valid = simulation_world.can_place_foundation(local_player_team, kind, center)
 	var footprint := Footprint.building(simulation_world.unit_stats(kind), center)
 	var ghost := {"kind": kind, "team": local_player_team, "pos": center, "state": "foundation", "construction_stage": 0, "footprint": footprint}
-	var color := Color(0.45, 0.95, 0.5, 0.75) if placement_preview_valid else Color(1.0, 0.3, 0.25, 0.75)
+	if not wall_entry.is_empty():
+		ghost = wall_entry["ghost"].duplicate()
+		ghost["footprint"] = footprint
+	var valid := bool(wall_entry.get("valid", placement_preview_valid))
+	var color := Color(0.45, 0.95, 0.5, 0.75) if valid else Color(1.0, 0.3, 0.25, 0.75)
 	var points := building_selection_outline(ghost)
 	draw_colored_polygon(points, Color(color.r, color.g, color.b, 0.16))
 	draw_polyline(points, color, maxf(1.0, view_zoom), true)
+	if not draw_sprite:
+		return
 	var frame_info := resource_catalog.building_frame_info(ghost, 0.0)
-	var texture: Texture2D = frame_info.get("texture")
-	if texture != null:
-		draw_anchored_texture(texture, String(frame_info.get("asset_name", "")), int(frame_info.get("frame_index", 0)), PixelScaling.snap_screen(world_to_screen(center)), view_zoom, bool(frame_info.get("mirrored", false)), 0.55, frame_info.get("hotspot"))
+	var layers: Array = [frame_info]
+	layers.append_array(frame_info.get("composite_parts", []))
+	layers.sort_custom(func(a, b): return int(a.get("graphic_layer", 20)) < int(b.get("graphic_layer", 20)))
+	for layer in layers:
+		var texture: Texture2D = layer.get("texture")
+		if texture == null:
+			continue
+		var offset: Vector2 = layer.get("screen_offset", Vector2.ZERO)
+		draw_anchored_texture(texture, String(layer.get("asset_name", "")), int(layer.get("frame_index", 0)), PixelScaling.snap_screen(world_to_screen(center) + offset * view_zoom), view_zoom, bool(layer.get("mirrored", false)), 0.55, layer.get("hotspot"))
 
 
 func _terrain_geometry_revision() -> int:

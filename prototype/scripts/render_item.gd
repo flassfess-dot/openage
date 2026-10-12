@@ -42,6 +42,7 @@ static func create(kind: String, layer: int, world_anchor: Vector2, screen_posit
 		"player_color": player_color,
 		"opacity": clampf(opacity, 0.0, 1.0),
 		"sub_order": sub_order,
+		"wall_depth_tie": data is Dictionary and String(data.get("kind", "")) == "wall",
 		"data": data,
 		"frame_info": frame_info,
 	}
@@ -60,6 +61,19 @@ static func less_same_layer(left: Dictionary, right: Dictionary) -> bool:
 		return float(left["elevation"]) < float(right["elevation"])
 	if int(left.get("sub_order", 0)) != int(right.get("sub_order", 0)):
 		return int(left.get("sub_order", 0)) < int(right.get("sub_order", 0))
+	# Neighboring wall sprites share edge pixels at equal projected depth.
+	# Resolve them spatially so creating the same rows in reverse is identical.
+	var left_wall := bool(left.get("wall_depth_tie", false))
+	var right_wall := bool(right.get("wall_depth_tie", false))
+	if left_wall != right_wall:
+		return left_wall
+	if left_wall:
+		var left_anchor: Vector2 = left["world_anchor"]
+		var right_anchor: Vector2 = right["world_anchor"]
+		if not is_equal_approx(left_anchor.x, right_anchor.x):
+			return left_anchor.x < right_anchor.x
+		if not is_equal_approx(left_anchor.y, right_anchor.y):
+			return left_anchor.y < right_anchor.y
 	if int(left["stable_id"]) != int(right["stable_id"]):
 		return int(left["stable_id"]) < int(right["stable_id"])
 	return false

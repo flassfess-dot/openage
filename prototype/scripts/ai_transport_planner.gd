@@ -2,6 +2,7 @@ class_name RoRAiTransportPlanner
 extends RefCounted
 
 const Commands := preload("res://scripts/commands.gd")
+const Combat := preload("res://scripts/ai_combat_model.gd")
 
 const BOARDING_MARGIN: float = 1.25
 const MAX_UNLOAD_DISTANCE: float = 4.5
@@ -14,6 +15,11 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 	var allies: Array = snapshot.get("player_state", {}).get("mutual_allies", snapshot.get("player_state", {}).get("allies", [team]))
 	var own_units: Array = snapshot.get("units", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
 	var transports: Array = snapshot.get("units", []).filter(func(entity): return int(entity.get("team", 0)) in allies and float(entity.get("hp", 0.0)) > 0.0 and bool(entity.get("components", {}).get("cargo", {}).get("enabled", false)) and String(entity.get("task", "idle")) in ["idle", "hold"] and (int(entity.get("team", 0)) == team or bool(entity.get("components", {}).get("cargo", {}).get("allow_allied", true))))
+	if bool(goal.get("adaptive_strategy", false)):
+		var live_ids: Dictionary = {}
+		for unit in own_units: live_ids[int(unit["id"])] = true
+		for id in goal.get("expeditions", {}).keys():
+			if not live_ids.has(int(id)): goal["expeditions"].erase(id)
 	if transports.is_empty():
 		return []
 	var navigation: Dictionary = snapshot.get("navigation", {})
@@ -22,6 +28,8 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 	var passengers: Array = own_units.filter(func(entity):
 		return not reserved_unit_ids.has(int(entity.get("id", -1))) and String(entity.get("movement_domain", "land")) == "land" and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", []) or int(entity.get("scenario_object_id", -1)) >= 0) and String(entity.get("task", "idle")) in ["idle", "hold"] and (not has_off_target_assault or not target_land.has(Vector2i(Vector2(entity.get("pos", Vector2.ZERO)))))
 	)
+	if bool(goal.get("adaptive_strategy", false)):
+		passengers = passengers.filter(func(u): return not bool(u.get("components", {}).get("worker", {}).get("enabled", false)))
 	passengers.append_array(snapshot.get("units", []).filter(func(entity): return int(entity.get("team", -1)) == 0 and float(entity.get("hp", 0.0)) > 0.0 and String(entity.get("movement_domain", "land")) == "land" and "capturable" in entity.get("behavior_tags", []) and not reserved_unit_ids.has(int(entity.get("id", -1)))))
 	transports.sort_custom(func(left, right):
 		var left_own := int(left.get("team", 0)) == team
@@ -41,6 +49,14 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 		var cargo_ids: Array = cargo.get("passenger_ids", [])
 		var own_transport := int(transport.get("team", 0)) == team
 		var occupied := cargo_ids.size() if own_transport else int(cargo.get("count", -1))
+		var expedition: Dictionary = {}
+		if bool(goal.get("adaptive_strategy", false)) and own_transport:
+			var transport_id := int(transport["id"])
+			expedition = goal.get("expeditions", {}).get(transport_id, {"phase": "loading", "load_tick": tick, "landing": Vector2.ZERO})
+			goal["expeditions"][transport_id] = expedition
+			if occupied == 0:
+				expedition["phase"] = "loading"
+				expedition["load_tick"] = tick
 		if occupied < 0:
 			continue
 		if occupied == 0 or not own_transport:
@@ -53,6 +69,15 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 				var right_distance := Vector2(right.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(transport.get("pos", Vector2.ZERO)))
 				return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and int(left.get("id", -1)) < int(right.get("id", -1)))
 			)
+			if bool(goal.get("adaptive_strategy", false)) and own_transport and not available.is_empty():
+				var pickup_position := Vector2(available[0].get("pos", Vector2.ZERO))
+				var pickup: Variant = _landing_near(pickup_position, navigation, _known_land_component(pickup_position, navigation))
+				if pickup is Vector2 and Vector2(transport.get("pos", Vector2.ZERO)).distance_to(pickup) > MAX_UNLOAD_DISTANCE:
+					var approach: Variant = _water_approach(pickup, transport, navigation)
+					if approach is Vector2:
+						if not expedition.is_empty(): expedition["phase"] = "returning_for_troops"
+						result.append(Commands.MoveCommand.new(tick, [int(transport["id"])], approach))
+						continue
 			var in_range: Array[int] = []
 			for passenger_value in available:
 				var passenger: Dictionary = passenger_value
@@ -101,17 +126,44 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 					boarding_ids.append(int(passenger["id"]))
 				result.append(Commands.BoardCommand.new(tick, boarding_ids, int(transport["id"])))
 				continue
+		if not expedition.is_empty() and occupied < mini(int(cargo.get("capacity", 0)), int(goal.get("minimum_landing_group", 3))) and tick - int(expedition["load_tick"]) < 240: continue
 		if not landing_computed:
-			target_landing = _landing_near(Vector2(goal.get("position", Vector2.ZERO)), navigation, target_land)
+			target_landing = _landing_near(Vector2(goal.get("position", Vector2.ZERO)), navigation, target_land, goal)
 			landing_computed = true
 		var landing: Variant = target_landing
 		if not landing is Vector2:
 			continue
+		if not expedition.is_empty(): expedition["landing"] = landing
 		if Vector2(transport.get("pos", Vector2.ZERO)).distance_to(landing) <= MAX_UNLOAD_DISTANCE + 0.0001:
+			if not expedition.is_empty(): expedition["phase"] = "unloading"
 			result.append(Commands.UnloadCommand.new(tick, [int(transport.get("id", -1))], landing))
 			continue
+		if bool(goal.get("adaptive_strategy", false)):
+			if not expedition.is_empty(): expedition["phase"] = "escort"
+			var escorts: Array = own_units.filter(func(u): return not reserved_unit_ids.has(int(u.get("id", -1))) and String(u.get("movement_domain", "")) == "water" and bool(u.get("combat_enabled", false)) and not bool(u.get("components", {}).get("worker", {}).get("enabled", false)))
+			escorts.sort_custom(func(a, b):
+				var ad := Vector2(a.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(transport.get("pos", Vector2.ZERO)))
+				var bd := Vector2(b.get("pos", Vector2.ZERO)).distance_squared_to(Vector2(transport.get("pos", Vector2.ZERO)))
+				return ad < bd if ad != bd else int(a["id"]) < int(b["id"]))
+			escorts = escorts.slice(0, maxi(1, int(goal.get("minimum_naval_escort", 2))))
+			var departure := Vector2(transport.get("pos", Vector2.ZERO))
+			var route := Vector2(landing) - departure
+			var threats: Array = goal.get("landing_threats", []).filter(func(e):
+				var position := Vector2(e.get("pos", Vector2.ZERO))
+				var alpha := clampf((position - departure).dot(route) / maxf(0.001, route.length_squared()), 0.0, 1.0)
+				return String(e.get("movement_domain", "")) == "water" and bool(e.get("combat_enabled", false)) and position.distance_to(departure + route * alpha) <= 16.0)
+			if not threats.is_empty() and (escorts.size() < int(goal.get("minimum_naval_escort", 2)) or Combat.strength(escorts, threats) < Combat.strength(threats, escorts)):
+				continue
+			var assembled := escorts.all(func(e): return Vector2(e.get("pos", Vector2.ZERO)).distance_to(Vector2(transport.get("pos", Vector2.ZERO))) <= 6.0)
+			for escort in escorts:
+				var escort_id := int(escort["id"])
+				reserved_unit_ids[escort_id] = true
+				var escort_goal: Variant = Vector2(transport.get("pos", Vector2.ZERO)) if not assembled else _water_approach(Vector2(landing), escort, navigation)
+				if escort_goal is Vector2: result.append(Commands.AttackMoveCommand.new(tick, [escort_id], escort_goal))
+			if not threats.is_empty() and not assembled: continue
 		var water_approach: Variant = _water_approach(Vector2(landing), transport, navigation)
 		if water_approach is Vector2:
+			if not expedition.is_empty(): expedition["phase"] = "sailing"
 			result.append(Commands.MoveCommand.new(tick, [int(transport.get("id", -1))], water_approach))
 	return result
 
@@ -154,29 +206,39 @@ static func _nearest_coastal_land(origin: Vector2, navigation: Dictionary, probe
 	return _nearest(origin, candidates)
 
 
-static func _landing_near(target: Vector2, navigation: Dictionary, target_land: Dictionary = {}) -> Variant:
+static func _landing_near(target: Vector2, navigation: Dictionary, target_land: Dictionary = {}, goal: Dictionary = {}) -> Variant:
 	var component := target_land if not target_land.is_empty() else _known_land_component(target, navigation)
 	var water: Array = navigation.get("water", [])
-	if component.is_empty() or water.is_empty():
-		return null
+	if component.is_empty() or water.is_empty(): return null
 	var water_cells: Dictionary = {}
-	for point_value in water:
-		water_cells[Vector2i(Vector2(point_value))] = true
-	var best: Variant = null
-	var best_distance := INF
+	for value in water: water_cells[Vector2i(Vector2(value))] = true
+	var candidates: Array = []
 	for cell_value in component:
 		var cell: Vector2i = cell_value
-		var coastal := false
 		for offset in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(1, -1), Vector2i(-1, 0), Vector2i(1, 0), Vector2i(-1, 1), Vector2i(0, 1), Vector2i(1, 1)]:
 			if water_cells.has(cell + offset):
-				coastal = true
+				candidates.append(Vector2(cell) + Vector2(0.5, 0.5))
 				break
-		if coastal:
-			var point := Vector2(cell) + Vector2(0.5, 0.5)
-			var distance := target.distance_squared_to(point)
-			if distance < best_distance or (is_equal_approx(distance, best_distance) and (best == null or point.x < Vector2(best).x or (point.x == Vector2(best).x and point.y < Vector2(best).y))):
-				best = point
-				best_distance = distance
+	candidates.sort_custom(func(a, b):
+		var ad := target.distance_squared_to(Vector2(a))
+		var bd := target.distance_squared_to(Vector2(b))
+		return ad < bd if ad != bd else (a.x < b.x or (a.x == b.x and a.y < b.y)))
+	if not bool(goal.get("adaptive_strategy", false)): return candidates[0] if not candidates.is_empty() else null
+	var best: Variant = null
+	var best_score := INF
+	# Coast extraction is linear. Expensive threat scoring has a fixed quota.
+	for point_value in candidates.slice(0, 128):
+		var point := Vector2(point_value)
+		var danger := 0.0
+		for enemy in goal.get("landing_threats", []):
+			var separation := point.distance_to(Vector2(enemy.get("pos", Vector2.ZERO)))
+			var radius := 8.0 + float(Combat.profile(enemy).get("range", 0.0))
+			if separation < radius: danger += Combat.strength([enemy]) * float(enemy.get("confidence", 1.0)) * (1.0 - separation / radius)
+		if danger > float(goal.get("landing_danger_limit", 12.0)): continue
+		var score := target.distance_squared_to(point) + danger * 30.0
+		if score < best_score:
+			best = point
+			best_score = score
 	return best
 
 

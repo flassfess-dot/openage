@@ -198,6 +198,8 @@ func command_from_record(record: Dictionary):
 			command = Commands.TradeCommand.new(tick, ids, int(params.get("target_dock_id", -1)))
 		"build":
 			command = Commands.BuildCommand.new(tick, ids, String(params.get("building_type", "")), params.get("target", Vector2.ZERO))
+			for key in ["wall_cells", "planned_foundation_ids", "planned_foundation_id"]:
+				if params.has(key): command.params[key] = params[key]
 		"set_rally_point":
 			command = Commands.SetRallyPointCommand.new(tick, ids, params.get("target", Vector2.ZERO))
 		"train":
@@ -264,8 +266,26 @@ func encode_variant_reference(value: Variant, quantize_numbers: bool = true) -> 
 	return value
 
 
+# AI pending plans compare whole nested Variants, including numeric types and
+# dictionary keys. JSON numbers alone cannot preserve that contract.
+func encode_exact_variant(value: Variant) -> Dictionary:
+	var bytes := var_to_bytes(value)
+	if bytes.size() > 64 * 1024 * 1024:
+		return {}
+	return {"__exact_variant_v1": Marshalls.raw_to_base64(bytes)}
+
+
 func decode_variant(value: Variant) -> Variant:
 	if value is Dictionary:
+		if value.has("__exact_variant_v1"):
+			var encoded: Variant = value["__exact_variant_v1"]
+			if value.size() != 1 or not encoded is String or encoded.length() > 64 * 1024 * 1024 * 4 / 3 + 4:
+				return null
+			var bytes := Marshalls.base64_to_raw(encoded)
+			if bytes.is_empty() or bytes.size() > 64 * 1024 * 1024:
+				return null
+			# bytes_to_var defaults to disallowing object deserialization.
+			return bytes_to_var(bytes)
 		if value.has("__vector2"):
 			return Vector2(float(value["__vector2"][0]), float(value["__vector2"][1]))
 		if value.has("__vector2i"):

@@ -40,6 +40,7 @@ const SimulationMovementSystem := preload("res://scripts/simulation_movement_sys
 const SimulationDeathSystem := preload("res://scripts/simulation_death_system.gd")
 const SimulationApproachSystem := preload("res://scripts/simulation_approach_system.gd")
 const SimulationEntityFactory := preload("res://scripts/simulation_entity_factory.gd")
+const WallPlacement := preload("res://scripts/wall_placement.gd")
 
 const GATHER_UPDATE_IDLE := SimulationGatheringSystem.GATHER_UPDATE_IDLE
 const GATHER_UPDATE_MOVE := SimulationGatheringSystem.GATHER_UPDATE_MOVE
@@ -781,7 +782,7 @@ func refresh_building_connectivity() -> void:
 			continue
 		for cell_value in building.get("occupied_cells", []):
 			var cell: Vector2i = cell_value
-			occupied["%d:%s:%d:%d" % [int(building.get("team", 0)), group, cell.x, cell.y]] = true
+			occupied["%s:%d:%d" % [WallPlacement.connectivity_key(building), cell.x, cell.y]] = true
 	var offsets := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]
 	for building_value in buildings:
 		var building: Dictionary = building_value
@@ -791,13 +792,17 @@ func refresh_building_connectivity() -> void:
 			for direction in range(offsets.size()):
 				for cell_value in building.get("occupied_cells", []):
 					var neighbor: Vector2i = Vector2i(cell_value) + offsets[direction]
-					var key := "%d:%s:%d:%d" % [int(building.get("team", 0)), group, neighbor.x, neighbor.y]
+					var key := "%s:%d:%d" % [WallPlacement.connectivity_key(building), neighbor.x, neighbor.y]
 					if occupied.has(key):
 						next_mask |= 1 << direction
 						break
 		if int(building.get("connection_mask", 0)) != next_mask:
 			set_entity_field(building, "connection_mask", next_mask)
 			set_entity_field(building, "connection_revision", int(building.get("connection_revision", 0)) + 1)
+
+
+func plan_wall_line(team: int, cells: Array[Vector2i]) -> Dictionary:
+	return WallPlacement.plan(self, team, cells)
 
 
 func register_building_victory_objective(building: Dictionary) -> void:
@@ -2016,8 +2021,11 @@ func _build_option_icon_id(team: int, base_source_id: int, resolved_source_id: i
 	var preview := {"team": team, "source_unit_id": resolved_source_id,
 		"unit_lineage": [base_source_id, resolved_source_id], "components": {}}
 	for effect in technology_system.persistent_entity_effects(team):
-		if int(effect.get("attr_c", -1)) == 17:
-			apply_attribute_effect(preview, effect)
+		if int(effect.get("attr_c", -1)) == 17 and technology_effect_matches_entity(preview, effect):
+			var raw_type := int(effect.get("type_id", -1))
+			var operator := raw_type % 10 if raw_type >= 10 and raw_type < 30 else raw_type
+			if operator in [0, 4, 5]:
+				preview["presentation_facing"] = maxi(0, roundi(apply_effect_operator(float(preview.get("presentation_facing", 0)), operator, float(effect.get("attr_d", 0.0)))))
 	return icon_id + maxi(0, int(preview.get("presentation_facing", 0)))
 
 
@@ -2971,6 +2979,8 @@ func apply_technology_commands(team: int, commands: Array, resolve_automatic: bo
 		for entity in upgraded_entities:
 			if buildings_by_id.has(int(entity.get("id", -1))):
 				_sync_building_navigation_occupancy(entity)
+	if not is_bulk_loading() and not upgraded_entities.is_empty():
+		refresh_building_connectivity()
 	if resolve_automatic:
 		resolve_automatic_technologies(team)
 	_sync_shared_vision(team)
@@ -4051,6 +4061,11 @@ func restart_entity_order(entity: Dictionary) -> void:
 
 func append_entity_queued_order(entity: Dictionary, entry: Dictionary) -> bool:
 	var result := OrderPipeline.append_queued(entity, entry)
+	if result: _mark_entity_order_changed(entity)
+	return result
+
+func prepend_entity_queued_order(entity: Dictionary, entry: Dictionary) -> bool:
+	var result := OrderPipeline.prepend_queued(entity, entry)
 	if result: _mark_entity_order_changed(entity)
 	return result
 

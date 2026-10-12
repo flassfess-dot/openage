@@ -39,6 +39,8 @@ func _initialize() -> void:
 	var controller = GameController.new(world)
 	var ai = AiPlayer.new(definition["players"][1])
 	var issued := 0
+	var scout_move_sequences: Dictionary = {}
+	var scout_ids: Dictionary = {}
 
 	while int(controller.tick_index) < MAX_TICKS:
 		var next_tick := int(controller.tick_index) + 1
@@ -46,6 +48,12 @@ func _initialize() -> void:
 			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, int(ai.team), ai.presentation_options())
 			for command in ai.collect_commands(knowledge, next_tick):
 				controller.enqueue_command(command, true, int(ai.team))
+				if String(command.command_type()) == "move":
+					for id in command.unit_ids:
+						var unit: Variant = world.find_unit(int(id))
+						if unit != null and bool(unit.get("combat_enabled", false)) and not world.entity_is_worker(unit):
+							scout_move_sequences[int(command.sequence_id)] = true
+							scout_ids[int(id)] = true
 				issued += 1
 		controller.advance_frame(0.25, 1, 2)
 		if world.is_battle_over():
@@ -65,10 +73,15 @@ func _initialize() -> void:
 			accepted += 1
 			var command_type := String(event.get("payload", {}).get("command_type", "unknown"))
 			accepted_types[command_type] = int(accepted_types.get(command_type, 0)) + 1
+			if command_type == "move" and scout_move_sequences.has(int(event["payload"].get("sequence_id", -1))):
+				accepted_types["scout_move"] = int(accepted_types.get("scout_move", 0)) + 1
 		elif String(event.get("type", "")) == "command_rejected" and int(event.get("payload", {}).get("issuer_id", 0)) == 2:
 			rejected += 1
 			var reason := String(event.get("payload", {}).get("reason", "unknown"))
 			rejection_reasons[reason] = int(rejection_reasons.get(reason, 0)) + 1
+	var home: Vector2 = team_two_buildings.filter(func(b): return b.get("kind") == "town_center")[0]["pos"]
+	var explored: bool = combatants.any(func(u): return scout_ids.has(int(u["id"])) and Vector2(u["pos"]).distance_to(home) >= 8.0)
+	assert_true(explored or int(accepted_types.get("attack", 0)) + int(accepted_types.get("attack_move", 0)) > 0, "a combat scout actually explores away from the starting town or begins combat")
 	var resources := [world.get_resource_amount(2, 0), world.get_resource_amount(2, 1), world.get_resource_amount(2, 2), world.get_resource_amount(2, 3)]
 	var queues: Array = team_two_buildings.map(func(building): return {"id": int(building.get("id", -1)), "kind": String(building.get("kind", "")), "pos": building.get("pos", Vector2.ZERO), "state": String(building.get("state", "")), "progress": snappedf(float(building.get("construction_progress", 0.0)), 0.01), "builders": building.get("builders", {}).size(), "queue": building.get("production_queue", []).size()})
 	var path_requests := maxi(0, int(world.navigation_service.next_request_id) - 1)
@@ -80,7 +93,7 @@ func _initialize() -> void:
 	assert_true("barracks" in kinds, "generated AI completes its first military producer")
 	assert_true(combatants.size() >= 3 or world.is_battle_over(), "generated AI fields a policy-sized attack group")
 	assert_true(int(accepted_types.get("research", 0)) > 0 or world.get_current_age(2) >= 101, "generated AI starts its first age advance")
-	assert_true(int(accepted_types.get("formation_move", 0)) > 0 or int(accepted_types.get("attack_move", 0)) > 0 or int(accepted_types.get("attack", 0)) > 0, "generated military leaves the base through the ordinary combat command pipeline")
+	assert_true(int(accepted_types.get("formation_move", 0)) + int(accepted_types.get("scout_move", 0)) > 0 or int(accepted_types.get("attack_move", 0)) > 0 or int(accepted_types.get("attack", 0)) > 0, "generated combat scouts or army operations use the ordinary movement/combat command pipeline")
 	assert_true(rejected <= maxi(2, accepted / 10), "generated AI does not rely on rejected command spam (%d/%d)" % [rejected, accepted])
 	assert_true(issued <= 250, "AI decision cadence bounds public command growth over the long match (%d)" % issued)
 	assert_true(path_requests <= maxi(512, issued * 128), "navigation requests stay bounded relative to public commands (%d/%d)" % [path_requests, issued])

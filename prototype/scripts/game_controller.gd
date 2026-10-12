@@ -19,8 +19,11 @@ const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const FIXED_STEP_SECONDS: float = 0.05
 const GAME_SPEEDS := [1.0, 1.5, 2.0]
 const MAX_STEPS_PER_FRAME: int = 4
-const FRAME_SIMULATION_BUDGET_USEC: int = 8000
-const MAX_ACCUMULATED_SECONDS: float = FIXED_STEP_SECONDS * MAX_STEPS_PER_FRAME
+const FRAME_SIMULATION_BUDGET_USEC: int = 24000
+const MAX_RECOVERABLE_PREPARATION_WAIT_SECONDS := 0.15
+# Retain one short preparation wait at the fastest selected speed, while
+# executing at most four ordered steps in any rendered frame.
+const MAX_ACCUMULATED_SECONDS: float = FIXED_STEP_SECONDS * (MAX_STEPS_PER_FRAME + 3)
 const FORMATION_RECONCILE_INTERVAL_TICKS: int = 2
 const QUEUEABLE_ORDERS := ["move", "formation_move", "attack_move", "gather", "return_resources", "build", "repair", "attack", "unload"]
 const REPLACING_ORDERS := ["move", "formation_move", "attack_move", "attack", "attack_ground", "convert", "heal", "gather", "return_resources", "board", "unload", "trade", "build", "repair", "stop", "hold"]
@@ -36,6 +39,8 @@ var combat_awareness := CombatAwarenessSystem.new()
 var wildlife_behavior := WildlifeBehaviorSystem.new()
 var accumulator_seconds: float = 0.0
 var preparation_waiting := false
+var preparation_wait_seconds := 0.0
+var preparation_preserved_debt := 0.0
 var speed_index: int = 1
 var paused: bool = false
 var formation_groups: Dictionary = {}
@@ -154,6 +159,8 @@ func reset_timing() -> void:
 	tick_index = 0
 	accumulator_seconds = 0.0
 	preparation_waiting = false
+	preparation_wait_seconds = 0.0
+	preparation_preserved_debt = 0.0
 	next_command_sequence = 1
 	clear_queue()
 	command_results.clear()
@@ -208,6 +215,8 @@ func replay_until_tick(target_tick: int, player_team: int, enemy_team: int) -> b
 	paused = was_paused
 	accumulator_seconds = 0.0
 	preparation_waiting = false
+	preparation_wait_seconds = 0.0
+	preparation_preserved_debt = 0.0
 	return tick_index == target_tick and last_replay_mismatch.is_empty()
 
 func process_commands() -> void:
@@ -230,9 +239,10 @@ func process_commands() -> void:
 
 func _dispatch_command(command) -> Dictionary:
 	var rejection_reason := "unsupported_command"
+	var is_wall_plan: bool = command.command_type() == "build" and command.params.has("wall_cells")
 	if int(command.issuer_id) > 0 and simulation_world.player_registry.status(int(command.issuer_id)) != "active":
 		return CommandResult.rejected(command, tick_index, "player_not_active")
-	if bool(command.params.get("queue_order", false)):
+	if bool(command.params.get("queue_order", false)) and not is_wall_plan:
 		rejection_reason = _queue_deferred_command(command)
 		return CommandResult.accepted(command, tick_index) if rejection_reason.is_empty() else CommandResult.rejected(command, tick_index, rejection_reason)
 	match command.command_type():
@@ -291,6 +301,8 @@ func _dispatch_command(command) -> Dictionary:
 		"population_limit":
 			rejection_reason = _apply_population_limit(command)
 	if rejection_reason.is_empty():
+		if is_wall_plan:
+			return CommandResult.accepted(command, tick_index)
 		if command.command_type() in REPLACING_ORDERS and command.command_type() != "attack" and not bool(command.params.get("autonomous", false)):
 			for unit_id in command.unit_ids:
 				var unit = simulation_world.find_unit(int(unit_id))
@@ -707,6 +719,12 @@ func _apply_build(command) -> String:
 	var workers: Array = selected.filter(func(unit): return simulation_world.entity_is_worker(unit))
 	if workers.is_empty():
 		return "no_eligible_workers"
+	if command.params.has("wall_cells"):
+		return _apply_wall_line(command, workers)
+	if command.params.has("planned_foundation_ids"):
+		if command.building_type != "wall" or not command.params["planned_foundation_ids"] is Array:
+			return "invalid_wall_plan"
+		return _start_planned_wall_line(command, workers, command.params["planned_foundation_ids"])
 	var planned_foundation_id := int(command.params.get("planned_foundation_id", -1))
 	if planned_foundation_id >= 0:
 		var planned_foundation = simulation_world.find_building(planned_foundation_id)
@@ -732,6 +750,85 @@ func _apply_build(command) -> String:
 	_detach_units_from_formations(workers)
 	var foundation = simulation_world.assign_command_build(workers, command.building_type, command.target)
 	return "" if foundation != null else String(simulation_world.last_build_failure if not simulation_world.last_build_failure.is_empty() else "build_rejected")
+
+
+func _apply_wall_line(command, workers: Array) -> String:
+	if command.building_type != "wall" or not command.params["wall_cells"] is Array:
+		return "invalid_wall_plan"
+	var team := int(workers[0].get("team", 0))
+	var queued := bool(command.params.get("queue_order", false))
+	if queued:
+		for worker in workers:
+			if OrderPipeline.queued(worker).size() >= OrderPipeline.MAX_QUEUED_ORDERS:
+				return "order_queue_full"
+	var cells: Array[Vector2i] = []
+	for value in command.params["wall_cells"]:
+		if not value is Vector2i:
+			return "invalid_wall_plan"
+		var cell: Vector2i = value
+		if cell.x < 0 or cell.y < 0 or cell.x >= simulation_world.map_size.x or cell.y >= simulation_world.map_size.y:
+			return "invalid_wall_plan"
+		cells.append(cell)
+	if cells.is_empty() or cells.size() > maxi(simulation_world.map_size.x, simulation_world.map_size.y):
+		return "invalid_wall_plan"
+	var plan: Dictionary = simulation_world.plan_wall_line(team, cells)
+	var foundation_ids: Array = []
+	var rejection := "build_rejected"
+	for entry in plan["entries"]:
+		if not bool(entry["valid"]):
+			rejection = String(entry["reason"])
+			continue
+		if String(entry["status"]) == "existing":
+			continue
+		var foundation = simulation_world.find_building(int(entry["building_id"])) if String(entry["status"]) == "reuse" else simulation_world.place_foundation(team, "wall", entry["position"])
+		if foundation != null:
+			foundation_ids.append(int(foundation["id"]))
+	if foundation_ids.is_empty():
+		return "" if plan["entries"].any(func(entry): return String(entry["status"]) == "existing") else rejection
+	if queued:
+		_queue_wall_continuation(command, workers, foundation_ids, false)
+	else:
+		for worker in workers:
+			simulation_world.clear_entity_queued_orders(worker)
+			queued_unit_ids.erase(int(worker["id"]))
+			simulation_world.transport_system.clear_pending_order(worker)
+			worker["combat_pursuit"] = false
+		return _start_planned_wall_line(command, workers, foundation_ids)
+	return ""
+
+
+func _start_planned_wall_line(command, workers: Array, ids: Array) -> String:
+	var pending := ids.duplicate()
+	while not pending.is_empty():
+		var foundation = simulation_world.find_building(int(pending.pop_front()))
+		if foundation == null or float(foundation.get("hp", 0.0)) <= 0.0 or String(foundation.get("state", "")) != "foundation" or String(foundation.get("kind", "")) != "wall" or int(foundation.get("team", 0)) != int(workers[0].get("team", 0)):
+			continue
+		_detach_units_from_formations(workers)
+		simulation_world.assign_workers_to_building(workers, foundation, "build")
+		if not pending.is_empty():
+			_queue_wall_continuation(command, workers, pending, true)
+		return ""
+	return "planned_foundation_unavailable"
+
+
+func _queue_wall_continuation(command, workers: Array, ids: Array, prepend: bool) -> void:
+	# One queue slot holds the rest of a gesture, independently of its length.
+	# The ordinary BuildCommand codec keeps this plan in checkpoints and replay.
+	var params: Dictionary = queued_order_codec.encode_variant({
+		"building_type": "wall", "target": Vector2.ZERO,
+		"planned_foundation_ids": ids, "queue_order": true,
+	})
+	for worker in workers:
+		var entry := {
+			"tick": tick_index, "issuer_id": int(command.issuer_id),
+			"sequence_id": int(command.sequence_id), "type": "build",
+			"unit_ids": [int(worker["id"])], "params": params,
+		}
+		if prepend:
+			simulation_world.prepend_entity_queued_order(worker, entry)
+		else:
+			simulation_world.append_entity_queued_order(worker, entry)
+		queued_unit_ids[int(worker["id"])] = true
 
 
 func _apply_repair(command) -> String:
@@ -1314,13 +1411,18 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	if paused or simulation_world == null:
 		return simulation_world.get_last_battle_message() if simulation_world != null else ""
 
-	# An advisory worker can hold a tick for many rendered frames. Preserve
-	# the debt that reached its barrier, but do not turn wall-clock waiting
-	# into ever more catch-up work after the worker completes.
-	if not preparation_waiting:
-		# Under sustained overload, slow wall-clock progress instead of growing
-		# an unbounded catch-up debt. Commands and simulation ticks stay ordered.
-		accumulator_seconds = minf(MAX_ACCUMULATED_SECONDS, accumulator_seconds + maxf(0.0, minf(frame_delta, 0.25)) * get_speed_multiplier())
+	var elapsed := maxf(0.0, minf(frame_delta, 0.25))
+	if preparation_waiting:
+		preparation_wait_seconds += elapsed
+		if preparation_wait_seconds > MAX_RECOVERABLE_PREPARATION_WAIT_SECONDS:
+			# Long jobs retain the previous freeze-clock protection. They never
+			# cause an unlimited burst of catch-up work after the barrier clears.
+			accumulator_seconds = preparation_preserved_debt
+		else:
+			accumulator_seconds = minf(MAX_ACCUMULATED_SECONDS, accumulator_seconds + elapsed * get_speed_multiplier())
+	else:
+		accumulator_seconds = minf(MAX_ACCUMULATED_SECONDS, accumulator_seconds + elapsed * get_speed_multiplier())
+
 	var frame_started := Time.get_ticks_usec()
 	var steps := 0
 	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
@@ -1328,9 +1430,14 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 		if steps > 0 and Time.get_ticks_usec() - frame_started >= FRAME_SIMULATION_BUDGET_USEC:
 			break
 		if not _run_fixed_tick(player_team, enemy_team):
+			if not preparation_waiting:
+				preparation_wait_seconds = 0.0
+				preparation_preserved_debt = accumulator_seconds
 			preparation_waiting = true
 			break
 		preparation_waiting = false
+		preparation_wait_seconds = 0.0
+		preparation_preserved_debt = 0.0
 		accumulator_seconds -= FIXED_STEP_SECONDS
 		steps += 1
 	return simulation_world.get_last_battle_message()
@@ -1410,6 +1517,3 @@ func _inject_replay_commands_for_current_tick() -> void:
 		return
 	for replay_command in replay_source.commands_issued_through_tick(tick_index):
 		enqueue_command(replay_command, false)
-
-
-
