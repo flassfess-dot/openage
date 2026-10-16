@@ -46,6 +46,39 @@ func _initialize() -> void:
 	check(renderer.create_world_drawables(snapshot, project).is_empty() and renderer.cached_resource_records.is_empty(), "empty viewport releases retained records")
 	renderer.clear_caches()
 	check(renderer.cached_resource_raw_drawables.is_empty(), "match reset releases resource drawables")
+	# Immutable viewport reuse must keep schools animated and pickable while
+	# unrelated trees change. Panning must move the grouped selection too.
+	var fish := {"id": 700, "kind": "shore_fish", "pos": Vector2(3, 4), "amount": 100}
+	fish.make_read_only()
+	var immutable_tree := {"id": 701, "kind": "tree", "pos": Vector2(4, 4), "amount": 100}
+	immutable_tree.make_read_only()
+	var view: Array = [fish, immutable_tree]
+	view.make_read_only()
+	snapshot["resources"] = view
+	var fish_highlight: Array[int] = [700]
+	items = renderer.create_world_drawables(snapshot, project, 1, frame_info, fish_highlight)
+	var group: Dictionary = items.filter(func(item): return item["kind"] == "resource" and item["stable_id"] == 700)[0]["selection_group"]
+	var before := resolved
+	camera += Vector2(30, 20)
+	items = renderer.create_world_drawables(snapshot, project, 1, frame_info, fish_highlight)
+	verify(items)
+	check(resolved == before + 1, "unchanged immutable view resolves only animated fish, not trees")
+	check(is_same(group, items.filter(func(item): return item["kind"] == "resource" and item["stable_id"] == 700)[0]["selection_group"]), "unchanged schools retain grouping and picking membership")
+	var changed_tree := immutable_tree.duplicate()
+	changed_tree["amount"] = 90
+	changed_tree.make_read_only()
+	view = [fish, changed_tree]
+	view.make_read_only()
+	snapshot["resources"] = view
+	items = renderer.create_world_drawables(snapshot, project, 1, frame_info, fish_highlight)
+	check(is_same(group, items.filter(func(item): return item["kind"] == "resource" and item["stable_id"] == 700)[0]["selection_group"]), "tree harvesting does not rebuild fish schools")
+	view = [changed_tree]
+	view.make_read_only()
+	snapshot["resources"] = view
+	items = renderer.create_world_drawables(snapshot, project, 1, frame_info, fish_highlight)
+	check(not items.any(func(item): return item["data"].has("selection_members")), "departing fish evicts their grouped selection")
+	renderer.clear_caches()
+	check(renderer.cached_resource_input.is_empty() and renderer.cached_resource_animated.is_empty(), "reset releases retained publication and animation sources")
 	for failure in failures: push_error(failure)
 	print("Retained resource drawables: %d failures" % failures.size())
 	quit(0 if failures.is_empty() else 1)

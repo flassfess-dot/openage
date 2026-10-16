@@ -18,6 +18,7 @@ void initialize_ror_pathfinding(ModuleInitializationLevel level) {
     GDREGISTER_CLASS(RoRPathKernel);
     GDREGISTER_CLASS(RoRVisibilityKernel);
     GDREGISTER_CLASS(RoRTerrainKernel);
+    GDREGISTER_CLASS(RoRStaticSpriteProjection);
     GDREGISTER_CLASS(RoRReadModelKernel);
 }
 

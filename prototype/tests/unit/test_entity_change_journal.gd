@@ -13,6 +13,12 @@ func _initialize() -> void:
 	var first := journal.changes_since(cursor)
 	check(first["ids"] == [7, 8] and first["masks"][7] == (Journal.POSITION | Journal.COMBAT), "repeated writes coalesce by ID and group")
 	check(journal.changes_since(cursor) == first, "independent consumers read identical non-consuming deltas")
+	var edited_delta := journal.changes_since(cursor)
+	edited_delta["ids"].clear()
+	edited_delta["masks"].clear()
+	edited_delta["removed_ids"].append(999)
+	edited_delta["stamp"] = {"revision": -1}
+	check(journal.changes_since(cursor) == first, "a consumer cannot mutate another reader\u0027s cached delta")
 	check(journal.revision == cursor + 1, "one publication has one revision")
 	var second_cursor := journal.revision
 	journal.mark(7, Journal.POSITION)
@@ -27,6 +33,7 @@ func _initialize() -> void:
 		journal.flush()
 	check(journal.history.size() <= Journal.MAX_BATCHES and journal.changes_since(second_cursor)["reason"] == "history_overflow", "lagging consumers request full synchronization")
 	journal.reset()
+	check(journal.delta_cache.is_empty(), "reset releases derived cached deltas")
 	for id in range(Journal.MAX_PENDING_IDS + 1): journal.mark(id, Journal.POSITION)
 	check(journal.pending.size() <= Journal.MAX_PENDING_IDS, "pending IDs have a hard limit")
 	check(journal.changes_since(0)["reason"] == "pending_overflow", "large batches have an explicit full-sync fallback")

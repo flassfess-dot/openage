@@ -16,13 +16,16 @@ func _init(simulation_world) -> void:
 	world_ref = weakref(simulation_world)
 
 
-func place_foundation(team: int, kind: String, position: Vector2, workers: Array = []) -> Variant:
+func place_foundation(team: int, kind: String, position: Vector2, workers: Array = [], placement_options: Dictionary = {}) -> Variant:
 	position = Coordinates.clamp_world(position, world.map_size)
-	if not world.can_place_foundation(team, kind, position):
+	if not world.can_place_foundation(team, kind, position, placement_options):
 		return null
 	var cost: Dictionary = world.building_cost(kind, team)
 	world.spend_resource_cost(team, cost)
-	var building: Dictionary = world.add_building(world.entity_id_sequence.next(), kind, position, team, false)
+	if kind == "gate":
+		var replaced_walls: Dictionary = world.gate_system.replacement_wall_ids(team, position, int(placement_options.get("gate_axis", 0)))
+		world.gate_system.replace_wall_segments(replaced_walls)
+	var building: Dictionary = world.add_building(world.entity_id_sequence.next(), kind, position, team, false, placement_options)
 	world.set_entity_field(building, "reserved_cost", cost.duplicate(true))
 	world.assign_workers_to_building(workers, building, "build")
 	world.emit_domain_event("foundation_placed", {
@@ -86,7 +89,7 @@ func cancel_foundation(building_id: int) -> bool:
 	return true
 
 
-func assign_command_build(selected: Array, kind: String, position: Vector2) -> Variant:
+func assign_command_build(selected: Array, kind: String, position: Vector2, placement_options: Dictionary = {}) -> Variant:
 	var foundation: Variant = null
 	var team := int(selected[0].get("team", 0)) if not selected.is_empty() else 0
 	for building_value in world.get_buildings():
@@ -99,7 +102,7 @@ func assign_command_build(selected: Array, kind: String, position: Vector2) -> V
 		if bool(building.get("harvestable", false)) and String(building.get("resource_state", "")) == "depleted":
 			return reseed_harvestable_building(building, selected)
 	if foundation == null:
-		foundation = place_foundation(team, kind, position)
+		foundation = place_foundation(team, kind, position, [], placement_options)
 	if foundation != null:
 		world.assign_workers_to_building(selected, foundation, "build")
 	return foundation

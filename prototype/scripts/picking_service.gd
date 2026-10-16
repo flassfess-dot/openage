@@ -4,6 +4,7 @@ extends RefCounted
 const FishShoalSelection := preload("res://scripts/fish_shoal_selection.gd")
 const SelectionResolver := preload("res://scripts/selection_resolver.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
+const WallPlacement := preload("res://scripts/wall_placement.gd")
 
 const SELECTABLE_DRAWABLES := ["unit", "unit_part", "building", "building_part", "resource"]
 
@@ -90,6 +91,9 @@ func entity_type_for(drawable_kind: String, entity: Dictionary) -> String:
 
 func texture_hit(screen_position: Vector2, drawable: Dictionary, world_to_screen: Callable, zoom: float) -> bool:
 	var frame_info: Dictionary = drawable.get("frame_info", {})
+	if frame_info.has("gate_polygon"):
+		var gate_anchor := PixelScaling.snap_screen(world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO))))
+		return Geometry2D.is_point_in_polygon((screen_position-gate_anchor)/maxf(0.001,zoom),frame_info["gate_polygon"])
 	var texture: Texture2D = frame_info.get("texture")
 	if texture == null:
 		return false
@@ -113,7 +117,7 @@ func footprint_hit(screen_position: Vector2, entity_type: String, entity: Dictio
 		return offset.x * offset.x / (radius.x * radius.x) + offset.y * offset.y / (radius.y * radius.y) <= 1.0
 	var footprint: Dictionary = entity.get("footprint", {})
 	if entity_type in ["building", "foundation"]:
-		var polygon_source: Variant = footprint.get("polygon", PackedVector2Array())
+		var polygon_source := WallPlacement.selection_polygon(entity)
 		var polygon := PackedVector2Array()
 		for world_point in polygon_source:
 			polygon.append(world_to_screen.call(Vector2(world_point)))

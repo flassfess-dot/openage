@@ -155,7 +155,10 @@ func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []
 			continue
 		if bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", []):
 			continue
-		_append_occupants(desired, building.get("occupied_cells", []), "building", int(building.get("id", -1)))
+		var building_cells: Array = building.get("occupied_cells", [])
+		if String(building.get("kind", "")) == "gate" and String(building.get("state", "")) == "complete" and float(building.get("gate_open_fraction", 0.0)) >= 0.95:
+			building_cells = building.get("gate_pier_cells", [])
+		_append_occupants(desired, building_cells, "building", int(building.get("id", -1)))
 	for obstruction_value in static_obstructions:
 		var obstruction: Dictionary = obstruction_value
 		_append_occupants(desired, obstruction.get("occupied_cells", []), "static_obstruction", int(obstruction.get("id", -1)))
@@ -360,14 +363,20 @@ func can_build(cells: Array) -> bool:
 	return can_build_for(cells, "land", -1)
 
 
-func can_build_for(cells: Array, movement_domain: String = "land", restriction_id: int = -1) -> bool:
+func can_build_for(cells: Array, movement_domain: String = "land", restriction_id: int = -1, replaced_building_ids: Dictionary = {}) -> bool:
 	if cells.is_empty():
 		return false
 	var required_elevation: Variant = null
 	for cell_value in cells:
 		var cell: Vector2i = cell_value
-		if not contains(cell) or not surface_accessible(cell, movement_domain, restriction_id) or occupied_cells.has(cell) or is_slope(cell):
+		if not contains(cell) or not surface_accessible(cell, movement_domain, restriction_id) or is_slope(cell):
 			return false
+		if occupied_cells.has(cell):
+			if replaced_building_ids.is_empty():
+				return false
+			for occupant in occupied_cells[cell]:
+				if String(occupant.get("category", "")) != "building" or not replaced_building_ids.has(int(occupant.get("id", -1))):
+					return false
 		if required_elevation == null:
 			required_elevation = elevation(cell)
 		elif elevation(cell) != int(required_elevation):

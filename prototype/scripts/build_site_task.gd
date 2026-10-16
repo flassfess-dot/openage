@@ -7,6 +7,7 @@ const Pathfinder := preload("res://scripts/pathfinder.gd")
 const Placement := preload("res://scripts/simulation_building_placement_system.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
+const GateSystem := preload("res://scripts/gate_system.gd")
 const MAX_ACTOR_BYTES := 8 * 1024 * 1024
 
 class Repository extends RefCounted:
@@ -250,6 +251,10 @@ static func run(input: Dictionary, private_planner = null) -> Dictionary:
 	task.building_placement_system.site_footprint_profiles = Data.copy(input.get("static_profiles", {}))
 	var sites := task.search(int(input["team"]), [kind], int(input["maximum"]), int(input["radius"]), input["preferred"], input["strict"], float(input["gap"]))
 	return {"sites": sites, "fallbacks": task.gap_fallbacks, "static_cache": task.building_placement_system.site_map_cache.get(kind, {}), "static_profiles": task.building_placement_system.site_footprint_profiles}
+
+func building_placement_stats(kind: String, axis: int = 0) -> Dictionary:
+	return GateSystem.placement_stats(unit_stats(kind), axis) if kind == "gate" else unit_stats(kind)
+
 
 func unit_stats(kind: String) -> Dictionary:
 	return data_repository.profiles[kind]["stats"]

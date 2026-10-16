@@ -294,11 +294,13 @@ func _resource_placement_is_valid(candidate: Vector2, radius: float, movement_do
 	return true
 
 
-func add_building(id: int, kind: String, position: Vector2, team: int = 1, completed: bool = true) -> Dictionary:
+func add_building(id: int, kind: String, position: Vector2, team: int = 1, completed: bool = true, placement_options: Dictionary = {}) -> Dictionary:
 	if team > 0:
 		world.player_registry.ensure(team, int(world.civilization_by_team.get(team, 13)))
 	var stats: Dictionary = world.unit_stats(kind)
 	var source: Dictionary = world.object_record_for(kind, team)
+	if kind == "gate":
+		stats = world.building_placement_stats(kind, int(placement_options.get("gate_axis", 0)))
 	var footprint: Dictionary = Footprint.building(stats, position)
 	var obstruction_type := int(source.get("geometry", {}).get("obstruction_type", stats.get("obstruction_type", 2)))
 	var civilization_id := int(world.civilization_by_team.get(team, 13))
@@ -386,6 +388,8 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 	EntityComponents.sync_dynamic(building)
 	world.buildings.append(building)
 	world.buildings_by_id[id] = building
+	if kind == "gate":
+		world.gate_system.register(building, int(placement_options.get("gate_axis", 0)))
 	world.mark_combat_roster_dirty()
 	world.track_conquest_entity(building)
 	if kind == "town_center" and completed:

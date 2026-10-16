@@ -1,16 +1,20 @@
 class_name RoRDataRepository
 extends RefCounted
 
+const GateCatalog := preload("res://scripts/gate_catalog.gd")
+
 var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
 var compatibility_gamespec: Dictionary = {}
 
 
 func configure_runtime(data: Dictionary) -> void:
+	GateCatalog.install_runtime(data)
 	runtime_catalog = data
 
 
 func configure_objects(data: Dictionary) -> void:
+	GateCatalog.install_objects(data)
 	object_catalog = data
 
 

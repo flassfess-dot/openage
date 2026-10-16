@@ -2,6 +2,7 @@ class_name RoRHudViewModel
 extends RefCounted
 
 const IconRegistry := preload("res://scripts/interface_icon_registry.gd")
+const GateCatalog := preload("res://scripts/gate_catalog.gd")
 const RoRCommands := preload("res://scripts/commands.gd")
 const RESOURCE_NAMES := {0: "food", 1: "wood", 2: "stone", 3: "gold"}
 const FORMATIONS := [
@@ -97,6 +98,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 	var selection_model := _selection_model(selected, player_state, locale)
 	var model := {
 		"tick": int(snapshot.get("tick", 0)),
+		"icon_team": observer_team,
 		"resources": {
 			"wood": int(player_state.get("wood", 0)),
 			"food": int(player_state.get("food", 0)),
@@ -231,8 +233,8 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"type": "build",
 				"id": kind,
 				"label": _name_for_kind(kind, worker, locale),
-				"icon_kind": _building_icon_kind(worker),
-				"icon_id": int(option.get("icon_id", _icon_id_for_kind(kind, worker))),
+				"icon_kind": "gate" if kind == "gate" else _building_icon_kind(worker),
+				"icon_id": GateCatalog.icon_id(int(option.get("source_unit_id", 10072)), _building_icon_set(worker)) if kind == "gate" else int(option.get("icon_id", _icon_id_for_kind(kind, worker))),
 				"source_unit_id": int(option.get("source_unit_id", -1)),
 				"button_id": int(option.get("button_id", -1)),
 				"cost": option.get("cost", {}).duplicate(true),
@@ -242,6 +244,9 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"active": false,
 				"reason": reason,
 			})
+	if not selected.is_empty() and selected.all(func(entity): return String(entity.get("kind", "")) == "gate"):
+		for mode in ["auto", "open", "locked"]:
+			model["commands"].append({"type": "unit_action", "id": "gate_" + mode, "label": {"auto": "Автоматические ворота", "open": "Держать открытыми", "locked": "Запереть ворота"}[mode], "short_label": {"auto": "АВТО", "open": "ОТКРЫТЬ", "locked": "ЗАПЕРЕТЬ"}[mode], "icon_kind": "gate_mode", "icon_id": ["auto", "open", "locked"].find(mode), "enabled": disabled_reason.is_empty() and selected.all(func(gate): return String(gate.get("state", "")) == "complete"), "active": selected.all(func(gate): return String(gate.get("gate_mode", "auto")) == mode), "reason": disabled_reason})
 	if selected.size() == 1 and _category(selected[0]) == "building":
 		var building: Dictionary = selected[0]
 		var production_queue: Array = building.get("production_queue", [])
@@ -386,6 +391,7 @@ func _entity_input_signature(entity: Dictionary) -> int:
 		String(entity.get("task", "")),
 		String(entity.get("state", "")),
 		String(entity.get("stance", "")),
+		String(entity.get("gate_mode", "")),
 		float(entity.get("carried_amount", 0.0)),
 		float(entity.get("carry_capacity", 0.0)),
 		int(entity.get("carried_resource_type_id", -1)),
@@ -532,6 +538,7 @@ func _selection_model(selected: Array, player_state: Dictionary, locale: String)
 			"trade_stage": String(trade.get("stage", "idle")),
 			"trade_resource_type_id": int(trade.get("selected_input_resource_type_id", -1)),
 			"trade_cargo_gold": int(trade.get("cargo_gold", 0)),
+			"icon_team": int(leader.get("team", 1)),
 			"icon_kind": _building_icon_kind(leader) if category == "building" else "unit",
 			"icon_id": _icon_id_for_kind(String(leader.get("kind", "")), leader),
 		},
@@ -580,6 +587,7 @@ func _queue_model(queue: Array, context_entity: Dictionary, locale: String) -> A
 			"kind": kind,
 			"technology_id": technology_id,
 			"label": _name_for_kind(kind, context_entity, locale) if order_type == "unit" else _technology_name(technology_id, locale),
+			"icon_team": int(context_entity.get("team", 1)),
 			"icon_kind": "unit" if order_type == "unit" else "technology",
 			"icon_id": _icon_id_for_kind(kind, context_entity) if order_type == "unit" else int(technology.get("icon_id", -1)),
 			"status": String(order.get("status", "queued")),
@@ -624,6 +632,8 @@ func _technology_name(technology_id: int, locale: String) -> String:
 
 
 func _icon_id_for_kind(kind: String, entity: Dictionary) -> int:
+	if kind == "gate":
+		return GateCatalog.icon_id(int(entity.get("source_unit_id", 10072)), _building_icon_set(entity))
 	var archetype: Dictionary = runtime_catalog.get("archetypes", {}).get(kind, {})
 	if archetype.is_empty():
 		return -1
@@ -643,10 +653,16 @@ func _icon_id_for_kind(kind: String, entity: Dictionary) -> int:
 
 
 func _building_icon_kind(entity: Dictionary) -> String:
+	if String(entity.get("kind", "")) == "gate":
+		return "gate"
+	return "building_%d" % _building_icon_set(entity)
+
+
+func _building_icon_set(entity: Dictionary) -> int:
 	var default_civilization_id := int(runtime_catalog.get("default_civilization_id", 13))
 	var civilization_id := int(entity.get("components", {}).get("ownership", {}).get("civilization_id", default_civilization_id))
 	var icon_set := int(building_icon_set_by_civilization.get(civilization_id, building_icon_set_by_civilization.get(default_civilization_id, 0)))
-	return "building_%d" % clampi(icon_set, 0, 4)
+	return clampi(icon_set, 0, 4)
 
 
 func _command_option_is_visible(option: Dictionary) -> bool:

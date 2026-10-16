@@ -384,7 +384,7 @@ func style_button(button: Button) -> void:
 func icon_for(record: Dictionary) -> Texture2D:
 	if icon_registry == null:
 		return null
-	return icon_registry.texture(String(record.get("icon_kind", "object")), int(record.get("icon_id", -1)))
+	return icon_registry.texture(String(record.get("icon_kind", "object")), int(record.get("icon_id", -1)), int(record.get("icon_team", model.get("icon_team", 1))))
 
 
 func place(control: Control, rect: Rect2) -> void:

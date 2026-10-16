@@ -198,7 +198,7 @@ func command_from_record(record: Dictionary):
 			command = Commands.TradeCommand.new(tick, ids, int(params.get("target_dock_id", -1)))
 		"build":
 			command = Commands.BuildCommand.new(tick, ids, String(params.get("building_type", "")), params.get("target", Vector2.ZERO))
-			for key in ["wall_cells", "planned_foundation_ids", "planned_foundation_id"]:
+			for key in ["wall_cells", "planned_foundation_ids", "planned_foundation_id", "gate_axis"]:
 				if params.has(key): command.params[key] = params[key]
 		"set_rally_point":
 			command = Commands.SetRallyPointCommand.new(tick, ids, params.get("target", Vector2.ZERO))
@@ -212,6 +212,8 @@ func command_from_record(record: Dictionary):
 			command = Commands.RepairCommand.new(tick, ids, int(params.get("target_building_id", -1)))
 		"tribute":
 			command = Commands.TributeCommand.new(tick, int(params.get("target_team", -1)), int(params.get("resource_type_id", -1)), int(params.get("amount", 0)))
+		"gate_mode":
+			command = Commands.GateModeCommand.new(tick, ids, String(params.get("mode", "auto")))
 		"stance":
 			command = Commands.StanceCommand.new(tick, ids, String(params.get("stance", "passive")))
 		"hold":

@@ -42,6 +42,9 @@ func synchronize(world) -> void:
 		for row in world.victory_objectives: _put(row, "objectives")
 	else:
 		for id in delta["ids"]:
+			# Existing live dictionaries already expose activity/health changes.
+			# Only membership, replacement and spatial changes need a bucket write.
+			if entities.has(id) and not (int(delta["masks"][id]) & (1 | 2 | 128)): continue
 			var row: Variant = world.find_unit(int(id))
 			var category := "units"
 			if row == null:
@@ -209,13 +212,14 @@ func update_building_memory(world, before_visibility: bool) -> void:
 		if team <= 0: continue
 		var state: Dictionary = memory_cursors.get(team, {"entity": -1, "fog": -1})
 		var delta: Dictionary = world.entity_changes.changes_since(int(state["entity"]))
+		var memories: Dictionary = world.last_known_buildings_by_player.get(team, {})
 		var candidates: Dictionary = {}
 		if bool(delta["full"]):
 			for row in world.get_buildings(): candidates[int(row["id"])] = true
 		else:
-			for id in delta["ids"]: candidates[id] = true
+			for id in delta["ids"]:
+				if world.buildings_by_id.has(id) or memories.has(id): candidates[id] = true
 		var visibility: Dictionary = fog.visibility_changes_since(team, int(state["fog"]))
-		var memories: Dictionary = world.last_known_buildings_by_player.get(team, {})
 		if not before_visibility:
 			if bool(visibility["full"]) or overflow:
 				for row in world.get_buildings(): candidates[int(row["id"])] = true

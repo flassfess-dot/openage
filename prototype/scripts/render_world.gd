@@ -5,6 +5,9 @@ const PickingService := preload("res://scripts/picking_service.gd")
 const ResourcePresentationRegistry := preload("res://scripts/resource_presentation_registry.gd")
 const RenderItem := preload("res://scripts/render_item.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
+const SpriteAtlas := preload("res://scripts/sprite_atlas.gd")
+var sprite_atlas := SpriteAtlas.new()
+var sprite_atlas_enabled := true
 const AMBIENT_TRAVEL_TICKS := 160
 const AMBIENT_WANDER_RADIUS := 8.0
 const AMBIENT_MIN_WAYPOINT_RADIUS := 5.0
@@ -28,6 +31,18 @@ var cached_resource_drawables: Array = []
 var cached_resource_projection: Variant = null
 var cached_resource_records: Dictionary = {}
 var cached_resource_raw_drawables: Array = []
+var cached_resource_input: Array = []
+var cached_resource_highlights: Array[int] = []
+var cached_resource_animated: Array = []
+var cached_sprite_scale := 0.0
+var affine_static_projection := true
+var cached_resource_origin: Variant = null
+var cached_resource_scale := 0.0
+var cached_resource_group_selections: Array = []
+var cached_environment_origin: Variant = null
+var cached_environment_scale := 0.0
+var cached_resource_clip: Dictionary = {}
+var cached_environment_clip: Dictionary = {}
 var cached_environment_signature: int = 0
 var cached_environment_drawables: Array = []
 var cached_environment_signature_valid := false
@@ -37,15 +52,43 @@ var cached_environment_animated: Array = []
 var cached_environment_projection: Variant = null
 var performance_probe: Variant = null
 var cached_building_depth_index: Dictionary = {}
+var cached_building_records: Dictionary = {}
+var rally_drawables: Array = []
+var camera_cache_ready := false
+var camera_actor_items: Array = []
+var camera_actor_statics: Array = []
+var current_projection_origin := Vector2.ZERO
+var cached_refresh_input: Array = []
+var cached_refresh_static: Array = []
+var cached_refresh_moving: Array = []
+var cached_refresh_ambient: Array = []
+var native_render_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 
 
 func clear_caches() -> void:
+	sprite_atlas.clear()
 	cached_building_depth_index.clear()
+	cached_building_records.clear()
+	camera_cache_ready = false
+	camera_actor_items = []
+	camera_actor_statics = []
+	cached_refresh_input = []
+	cached_refresh_static = []
+	cached_refresh_moving = []
+	cached_refresh_ambient = []
 	cached_resource_signature = 0
 	cached_resource_drawables.clear()
 	cached_resource_projection = null
 	cached_resource_records.clear()
 	cached_resource_raw_drawables.clear()
+	cached_resource_input = []
+	cached_resource_highlights = []
+	cached_resource_animated.clear()
+	cached_resource_origin = null
+	cached_environment_origin = null
+	cached_resource_group_selections.clear()
+	cached_resource_clip.clear()
+	cached_environment_clip.clear()
 	cached_environment_signature = 0
 	cached_environment_drawables.clear()
 	cached_environment_signature_valid = false
@@ -55,9 +98,12 @@ func clear_caches() -> void:
 	cached_environment_projection = null
 
 
-func create_world_drawables(world_source, world_to_screen: Callable, interpolation_alpha: float = 1.0, frame_info_provider: Callable = Callable(), preview_ids: Array[int] = [], observer_team: int = 0, selected_ids: Array[int] = []) -> Array:
+func create_world_drawables(world_source, world_to_screen: Callable, interpolation_alpha: float = 1.0, frame_info_provider: Callable = Callable(), preview_ids: Array[int] = [], observer_team: int = 0, selected_ids: Array[int] = [], sprite_scale: float = 0.0, viewport: Rect2 = Rect2()) -> Array:
 	var stage_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var drawables: Array = []
+	rally_drawables = []
+	current_projection_origin = world_to_screen.call(Vector2.ZERO)
+	if world_source is Dictionary and not world_source.has("resources"): cached_sprite_scale = sprite_scale
 	var alpha := clampf(interpolation_alpha, 0.0, 1.0)
 	var preview_id_lookup: Variant = _id_lookup(preview_ids)
 	var selected_id_lookup: Variant = _id_lookup(selected_ids)
@@ -85,15 +131,22 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	var source_markers: Array = world_source.get("markers", []) if from_snapshot else []
 	var source_environment: Array = world_source.get("environment", []) if from_snapshot else []
 	var source_units: Array = world_source.get("units", []) if from_snapshot else world_source.get_units()
-	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids + selected_ids) if from_snapshot and world_source.has("resources") else []
+	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids + selected_ids, sprite_scale, world_source.get("resource_delta", {}), viewport) if from_snapshot and world_source.has("resources") else []
+	if viewport.has_area(): resource_drawables = _visible_static_drawables(resource_drawables, viewport, cached_resource_clip)
 	_observe_stage("resources", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
-	var environment_projection := _snapshot_environment_drawables(source_environment, world_to_screen, frame_info_provider, int(world_source.get("environment_revision", -1))) if from_snapshot and world_source.has("environment") else {"static": [], "animated": source_environment}
+	var environment_projection := _snapshot_environment_drawables(source_environment, world_to_screen, frame_info_provider, int(world_source.get("environment_revision", -1)), viewport) if from_snapshot and world_source.has("environment") else {"static": [], "animated": source_environment}
 	var environment_drawables: Array = environment_projection["static"]
+	if viewport.has_area(): environment_drawables = _visible_static_drawables(environment_drawables, viewport, cached_environment_clip)
 	source_environment = environment_projection["animated"]
 	_observe_stage("environment_cache", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
-	cached_building_depth_index = _building_depth_index(source_buildings)
+	cached_building_depth_index = _building_depth_index(source_buildings, frame_info_provider)
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.building.depth_index", Time.get_ticks_usec() - stage_started)
+	var building_frames_us := 0
+	var building_items_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var present_buildings: Dictionary = {}
+	var moved_building_items: Array = []
 	for building in source_buildings:
 		if building["hp"] <= 0.0 and String(building.get("death_phase", "removed")) not in ["dying", "ruin"]:
 			continue
@@ -101,18 +154,46 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 			continue
 		var building_position: Vector2 = building["pos"]
 		var building_screen: Vector2 = world_to_screen.call(building_position)
+		var info_started := Time.get_ticks_usec() if performance_probe != null else 0
 		var building_info := _frame_info(frame_info_provider, "building", building)
+		if performance_probe != null: building_frames_us += Time.get_ticks_usec() - info_started
 		var building_id := int(building["id"])
 		var building_elevation := float(building.get("elevation", 0.0))
 		var is_interior_resource := bool(building.get("harvestable", false))
 		var base_sub_order := int(building_info.get("graphic_layer", 20)) * 1000 - (100 if is_interior_resource else 0)
+		present_buildings[building_id] = true
+		var selected: bool = selected_id_lookup.has(building_id)
+		var previewed: bool = preview_id_lookup.has(building_id)
+		var has_rally := selected and bool(building.get("rally_point_set", false))
+		var signature := hash([building_info, building_position, building_elevation, String(building.get("kind", "")), is_interior_resource, selected, previewed, observer_team])
+		var retained: Dictionary = cached_building_records.get(building_id, {})
+		if not has_rally and retained.get("signature") == signature:
+			var moved: bool = retained["screen"] != building_screen or float(retained["scale"]) != cached_sprite_scale
+			var changed: bool = not is_same(retained["source"], building)
+			if moved or changed:
+				for item in retained["items"]:
+					if changed: item["data"] = building
+					if moved:
+						if _can_project_visible(viewport):
+							moved_building_items.append(item)
+						else:
+							item["screen_position"] = building_screen
+							item["screen_y"] = Vector2(world_to_screen.call(building_position + Vector2(item.get("depth_world_offset", Vector2.ZERO)))).y
+							_cache_resource_sprite(item)
+			retained["screen"] = building_screen
+			retained["scale"] = cached_sprite_scale
+			retained["source"] = building
+			drawables.append_array(retained["items"])
+			continue
+		var first_item := drawables.size()
 		drawables.append(RenderItem.create("building", RenderItem.Layer.DECAL if is_interior_resource else RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, building_info, building_elevation, Color.WHITE, 1.0, base_sub_order))
 		var building_part_index := 0
 		for part in building_info.get("composite_parts", []):
 			building_part_index += 1
 			var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + (100 if is_interior_resource else 0) + building_part_index
 			var upright := String(part.get("presentation_layer", "")) == "upright"
-			var part_item := RenderItem.create("building_part", RenderItem.Layer.UNIT_BUILDING if upright or not is_interior_resource else RenderItem.Layer.DECAL, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order)
+			var part_layer := RenderItem.Layer.SHADOW if String(part.get("presentation_layer", "")) == "shadow" else RenderItem.Layer.UNIT_BUILDING if upright or not is_interior_resource else RenderItem.Layer.DECAL
+			var part_item := RenderItem.create("building_part", part_layer, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order)
 			var depth_offset: Vector2 = part.get("depth_world_offset", Vector2.ZERO)
 			part_item["depth_world_offset"] = depth_offset
 			part_item["screen_y"] = Vector2(world_to_screen.call(building_position + depth_offset)).y
@@ -122,7 +203,18 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		if selected_id_lookup.has(building_id) and int(building.get("team", 0)) == observer_team and bool(building.get("rally_point_set", false)) and float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "")) == "complete":
 			var rally_position := Vector2(building.get("rally_point", building_position))
 			var rally_info := _frame_info(frame_info_provider, "rally_flag", building)
-			drawables.append(RenderItem.create("rally_flag", RenderItem.Layer.UNIT_BUILDING, rally_position, world_to_screen.call(rally_position), building_id, building, rally_info, 0.0, team_color(observer_team), 1.0, 20_001))
+			var flag := RenderItem.create("rally_flag", RenderItem.Layer.UNIT_BUILDING, rally_position, world_to_screen.call(rally_position), building_id, building, rally_info, 0.0, team_color(observer_team), 1.0, 20_001)
+			drawables.append(flag)
+			rally_drawables.append(flag)
+		var items := drawables.slice(first_item)
+		for item in items: _cache_resource_sprite(item)
+		cached_building_records[building_id] = {"signature": signature, "items": items, "source": building, "screen": building_screen, "scale": cached_sprite_scale}
+	if not moved_building_items.is_empty(): native_render_kernel.project_visible_static_items(moved_building_items, current_projection_origin, sprite_scale, Rect2())
+	for id in cached_building_records.keys():
+		if not present_buildings.has(id): cached_building_records.erase(id)
+	if performance_probe != null:
+		performance_probe.observe_microseconds("presentation.building.frames", building_frames_us)
+		performance_probe.observe_microseconds("presentation.building.items", Time.get_ticks_usec() - building_items_started - building_frames_us)
 	_observe_stage("buildings", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	if not from_snapshot:
@@ -174,45 +266,62 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		drawables = FishShoalSelection.group_drawables(drawables, preview_ids + selected_ids, world_to_screen)
 	_observe_stage("static_entities", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
-	for unit in source_units:
-		var death_phase := String(unit.get("death_phase", "alive"))
-		if unit["hp"] > 0.0 or death_phase in ["dying", "corpse"]:
-			if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, unit):
-				continue
-			var previous_position: Vector2 = unit.get("previous_pos", unit["pos"])
-			var render_position: Vector2 = previous_position.lerp(unit["pos"], alpha)
-			var unit_screen: Vector2 = world_to_screen.call(render_position)
-			var unit_sort_screen := unit_screen
-			var depth_offset := _unit_building_depth_offset(render_position, unit_screen.y, cached_building_depth_index, world_to_screen)
-			unit_sort_screen.y += depth_offset
-			var frame_info := _frame_info(frame_info_provider, "unit", unit)
-			var stable_id := int(unit["id"])
-			var elevation := float(unit.get("elevation", 0.0))
-			var player_color := team_color(int(unit.get("team", 0)))
-			if death_phase != "corpse":
-				drawables.append(RenderItem.create("shadow", RenderItem.Layer.SHADOW, render_position, unit_screen, stable_id, unit, {}, elevation, Color(0.0, 0.0, 0.0, 0.32)))
-			var unit_base_sub_order := int(frame_info.get("graphic_layer", 20)) * 1000
-			var unit_item := RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, unit_base_sub_order)
-			unit_item["screen_y"] = unit_sort_screen.y
-			unit_item["depth_offset"] = depth_offset
-			drawables.append(unit_item)
-			var unit_part_index := 0
-			for part_value in frame_info.get("composite_parts", []):
-				var part: Dictionary = part_value
-				unit_part_index += 1
-				var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + unit_part_index
-				var unit_part_item := RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order)
-				unit_part_item["screen_y"] = unit_sort_screen.y
-				unit_part_item["depth_offset"] = depth_offset
-				drawables.append(unit_part_item)
-			var highlighted: bool = selected_id_lookup.has(stable_id) or bool(unit.get("selected", false)) or preview_id_lookup.has(stable_id)
-			if death_phase == "alive" and highlighted:
-				drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
-			if death_phase == "alive" and highlighted:
-				drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
+	if from_snapshot and native_render_kernel != null and native_render_kernel.has_method("create_unit_render_items"):
+		drawables.append_array(native_render_kernel.create_unit_render_items(source_units, world_to_screen, frame_info_provider, Callable(self, "team_color"), alpha, cached_building_depth_index, preview_ids, selected_ids))
+	else:
+		for unit in source_units:
+			var death_phase := String(unit.get("death_phase", "alive"))
+			if unit["hp"] > 0.0 or death_phase in ["dying", "corpse"]:
+				if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, unit):
+					continue
+				var previous_position: Vector2 = unit.get("previous_pos", unit["pos"])
+				var render_position: Vector2 = previous_position.lerp(unit["pos"], alpha)
+				var unit_screen: Vector2 = world_to_screen.call(render_position)
+				var unit_sort_screen := unit_screen
+				var depth_offset := _unit_building_depth_offset(render_position, unit_screen.y, cached_building_depth_index, world_to_screen)
+				unit_sort_screen.y += depth_offset
+				var frame_info := _frame_info(frame_info_provider, "unit", unit)
+				var stable_id := int(unit["id"])
+				var elevation := float(unit.get("elevation", 0.0))
+				var player_color := team_color(int(unit.get("team", 0)))
+				if death_phase != "corpse":
+					drawables.append(RenderItem.create("shadow", RenderItem.Layer.SHADOW, render_position, unit_screen, stable_id, unit, {}, elevation, Color(0.0, 0.0, 0.0, 0.32)))
+				var unit_base_sub_order := int(frame_info.get("graphic_layer", 20)) * 1000
+				var unit_item := RenderItem.create("unit", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, unit_base_sub_order)
+				unit_item["screen_y"] = unit_sort_screen.y
+				unit_item["depth_offset"] = depth_offset
+				drawables.append(unit_item)
+				var unit_part_index := 0
+				for part_value in frame_info.get("composite_parts", []):
+					var part: Dictionary = part_value
+					unit_part_index += 1
+					var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + unit_part_index
+					var unit_part_item := RenderItem.create("unit_part", RenderItem.Layer.UNIT_BUILDING, render_position, unit_screen, stable_id, unit, part, elevation, player_color, 1.0, part_sub_order)
+					unit_part_item["screen_y"] = unit_sort_screen.y
+					unit_part_item["depth_offset"] = depth_offset
+					drawables.append(unit_part_item)
+				var highlighted: bool = selected_id_lookup.has(stable_id) or bool(unit.get("selected", false)) or preview_id_lookup.has(stable_id)
+				if death_phase == "alive" and highlighted:
+					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
+				if death_phase == "alive" and highlighted:
+					drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
+	if sprite_scale > 0.0 and native_render_kernel != null and native_render_kernel.has_method("cache_actor_sprites"): native_render_kernel.cache_actor_sprites(drawables, sprite_scale)
 	_observe_stage("units", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
-	drawables = _sort_drawables_by_layer(drawables)
+	drawables = native_render_kernel.sort_render_items(drawables) if native_render_kernel != null and native_render_kernel.has_method("sort_render_items") else _sort_drawables_by_layer(drawables)
+	camera_actor_items = drawables
+	camera_actor_statics = []
+	if affine_static_projection and sprite_scale > 0.0 and native_render_kernel != null and native_render_kernel.has_method("project_visible_static_items"):
+		camera_actor_statics = native_render_kernel.partition_render_items(camera_actor_items)["static"]
+		native_render_kernel.project_visible_static_items(camera_actor_statics, current_projection_origin, sprite_scale, Rect2())
+	camera_cache_ready = true
+	if sprite_scale > 0.0:
+		var visible: Array = []
+		for item in drawables:
+			if String(item["kind"]) in ["building", "building_part"]:
+				if viewport.has_area() and item.has("sprite_command") and not viewport.intersects(item["sprite_command"][1], true): continue
+			visible.append(item)
+		drawables = visible
 	_observe_stage("sort", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	var result: Array = drawables
@@ -221,6 +330,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	if not resource_drawables.is_empty():
 		result = _merge_sorted_drawables(result, resource_drawables)
 	_observe_stage("merge", stage_started)
+	sprite_atlas.flush()
 	return result
 
 
@@ -329,12 +439,48 @@ static func _ambient_roll(entity_id: int, cycle: int, salt: int, limit: int) -> 
 	return posmod(state, maxi(1, limit))
 
 
-func _reproject_statics(drawables: Array, world_to_screen: Callable) -> void:
+func _reproject_statics(drawables: Array, world_to_screen: Callable, old_origin: Variant = null, old_scale: float = 0.0) -> void:
+	var origin: Vector2 = world_to_screen.call(Vector2.ZERO)
+	var affine := affine_static_projection and old_origin is Vector2 and old_scale > 0.0 and cached_sprite_scale > 0.0
+	if affine and native_render_kernel != null and native_render_kernel.has_method("reproject_static_items"):
+		native_render_kernel.reproject_static_items(drawables, origin, old_origin, old_scale, cached_sprite_scale)
+		return
 	for drawable_value in drawables:
 		var drawable: Dictionary = drawable_value
-		var screen: Vector2 = world_to_screen.call(drawable["world_anchor"])
+		var screen: Vector2
+		if affine:
+			# Derive once, then reuse the original local anchor. Repeated pans
+			# must not accumulate rounding error or query terrain per object.
+			if not drawable.has("projection_anchor"):
+				drawable["projection_anchor"] = (Vector2(drawable["screen_position"]) - Vector2(old_origin)) / old_scale
+			screen = Vector2(drawable["projection_anchor"]) * cached_sprite_scale + origin
+		else:
+			screen = world_to_screen.call(drawable["world_anchor"])
+			if cached_sprite_scale > 0.0: drawable["projection_anchor"] = (screen - origin) / cached_sprite_scale
 		drawable["screen_position"] = screen
 		drawable["screen_y"] = screen.y
+		if String(drawable["kind"]) in ["resource", "resource_shadow", "building", "building_part", "environment"]: _cache_resource_sprite(drawable)
+
+
+func _cache_resource_sprite(item: Dictionary) -> void:
+	item.erase("sprite_command")
+	if cached_sprite_scale > 0.0 and not item.has("projection_anchor"):
+		item["projection_anchor"] = (Vector2(item["screen_position"]) - current_projection_origin) / cached_sprite_scale
+		item["projection_sort_y"] = (float(item["screen_y"]) - current_projection_origin.y) / cached_sprite_scale
+	var info: Dictionary = item["frame_info"]
+	var texture: Texture2D = info.get("texture")
+	if cached_sprite_scale <= 0.0 or texture == null or info.has("gate_polygon") or info.has("rotation") or bool(info.get("mirrored", false)): return
+	var anchor := Vector2(item["screen_position"]).round() + Vector2(info.get("screen_offset", Vector2.ZERO)) * cached_sprite_scale
+	item["sprite_source_size"] = texture.get_size()
+	item["sprite_screen_offset"] = Vector2(info.get("screen_offset", Vector2.ZERO))
+	var rendered_texture := sprite_atlas.texture_for(texture) if sprite_atlas_enabled else texture
+	var texture_rid := rendered_texture.get_rid()
+	var region := Rect2(Vector2.ZERO, texture.get_size())
+	if rendered_texture is AtlasTexture:
+		texture_rid = rendered_texture.atlas.get_rid()
+		region = rendered_texture.region
+	item["sprite_command"] = [rendered_texture, Rect2(anchor - Vector2(item["hotspot"]) * cached_sprite_scale, texture.get_size() * cached_sprite_scale), Color(1, 1, 1, float(item["opacity"])), texture_rid, region]
+
 
 static func _append_resource_shadow(drawables: Array, resource: Dictionary, frame_info: Dictionary, position: Vector2, screen: Vector2) -> void:
 	var shadow: Dictionary = frame_info.get("shadow", {})
@@ -351,20 +497,55 @@ static func resource_layer(resource: Dictionary) -> int:
 	return RenderItem.Layer.UNIT_BUILDING
 
 
-func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, frame_info_provider: Callable, preview_ids: Array[int]) -> Array:
+func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, frame_info_provider: Callable, preview_ids: Array[int], sprite_scale: float = 0.0, publication_delta: Dictionary = {}, viewport: Rect2 = Rect2()) -> Array:
 	var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
-	if cached_resource_projection != projection:
-		_reproject_statics(cached_resource_raw_drawables, world_to_screen)
+	var scale_changed := cached_sprite_scale != sprite_scale
+	cached_sprite_scale = sprite_scale
+	if cached_resource_projection != projection or scale_changed:
+		if not _can_project_visible(viewport):
+			_reproject_statics(cached_resource_raw_drawables, world_to_screen, cached_resource_origin, cached_resource_scale)
+			_reproject_statics(cached_resource_group_selections, world_to_screen, cached_resource_origin, cached_resource_scale)
+		cached_resource_origin = world_to_screen.call(Vector2.ZERO)
+		cached_resource_scale = sprite_scale
 		cached_resource_projection = projection
-	var next_records: Dictionary = {}
+	if resources.is_read_only() and is_same(resources, cached_resource_input) and preview_ids == cached_resource_highlights:
+		_refresh_resource_animations(frame_info_provider)
+		if performance_probe != null: performance_probe.increment("presentation.resources.publications_reused")
+		return cached_resource_drawables
+	var highlights_changed := preview_ids != cached_resource_highlights
+	var delta: Dictionary = {}
+	# The legal-memory producer publishes an immutable delta with exact source
+	# identities. No scan is needed when this renderer saw its predecessor.
+	if not highlights_changed and publication_delta.is_read_only() and is_same(publication_delta.get("previous"), cached_resource_input) and is_same(publication_delta.get("current"), resources):
+		delta = publication_delta
+	elif not highlights_changed and native_render_kernel != null and native_render_kernel.has_method("diff_resource_records"):
+		delta = native_render_kernel.diff_resource_records(cached_resource_input, resources)
+	var incremental := bool(delta.get("valid", false))
+	if performance_probe != null:
+		performance_probe.increment("presentation.resources.incremental" if incremental else "presentation.resources.full_scan")
+		performance_probe.increment("presentation.resources.records_scanned", delta["changed"].size() if incremental else resources.size())
+	var immutable_view := resources.is_read_only()
+	cached_resource_input = []
+	cached_resource_highlights = preview_ids.duplicate()
+	var next_records: Dictionary = cached_resource_records.duplicate() if incremental else {}
+	var replaced: Dictionary = {}
+	if incremental:
+		for removed_id in delta["removed"]:
+			next_records.erase(removed_id)
+			replaced[removed_id] = true
 	var retained: Dictionary = {}
 	var added: Array = []
 	var highlighted: Variant = _id_lookup(preview_ids)
 	var has_fish := false
+	var fish_changed := highlights_changed
 	var resolved := 0
-	for resource_value in resources:
+	for resource_value in (delta["changed"] if incremental else resources):
 		var resource: Dictionary = resource_value
+		immutable_view = immutable_view and resource.is_read_only() and (not resource.has("behavior_tags") or resource["behavior_tags"].is_read_only())
 		if int(resource.get("amount", 0)) <= 0 and not bool(resource.get("visible_when_depleted", false)):
+			if incremental:
+				next_records.erase(int(resource["id"]))
+				replaced[int(resource["id"])] = true
 			continue
 		var id := int(resource.get("id", -1))
 		var selected: bool = highlighted.has(id) and PickingService.resource_is_selectable(resource)
@@ -377,58 +558,170 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var fish: bool = bool(previous.get("fish", false)) if identical else FishShoalSelection.is_fish(resource)
 		has_fish = has_fish or fish
 		if not previous.is_empty() and int(previous["signature"]) == signature:
+			if identical:
+				next_records[id] = previous
+				retained[id] = true
+				continue
+			fish_changed = fish_changed or fish
 			for item in previous["drawables"]:
 				if not identical: item["data"] = resource
-				if fish: item.erase("selection_group")
-				if animated and String(item["kind"]) != "resource_shadow":
-					var info := _frame_info(frame_info_provider, "resource", resource)
-					item["frame_info"] = info
-					item["frame"] = int(info.get("frame_index", 0))
-					item["hotspot"] = info.get("hotspot", Vector2.ZERO)
 			previous["source"] = resource
 			next_records[id] = previous
 			retained[id] = true
 			continue
+		fish_changed = fish_changed or fish or bool(previous.get("fish", false))
+		replaced[id] = true
 		var position: Vector2 = resource.get("pos", Vector2.ZERO)
 		var screen: Vector2 = world_to_screen.call(position)
 		var info := _frame_info(frame_info_provider, "resource", resource)
 		var elevation := float(resource.get("elevation", 0.0))
 		var items: Array = [RenderItem.create("resource", resource_layer(resource), position, screen, id, resource, info, elevation)]
 		_append_resource_shadow(items, resource, info, position, screen)
+		for item in items:
+			_cache_resource_sprite(item)
+			item["clip_static_sprite"] = not animated
 		if selected:
 			items.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, screen, id, resource, info, elevation, Color("d6bc63"), 1.0, 1))
 		next_records[id] = {"signature": signature, "drawables": items, "source": resource, "selected": selected, "animated": animated, "fish": fish}
 		added.append_array(items)
 		resolved += 1
 
-	if added.is_empty() and next_records.size() == cached_resource_records.size() and not has_fish:
+	cached_resource_input = resources if immutable_view else []
+	if not incremental or not added.is_empty() or not replaced.is_empty():
+		cached_resource_animated = []
+		for record in next_records.values():
+			if bool(record["animated"]): cached_resource_animated.append(record)
+	_refresh_resource_animations(frame_info_provider)
+	if incremental:
+		for id in delta["removed"]:
+			if bool(cached_resource_records.get(id, {}).get("fish", false)): fish_changed = true
+	else:
+		for id in cached_resource_records:
+			if not next_records.has(id) and bool(cached_resource_records[id]["fish"]): fish_changed = true
+	if added.is_empty() and next_records.size() == cached_resource_records.size() and not fish_changed:
+		cached_resource_records = next_records
 		if performance_probe != null: performance_probe.increment("presentation.resources.frames_reused", next_records.size())
-		return cached_resource_raw_drawables
+		return cached_resource_drawables
 	var kept: Array = []
 	for item in cached_resource_raw_drawables:
-		if retained.has(int(item["stable_id"])): kept.append(item)
+		if (not replaced.has(int(item["stable_id"]))) if incremental else retained.has(int(item["stable_id"])): kept.append(item)
 	added.sort_custom(RenderItem.less)
-	cached_resource_raw_drawables = merge_sorted_drawables(kept, added)
+	cached_resource_raw_drawables = _merge_static_items(kept, added)
 	# Retain only the current viewport's legal records. A single entering tree or
 	# depletion change never reloads all remaining resource frame descriptors.
 	cached_resource_records = next_records
 	cached_resource_drawables = cached_resource_raw_drawables
+	cached_resource_group_selections = []
+	if not has_fish:
+		for record in next_records.values():
+			if bool(record["fish"]): has_fish = true; break
 	if has_fish:
-		cached_resource_drawables = FishShoalSelection.group_drawables(cached_resource_raw_drawables, preview_ids, world_to_screen)
-		cached_resource_drawables.sort_custom(RenderItem.less)
+		# Group/sort only the fish, then merge with the already sorted forest.
+		# A few animated schools must not trigger a full resource re-sort.
+		var fish_items: Array = []
+		var other_items: Array = []
+		for item in cached_resource_raw_drawables:
+			if bool(cached_resource_records[int(item["stable_id"])]["fish"]):
+				item.erase("selection_group")
+				fish_items.append(item)
+			else: other_items.append(item)
+		var grouped := FishShoalSelection.group_drawables(fish_items, preview_ids, world_to_screen)
+		for item in grouped:
+			if String(item["kind"]) == "selection": cached_resource_group_selections.append(item)
+		grouped.sort_custom(RenderItem.less)
+		cached_resource_drawables = _merge_static_items(other_items, grouped)
 	if performance_probe != null:
 		performance_probe.increment("presentation.resources.frames_resolved", resolved)
 		performance_probe.increment("presentation.resources.frames_reused", retained.size())
 	return cached_resource_drawables
 
 
-func _snapshot_environment_drawables(environment_items: Array, world_to_screen: Callable, frame_info_provider: Callable, revision: int = -1) -> Dictionary:
+func _can_project_visible(viewport: Rect2) -> bool:
+	return affine_static_projection and cached_sprite_scale > 0.0 and viewport.has_area() and native_render_kernel != null and native_render_kernel.has_method("project_visible_static_items")
+
+
+func _merge_static_items(first: Array, second: Array) -> Array:
+	if affine_static_projection and cached_sprite_scale > 0.0 and native_render_kernel != null and native_render_kernel.has_method("merge_projected_static_items"):
+		return native_render_kernel.merge_projected_static_items(first, second, current_projection_origin, cached_sprite_scale)
+	return merge_sorted_drawables(first, second)
+
+
+func can_refresh_camera() -> bool:
+	return camera_cache_ready and affine_static_projection and cached_sprite_scale > 0.0 and native_render_kernel != null and native_render_kernel.has_method("project_visible_static_items")
+
+
+func refresh_camera_drawables(world_to_screen: Callable, interpolation_alpha: float, sprite_scale: float, viewport: Rect2) -> Array:
+	current_projection_origin = world_to_screen.call(Vector2.ZERO)
+	cached_sprite_scale = sprite_scale
+	var projection := hash([current_projection_origin, world_to_screen.call(Vector2.ONE)])
+	cached_resource_projection = projection
+	cached_environment_projection = projection
+	cached_resource_origin = current_projection_origin
+	cached_environment_origin = current_projection_origin
+	cached_resource_scale = sprite_scale
+	cached_environment_scale = sprite_scale
+	if camera_actor_statics.is_empty():
+		camera_actor_statics = native_render_kernel.partition_render_items(camera_actor_items)["static"]
+	native_render_kernel.project_visible_static_items(camera_actor_statics, current_projection_origin, sprite_scale, Rect2())
+	refresh_world_drawables(camera_actor_items, world_to_screen, interpolation_alpha, false, true)
+	for record in cached_building_records.values():
+		if not record["items"].is_empty():
+			record["screen"] = record["items"][0]["screen_position"]
+			record["scale"] = sprite_scale
+	var actors: Array = []
+	for item in camera_actor_items:
+		if String(item["kind"]) in ["building", "building_part"] and item.has("sprite_command") and not viewport.intersects(item["sprite_command"][1], true): continue
+		actors.append(item)
+	var resources := _visible_static_drawables(cached_resource_drawables, viewport, cached_resource_clip)
+	var environment := _visible_static_drawables(cached_environment_drawables, viewport, cached_environment_clip)
+	return merge_sorted_drawables(merge_sorted_drawables(actors, environment), resources)
+
+
+func _visible_static_drawables(items: Array, viewport: Rect2, cache: Dictionary) -> Array:
+	var key := [viewport, cached_resource_projection]
+	if cache.get("key") == key and is_same(cache.get("source"), items): return cache["result"]
+	var result: Array = []
+	if _can_project_visible(viewport):
+		if not is_same(cache.get("prepared_source"), items):
+			cache["prepared"] = native_render_kernel.prepare_static_projection(items, current_projection_origin, cached_sprite_scale)
+			cache["prepared_source"] = items
+		result = native_render_kernel.project_prepared_static_items(cache["prepared"], current_projection_origin, cached_sprite_scale, viewport)
+		cache["source"] = items
+		cache["result"] = result
+		cache["key"] = key
+		return result
+	for item in items:
+		# Test the whole source sprite, including the crown/hotspot. Animation
+		# and group selections stay conservative, even outside the viewport.
+		if bool(item.get("clip_static_sprite", false)) and item.has("sprite_command"):
+			if not viewport.intersects(item["sprite_command"][1], true): continue
+		result.append(item)
+	cache["source"] = items
+	cache["result"] = result
+	cache["key"] = key
+	return result
+
+
+func _refresh_resource_animations(provider: Callable) -> void:
+	for record in cached_resource_animated:
+		var info := _frame_info(provider, "resource", record["source"])
+		for item in record["drawables"]:
+			if String(item["kind"]) == "resource_shadow": continue
+			item["frame_info"] = info
+			item["frame"] = int(info.get("frame_index", 0))
+			item["hotspot"] = info.get("hotspot", Vector2.ZERO)
+			_cache_resource_sprite(item)
+
+
+func _snapshot_environment_drawables(environment_items: Array, world_to_screen: Callable, frame_info_provider: Callable, revision: int = -1, viewport: Rect2 = Rect2()) -> Dictionary:
 	# Pan/zoom preserves depth order, but cached and newly entering items must
 	# share the current projection before merging with units and buildings.
 	var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
 	if cached_environment_projection != projection:
-		_reproject_statics(cached_environment_drawables, world_to_screen)
-
+		if not _can_project_visible(viewport):
+			_reproject_statics(cached_environment_drawables, world_to_screen, cached_environment_origin, cached_environment_scale)
+		cached_environment_origin = world_to_screen.call(Vector2.ZERO)
+		cached_environment_scale = cached_sprite_scale
 		cached_environment_projection = projection
 	# The main scene publishes a revision for its immutable spatial query.
 	# Avoid hashing every decoration again on all 20 simulation ticks.
@@ -465,6 +758,8 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 		var position: Vector2 = item.get("position", Vector2.ZERO)
 		var frame_info := _frame_info(frame_info_provider, "environment", item)
 		var drawable := RenderItem.create("environment", environment_layer(item), position, world_to_screen.call(position), item_id, item, frame_info, float(item.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(frame_info.get("graphic_layer", 0)) * 1000)
+		_cache_resource_sprite(drawable)
+		drawable["clip_static_sprite"] = true
 		next_records[item_id] = {"signature": entry["signature"], "drawable": drawable}
 		added.append(drawable)
 	var kept: Array = []
@@ -473,7 +768,7 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 		if retained.has(int(drawable["stable_id"])):
 			kept.append(drawable)
 	added.sort_custom(RenderItem.less)
-	cached_environment_drawables = merge_sorted_drawables(kept, added)
+	cached_environment_drawables = _merge_static_items(kept, added)
 	# Evict offscreen records: memory is bounded by the current query, not by
 	# how much of a supergiant map the player has visited.
 	cached_environment_records = next_records
@@ -485,6 +780,8 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 	return {"static": cached_environment_drawables, "animated": animated}
 
 func merge_sorted_drawables(first: Array, second: Array) -> Array:
+	if native_render_kernel != null and native_render_kernel.has_method("merge_render_items"):
+		return native_render_kernel.merge_render_items(first, second)
 	# Both inputs are sorted by the strict total RenderItem order (distinct
 	# entities never tie), so this linear merge yields exactly the order a full
 	# re-sort would produce while touching each item once.
@@ -511,14 +808,31 @@ func _merge_sorted_drawables(first: Array, second: Array) -> Array:
 const INTERPOLATED_KINDS := ["unit", "unit_part", "shadow", "selection", "health_bar"]
 
 
-func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interpolation_alpha: float = 1.0, projection_changed: bool = true) -> Array:
+func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interpolation_alpha: float = 1.0, projection_changed: bool = true, force_resort: bool = false) -> Array:
 	# Frame descriptors, composite parts and render-item dictionaries are stable
 	# for one published presentation revision. Between fixed simulation ticks only
 	# interpolation changes, so update anchors in place instead of rebuilding the
 	# complete render queue and resolving every sprite again.
 	var alpha := clampf(interpolation_alpha, 0.0, 1.0)
-	var moved := false
-	for drawable_value in drawables:
+	var moved := force_resort
+	if not is_same(cached_refresh_input, drawables) or projection_changed:
+		cached_refresh_input = drawables
+		if native_render_kernel != null and native_render_kernel.has_method("partition_render_items"):
+			var partition: Dictionary = native_render_kernel.partition_render_items(drawables)
+			cached_refresh_static = partition["static"]
+			cached_refresh_moving = partition["moving"]
+			cached_refresh_ambient = partition.get("ambient", [])
+		else:
+			cached_refresh_static = []
+			cached_refresh_moving = []
+			for item in drawables:
+				if _is_dynamic_drawable(String(item.get("kind", "")), item.get("data", {})): cached_refresh_moving.append(item)
+				else: cached_refresh_static.append(item)
+	var refresh_items: Array = drawables if projection_changed else cached_refresh_moving
+	if not projection_changed and native_render_kernel != null and native_render_kernel.has_method("refresh_interpolated_items"):
+		moved = bool(native_render_kernel.refresh_interpolated_items(cached_refresh_moving, world_to_screen, alpha, cached_building_depth_index, cached_sprite_scale)) or moved
+		refresh_items = cached_refresh_ambient
+	for drawable_value in refresh_items:
 		var drawable: Dictionary = drawable_value
 		var kind := String(drawable.get("kind", ""))
 		var data: Dictionary = drawable.get("data", {})
@@ -538,6 +852,7 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 				drawable["screen_position"] = static_screen
 				var sort_offset := Vector2(drawable.get("depth_world_offset", Vector2.ZERO))
 				drawable["screen_y"] = Vector2(world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO)) + sort_offset)).y
+				if String(drawable["kind"]) in ["resource", "resource_shadow", "building", "building_part", "environment"]: _cache_resource_sprite(drawable)
 			continue
 		var resolved_position: Vector2 = position
 		if not resolved_position.is_equal_approx(Vector2(drawable.get("world_anchor", resolved_position))):
@@ -548,24 +863,22 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		if kind in ["unit", "unit_part"]:
 			drawable["depth_offset"] = _unit_building_depth_offset(resolved_position, screen_position.y, cached_building_depth_index, world_to_screen)
 		drawable["screen_y"] = screen_position.y + float(drawable.get("depth_offset", 0.0))
+		if drawable.has("sprite_command"): _cache_resource_sprite(drawable)
 	if projection_changed:
-		var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
-		cached_resource_projection = projection
-		cached_environment_projection = projection
+		# A compatibility refresh can update a clipped subset of the caches.
+		# Re-query the remaining statics before the next published queue.
+		cached_resource_projection = null
+		cached_environment_projection = null
+		cached_resource_origin = null
+		cached_environment_origin = null
+		cached_resource_clip.clear()
+		cached_environment_clip.clear()
 	if moved:
-		var static_drawables: Array = []
-		var moving_drawables: Array = []
-		for drawable_value in drawables:
-			var drawable: Dictionary = drawable_value
-			var data: Dictionary = drawable.get("data", {})
-			if _is_dynamic_drawable(String(drawable.get("kind", "")), data):
-				moving_drawables.append(drawable)
-			else:
-				static_drawables.append(drawable)
-		moving_drawables.sort_custom(RenderItem.less)
-		var merged := merge_sorted_drawables(static_drawables, moving_drawables)
-		for index in range(drawables.size()):
-			drawables[index] = merged[index]
+		if native_render_kernel != null and native_render_kernel.has_method("sort_render_items"):
+			cached_refresh_moving = native_render_kernel.sort_render_items(cached_refresh_moving)
+		else: cached_refresh_moving.sort_custom(RenderItem.less)
+		var merged := merge_sorted_drawables(cached_refresh_static, cached_refresh_moving)
+		drawables.assign(merged)
 	return drawables
 
 
@@ -591,9 +904,39 @@ func _observe_stage(stage: String, started: int) -> void:
 
 
 
-static func _unit_building_depth_offset(position: Vector2, screen_y: float, index: Dictionary, project: Callable) -> float:
+func _unit_building_depth_offset(position: Vector2, screen_y: float, index: Dictionary, project: Callable) -> float:
+	if native_render_kernel != null and native_render_kernel.has_method("unit_depth_offset"):
+		return native_render_kernel.unit_depth_offset(position, screen_y, index, project)
+	return _reference_unit_building_depth_offset(position, screen_y, index, project)
+
+
+static func _reference_unit_building_depth_offset(position: Vector2, screen_y: float, index: Dictionary, project: Callable) -> float:
 	var adjusted := screen_y
+	var front_limit := -INF
+	var back_limit := INF
 	for building in index.get(Vector2i((position / 4.0).floor()), []):
+		if building.has("gate_occluder"):
+			var segment: Dictionary = building["gate_occluder"]
+			var start: Vector2 = segment["start"]
+			var end: Vector2 = segment["end"]
+			var direction := end-start
+			var length_squared := direction.length_squared()
+			if length_squared < 0.0001:
+				continue
+			var along := (position-start).dot(direction)/length_squared
+			var normal := direction.orthogonal().normalized()
+			if normal.dot(Vector2.ONE) < 0:
+				normal = -normal
+			var side := (position-start).dot(normal)
+			if along < -0.75 or along > 1.75 or absf(side) > 1.25:
+				continue
+			var depth: float = Vector2(project.call(segment["depth"])).y
+			var margin := maxf(0.05,absf(depth)*0.00002)
+			if side >= 0:
+				front_limit = maxf(front_limit,depth+margin)
+			else:
+				back_limit = minf(back_limit,depth-margin)
+			continue
 		if bool(building.get("harvestable", false)) or float(building.get("hp", 0.0)) <= 0.0:
 			continue
 		var center := Vector2(building["pos"])
@@ -603,13 +946,32 @@ static func _unit_building_depth_offset(position: Vector2, screen_y: float, inde
 			continue
 		if offset.x >= half.x or offset.y >= half.y:
 			adjusted = maxf(adjusted, Vector2(project.call(center)).y + 0.01)
+	if front_limit <= back_limit:
+		adjusted = clampf(adjusted,front_limit,back_limit)
 	return adjusted - screen_y
 
 
-static func _building_depth_index(buildings: Array) -> Dictionary:
+static func _building_depth_index(buildings: Array, provider: Callable = Callable()) -> Dictionary:
 	var index: Dictionary = {}
 	for building in buildings:
 		if bool(building.get("harvestable", false)) or float(building.get("hp", 0.0)) <= 0.0:
+			continue
+		if String(building.get("kind", "")) == "gate":
+			if provider.is_valid():
+				var provided: Variant = provider.call("building",building)
+				if not provided is Dictionary:
+					continue
+				var info: Dictionary = provided
+				for local in info.get("gate_occluders",[]):
+					var origin := Vector2(building["pos"])
+					var segment := {"start":origin+Vector2(local["start"]),"end":origin+Vector2(local["end"]),"depth":origin+Vector2(local["depth"])}
+					var first := Vector2i(((Vector2(segment["start"]).min(segment["end"])-Vector2.ONE*2.0)/4.0).floor())
+					var last := Vector2i(((Vector2(segment["start"]).max(segment["end"])+Vector2.ONE*2.0)/4.0).floor())
+					for y in range(first.y,last.y+1):
+						for x in range(first.x,last.x+1):
+							var key := Vector2i(x,y)
+							if not index.has(key): index[key] = []
+							index[key].append({"gate_occluder":segment})
 			continue
 		var center := Vector2(building["pos"])
 		var extent := Vector2(building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))) + Vector2.ONE * 1.5

@@ -1,5 +1,6 @@
 class_name RoRResourceCatalog
 
+const GateCatalog := preload("res://scripts/gate_catalog.gd")
 const PlayerPalette := preload("res://scripts/player_palette.gd")
 var player_palette := PlayerPalette.new()
 
@@ -70,6 +71,7 @@ func load() -> void:
 	unit_presentations.player_palette = player_palette
 	building_presentations.player_palette = player_palette
 	effect_presentations.player_palette = player_palette
+	interface_icons.player_palette = player_palette
 	var graphics_frame_records: Dictionary = asset_frame_records_by_archive.get("graphics", {})
 	var interface_frame_records: Dictionary = asset_frame_records_by_archive.get("interfac", {})
 	scenario_marker_textures.clear()
@@ -213,6 +215,8 @@ func load_generated_data() -> void:
 	var parsed_runtime = read_json("res://assets/generated/runtime-catalog.json")
 	if parsed_runtime is Dictionary:
 		runtime_catalog_data = parsed_runtime
+	GateCatalog.install_objects(object_catalog_data)
+	GateCatalog.install_runtime(runtime_catalog_data)
 	var parsed_scenarios = read_json("res://assets/generated/scenario-catalog.json")
 	if parsed_scenarios is Dictionary:
 		scenario_catalog_data = parsed_scenarios

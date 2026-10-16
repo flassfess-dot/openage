@@ -30,7 +30,9 @@ Controls:
 - `,` / `.`: slower/faster game speed (1.0x, 1.5x, 2.0x)
 - `F3`: toggle diagnostics (IDs, footprints, grid, paths, slots, velocities, facing and render keys)
 - `Ctrl+F10`: open the eight-direction animation calibration scene
-- `B`: open construction choices for selected villagers
+- `B`: open construction choices for selected villagers; Gates unlock with Small Wall research
+- `Tab` during gate placement: turn the 4x1 footprint; select a finished gate for Auto / Open / Locked modes
+- gates follow Small / Medium / Fortified Wall research and retain their mode, orientation and health ratio; see `docs/gates.md`
 - `R`: choose a repair target for selected villagers; restart when no villager is selected or the battle has ended
 - `Del`: delete selected own objects
 - `Esc`: cancel targeting or return from construction; quit when no command or submenu is active
@@ -77,6 +79,13 @@ Smaller windows page commands instead of shrinking them; construction keeps Back
 accessible on every page. Narrow windows reflow the HUD without stretching the
 original minimap frame.
 
+The desktop renderer uses Vulkan Mobile with Mailbox presentation, applied after
+native window creation to avoid a startup presentation stall. Unsupported
+rendering devices retain Godot's automatic fallback to OpenGL compatibility.
+Rendering keeps the original resolution, nearest-neighbor artwork and fixed
+simulation cadence. Camera projection, static building compositions and entity
+change deltas reuse bounded data; match replacement clears the derived caches.
+
 Terrain now prepares the next full-quality view on a worker before scrolling
 exits the current mesh. Numeric terrain/height/variant samples are retained only
 for the current window and invalidated by terrain revisions. Scenery queries
@@ -84,6 +93,26 @@ reuse unchanged render records, resolve only entering or changed objects, and
 merge their depth order without rebuilding all decorations. Effects-only draws
 preserve the scene cache. Regression tests cover cache bounds, camera projection,
 terrain prefetch and exact geometry; the default map size and artwork are unchanged.
+Camera resource publications retain one immutable, ID-sorted array per observer.
+Legal observation changes update only its changed records; hidden live changes
+never invalidate fog memory. Moving the camera replaces this bounded view, and
+save restoration clears it with the observer memory. Selected resources still
+receive detached control records. The renderer reuses unchanged publications,
+animates only its animated resource records and groups/sorts fish separately
+from the forest. Plain static resource sprites retain their texture rectangles
+until their frame or camera projection changes; rotated/mirrored sprites use the
+existing draw path. Static resources, scenery and building sprites wholly outside
+the viewport are omitted using full sprite bounds; camera movement refreshes the
+queue between simulation ticks so crowns entering the window remain visible.
+Camera queries snap outward to eight-tile windows, always preserving the full
+sprite margin while avoiding a new forest query for each camera pixel.
+Camera pan/zoom reprojects retained static anchors without repeating terrain
+height queries or projecting fish bodies twice. RenderWorld.affine_static_projection
+can disable this path for reference comparisons. Whole-view reuse requires
+immutable resource records as well as an immutable outer array.
+Native depth-list merging preserves the reference comparator
+and automatically falls back to GDScript if that method is unavailable.
+
 Worker and inspection behavior
 ------------------------------
 The villager action layer has Build on the first plain-hammer button and Repair

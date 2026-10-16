@@ -290,6 +290,8 @@ func _dispatch_command(command) -> Dictionary:
 			rejection_reason = _apply_research(command)
 		"cancel_production":
 			rejection_reason = _apply_cancel_production(command)
+		"gate_mode":
+			rejection_reason = simulation_world.gate_system.set_mode(command.unit_ids, command.issuer_id, String(command.params.get("mode", "")))
 		"stance":
 			rejection_reason = _apply_stance(command)
 		"stop", "hold":
@@ -355,7 +357,7 @@ func _queue_deferred_command(command) -> String:
 				foundation = building
 				break
 		if foundation == null:
-			foundation = simulation_world.place_foundation(team, command.building_type, command.target)
+			foundation = simulation_world.place_foundation(team, command.building_type, command.target, [], {"gate_axis": int(command.params.get("gate_axis", 0))})
 		if foundation == null:
 			return String(simulation_world.last_build_failure if not simulation_world.last_build_failure.is_empty() else "build_rejected")
 		command.params["planned_foundation_id"] = int(foundation.get("id", -1))
@@ -734,8 +736,10 @@ func _apply_build(command) -> String:
 		simulation_world.assign_workers_to_building(workers, planned_foundation, "build")
 		return ""
 	if bool(command.params.get("plan_only", false)):
+		if command.building_type == "gate" and workers.any(func(worker): return OrderPipeline.queued(worker).size() >= OrderPipeline.MAX_QUEUED_ORDERS):
+			return "order_queue_full"
 		var team := int(workers[0].get("team", 0))
-		var foundation = simulation_world.place_foundation(team, command.building_type, command.target)
+		var foundation = simulation_world.place_foundation(team, command.building_type, command.target, [], {"gate_axis": int(command.params.get("gate_axis", 0))})
 		if foundation == null:
 			return String(simulation_world.last_build_failure if not simulation_world.last_build_failure.is_empty() else "build_rejected")
 		command.params.erase("plan_only")
@@ -748,7 +752,7 @@ func _apply_build(command) -> String:
 			return queue_reason
 		return ""
 	_detach_units_from_formations(workers)
-	var foundation = simulation_world.assign_command_build(workers, command.building_type, command.target)
+	var foundation = simulation_world.assign_command_build(workers, command.building_type, command.target, {"gate_axis": int(command.params.get("gate_axis", 0))})
 	return "" if foundation != null else String(simulation_world.last_build_failure if not simulation_world.last_build_failure.is_empty() else "build_rejected")
 
 

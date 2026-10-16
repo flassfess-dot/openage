@@ -2,14 +2,15 @@ class_name RoRGameSaveArchive
 extends RefCounted
 
 const ReplaySystem := preload("res://scripts/replay_system.gd")
+const Checkpoint := preload("res://scripts/game_checkpoint.gd")
 const SoundCueHistory := preload("res://scripts/sound_cue_history.gd")
-const FORMAT_VERSION := 6
+const FORMAT_VERSION := 7
 const CHECKPOINT_FORMAT_VERSION := FORMAT_VERSION
 const SAVE_PATH := "user://saves/quicksave.json"
 const NAMED_SAVE_DIRECTORY := "user://saves/named"
 const MAX_SLOT_NAME_LENGTH := 64
 const MAX_TICK := 20_000_000
-const REQUIRED_FEATURES := ["incremental_runtime_v2", "world_checkpoint", "population_points", "order_queues", "fog_memory", "sound_cue_history", "match_rules", "adaptive_ai_v1"]
+const REQUIRED_FEATURES := ["incremental_runtime_v2", "world_checkpoint", "population_points", "order_queues", "fog_memory", "sound_cue_history", "match_rules", "adaptive_ai_v1", "gates_v1"]
 
 
 static func create(match_path: String, match_definition: Dictionary, tick: int, _state_hash: String, replay: Dictionary, ai_states: Array, view_state: Dictionary, controller_state: Dictionary, slot_name: String = "Быстрое сохранение", checkpoint: Dictionary = {}) -> Dictionary:
@@ -62,7 +63,7 @@ static func validate(data: Dictionary) -> String:
 	if not features is Array or not REQUIRED_FEATURES.all(func(feature): return feature in features):
 		return "schema_features_missing"
 	var blob: Variant = data.get("checkpoint")
-	if not blob is Dictionary or int(blob.get("version", -1)) != 2 or String(blob.get("sha256", "")).length() != 64 or String(blob.get("data", "")).is_empty():
+	if not blob is Dictionary or int(blob.get("version", -1)) != Checkpoint.VERSION or String(blob.get("sha256", "")).length() != 64 or String(blob.get("data", "")).is_empty():
 		return "checkpoint_invalid"
 	var metadata: Variant = data.get("metadata")
 	if not metadata is Dictionary or not valid_slot_name(String(metadata.get("slot_name", ""))) or int(metadata.get("saved_at_unix", 0)) <= 0:

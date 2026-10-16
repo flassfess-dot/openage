@@ -119,7 +119,19 @@ func check_running(game, stage: String) -> bool:
 		await tree.process_frame
 		if game.game_controller.tick_index >= initial_tick + 10:
 			game.current_world_drawables()
-			report["stages"].append({"stage": stage, "initial_tick": initial_tick, "final_tick": game.game_controller.tick_index, "map_size": [game.map_size.x, game.map_size.y]})
+			var stage_report := {"stage":stage,"initial_tick":initial_tick,"final_tick":game.game_controller.tick_index,"map_size":[game.map_size.x,game.map_size.y]}
+			if "--capture-rendered-startup" in OS.get_cmdline_user_args() and DisplayServer.get_name() != "headless":
+				DirAccess.make_dir_recursive_absolute(output_path.get_base_dir())
+				game.queue_redraw()
+				await tree.process_frame
+				await RenderingServer.frame_post_draw
+				var screenshot := output_path.get_base_dir().path_join(stage+".png")
+				var image_error := tree.root.get_texture().get_image().save_png(screenshot)
+				if image_error != OK:
+					fail("Cannot capture rendered verification: "+screenshot)
+					return false
+				stage_report["screenshot"] = screenshot
+			report["stages"].append(stage_report)
 			print("PACKAGED_STARTUP %s running: tick %d -> %d" % [stage, initial_tick, game.game_controller.tick_index])
 			return true
 	fail("Simulation did not advance after loading: " + stage)

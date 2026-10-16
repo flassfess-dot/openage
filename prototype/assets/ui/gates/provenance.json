@@ -1,0 +1,16 @@
+{
+  "generator": "res://tools/bake_gate_icons.gd",
+  "renderer": "RoRGatePresentation / RoRBuildingPresentationRegistry",
+  "size": [
+    50,
+    50
+  ],
+  "variants": 11,
+  "player_colors": 8,
+  "inputs": [
+    "res://assets/generated/ (original wall, flag, shadow and terrain sprites)",
+    "res://assets/gates/*-leaves.png"
+  ],
+  "style": "Cropped isometric raster building portrait, nearest texture sampling, original in-game palette.",
+  "regenerate": "Godot --path prototype --script res://tools/bake_gate_icons.gd, then Godot --headless --path prototype --import"
+}

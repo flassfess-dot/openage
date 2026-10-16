@@ -24,7 +24,7 @@ func capture(world, tick: int, team: int, selected_ids: Array, bounds: Rect2, di
 	var refresh := overview_tick < 0 or tick < overview_tick or tick - overview_tick >= OVERVIEW_REFRESH_TICKS
 	var next_resource_revision := int(world.known_resource_revision(team))
 	var refresh_resources := refresh and (old_overview.is_empty() or next_resource_revision != resource_revision)
-	var options := {"include_navigation": false, "include_build_sites": false, "include_overview": refresh, "include_overview_resources": refresh_resources, "compact_render_entities": not diagnostics, "include_production_overview": true, "borrow_visible_render_entities": not diagnostics, "borrow_overview_entities": not diagnostics and not coordinator.is_enabled("presentation"), "entity_bounds": bounds, "always_include_entity_ids": selected_ids, "command_option_entity_ids": selected_ids}
+	var options := {"include_navigation": false, "include_build_sites": false, "include_overview": refresh, "include_overview_resources": refresh_resources, "compact_render_entities": not diagnostics, "include_production_overview": true, "borrow_visible_render_entities": not diagnostics, "borrow_sampled_building_memory": not diagnostics, "borrow_overview_entities": not diagnostics and not coordinator.is_enabled("presentation"), "entity_bounds": bounds, "always_include_entity_ids": selected_ids, "command_option_entity_ids": selected_ids}
 	if probe != null:
 		options["performance_probe"] = probe
 		options["performance_prefix"] = "presentation.local.snapshot"

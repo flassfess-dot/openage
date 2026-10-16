@@ -1,6 +1,8 @@
 class_name RoRInterfaceIconRegistry
 extends RefCounted
 
+const GateCatalog := preload("res://scripts/gate_catalog.gd")
+
 const ASSET_NAMES := {
 	"object": "unit_icon",
 	"unit": "unit_icon",
@@ -30,6 +32,7 @@ static func command_icon(action: String, stance: String = "aggressive") -> Dicti
 
 var records_by_sheet: Dictionary = {}
 var texture_cache: Dictionary = {}
+var player_palette
 
 
 func configure(asset_records: Variant, indexed_frame_records: Dictionary = {}) -> void:
@@ -56,35 +59,53 @@ func configure(asset_records: Variant, indexed_frame_records: Dictionary = {}) -
 			continue
 		if not records_by_sheet.has(sheet_name):
 			records_by_sheet[sheet_name] = {}
-		records_by_sheet[sheet_name][int(record["frame"])] = String(record.get("file", ""))
+		records_by_sheet[sheet_name][int(record["frame"])] = record
 
 
 func has_icon(icon_kind: String, icon_id: int) -> bool:
+	if icon_kind == "gate":
+		return icon_id >= 0 and icon_id < GateCatalog.ICON_VARIANTS.size()
+	if icon_kind == "gate_mode":
+		return icon_id >= 0 and icon_id < 3
 	if icon_kind == "command_custom":
 		return icon_id >= 0 and icon_id < CUSTOM_COMMANDS.size()
 	var sheet_name := String(ASSET_NAMES.get(icon_kind, ""))
 	return icon_id >= 0 and records_by_sheet.get(sheet_name, {}).has(icon_id)
 
 
-func texture(icon_kind: String, icon_id: int) -> Texture2D:
+func texture(icon_kind: String, icon_id: int, team: int = 1) -> Texture2D:
 	if not has_icon(icon_kind, icon_id):
 		return null
+	var player: int = player_palette.color_index(team) if player_palette != null and team > 0 else 1
+	if icon_kind in ["gate", "gate_mode"]:
+		var gate_key := "%s:%d:%d" % [icon_kind, icon_id, player]
+		if not texture_cache.has(gate_key):
+			if icon_kind == "gate":
+				texture_cache[gate_key] = load("res://assets/ui/gates/%s-p%d.png" % [GateCatalog.ICON_VARIANTS[icon_id], player])
+			else:
+				texture_cache[gate_key] = load("res://assets/ui/commands/%s.svg" % ["gate-auto", "gate-open", "gate-locked"][icon_id])
+		return texture_cache[gate_key]
 	if icon_kind == "command_custom":
 		var custom_key := "custom:%d" % icon_id
 		if not texture_cache.has(custom_key):
 			texture_cache[custom_key] = load("res://assets/ui/commands/%s.svg" % CUSTOM_COMMANDS[icon_id])
 		return texture_cache[custom_key]
 	var sheet_name := String(ASSET_NAMES[icon_kind])
-	var cache_key := "%s:%d" % [sheet_name, icon_id]
+	var cache_key := "%s:%d:%d" % [sheet_name, icon_id, player]
 	if texture_cache.has(cache_key):
 		return texture_cache[cache_key]
-	var file_name := String(records_by_sheet[sheet_name][icon_id])
+	var record: Dictionary = records_by_sheet[sheet_name][icon_id]
+	var file_name := String(record.get("file", ""))
 	var loaded: Texture2D = load("res://assets/generated/%s" % file_name)
+	if player_palette != null:
+		loaded = player_palette.texture_for(record, loaded, player)
 	if loaded != null:
 		texture_cache[cache_key] = loaded
 	return loaded
 
 
 func frame_count(icon_kind: String) -> int:
+	if icon_kind in ["gate", "gate_mode"]:
+		return GateCatalog.ICON_VARIANTS.size() if icon_kind == "gate" else 3
 	var sheet_name := String(ASSET_NAMES.get(icon_kind, ""))
 	return records_by_sheet.get(sheet_name, {}).size()

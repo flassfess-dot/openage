@@ -238,6 +238,9 @@ func poll_background_loading() -> void:
 		texture_queue.release(releasable)
 
 func ensure_loaded(texture_key: String, requested_state: String = "") -> void:
+	# A ready clip does not need to poll unrelated pending animations for every
+	# visible unit and composite part. The scene polls the queue once per frame.
+	if not requested_state.is_empty() and loaded_states.get(texture_key, {}).has(requested_state): return
 	if prewarming or not background_loading_enabled:
 		_ensure_loaded_synchronous(texture_key, requested_state)
 		return

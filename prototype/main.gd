@@ -150,6 +150,7 @@ var overview_buildings: Array = []
 var presentation_snapshot: Dictionary = {}
 var formation := "RECTANGLE"
 var pending_build_kind := ""
+var pending_gate_axis := 0
 var pending_build_started := false
 var resource_feedback_id := -1
 var resource_feedback_time := 0.0
@@ -248,6 +249,7 @@ var cached_projection_offset := Vector2(INF, INF)
 var cached_projection_zoom := -1.0
 
 func _ready() -> void:
+	preload("res://scripts/rendering_configuration.gd").apply_window_presentation()
 	font = ThemeDB.fallback_font
 	resource_catalog = ResourceCatalog.new()
 	resource_catalog.load()
@@ -558,6 +560,8 @@ func add_resource(kind: String, position: Vector2, amount: int) -> void:
 		return
 	simulation_world.add_resource(kind, position, amount)
 func _process(delta: float) -> void:
+	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var frame_started := Time.get_ticks_usec() if probe != null else 0
 	if navigation_loading.is_loading():
 		if navigation_loading_label != null:
 			navigation_loading_label.show()
@@ -571,9 +575,8 @@ func _process(delta: float) -> void:
 	_poll_save_jobs()
 	if resource_catalog != null:
 		resource_catalog.unit_presentations.poll_background_loading()
-	var probe: Variant = game_controller.performance_probe if game_controller != null else null
-	var frame_started := Time.get_ticks_usec() if probe != null else 0
-	var stage_started := frame_started
+	if probe != null: probe.observe_microseconds("presentation.process.background_loading", Time.get_ticks_usec() - frame_started)
+	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	presentation_audio_router.advance(delta)
 	presentation_effect_timeline.advance(delta)
 	_sync_effect_snapshot()
@@ -957,15 +960,44 @@ func find_resource(id: int):
 func iso_raw(world: Vector2) -> Vector2:
 	return Coordinates.iso_raw(world)
 
+var projected_height_source: Variant = null
+var projected_height_revision := -1
+var projected_height_epoch := -1
+var projected_heights: Dictionary = {}
+const MAX_PROJECTED_HEIGHTS := 4096
+
 func world_to_screen(world: Vector2) -> Vector2:
-	if simulation_world != null:
-		return simulation_world.terrain_elevation.world_to_screen(world, view_zoom, view_offset)
-	return Coordinates.world_to_screen(world, view_zoom, view_offset)
+	if simulation_world == null:
+		return Coordinates.world_to_screen(world, view_zoom, view_offset)
+	var elevation = simulation_world.terrain_elevation
+	if projected_height_source != elevation or projected_height_revision != elevation.revision or projected_height_epoch != elevation.cache_epoch:
+		projected_heights.clear()
+		projected_height_source = elevation
+		projected_height_revision = elevation.revision
+		projected_height_epoch = elevation.cache_epoch
+	var height := 0.0
+	if elevation.nonzero_vertex_count > 0:
+		if projected_heights.has(world): height = float(projected_heights[world])
+		else:
+			height = elevation.elevation_at_world(world)
+			if projected_heights.size() >= MAX_PROJECTED_HEIGHTS: projected_heights.clear()
+			projected_heights[world] = height
+	# Keep the reference arithmetic order, including pixel rounding boundaries.
+	return Coordinates.world_to_screen(world, view_zoom, view_offset) + elevation.screen_offset(height, view_zoom)
 
 func screen_to_world(screen: Vector2) -> Vector2:
 	if simulation_world != null:
 		return simulation_world.terrain_elevation.screen_to_world(screen, view_zoom, view_offset)
 	return Coordinates.screen_to_world(screen, view_zoom, view_offset)
+
+func _input(event: InputEvent) -> void:
+	# Placement rotation must precede Control focus navigation on Tab.
+	if pending_build_kind == "gate" and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB and (network_chat_input == null or not network_chat_input.visible):
+		pending_gate_axis = 1 - pending_gate_axis
+		placement_preview_key = ""
+		queue_redraw()
+		get_viewport().set_input_as_handled()
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if navigation_loading.is_loading():
@@ -1536,17 +1568,18 @@ func current_world_drawables() -> Array:
 	highlighted_ids.sort()
 	var selected_ids := player_control_state.selected_ids()
 	var control_signature := hash([highlighted_ids, selected_ids])
-	if cached_world_drawables_revision != presentation_revision or cached_world_drawables_control_signature != control_signature:
+	if cached_world_drawables_revision != presentation_revision or cached_world_drawables_control_signature != control_signature or not render_world.camera_cache_ready or ((cached_projection_offset != view_offset or cached_projection_zoom != view_zoom) and not render_world.can_refresh_camera()):
 		var retained_snapshot := presentation_snapshot.duplicate()
 		retained_snapshot["effects"] = []
 		render_world.performance_probe = game_controller.performance_probe if game_controller != null else null
-		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, local_player_team, selected_ids)
-		# Retained static caches project before their depth merge. Refresh only
-		# interpolation here; a second full scenery projection wastes frame time.
-		render_world.refresh_world_drawables(cached_world_drawables, Callable(self, "world_to_screen"), interpolation_alpha, false)
-		cached_rally_drawables = cached_world_drawables.filter(func(item): return String(item.get("kind", "")) == "rally_flag")
+		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, local_player_team, selected_ids, view_zoom, get_viewport_rect())
+		# The new queue already contains interpolated positions and current depth.
+		# Refresh it only on later frames that reuse this publication.
+		cached_rally_drawables = render_world.rally_drawables
 		cached_world_drawables_revision = presentation_revision
 		cached_world_drawables_control_signature = control_signature
+	elif (cached_projection_offset != view_offset or cached_projection_zoom != view_zoom) and render_world.can_refresh_camera():
+		cached_world_drawables = render_world.refresh_camera_drawables(Callable(self, "world_to_screen"), interpolation_alpha, view_zoom, get_viewport_rect())
 	else:
 		# Static drawables only need a fresh projection when the camera moved;
 		# the affine pan/zoom preserves their relative depth order.
@@ -1773,6 +1806,12 @@ func issue_unload_at_pointer(queue_order: bool = false) -> void:
 
 
 func issue_unit_action(action_name: String) -> void:
+	if action_name.begins_with("gate_"):
+		var gates := selected_entities().filter(func(entity): return String(entity.get("kind", "")) == "gate" and int(entity.get("team", 0)) == local_player_team)
+		if not gates.is_empty() and not battle_over:
+			var gate_command = RoRCommands.GateModeCommand.new(game_controller.tick_index + 1, _selection_ids(gates), action_name.trim_prefix("gate_"))
+			enqueue_with_feedback(gate_command, "Режим ворот", "")
+		return
 	if action_name == "unload":
 		issue_unload_at_pointer()
 		return
@@ -2076,7 +2115,7 @@ func begin_build_placement(building_kind: String) -> void:
 	pending_build_kind = building_kind
 	pending_build_started = false
 	update_interaction_cursor(input_adapter.pointer_position)
-	game_message = "Укажите место строительства: %s (ПКМ — отмена)" % building_kind
+	game_message = "Укажите место строительства: %s (ПКМ — отмена)" % ("ворота; Tab — повернуть" if building_kind == "gate" else building_kind)
 	message_time = 4.0
 
 
@@ -2111,11 +2150,13 @@ func commit_build_placement(screen_position: Vector2, queue_order: bool = false,
 		pending_build_started = true
 	update_interaction_cursor(input_adapter.pointer_position)
 	var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, _selection_ids(workers), kind, target)
+	if kind == "gate":
+		command.params["gate_axis"] = pending_gate_axis
 	if defer_order:
 		# A queued building is still a real world object: reserve and render its
 		# foundation now, then queue only the workers' trip to that foundation.
 		command.params["plan_only"] = true
-	enqueue_with_feedback(command, "Строительство: %s" % kind, "command:%s" % String(workers[0].get("kind", "villager")), null)
+	enqueue_with_feedback(command, "Строительство: %s" % ("ворота" if kind == "gate" else kind), "command:%s" % String(workers[0].get("kind", "villager")), null)
 
 
 func queue_wall_line(workers: Array, cells: Array[Vector2i], queue_order: bool = false) -> void:
@@ -2209,14 +2250,19 @@ func sync_world_state(force: bool = true) -> void:
 	var current_tick := game_controller.tick_index if game_controller != null else 0
 	var selected_ids := player_control_state.selected_ids()
 	var selection_signature := hash(selected_ids)
-	var required_view_bounds := _expanded_tile_bounds(visible_tile_bounds(), 2)
+	var required_view_bounds := visible_tile_bounds(8)
 	if not force and not presentation_snapshot.is_empty() and current_tick == cached_presentation_tick and selection_signature == cached_presentation_selection_signature and diagnostics_enabled == cached_presentation_diagnostics and _tile_bounds_contains(cached_presentation_bounds, required_view_bounds):
 		if probe != null:
 			probe.increment("presentation.sync.skipped")
 		return
 	var sync_started := Time.get_ticks_usec() if probe != null else 0
 	var stage_started := sync_started
-	var snapshot_bounds := visible_tile_bounds(8)
+	var requested_bounds := required_view_bounds
+	# Keep the camera query stable within eight-tile windows while preserving
+	# the full sprite margin on every side, including tall crowns/buildings.
+	var query_start := Vector2i((Vector2(requested_bounds.position) / 8.0).floor()) * 8
+	var query_end := Vector2i((Vector2(requested_bounds.end) / 8.0).ceil()) * 8
+	var snapshot_bounds := Rect2i(query_start, query_end - query_start).intersection(Rect2i(Vector2i.ZERO, map_size))
 	presentation_snapshot = render_snapshot_source.capture(simulation_world, current_tick, local_player_team, selected_ids, Rect2(Vector2(snapshot_bounds.position), Vector2(snapshot_bounds.size)), diagnostics_enabled, task_coordinator, probe)
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.snapshot", Time.get_ticks_usec() - stage_started)
@@ -2254,7 +2300,8 @@ func sync_world_state(force: bool = true) -> void:
 	overview_units = overview.get("units", units)
 	overview_resource_nodes = overview.get("resources", resource_nodes)
 	overview_buildings = overview.get("buildings", presentation_snapshot.get("buildings", []))
-	player_control_state.prune(selectable_player_ids())
+	if not selected_ids.is_empty():
+		player_control_state.prune(selectable_player_ids())
 	battle_over = bool(presentation_snapshot.get("battle_over", false))
 	var now_spectator := String(presentation_snapshot.get("player_state", {}).get("status", "active")) in ["resigned", "defeated"]
 	if now_spectator and not local_spectator:
@@ -2496,6 +2543,8 @@ func draw_terrain_border(tile_origin: Vector2, layer: Dictionary) -> void:
 	var position := PixelScaling.snap_screen(tile_origin - hotspot * view_zoom)
 	draw_texture_rect(texture, Rect2(position, texture.get_size() * view_zoom), false)
 
+var native_sprite_submission := true
+
 func draw_world_objects() -> void:
 	if render_world != null:
 		var probe: Variant = game_controller.performance_probe if game_controller != null else null
@@ -2504,15 +2553,32 @@ func draw_world_objects() -> void:
 		if probe != null:
 			probe.observe_microseconds("presentation.draw.world_prepare", Time.get_ticks_usec() - stage_started)
 			stage_started = Time.get_ticks_usec()
-		for drawable in drawables:
-			match drawable["kind"]:
-				"building", "building_part", "resource", "resource_shadow", "unit", "unit_part", "projectile", "effect", "marker", "environment": draw_render_body(drawable)
-				"shadow": draw_unit_shadow(drawable)
-				"selection": draw_unit_selection(drawable)
-				"health_bar": draw_unit_health(drawable)
+		var kernel: Variant = render_world.native_render_kernel
+		var direct: bool = native_sprite_submission and kernel != null and kernel.has_method("submit_sprite_run")
+		var index := 0
+		while index < drawables.size():
+			if direct and drawables[index].has("sprite_command"):
+				var next: int = kernel.submit_sprite_run(get_canvas_item(), drawables, index)
+				if next > index:
+					index = next
+					continue
+			draw_world_item(drawables[index])
+			index += 1
 		if probe != null:
 			probe.observe_microseconds("presentation.draw.world_submit", Time.get_ticks_usec() - stage_started)
 	return
+
+
+func draw_world_item(drawable: Dictionary) -> void:
+	if drawable.has("sprite_command"):
+		var command: Array = drawable["sprite_command"]
+		draw_texture_rect(command[0], command[1], false, command[2])
+		return
+	match drawable["kind"]:
+		"building", "building_part", "resource", "resource_shadow", "unit", "unit_part", "projectile", "effect", "marker", "environment": draw_render_body(drawable)
+		"shadow": draw_unit_shadow(drawable)
+		"selection": draw_unit_selection(drawable)
+		"health_bar": draw_unit_health(drawable)
 
 
 func draw_rally_flags() -> void:
@@ -2565,9 +2631,15 @@ func draw_foundation_preview_at(kind: String, center: Vector2, wall_entry: Dicti
 	var key := "%s:%d:%d:%d:%d" % [kind, roundi(center.x), roundi(center.y), game_controller.tick_index, simulation_world.navigation_grid.revision]
 	if wall_entry.is_empty() and key != placement_preview_key:
 		placement_preview_key = key
-		placement_preview_valid = simulation_world.can_place_foundation(local_player_team, kind, center)
-	var footprint := Footprint.building(simulation_world.unit_stats(kind), center)
+		placement_preview_valid = simulation_world.can_place_foundation(local_player_team, kind, center, {"gate_axis": pending_gate_axis})
+	var footprint := Footprint.building(simulation_world.building_placement_stats(kind, pending_gate_axis), center)
 	var ghost := {"kind": kind, "team": local_player_team, "pos": center, "state": "foundation", "construction_stage": 0, "footprint": footprint}
+	if kind == "gate":
+		ghost["state"] = "complete"
+		ghost["gate_axis"] = pending_gate_axis
+		ghost["gate_open_fraction"] = 0.0
+		ghost["components"] = {"ownership": {"civilization_id": int(simulation_world.civilization_by_team.get(local_player_team, 13))}}
+		ghost["source_unit_id"] = simulation_world.technology_system.resolved_unit_id(local_player_team, 10072)
 	if not wall_entry.is_empty():
 		ghost = wall_entry["ghost"].duplicate()
 		ghost["footprint"] = footprint
@@ -2583,6 +2655,9 @@ func draw_foundation_preview_at(kind: String, center: Vector2, wall_entry: Dicti
 	layers.append_array(frame_info.get("composite_parts", []))
 	layers.sort_custom(func(a, b): return int(a.get("graphic_layer", 20)) < int(b.get("graphic_layer", 20)))
 	for layer in layers:
+		if layer.has("gate_polygon"):
+			draw_render_body({"frame_info": layer, "screen_position": world_to_screen(center), "opacity": 0.55})
+			continue
 		var texture: Texture2D = layer.get("texture")
 		if texture == null:
 			continue
@@ -2910,6 +2985,14 @@ func static_frame_info(texture: Texture2D, asset_name: String, frame_index: int 
 
 func draw_render_body(item: Dictionary) -> void:
 	var frame_info: Dictionary = item["frame_info"]
+	if frame_info.has("gate_polygon"):
+		var gate_screen := PixelScaling.snap_screen(item["screen_position"])
+		draw_set_transform(gate_screen, 0, Vector2.ONE * view_zoom)
+		var gate_color: Color = frame_info.get("gate_color", Color.WHITE)
+		gate_color.a *= float(item.get("opacity", 1.0))
+		draw_polygon(frame_info["gate_polygon"], PackedColorArray([gate_color]), frame_info.get("gate_uv", PackedVector2Array()), frame_info.get("texture"))
+		draw_set_transform(Vector2.ZERO)
+		return
 	if frame_info.is_empty() or frame_info.get("texture") == null:
 		if String(item.get("kind", "")) == "objective":
 			draw_objective_fallback(item)
@@ -3014,25 +3097,16 @@ func draw_building_selection_rectangle(building: Dictionary, color: Color) -> vo
 
 
 func building_selection_outline(building: Dictionary) -> PackedVector2Array:
-	var footprint: Dictionary = building.get("footprint", {})
-	var half_size := Vector2(footprint.get("half_size", Vector2(0.5, 0.5)))
-	var center := Vector2(building.get("pos", Vector2.ZERO))
 	var points := PackedVector2Array()
-	for offset in [Vector2(-half_size.x, -half_size.y), Vector2(half_size.x, -half_size.y), Vector2(half_size.x, half_size.y), Vector2(-half_size.x, half_size.y), Vector2(-half_size.x, -half_size.y)]:
-		points.append(PixelScaling.snap_screen(world_to_screen(center + offset)))
+	for point in WallPlacement.selection_polygon(building):
+		points.append(PixelScaling.snap_screen(world_to_screen(point)))
+	if not points.is_empty():
+		points.append(points[0])
 	return points
 
 
 func building_selection_rectangle(building: Dictionary) -> Rect2:
-	var footprint: Dictionary = building.get("footprint", {})
-	var half_size := Vector2(footprint.get("half_size", Vector2(0.5, 0.5)))
-	var center := Vector2(building.get("pos", Vector2.ZERO))
-	var corners := [
-		center + Vector2(-half_size.x, -half_size.y),
-		center + Vector2(half_size.x, -half_size.y),
-		center + Vector2(half_size.x, half_size.y),
-		center + Vector2(-half_size.x, half_size.y),
-	]
+	var corners := WallPlacement.selection_polygon(building)
 	var minimum := Vector2(INF, INF)
 	var maximum := Vector2(-INF, -INF)
 	for corner in corners:
@@ -3220,11 +3294,14 @@ func draw_minimap(rectangle: Rect2) -> void:
 	if cached_minimap_mesh != null:
 		draw_mesh(cached_minimap_mesh, null)
 	draw_polyline(PackedVector2Array([map_points[0], map_points[1], map_points[2], map_points[3], map_points[0]]), Color("d2bd7d"), 1.0)
+	# The visible-bounds query already resolved these exact terrain intersections.
+	# Reuse them for the minimap instead of repeating 96 height-search iterations.
+	visible_tile_bounds()
 	var camera_world := PackedVector2Array([
-		Coordinates.clamp_world(screen_to_world(Vector2(0, hud_top_height())), map_size),
-		Coordinates.clamp_world(screen_to_world(Vector2(get_viewport_rect().size.x, hud_top_height())), map_size),
-		Coordinates.clamp_world(screen_to_world(Vector2(get_viewport_rect().size.x, get_viewport_rect().size.y - hud_bottom_height())), map_size),
-		Coordinates.clamp_world(screen_to_world(Vector2(0, get_viewport_rect().size.y - hud_bottom_height())), map_size),
+		Coordinates.clamp_world(visible_world_corners[0], map_size),
+		Coordinates.clamp_world(visible_world_corners[1], map_size),
+		Coordinates.clamp_world(visible_world_corners[2], map_size),
+		Coordinates.clamp_world(visible_world_corners[3], map_size),
 	])
 	var camera_points := PackedVector2Array()
 	for world_point in camera_world:
@@ -3313,15 +3390,22 @@ func fog_runs() -> Array:
 	return cached_fog_runs
 
 
+var visible_corner_key: Array = []
+var visible_world_corners: Array[Vector2] = []
+
 func visible_tile_bounds(margin: int = 4) -> Rect2i:
 	var viewport_size := get_viewport_rect().size
-	var world_corners: Array[Vector2] = [
-		screen_to_world(Vector2(0, hud_top_height())),
-		screen_to_world(Vector2(viewport_size.x, hud_top_height())),
-		screen_to_world(Vector2(viewport_size.x, viewport_size.y - hud_bottom_height())),
-		screen_to_world(Vector2(0, viewport_size.y - hud_bottom_height())),
-	]
-	return ViewportCulling.tile_bounds(map_size, world_corners, margin)
+	var elevation: Variant = simulation_world.terrain_elevation if simulation_world != null else null
+	var key := [elevation, elevation.revision if elevation != null else -1, elevation.cache_epoch if elevation != null else -1, map_size, view_offset, view_zoom, viewport_size]
+	if visible_corner_key != key:
+		visible_corner_key = key
+		visible_world_corners = [
+			screen_to_world(Vector2(0, hud_top_height())),
+			screen_to_world(Vector2(viewport_size.x, hud_top_height())),
+			screen_to_world(Vector2(viewport_size.x, viewport_size.y - hud_bottom_height())),
+			screen_to_world(Vector2(0, viewport_size.y - hud_bottom_height())),
+		]
+	return ViewportCulling.tile_bounds(map_size, visible_world_corners, margin)
 
 
 func minimap_rectangle() -> Rect2:

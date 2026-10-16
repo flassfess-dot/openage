@@ -13,11 +13,14 @@ run/main_scene="res://launcher.tscn"
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="disabled"
+; Mailbox is applied after native window creation by rendering_configuration.gd.
+window/vsync/vsync_mode=1
 
 [rendering]
 
-renderer/rendering_method="gl_compatibility"
-renderer/rendering_method.mobile="gl_compatibility"
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+renderer/rendering_method.web="gl_compatibility"
 textures/default_filters/use_nearest_mipmap_filter=false
 textures/canvas_textures/default_texture_filter=0
 

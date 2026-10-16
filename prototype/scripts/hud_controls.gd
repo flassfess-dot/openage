@@ -444,11 +444,9 @@ func command_icon(command: Dictionary) -> Texture2D:
 	if interface_skin != null and command_type == "trade_resource":
 		var resource_name := String({0: "food", 1: "wood", 2: "stone"}.get(int(command.get("resource_type_id", -1)), ""))
 		return interface_skin.resource_icon(resource_name, interface_style_index)
-	if interface_skin != null and command_type in ["open_build_menu", "cancel_production", "close_build_menu"]:
-		var glyphs: Array = interface_skin.source_candidate(50721).get("frames", [])
-		var frame := int(IconRegistry.COMMAND_GLYPHS.get(command_type, -1))
-		return glyphs[frame] if frame >= 0 and frame < glyphs.size() else null
-	return icon_registry.texture(String(command.get("icon_kind", "")), int(command.get("icon_id", -1))) if icon_registry != null else null
+	if icon_registry != null and command_type in ["open_build_menu", "cancel_production", "close_build_menu"]:
+		return icon_registry.texture("command", int(IconRegistry.COMMAND_GLYPHS[command_type]), int(current_model.get("icon_team", 1)))
+	return icon_registry.texture(String(command.get("icon_kind", "")), int(command.get("icon_id", -1)), int(command.get("icon_team", current_model.get("icon_team", 1)))) if icon_registry != null else null
 
 func make_style(fill: Color, border: Color) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()

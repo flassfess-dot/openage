@@ -3,6 +3,7 @@ extends RefCounted
 
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const Footprint := preload("res://scripts/footprint.gd")
+const WallPlacement := preload("res://scripts/wall_placement.gd")
 
 var site_map_cache: Dictionary = {}
 var site_footprint_profiles: Dictionary = {}
@@ -34,8 +35,11 @@ func foundation_preserves_structure_gap(team: int, kind: String, position: Vecto
 	return true
 
 
-func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occupied_cells: Variant = null) -> bool:
+func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occupied_cells: Variant = null, placement_options: Dictionary = {}) -> bool:
 	world.last_build_failure = ""
+	if kind == "gate" and int(placement_options.get("gate_axis", 0)) not in [0, 1]:
+		world.last_build_failure = "invalid_gate_axis"
+		return false
 	if world.data_repository.is_configured() and (not world.data_repository.has_archetype(kind) or world.data_repository.category(kind) != "building"):
 		world.last_build_failure = "unknown_building_type"
 		return false
@@ -43,11 +47,13 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 	if required_technology_id >= 0 and not world.technology_system.is_researched(team, required_technology_id):
 		world.last_build_failure = "building_unavailable"
 		return false
-	var footprint := Footprint.building(world.unit_stats(kind), position)
+	var footprint := Footprint.building(world.building_placement_stats(kind, int(placement_options.get("gate_axis", 0))), position)
+	var replaced_walls: Dictionary = world.gate_system.replacement_wall_ids(team, position, int(placement_options.get("gate_axis", 0))) if kind == "gate" else {}
+	var candidate_center := WallPlacement.masonry_center({"kind":kind,"pos":position,"footprint":footprint,"gate_axis":int(placement_options.get("gate_axis",0))})
 	var placement: Dictionary = world.data_repository.runtime_metadata(kind).get("placement", {})
 	var placement_restriction := int(placement.get("terrain_restriction_id", -1))
 	var placement_domain := String(placement.get("domain", "land"))
-	if not world.navigation_grid.can_build_for(footprint.get("occupied_cells", []), placement_domain, placement_restriction):
+	if not world.navigation_grid.can_build_for(footprint.get("occupied_cells", []), placement_domain, placement_restriction, replaced_walls):
 		world.last_build_failure = "blocked_or_sloped"
 		return false
 	if not foundation_has_required_domain_access(footprint, placement):
@@ -57,9 +63,11 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 		var building: Dictionary = building_value
 		if float(building.get("hp", 0.0)) <= 0.0:
 			continue
+		if replaced_walls.has(int(building.get("id", -1))):
+			continue
 		var existing_half_size := Vector2(building.get("footprint", {}).get("obstruction_half_size", building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))))
 		var candidate_half_size := Vector2(footprint.get("obstruction_half_size", footprint.get("half_size", Vector2(0.5, 0.5))))
-		var delta := (Vector2(building.get("pos", Vector2.ZERO)) - position).abs()
+		var delta := (WallPlacement.masonry_center(building) - candidate_center).abs()
 		if delta.x < existing_half_size.x + candidate_half_size.x - 0.001 and delta.y < existing_half_size.y + candidate_half_size.y - 0.001:
 			world.last_build_failure = "blocked_or_sloped"
 			return false

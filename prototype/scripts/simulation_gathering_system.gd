@@ -7,6 +7,8 @@ const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const MAX_DROPOFF_ROSTERS := 64
 
 var dropoff_rosters: Dictionary = {}
+var native_recovery_enabled := true
+var recovery_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 var dropoff_building_ids: Dictionary = {}
 var dropoff_roster_epoch := -1
 var dropoff_roster_revision := -1
@@ -67,6 +69,12 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	# Active units own the complete runtime schema. Compatibility fallbacks stay
 	# at load and command boundaries instead of repeating catalog checks here.
 	var simulation_world = world
+	if native_recovery_enabled and recovery_kernel != null and recovery_kernel.has_method("advance_harvesting_recovery"):
+		assert(simulation_world.read_generation_pins == 0, "Pinned observation generation is immutable")
+		var changed_mask: int = recovery_kernel.advance_harvesting_recovery(worker, simulation_world.resource_nodes_by_id, simulation_world.resource_approach_slots)
+		if changed_mask >= 0:
+			if changed_mask != 0: simulation_world.notify_entity_changed(worker, changed_mask)
+			return GATHER_UPDATE_ACTION
 	if not bool(worker["components"]["worker"]["enabled"]):
 		finish_gather_order(worker, "not_a_worker")
 		return GATHER_UPDATE_IDLE

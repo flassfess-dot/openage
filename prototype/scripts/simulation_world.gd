@@ -9,6 +9,7 @@ const FacingConvention := preload("res://scripts/facing_convention.gd")
 const EntityIds := preload("res://scripts/entity_id.gd")
 const SpatialHash := preload("res://scripts/spatial_hash.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
+const GateSystem := preload("res://scripts/gate_system.gd")
 const Footprint := preload("res://scripts/footprint.gd")
 const NavigationGrid := preload("res://scripts/navigation_grid.gd")
 const Pathfinder := preload("res://scripts/pathfinder.gd")
@@ -155,6 +156,7 @@ var foundation_system: SimulationFoundationSystem
 var movement_system: SimulationMovementSystem
 var death_system: SimulationDeathSystem
 var approach_system: SimulationApproachSystem
+var gate_system: GateSystem
 var entity_factory: SimulationEntityFactory
 var ai_distress_system := AiDistressSystem.new()
 var worker_role_system: WorkerRoleSystem
@@ -244,6 +246,7 @@ func _init(world_size: Vector2i = Vector2i(24, 24)) -> void:
 	movement_system = SimulationMovementSystem.new(self)
 	death_system = SimulationDeathSystem.new(self)
 	approach_system = SimulationApproachSystem.new(self)
+	gate_system = GateSystem.new(self)
 	entity_factory = SimulationEntityFactory.new(self)
 	worker_role_system = WorkerRoleSystem.new(self)
 	conversion_system = ConversionSystem.new(self)
@@ -469,6 +472,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	static_obstructions.clear()
 	movement_system.knowledge.clear()
 	forest_resource_counts.clear()
+	gate_system.reset()
 	buildings.clear()
 	buildings_by_id.clear()
 	mark_combat_roster_dirty()
@@ -661,8 +665,8 @@ func resource_type_for(kind: String, source: Dictionary) -> int:
 func find_resource_placement(desired: Vector2, radius: float, movement_domain: String = "land", restriction_id: int = -1) -> Vector2:
 	return entity_factory.find_resource_placement(desired, radius, movement_domain, restriction_id)
 
-func add_building(id: int, kind: String, position: Vector2, team: int = 1, completed: bool = true) -> Dictionary:
-	return entity_factory.add_building(id, kind, position, team, completed)
+func add_building(id: int, kind: String, position: Vector2, team: int = 1, completed: bool = true, placement_options: Dictionary = {}) -> Dictionary:
+	return entity_factory.add_building(id, kind, position, team, completed, placement_options)
 
 func remove_selection_for(team: int) -> void:
 	for unit in units:
@@ -679,6 +683,10 @@ func get_selected_units(team: int) -> Array:
 
 func unit_stats(kind: String) -> Dictionary:
 	return data_repository.simulation_stats(kind)
+
+
+func building_placement_stats(kind: String, axis: int = 0) -> Dictionary:
+	return GateSystem.placement_stats(unit_stats(kind), axis) if kind == "gate" else unit_stats(kind)
 
 
 func apply_archetype_identity(entity: Dictionary, kind: String) -> void:
@@ -756,7 +764,7 @@ func combat_target_domains(entity: Dictionary) -> Array[String]:
 	if not entity_is_static(entity):
 		var movement_domain := String(entity.get("movement_domain", entity.get("components", {}).get("movement", {}).get("domain", "land")))
 		return [movement_domain] if movement_domain in ["land", "water"] else ["land"]
-	var placement: Dictionary = data_repository.runtime_metadata(String(entity.get("kind", ""))).get("placement", {})
+	var placement: Dictionary = data_repository.archetype(String(entity.get("kind", ""))).get("runtime", {}).get("placement", {})
 	var result: Array[String] = []
 	for domain_value in placement.get("required_adjacent_domains", []):
 		var domain := String(domain_value)
@@ -780,7 +788,7 @@ func refresh_building_connectivity() -> void:
 		set_entity_field(building, "connectivity_group", group)
 		if group.is_empty() or float(building.get("hp", 0.0)) <= 0.0 or String(building.get("state", "complete")) == "destroyed":
 			continue
-		for cell_value in building.get("occupied_cells", []):
+		for cell_value in WallPlacement.connection_cells(building):
 			var cell: Vector2i = cell_value
 			occupied["%s:%d:%d" % [WallPlacement.connectivity_key(building), cell.x, cell.y]] = true
 	var offsets := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]
@@ -790,7 +798,7 @@ func refresh_building_connectivity() -> void:
 		var next_mask := 0
 		if not group.is_empty() and float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "complete")) != "destroyed":
 			for direction in range(offsets.size()):
-				for cell_value in building.get("occupied_cells", []):
+				for cell_value in WallPlacement.connection_cells(building):
 					var neighbor: Vector2i = Vector2i(cell_value) + offsets[direction]
 					var key := "%s:%d:%d" % [WallPlacement.connectivity_key(building), neighbor.x, neighbor.y]
 					if occupied.has(key):
@@ -1006,6 +1014,7 @@ func _configure_tick_pipeline() -> void:
 	tick_pipeline.add_active("capture_previous_positions", Callable(self, "_tick_capture_previous_positions"))
 	tick_pipeline.add_active("ai_distress", Callable(ai_distress_system, "advance"))
 	tick_pipeline.add_active("trade_goods", Callable(trade_system, "advance_goods"))
+	tick_pipeline.add_active("gates", Callable(self, "_tick_gates"))
 	tick_pipeline.add_active("unit_orders", Callable(self, "_tick_unit_orders"))
 	tick_pipeline.add_active("capturable_objectives", Callable(self, "_tick_capturable_objectives"))
 	tick_pipeline.add_active("static_combat", Callable(combat_system, "advance_static_combatants"))
@@ -1045,6 +1054,10 @@ func advance(delta: float, player_team: int, enemy_team: int) -> String:
 
 func tick_system_order(match_completed: bool = false) -> Array[String]:
 	return tick_pipeline.system_order(match_completed)
+
+
+func _tick_gates(context: Dictionary) -> void:
+	gate_system.advance(maxf(0.0, float(context.get("delta", 0.0))))
 
 
 func _tick_capture_previous_positions(context: Dictionary) -> void:
@@ -1116,6 +1129,8 @@ func _building_navigation_cells(building: Dictionary) -> Array:
 		return []
 	if bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", []):
 		return []
+	if String(building.get("kind", "")) == "gate":
+		return gate_system.navigation_cells(building)
 	return building.get("occupied_cells", [])
 
 
@@ -1273,16 +1288,30 @@ func update_fog_of_war() -> void:
 
 
 func _tick_fog(context: Dictionary) -> void:
+	var probe: Variant = tick_pipeline.performance_probe
+	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	entity_read_index.update_building_memory(self, true)
+	if probe != null:
+		probe.observe_microseconds("simulation.fog.memory_before", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	visibility_system.configure_source(self)
 	visibility_system.advance(context)
+	if probe != null:
+		probe.observe_microseconds("simulation.fog.advance", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	entity_read_index.update_building_memory(self, false)
+	if probe != null:
+		probe.observe_microseconds("simulation.fog.memory_after", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	var fog = get_fog_of_war()
 	# Sample sight even while units are idle. A planner first created much later
 	# must not learn hidden changes to terrain the player saw earlier.
 	for observer_value in fog.states_by_player:
 		if int(observer_value) > 0:
 			movement_system.knowledge.planner(self, int(observer_value))
+	if probe != null:
+		probe.observe_microseconds("simulation.fog.path_memory", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
 	# Resource memory is sampled at the exact visibility transition. This keeps
 	# hidden state frozen even when an AI snapshot is requested less often than
 	# the simulation tick.
@@ -1290,6 +1319,7 @@ func _tick_fog(context: Dictionary) -> void:
 		var observer_team := int(observer_value)
 		var cached: Dictionary = known_resources_by_player[observer_value]
 		_refresh_known_resource_cache(observer_team, cached, fog)
+	if probe != null: probe.observe_microseconds("simulation.fog.resource_memory", Time.get_ticks_usec() - stage_started)
 
 func query_units_near(position: Vector2, radius: float) -> Array:
 	return spatial_index.query_circle(position, radius, "unit")
@@ -2356,8 +2386,8 @@ func foundation_preserves_structure_gap(team: int, kind: String, position: Vecto
 	return building_placement_system.foundation_preserves_structure_gap(team, kind, position, minimum_gap)
 
 
-func can_place_foundation(team: int, kind: String, position: Vector2) -> bool:
-	return building_placement_system.can_place_foundation(team, kind, position)
+func can_place_foundation(team: int, kind: String, position: Vector2, placement_options: Dictionary = {}) -> bool:
+	return building_placement_system.can_place_foundation(team, kind, position, null, placement_options)
 
 
 func _can_place_foundation(team: int, kind: String, position: Vector2, mobile_occupied_cells: Variant = null) -> bool:
@@ -2392,16 +2422,16 @@ func reachable_builder_ids(building: Dictionary) -> Array[int]:
 	return building_placement_system.reachable_builder_ids(building)
 
 
-func place_foundation(team: int, kind: String, position: Vector2, workers: Array = []) -> Variant:
-	return foundation_system.place_foundation(team, kind, position, workers)
+func place_foundation(team: int, kind: String, position: Vector2, workers: Array = [], placement_options: Dictionary = {}) -> Variant:
+	return foundation_system.place_foundation(team, kind, position, workers, placement_options)
 
 
 func cancel_foundation(building_id: int) -> bool:
 	return foundation_system.cancel_foundation(building_id)
 
 
-func assign_command_build(selected: Array, kind: String, position: Vector2) -> Variant:
-	return foundation_system.assign_command_build(selected, kind, position)
+func assign_command_build(selected: Array, kind: String, position: Vector2, placement_options: Dictionary = {}) -> Variant:
+	return foundation_system.assign_command_build(selected, kind, position, placement_options)
 
 
 func reseed_harvestable_building(building: Dictionary, workers: Array = []) -> Variant:
@@ -3646,12 +3676,14 @@ func _remember_known_resource(cached: Dictionary, resource: Dictionary, compact_
 		if existing.get("pos") != memory.get("pos") or (int(existing.get("amount", 0)) > 0) != (int(memory.get("amount", 0)) > 0):
 			_mark_known_resource_marker_changed(cached, resource_id)
 		if existing.get("pos") == memory.get("pos"):
+			_mark_resource_view_changed(cached, resource_id)
 			_replace_known_resource(cached["resources"], memory)
 			ids[resource_id] = memory
 			_update_ai_resource_projection(cached, memory)
 			return true
 		# Moving a remembered resource must also migrate its spatial indices.
 		_forget_known_resource(cached, resource_id)
+	_mark_resource_view_changed(cached, resource_id)
 	var known: Array = cached.get("resources", [])
 	_insert_known_resource_sorted(known, memory)
 	ids[resource_id] = memory
@@ -3679,6 +3711,7 @@ func _forget_known_resource(cached: Dictionary, resource_id: int) -> bool:
 	var memory: Variant = ids.get(resource_id)
 	if not memory is Dictionary:
 		return false
+	_mark_resource_view_changed(cached, resource_id)
 	var known: Array = cached.get("resources", [])
 	known.erase(memory)
 	if cached.has("ai_projection"):
@@ -3735,8 +3768,47 @@ func get_known_resources_in_bounds(observer_team: int, bounds: Rect2) -> Array:
 	var start_y := clampi(floori(bounds.position.y), 0, map_size.y)
 	var end_x := clampi(ceili(bounds.end.x), 0, map_size.x)
 	var end_y := clampi(ceili(bounds.end.y), 0, map_size.y)
+	var view_bounds := Rect2i(start_x, start_y, maxi(0, end_x - start_x), maxi(0, end_y - start_y))
+	var view: Dictionary = cached.get("render_view", {})
+	if view.get("bounds") == view_bounds:
+		var retained: Array = view["records"]
+		var result := retained
+		var changed_records: Array = []
+		var removed_ids: Array = []
+		for id_value in view["dirty"]:
+			var id := int(id_value)
+			var low := 0
+			var high := result.size()
+			while low < high:
+				var middle := (low + high) / 2
+				if int(result[middle]["id"]) < id: low = middle + 1
+				else: high = middle
+			var existing := low < result.size() and int(result[low]["id"]) == id
+			var record: Dictionary = known_ids.get(id, {})
+			var inside := not record.is_empty() and view_bounds.has_point(Vector2i(Vector2(record["pos"]).floor()))
+			if not existing and not inside: continue
+			if existing and inside and is_same(result[low], record): continue
+			if inside: changed_records.append(record)
+			else: removed_ids.append(id)
+			if is_same(result, retained): result = retained.duplicate()
+			if existing:
+				if inside: result[low] = record
+				else: result.remove_at(low)
+			elif inside: result.insert(low, record)
+		view["dirty"].clear()
+		result.make_read_only()
+		view["records"] = result
+		if not is_same(result, retained):
+			changed_records.make_read_only()
+			removed_ids.make_read_only()
+			var delta := {"valid": true, "previous": retained, "current": result, "changed": changed_records, "removed": removed_ids}
+			delta.make_read_only()
+			view["delta"] = delta
+		return result
 	var result: Array = []
 	if end_x <= start_x or end_y <= start_y:
+		result.make_read_only()
+		cached["render_view"] = {"bounds": view_bounds, "records": result, "dirty": {}}
 		return result
 	var first_chunk_x := floori(float(start_x) / float(RESOURCE_MEMORY_CHUNK_SIZE))
 	var first_chunk_y := floori(float(start_y) / float(RESOURCE_MEMORY_CHUNK_SIZE))
@@ -3755,7 +3827,22 @@ func get_known_resources_in_bounds(observer_team: int, bounds: Rect2) -> Array:
 				if cell_x >= start_x and cell_x < end_x and cell_y >= start_y and cell_y < end_y:
 					result.append(resource)
 	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	result.make_read_only()
+	# One camera publication per observer, bounded by this query. Only legal
+	# observation changes enter its queue; hidden live changes never reach it.
+	cached["render_view"] = {"bounds": view_bounds, "records": result, "dirty": {}}
 	return result
+
+
+func known_resource_view_delta(observer_team: int) -> Dictionary:
+	# At most the latest legal publication and its predecessor. Consumers that
+	# missed a publication use the ordinary full comparison instead.
+	return known_resources_by_player.get(observer_team, {}).get("render_view", {}).get("delta", {})
+
+
+func _mark_resource_view_changed(cached: Dictionary, id: int) -> void:
+	var view: Dictionary = cached.get("render_view", {})
+	if not view.is_empty(): view["dirty"][id] = true
 
 
 func _replace_known_resource(known: Array, replacement: Dictionary) -> void:

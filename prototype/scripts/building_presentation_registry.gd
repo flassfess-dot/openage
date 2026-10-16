@@ -6,6 +6,8 @@ const CompositeGraphic := preload("res://scripts/composite_graphic.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const DamageSelector := preload("res://scripts/presentation_damage_selector.gd")
 const WallPlacement := preload("res://scripts/wall_placement.gd")
+const GatePresentation := preload("res://scripts/gate_presentation.gd")
+var gate_presentations := GatePresentation.new()
 
 var player_palette
 var runtime_catalog: Dictionary = {}
@@ -20,6 +22,10 @@ var source_records_by_key: Dictionary = {}
 var presentation_facing_by_key: Dictionary = {}
 var civilization_icon_sets: Dictionary = {}
 var farm_layer_frames: Dictionary = {}
+var composite_templates: Dictionary = {}
+var resolved_frames: Dictionary = {}
+var static_resolved_frames: Dictionary = {}
+var complete_static_frames: Dictionary = {}
 
 
 func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, metadata: Dictionary, indexed_frame_records: Dictionary = {}) -> void:
@@ -31,6 +37,10 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 	presentation_facing_by_key.clear()
 	civilization_icon_sets.clear()
 	farm_layer_frames.clear()
+	composite_templates.clear()
+	resolved_frames.clear()
+	static_resolved_frames.clear()
+	complete_static_frames.clear()
 	for civilization_value in object_catalog.get("civilizations", []):
 		var civilization: Dictionary = civilization_value
 		civilization_icon_sets[int(civilization.get("civilization_id", -1))] = int(civilization.get("icon_set", 0))
@@ -38,7 +48,36 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 
 
 func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary:
+	# Only complete, healthy, idle compositions with no animated layer qualify.
+	# Damage, construction, farms and moving gate leaves keep their live paths.
+	var kind := String(building.get("kind", ""))
+	var eligible := kind not in ["gate", "farm"] and String(building.get("state", "complete")) == "complete" and String(building.get("death_phase", "alive")) == "alive" and String(building.get("anim_state", AnimationController.IDLE)) == AnimationController.IDLE and float(building.get("hp", 1.0)) >= maxf(1.0, float(building.get("max_hp", 1.0)))
+	if not eligible: return _resolve_frame_info(building, animation_time)
+	var civilization := int(building.get("components", {}).get("ownership", {}).get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
+	var cache_key := [kind, int(building.get("team", 1)), int(building.get("source_unit_id", -1)), int(building.get("display_graphic_id", -1)), civilization, int(building.get("presentation_facing", -1)), int(building.get("connection_mask", 0))]
+	if complete_static_frames.has(cache_key): return complete_static_frames[cache_key].duplicate()
+	var result := _resolve_frame_info(building, animation_time)
+	var graphic := int(result.get("graphic_id", -1))
 	var player := _player_asset_id(int(building.get("team", 1)))
+	var facing := _presentation_facing(building, graphic)
+	var template: Array = composite_templates.get(Vector3i(graphic, player, facing), [])
+	var parts: Array = result.get("composite_parts", [])
+	if (result.get("texture") == null or static_resolved_frames.has(Vector3i(graphic, player, facing))) and template.size() == parts.size() and template.all(func(entry): return entry.size() > 2):
+		var retained := result.duplicate(true)
+		var retained_parts: Array = retained.get("composite_parts", [])
+		for part in retained_parts: part.make_read_only()
+		retained_parts.make_read_only()
+		retained.make_read_only()
+		if complete_static_frames.size() >= 8192: complete_static_frames.clear()
+		cache_key.make_read_only()
+		complete_static_frames[cache_key] = retained
+	return result
+
+
+func _resolve_frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary:
+	var player := _player_asset_id(int(building.get("team", 1)))
+	if String(building.get("kind", "")) == "gate":
+		return gate_presentations.frame_info(self, building, player)
 	var source := _source_record(building)
 	if String(building.get("death_phase", "alive")) in ["dying", "ruin"] or String(building.get("state", "complete")) == "destroyed":
 		var death_graphic := int(source.get("graphics", {}).get("death", -1))
@@ -88,6 +127,7 @@ func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary
 	result["graphic_id"] = base_graphic
 	var parts := _composite_parts(base_graphic, player, presentation_facing, presentation_time)
 	if base_graphic == 273 and String(building.get("kind", "")) == "farm":
+		parts = parts.map(func(part): return part.duplicate())
 		var field := _farm_layer_frame("field", player)
 		var hut := _farm_layer_frame("hut", player)
 		if not field.is_empty() and not hut.is_empty():
@@ -300,6 +340,8 @@ func _frame_at(graphic_id: int, player: int, requested_frame: int) -> Dictionary
 
 
 func _resolved_frame(graphic_id: int, player: int, logical_facing: int, animation_time: float) -> Dictionary:
+	var static_key := Vector3i(graphic_id, player, logical_facing)
+	if static_resolved_frames.has(static_key): return static_resolved_frames[static_key].duplicate()
 	var key := _ensure_loaded(graphic_id, player)
 	var frames: Array = textures_by_key.get(key, [])
 	if frames.is_empty():
@@ -307,8 +349,10 @@ func _resolved_frame(graphic_id: int, player: int, logical_facing: int, animatio
 	var descriptor = descriptors_by_key[key]
 	var resolved: Dictionary = descriptor.resolve(logical_facing, animation_time, frames.size())
 	var frame_index := int(resolved["frame_index"])
+	var cache_key := "%s:%d:%d" % [key, logical_facing, frame_index]
+	if resolved_frames.has(cache_key): return resolved_frames[cache_key].duplicate()
 	var texture: Texture2D = frames[frame_index]
-	return {
+	var result := {
 		"texture": texture,
 		"asset_name": descriptor.asset_name,
 		"frame_index": frame_index,
@@ -318,12 +362,51 @@ func _resolved_frame(graphic_id: int, player: int, logical_facing: int, animatio
 		"direction_degrees": int(resolved["direction_degrees"]),
 		"graphic_layer": _graphic_layer(graphic_id),
 	}
+	if resolved_frames.size() >= 8192: resolved_frames.clear()
+	resolved_frames[cache_key] = result
+	if descriptor.frames_per_angle == 1:
+		if static_resolved_frames.size() >= 8192: static_resolved_frames.clear()
+		static_resolved_frames[static_key] = result
+	return result.duplicate()
 
 
 func _composite_parts(base_graphic_id: int, player: int, logical_facing: int, animation_time: float) -> Array:
+	var key := Vector3i(base_graphic_id, player, logical_facing)
+	if not composite_templates.has(key):
+		var template: Array = []
+		_compile_composite(template, base_graphic_id, player, logical_facing, Vector2.ZERO, {})
+		composite_templates[key] = template
 	var result: Array = []
-	_append_composite_parts(result, base_graphic_id, player, logical_facing, animation_time, Vector2.ZERO, {})
+	for entry in composite_templates[key]:
+		if entry.size() > 2:
+			result.append(entry[2])
+			continue
+		var part := _resolved_frame(int(entry[0]), player, logical_facing, animation_time)
+		if part.get("texture") == null: continue
+		part["graphic_id"] = int(entry[0])
+		part["screen_offset"] = entry[1]
+		result.append(part)
 	return result
+
+
+func _compile_composite(result: Array, graphic_id: int, player: int, facing: int, offset: Vector2, visited: Dictionary) -> void:
+	if visited.has(graphic_id): return
+	visited[graphic_id] = true
+	var spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
+	for delta in _delta_records(spec.get("deltas", [])):
+		var child := int(delta.get("graphic_id", -1))
+		if child < 0 or not CompositeGraphic.delta_visible(int(delta.get("display_angle", -1)), facing, int(spec.get("angle_count", 1))): continue
+		var first_frame := _resolved_frame(child, player, facing, 0.0)
+		if first_frame.get("texture") == null: continue
+		var child_offset := offset + Vector2(float(delta.get("offset_x", 0)), float(delta.get("offset_y", 0)))
+		if static_resolved_frames.has(Vector3i(child, player, facing)):
+			first_frame["graphic_id"] = child
+			first_frame["screen_offset"] = child_offset
+			first_frame.make_read_only()
+			result.append([child, child_offset, first_frame])
+		else: result.append([child, child_offset])
+		_compile_composite(result, child, player, facing, child_offset, visited)
+	visited.erase(graphic_id)
 
 
 func _append_composite_parts(result: Array, base_graphic_id: int, player: int, logical_facing: int, animation_time: float, inherited_offset: Vector2, visited: Dictionary) -> void:

@@ -29,7 +29,7 @@ func configure_assets(records: Array) -> void:
 	references.clear()
 	cached_textures.clear()
 	for record in records:
-		if String(record.get("archive", "")) != "graphics" or not record.has("frame"):
+		if String(record.get("archive", "")) not in ["graphics", "interfac"] or not record.has("frame"):
 			continue
 		var name := String(record.get("name", ""))
 		if name.begins_with("neutral_"):
@@ -42,7 +42,7 @@ func configure_assets(records: Array) -> void:
 		references[key][player] = record
 
 static func _reference_key(record: Dictionary) -> String:
-	return str([record.get("id", -1), record.get("source", ""), record.get("frame", 0), record.get("paletteId", 50500), record.get("derivation", {})])
+	return str([record.get("archive", ""), record.get("id", -1), record.get("source", ""), record.get("frame", 0), record.get("paletteId", 50500), record.get("derivation", {})])
 
 func texture_for(record: Dictionary, texture: Texture2D, player: int) -> Texture2D:
 	if texture == null or int(record.get("semanticPixels", {}).get("player_color", 0)) <= 0:

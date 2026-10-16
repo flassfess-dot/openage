@@ -133,6 +133,12 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	if snapshot_probe != null:
 		unit_overview_microseconds = Time.get_ticks_usec() - unit_substage_started
 		unit_substage_started = Time.get_ticks_usec()
+	if compact_render_entities and borrow_visible_render_entities and not compact_entities and always_include_entity_lookup.is_empty():
+		var kernel: Variant = world.render_entity_projection_cache.native_kernel
+		if kernel != null and kernel.has_method("filter_visible_entities"):
+			var visible: Array = kernel.filter_visible_entities(detail_units, observer_team, observer_states, fog_map_size)
+			units = world.render_entity_projection_cache.project_many(visible, world.entity_changes)
+			detail_units = []
 	for unit in detail_units:
 		if has_entity_bounds and not use_bounded_unit_query and not _entity_in_bounds(unit, entity_bounds) and not always_include_entity_lookup.has(int(unit.get("id", -1))):
 			continue
@@ -205,7 +211,26 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		else:
 			for resource_value in overview_source_resources:
 				overview_resources.append(_overview_entity(resource_value))
-	for resource in known_resources:
+	var borrow_resource_view := compact_render_entities and borrow_visible_render_entities and resources_are_preordered and has_entity_bounds and known_resources.is_read_only()
+	if borrow_resource_view:
+		resources = known_resources
+		# The legal memory records are already detached render projections. Only
+		# selected resources need the larger control projection; selected units
+		# must not cause the whole forest to be traversed/copied each tick.
+		for selected_id_value in always_include_entity_lookup:
+			var selected_id := int(selected_id_value)
+			var low := 0
+			var high := resources.size()
+			while low < high:
+				var middle := (low + high) / 2
+				if int(resources[middle]["id"]) < selected_id: low = middle + 1
+				else: high = middle
+			if low >= resources.size() or int(resources[low]["id"]) != selected_id: continue
+			var selected_resource := _presentation_entity(resources[low], observer_team, compact_entities, false, compact_render_projector)
+			if resources.is_read_only(): resources = resources.duplicate()
+			resources[low] = selected_resource
+			control_resources.append(selected_resource)
+	for resource in ([] if borrow_resource_view else known_resources):
 		var resource_id := int(resource.get("id", -1))
 		var presentation_resource: Dictionary
 		if resources_use_shared_ai_projection:
@@ -237,6 +262,8 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	var control_buildings: Array = []
 	var overview_buildings: Array = []
 	var remembered_buildings: Dictionary = world.last_known_buildings_by_player.get(observer_team, {}) if observer_team > 0 else {}
+	var memory_cursor: Dictionary = world.entity_read_index.memory_cursors.get(observer_team, {})
+	var borrow_building_memory: bool = bool(options.get("borrow_sampled_building_memory", false)) and int(memory_cursor.get("entity", -1)) == world.entity_changes.revision and int(memory_cursor.get("fog", -1)) == fog.revision_for_player(observer_team)
 	var live_building_ids: Dictionary = {}
 	var blocked_population_queues := 0
 	for building in world.entity_read_index.legal_entities(world, observer_team, "buildings"):
@@ -252,7 +279,11 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		if visible_now and observer_team > 0:
 			# Capture only legal, observed state. A later fogged snapshot never
 			# projects the live dictionary again.
-			observed_render = compact_render_projector.call(building) if compact_render_projector.is_valid() else _compact_render_entity(building)
+			var sampled: Dictionary = remembered_buildings.get(building_id, {})
+			if borrow_building_memory and ReadContract.is_render_record(sampled) and sampled.get("anim") == building.get("anim") and sampled.get("previous_pos") == building.get("previous_pos"):
+				observed_render = sampled
+			else:
+				observed_render = compact_render_projector.call(building) if compact_render_projector.is_valid() else _compact_render_entity(building)
 			remembered_buildings[building_id] = observed_render
 		elif observer_team > 0:
 			knowledge = remembered_buildings.get(building_id, {})
@@ -369,6 +400,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 		"units": sorted_units,
 		"control_units": control_units,
 		"resources": sorted_resources,
+		"resource_delta": world.known_resource_view_delta(observer_team) if borrow_resource_view and world.has_method("known_resource_view_delta") else {},
 		"control_resources": control_resources,
 		"objectives": sorted_objectives,
 		"buildings": sorted_buildings,
@@ -749,6 +781,7 @@ static func _production_overview(world, observer_team: int) -> Array:
 		var order: Dictionary = queue[0]
 		result.append({
 			"id": int(building["id"]),
+			"team": observer_team,
 			"kind": String(building.get("kind", "")),
 			"components": {"ownership": {"civilization_id": int(world.civilization_by_team.get(observer_team, 13))}},
 			"production_queue": [{"id": int(order.get("id", -1)), "order_type": String(order.get("order_type", "unit")), "kind": String(order.get("kind", "")), "technology_id": int(order.get("technology_id", -1)), "status": String(order.get("status", "queued")), "duration": float(order.get("duration", 0.05)), "progress": float(order.get("progress", 0))}],

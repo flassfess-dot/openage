@@ -15,6 +15,7 @@ const RENDER_FIELDS := [
 	"footprint_radius", "selection_radius", "selection_height",
 	"anim", "anim_state", "facing", "presentation_facing",
 	"connectivity_group", "connection_mask", "connection_revision",
+	"gate_axis", "gate_mode", "gate_open_fraction",
 	"death_phase", "death_elapsed", "decay_elapsed", "construction_stage",
 	"environment_asset", "environment_variant", "tree_condition", "tree_phase", "tree_fall_elapsed", "tree_fall_duration", "source_felled_graphic_id", "source_felled_asset_name", "display_graphic_id", "source_frame", "source_graphic_id", "source_graphic_asset_name",
 	"source_requested_graphic_asset_name", "source_asset_fallback_reason",

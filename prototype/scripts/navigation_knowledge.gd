@@ -32,9 +32,14 @@ func planner(world, team: int):
 		entry["source_revision"] = world.navigation_grid.revision
 		entries[team] = entry
 	entry["planner"].performance_probe = world.pathfinder.performance_probe
-	if int(entry.get("fog_revision", -1)) == fog.revision and int(entry["source_revision"]) == world.navigation_grid.revision:
+	var gate_revision: int = world.gate_system.planning_revision(team)
+	if int(entry.get("gate_revision", -1)) == gate_revision and int(entry.get("fog_revision", -1)) == fog.revision and int(entry["source_revision"]) == world.navigation_grid.revision:
 		return entry["planner"]
 	var dirty: Array = fog.consume_path_knowledge(team)
+	if int(entry.get("gate_revision", -1)) != gate_revision:
+		for gate_cell in world.gate_system.all_cells():
+			dirty.append(gate_cell.y * world.map_size.x + gate_cell.x)
+	entry["gate_revision"] = gate_revision
 	if int(entry["source_revision"]) != world.navigation_grid.revision:
 		var changes: Variant = world.navigation_grid.changed_cells_since(int(entry["source_revision"]))
 		if changes == null:
@@ -81,7 +86,7 @@ func _refresh(world, entry: Dictionary, indices: Array, initial: bool, team: int
 		# Exploration may be shared without current sight; retain old knowledge.
 		if not initial and grid.learned[index] != 0 and world.fog_of_war.state_at_cell(team, cell) != Fog.VISIBLE:
 			continue
-		var occupants: Array = source.occupied_cells.get(cell, [])
+		var occupants: Array = world.gate_system.planning_occupants(team, cell, source.occupied_cells.get(cell, []))
 		var terrain_id: int = source.terrain_id(cell)
 		var terrain: String = source.terrain(cell)
 		var terrain_changed: bool = grid.learned[index] == 0 or grid.terrain_id(cell) != terrain_id or grid.terrain(cell) != terrain

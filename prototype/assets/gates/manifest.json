@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "texture_use": "Approved timber gate leaf study cropped to a 320x224 transparent atlas, projected onto volume leaves at runtime.",
+  "design": [
+    "Two native piers with player flags",
+    "No lintel or built-in wall extensions",
+    "Two thick timber leaves, two iron straps with corner barrel hinges",
+    "Original pixel scale and palette"
+  ],
+  "groups": [
+    {
+      "key": "egyptian",
+      "medium_pier_graphic": 259,
+      "fortified_pier_graphic": 254
+    },
+    {
+      "key": "greek",
+      "medium_pier_graphic": 381,
+      "fortified_pier_graphic": 376
+    },
+    {
+      "key": "mesopotamian",
+      "medium_pier_graphic": 747,
+      "fortified_pier_graphic": 742
+    },
+    {
+      "key": "east_asian",
+      "medium_pier_graphic": 452,
+      "fortified_pier_graphic": 447
+    },
+    {
+      "key": "roman",
+      "medium_pier_graphic": 894,
+      "fortified_pier_graphic": 889
+    }
+  ],
+  "small_pier_graphic": 825,
+  "flag_graphic": 702,
+  "flag_frame": 12,
+  "source_method": "ImageGen approved studies with original piers locked; cropped and nearest-neighbor reduced for the native renderer. Masonry is resolved from existing imported assets at runtime.",
+  "historical_generation_record": "generation-record.json",
+  "runtime_geometry": "res://scripts/gate_presentation.gd",
+  "source_studies_directory": "gate-native-asset-studies/five-architecture-groups",
+  "source_leaf_filename_pattern": "{group}-closed-door-leaves.png",
+  "added_ai_generated_images_during_implementation": 0
+}

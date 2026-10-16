@@ -19,6 +19,9 @@ var epoch := -1
 var attackers_by_id: Dictionary = {}
 var target_membership: Dictionary = {}
 var metadata_by_id: Dictionary = {}
+var classification_by_id: Dictionary = {}
+var classification_sources: Dictionary = {}
+var classification_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 var assigned_targets: Dictionary = {}
 var retaliation_buckets: Dictionary = {}
 var wake_lanes: Array = [{}, {}, {}, {}]
@@ -39,6 +42,8 @@ func reset() -> void:
 	attackers_by_id.clear()
 	target_membership.clear()
 	metadata_by_id.clear()
+	classification_by_id.clear()
+	classification_sources.clear()
 	assigned_targets.clear()
 	retaliation_buckets.clear()
 	wake_lanes = [{}, {}, {}, {}]
@@ -186,13 +191,19 @@ func _refresh_combat_rosters(world, tick: int) -> void:
 		for row in world.get_units(): _update_record(row, world)
 		for row in world.get_buildings(): _update_record(row, world)
 	else:
-		for id in delta["ids"]:
+		var changed_ids: Array = classification_kernel.changed_combat_ids(delta, world.units_by_id, world.buildings_by_id, classification_sources, classification_by_id) if classification_kernel != null and classification_kernel.has_method("changed_combat_ids") else delta["ids"]
+		for id in changed_ids:
 			if not (int(delta["masks"][id]) & (Journal.LIFECYCLE | Journal.POSITION | Journal.ACTIVITY | Journal.COMBAT | Journal.OWNERSHIP)): continue
-			_remove_record(int(id), true)
 			var row: Variant = world.find_unit(int(id))
 			if row == null: row = world.find_building(int(id))
-			if row != null: _update_record(row, world)
-			elif attackers_by_id.erase(int(id)): roster_order_dirty = true
+			if row != null:
+				if classification_kernel != null and classification_kernel.has_method("matches_combat_classification") and is_same(classification_sources.get(id), row) and classification_kernel.matches_combat_classification(row, classification_by_id.get(id, [])): continue
+				var classification := _classification(row)
+				if classification_by_id.get(id) == classification and is_same(classification_sources.get(id), row): continue
+				_remove_record(int(id), true)
+				_update_record(row, world)
+			else:
+				_remove_record(int(id))
 	cursor = int(delta["revision"])
 	epoch = world.entity_changes.epoch
 	cached_roster_tick = tick
@@ -202,6 +213,8 @@ func _refresh_combat_rosters(world, tick: int) -> void:
 		roster_order_dirty = false
 
 func _remove_record(id: int, retain_attacker: bool = false) -> void:
+	classification_by_id.erase(id)
+	classification_sources.erase(id)
 	if target_membership.has(id):
 		var old: Array = target_membership[id]
 		var bucket: Dictionary = cached_candidate_index["buckets"][old[0]]
@@ -225,8 +238,14 @@ func _remove_record(id: int, retain_attacker: bool = false) -> void:
 	for lane in lane_by_id.get(id, []): wake_lanes[lane].erase(id)
 	lane_by_id.erase(id)
 
+func _classification(row: Dictionary) -> Array:
+	return [float(row.get("hp", 0.0)) > 0.0, _awareness_cell(Vector2(row.get("pos", Vector2.ZERO))), int(row.get("team", 0)), bool(row.get("combat_enabled", false)), String(row.get("task", "idle")), int(row.get("target_id", -1)), int(row.get("retaliation_target_id", -1)), bool(row.get("combat_pursuit", false)), String(row.get("stance", "passive")), bool(row.get("attack_autonomous", false)), row.get("behavior_tags", []).duplicate(), float(row.get("footprint_radius", 0.0))]
+
+
 func _update_record(row: Dictionary, world) -> void:
 	var id := int(row["id"])
+	classification_by_id[id] = _classification(row)
+	classification_sources[id] = row
 	var cell := _awareness_cell(Vector2(row.get("pos", Vector2.ZERO)))
 	var team := int(row.get("team", 0))
 	if float(row.get("hp", 0.0)) <= 0.0:

@@ -7,7 +7,7 @@ const Replay := preload("res://scripts/replay_system.gd")
 const Formation := preload("res://scripts/formation_group.gd")
 const KnowledgeGrid := preload("res://scripts/navigation_knowledge_grid.gd")
 const Pathfinder := preload("res://scripts/pathfinder.gd")
-const VERSION := 2
+const VERSION := 3
 const MAX_BYTES := 268435456
 # Durable state is explicit. Catalogs, projections, spatial indices and native
 # objects are reconstructed rather than serialized as implementation objects.
@@ -16,6 +16,7 @@ const LIST_INDICES := ["capturable_units", "dying_units", "dying_buildings", "de
 const GRID_FIELDS := ["size", "terrain_cells", "terrain_ids", "occupied_cells", "elevation_cells", "slope_cells", "revision", "surface_revision", "_change_log"]
 const FOG_FIELDS := ["map_size", "states_by_player", "personally_explored_by_player", "visible_counts_by_player", "revisions_by_player", "exploration_revisions_by_player", "newly_explored_cells_by_player", "newly_visible_cells_by_player", "allies_by_player", "shared_vision_by_player", "visibility_topology_dirty", "revision", "source_scan_generation", "path_dirty_by_player"]
 const SYSTEM_FIELDS := {
+	"gate_system": ["gate_ids", "policy_revision"],
 	"economy_system": ["resource_stockpiles_by_team", "population_by_team", "population_points_by_team", "population_reserved_by_team", "population_cap_by_team", "population_limit_by_team", "population_housing_by_team", "population_housing_enabled_by_team"],
 	"production_system": ["next_order_id", "last_production_failure", "last_research_failure", "last_research_message", "last_completed_research_id", "active_building_ids", "building_order_by_id", "next_building_order"],
 	"combat_system": ["projectiles", "resolved_projectiles"],

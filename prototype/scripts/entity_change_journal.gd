@@ -18,6 +18,8 @@ const MAX_BATCHES := 256
 const MAX_PENDING_IDS := 8192
 const MAX_RETAINED_IDS := 32768
 const MAX_TRACKED_IDS := 262144
+const MAX_DELTA_CACHE_ENTRIES := 8
+const MAX_DELTA_CACHE_IDS := 1024
 const PILOT_FIELDS := ["pos", "task", "hp", "team", "order"]
 
 var epoch := 0
@@ -28,6 +30,7 @@ var pending_removed: Dictionary = {}
 var pending_full := false
 var history: Array = []
 var retained_ids := 0
+var delta_cache: Dictionary = {}
 var performance_probe: Variant = null
 var comparison_enabled := false
 var comparison_records: Dictionary = {}
@@ -42,6 +45,7 @@ func reset() -> void:
 	pending_full = false
 	history.clear()
 	retained_ids = 0
+	delta_cache.clear()
 	comparison_records.clear()
 	comparison_versions.clear()
 
@@ -107,6 +111,7 @@ func remove(entity_id: int) -> void:
 func flush() -> void:
 	if pending.is_empty() and not pending_full:
 		return
+	delta_cache.clear()
 	var before := revision
 	revision += 1
 	var entry := {"from": before, "to": revision, "full": pending_full, "masks": pending, "removed": pending_removed}
@@ -131,6 +136,19 @@ func revision_for(entity_id: int, mask: int = ALL) -> int:
 
 func changes_since(before: int) -> Dictionary:
 	flush()
+	if delta_cache.has(before):
+		if performance_probe != null: performance_probe.increment("entities.delta_cache_hits")
+		# Each consumer still owns mutable containers, including CacheDependency's
+		# outer stamp. A consumer edit cannot poison another reader's cached delta.
+		return delta_cache[before].duplicate(true)
+	var result := _collect_changes_since(before)
+	if not bool(result["full"]) and result["ids"].size() <= MAX_DELTA_CACHE_IDS:
+		if delta_cache.size() >= MAX_DELTA_CACHE_ENTRIES: delta_cache.clear()
+		delta_cache[before] = result.duplicate(true)
+	return result
+
+
+func _collect_changes_since(before: int) -> Dictionary:
 	var result := {"revision": revision, "full": false, "exact": true, "ids": [], "masks": {}, "removed_ids": [], "reason": ""}
 	if before == revision: return result
 	if before < 0 or before > revision:
@@ -138,8 +156,16 @@ func changes_since(before: int) -> Dictionary:
 	var covered := before
 	var masks: Dictionary = {}
 	var removed: Dictionary = {}
-	for entry in history:
-		if int(entry["to"]) <= before: continue
+	# Readers normally need only the last one or two batches. Locate their
+	# cursor without walking the complete retained history on every query.
+	var first := 0
+	var last := history.size()
+	while first < last:
+		var middle := (first + last) / 2
+		if int(history[middle]["to"]) <= before: first = middle + 1
+		else: last = middle
+	for index in range(first, history.size()):
+		var entry: Dictionary = history[index]
 		if int(entry["from"]) != covered: return _full("history_overflow")
 		if bool(entry["full"]): return _full("pending_overflow")
 		for id in entry["masks"]:

@@ -158,6 +158,13 @@ class AttackMoveCommand extends MoveCommand:
 		return "attack_move"
 
 
+class GateModeCommand extends Command:
+	func _init(command_tick: int, building_ids: Array[int], mode: String) -> void:
+		super(command_tick, building_ids, {"mode": mode})
+	func command_type() -> String:
+		return "gate_mode"
+
+
 class StanceCommand extends Command:
 	var stance: String
 
