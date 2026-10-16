@@ -19,6 +19,7 @@ func _initialize() -> void:
 	var selection_count := 1
 	var open_build_menu := false
 	var hud_modal := ""
+	var menu_section := ""
 	var random_map_type := ""
 	var focus_coast := false
 	for argument in OS.get_cmdline_user_args():
@@ -34,6 +35,8 @@ func _initialize() -> void:
 			selection_count = maxi(1, int(argument.trim_prefix("--selection-count=")))
 		elif argument == "--open-build-menu":
 			open_build_menu = true
+		elif argument.begins_with("--menu-section="):
+			menu_section = argument.trim_prefix("--menu-section=")
 		elif argument.begins_with("--hud-modal="):
 			hud_modal = argument.trim_prefix("--hud-modal=")
 		elif argument.begins_with("--random-map-type="):
@@ -88,6 +91,14 @@ func _initialize() -> void:
 		for _frame in range(2):
 			await process_frame
 
+	if not menu_section.is_empty():
+		instance.get("hud_modal_overlay").show_section(menu_section)
+		for _frame in range(3): await process_frame
+	if not hud_modal.is_empty():
+		var modal = instance.get("hud_modal_overlay")
+		print("Modal geometry: viewport=%s overlay=%s panel=%s minimum=%s section=%s" % [requested_size, modal.size, modal.menu_panel.get_global_rect(), modal.menu_panel.get_combined_minimum_size(), modal.active_section])
+		print("Modal internals: body=%s footer=%s button=%s" % [modal.body_scroll.get_global_rect(), modal.back_button.get_global_rect(), modal.resume_button.get_combined_minimum_size()])
+	await RenderingServer.frame_post_draw
 	var image := viewport.get_texture().get_image()
 	var result := image.save_png(output_path)
 	if result != OK:

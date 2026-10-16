@@ -21,7 +21,7 @@ func _initialize() -> void:
 	var definition: Dictionary = built["definition"]
 	var size: Vector2i = data["size"]
 	check(definition["map"]["generator"]["type"] == Landscape.TYPE, "new matches opt into version two")
-	check(data["generator_version"] == 2 and String(data["content_hash"]).length() == 64, "version and hash are explicit")
+	check(data["generator_version"] == 3 and String(data["content_hash"]).length() == 64, "version and hash are explicit")
 	check(definition["map"]["content_hash"] == data["content_hash"], "save identity includes generated content")
 	var codec := Replay.new()
 	var round_trip: Dictionary = codec.decode_variant(JSON.parse_string(JSON.stringify(codec.encode_variant(definition))))

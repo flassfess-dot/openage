@@ -4,6 +4,8 @@ const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 const MatchBootstrap := preload("res://scripts/match_bootstrap.gd")
+const Checkpoint := preload("res://scripts/game_checkpoint.gd")
+const Controller := preload("res://scripts/game_controller.gd")
 
 var failures: Array[String] = []
 
@@ -44,6 +46,14 @@ func _initialize() -> void:
 				assert_equal(world.get_buildings().size(), 8, "all eight starting towns load into the simulation")
 				assert_equal(world.get_units().filter(func(unit): return String(unit.get("kind", "")) == "villager").size(), 24, "all eight worker groups load into the simulation")
 				assert_equal(world.get_resources().size(), result["map_data"].get("resources", []).filter(func(entity): return String(entity.get("category", "")) == "resource").size(), "generated resource nodes survive runtime bootstrap")
+				var controller := Controller.new(world)
+				var captured := Checkpoint.capture(world, controller, result["definition"], result["map_data"])
+				var checkpoint := Checkpoint.pack(captured)
+				captured.clear()
+				var restored := Checkpoint.unpack(checkpoint)
+				assert_true(not restored.is_empty(), "dense eight-player 400x400 world survives checkpoint serialization and the loader's size limit")
+				print("Supergiant checkpoint bytes: %d" % int(checkpoint["size"]))
+				restored.clear()
 	if failures.is_empty():
 		print("Supergiant random map tests passed")
 		quit(0)

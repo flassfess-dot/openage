@@ -8,7 +8,9 @@ const Formation := preload("res://scripts/formation_group.gd")
 const KnowledgeGrid := preload("res://scripts/navigation_knowledge_grid.gd")
 const Pathfinder := preload("res://scripts/pathfinder.gd")
 const VERSION := 3
-const MAX_BYTES := 268435456
+# A generated 400x400 forest already needs about 370 MiB before compression.
+# Keep a finite bound with room for supported dense maps and a developed match.
+const MAX_BYTES := 1_073_741_824
 # Durable state is explicit. Catalogs, projections, spatial indices and native
 # objects are reconstructed rather than serialized as implementation objects.
 const WORLD_FIELDS := ["map_size", "map_terrain_ids", "map_reserved_foundation_cells", "forest_resource_counts", "terrain_revision", "units", "resource_nodes", "buildings", "static_obstructions", "civilization_by_team", "full_tech_tree_enabled", "resource_approach_slots", "building_approach_slots", "last_build_failure", "victory_objectives", "score_by_team", "conquest_counts_by_team", "conquest_tracked_by_id", "unit_removal_pending", "building_removal_pending", "kills", "battle_over", "battle_message", "simulation_seed"]
@@ -102,7 +104,7 @@ static func capture(world, controller, definition: Dictionary, map: Dictionary) 
 	for unit in world_state["units"]:
 		unit.erase("_formation_path_cache")
 		unit.erase("formation_steering_target")
-	return {"version": VERSION, "runtime": _capture_runtime(world, controller), "observation_memory": {"buildings": world.last_known_buildings_by_player.duplicate(true), "resources": world.known_resource_memory_state()}, "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
+	return {"version": VERSION, "match_statistics": world.match_statistics.state(), "runtime": _capture_runtime(world, controller), "observation_memory": {"buildings": world.last_known_buildings_by_player.duplicate(true), "resources": world.known_resource_memory_state()}, "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
 
 static func _digest(bytes: PackedByteArray) -> String:
 	var hashing := HashingContext.new()
@@ -123,6 +125,7 @@ static func unpack(blob: Dictionary) -> Dictionary:
 
 static func validate(data: Dictionary) -> bool:
 	if int(data.get("version", -1)) != VERSION: return false
+	if data.has("match_statistics") and not preload("res://scripts/match_statistics.gd").valid_state(data["match_statistics"]): return false
 	for name in ["runtime", "observation_memory", "match_definition", "map_definition", "world", "systems", "fog", "grid", "knowledge", "controller", "indices"]:
 		if not data.get(name) is Dictionary: return false
 	var memory: Dictionary = data["observation_memory"]
@@ -318,4 +321,7 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	world.restore_known_resource_memory(data["observation_memory"]["resources"])
 	_restore_runtime(data["runtime"], world, controller, entities)
 	world.visibility_system.restore_source_tracking(world)
+	world.match_statistics.restore(data.get("match_statistics", {}))
+	if not world.match_statistics.initialized:
+		world.match_statistics.begin(world, controller.tick_index, controller.tick_index > 0)
 	return true

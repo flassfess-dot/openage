@@ -14,7 +14,7 @@ func _initialize() -> void:
 		return
 	var data: Dictionary = first["map_data"]
 	var metadata: Dictionary = data["generation_candidates"]
-	check(metadata["scope"] == "relief_and_ecology", "candidates select structural fields")
+	check(metadata["scope"] == "final_landscape", "candidates select completed landscapes after all exclusions")
 	check(metadata["candidate_count"] == 3, "standard map evaluates three bounded candidates")
 	var scores: Array = metadata["scores"]
 	var winning: Dictionary = scores[int(metadata["selected_candidate_index"])]

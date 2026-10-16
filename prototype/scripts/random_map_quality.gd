@@ -4,6 +4,7 @@ extends RefCounted
 const LandscapeNavigation := preload("res://scripts/random_map_navigation.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const RandomMapMetrics := preload("res://scripts/random_map_metrics.gd")
+const NaturalLandscape := preload("res://scripts/random_map_natural_landscape.gd")
 
 
 static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
@@ -137,6 +138,10 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 		if not expected_hash.is_empty() and expected_hash != String(map_data.get("content_hash", "")):
 			errors.append("random_map_content_hash_mismatch")
 	metrics.merge(RandomMapMetrics.measure(definition, map_data), true)
+	if int(map_data.get("generator_version", 0)) == NaturalLandscape.VERSION:
+		var composition := NaturalLandscape.composition(map_data)
+		metrics["landscape_composition"] = composition
+		errors.append_array(NaturalLandscape.composition_errors(composition))
 	return {
 		"valid": errors.is_empty(),
 		"errors": errors,

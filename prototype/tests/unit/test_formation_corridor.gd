@@ -15,6 +15,7 @@ func _initialize() -> void:
 	test_adaptive_width_and_blocked_side()
 	test_obstacle_bends_and_single_cell_goal()
 	test_native_corridor_matches_reference()
+	test_transit_gates_do_not_deploy_rank_depth()
 
 	if failures.is_empty():
 		print("F-008 formation corridor tests passed")
@@ -123,3 +124,13 @@ func test_native_corridor_matches_reference() -> void:
 			var expected := FormationCorridor.plan(endpoints[0], endpoints[1], FormationGeometry.LINE, 7, 1.3, radius, reference, grid)
 			var actual := FormationCorridor.plan(endpoints[0], endpoints[1], FormationGeometry.LINE, 7, 1.3, radius, native, grid)
 			assert_equal(actual, expected, "native corridor retains route, bends, compression and deployment (radius=%s)" % radius)
+
+
+func test_transit_gates_do_not_deploy_rank_depth() -> void:
+	var plan := {"route": [Vector2(8, 8), Vector2(14, 8), Vector2(20, 8)], "columns": [1, 1, 0], "bends": {1: true}}
+	var paths := FormationCorridor.member_waypoint_sets(plan, 100, FormationGeometry.LINE, 1.0, Vector2.UP)
+	var final := FormationGeometry.world_slots(FormationGeometry.local_slots(100, FormationGeometry.LINE), Vector2(20, 8), Vector2.UP)
+	for index in range(paths.size()):
+		assert_vector_close(paths[index][0], Vector2(8, 8), "ranks share the entry lane without oversized longitudinal offsets")
+		assert_vector_close(paths[index][1], Vector2(14, 8), "bend stays on the actual route regardless of final facing")
+		assert_vector_close(paths[index][-1], final[index], "only the final stage deploys the selected geometry and front")

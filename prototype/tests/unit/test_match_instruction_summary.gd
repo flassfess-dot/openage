@@ -13,12 +13,12 @@ func _initialize() -> void:
 		"skirmish_settings": {"map_type_id": "grasslands", "starting_age_id": "bronze", "population_limit": 50, "victory_mode_id": "conquest", "full_tech_tree": true},
 	}
 	var summary: String = HUDModalOverlay.instruction_summary(definition)
-	for expected in ["Внутренняя карта", "72×72", "41721", "Бронзовый век", "50", "Завоевание", "Full Tech Tree: Вкл."]:
+	for expected in ["Внутренняя карта", "72×72", "41721", "Бронзовый век", "50", "Завоевание", "Полное древо технологий: Вкл."]:
 		assert_true(summary.contains(expected), "pause instructions include %s" % expected)
 	definition["skirmish_settings"] = {}
 	summary = HUDModalOverlay.instruction_summary(definition)
 	assert_true(summary.contains("Бронзовый век") and summary.contains("Завоевание"), "non-skirmish match uses its actual player and victory rules")
-	assert_true(summary.contains("Full Tech Tree: Выкл."), "unconfigured Full Tech Tree is reported as disabled, not assumed enabled")
+	assert_true(summary.contains("Полное древо технологий: Выкл."), "unconfigured Full Tech Tree is reported as disabled, not assumed enabled")
 	definition["map"] = {"size": [24, 24], "seed": 41721, "generator": {"type": "coastal_land"}}
 	definition["players"] = [{"team": 1}]
 	summary = HUDModalOverlay.instruction_summary(definition)

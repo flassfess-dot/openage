@@ -10,6 +10,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	_test_inland_ecology_and_density()
+	_test_exposed_rock_habitat()
 	_test_coastal_predators()
 	_finish("Random map zoned ecology tests passed")
 
@@ -29,7 +30,8 @@ func _test_inland_ecology_and_density() -> void:
 	var scenery: Array = map_data.get("scenery", [])
 	assert_true(scenery.size() >= 20, "standard inland map receives a visible ambient scenery budget")
 	assert_true(scenery.all(func(entity): return bool(entity.get("ambient", false))), "decoration remains presentation-only")
-	assert_true(scenery.any(func(entity): return String(entity.get("decoration_key", "")).contains("rock") or entity.get("decoration_key") == "boulders"), "ambient layer contains terrain-matched rocks")
+	# Natural meadows may have no loose rocks. Their presence is tested in an
+	# exposed geological habitat below, rather than mandated for every seed.
 	assert_true(scenery.any(func(entity): return entity.get("presentation_layer") == "decal"), "ambient layer includes actual flat ground detail")
 	var specs: Dictionary = {}
 	for spec in Decorations.palette(): specs[spec["key"]] = spec
@@ -47,6 +49,24 @@ func _test_inland_ecology_and_density() -> void:
 	assert_true(float(dense_metrics["object_density_per_1000_land_cells"]) > float(sparse_metrics["object_density_per_1000_land_cells"]), "ambient pass increases normalized map occupancy")
 	assert_true(int(dense_metrics["largest_empty_radius_cells"]) <= int(sparse_metrics["largest_empty_radius_cells"]), "ambient pass never enlarges the largest empty region")
 
+
+func _test_exposed_rock_habitat() -> void:
+	var size := Vector2i(24, 24)
+	var terrain: Array[int] = []
+	terrain.resize(size.x * size.y)
+	terrain.fill(1000)
+	var levels: Array[int] = []
+	levels.resize((size.x + 1) * (size.y + 1))
+	levels.fill(0)
+	var fields := {"geology": [], "moisture": [], "woodland": [], "coast_distance": []}
+	for key in fields: fields[key].resize(terrain.size())
+	fields["geology"].fill(0.8)
+	fields["moisture"].fill(0.4)
+	fields["woodland"].fill(0.4)
+	fields["coast_distance"].fill(99)
+	var data := {"size": size, "terrain_ids": terrain, "vertex_levels": levels, "resources": []}
+	var scenery := Decorations.generate(data, fields, {}, 41721)
+	assert_true(scenery.any(func(entity): return String(entity.get("decoration_key", "")).contains("rock") or entity.get("decoration_key") == "boulders"), "exposed geological habitat produces native or imported loose rocks")
 
 func _test_coastal_predators() -> void:
 	var built := _build("coastal", 2, 7919)

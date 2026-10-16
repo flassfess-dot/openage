@@ -4,6 +4,8 @@ extends RefCounted
 const Landscape := preload("res://scripts/random_map_landscape.gd")
 const LandscapeNavigation := preload("res://scripts/random_map_navigation.gd")
 const Topology := preload("res://scripts/random_map_topology.gd")
+const NaturalLandscape := preload("res://scripts/random_map_natural_landscape.gd")
+const NaturalTopology := preload("res://scripts/random_map_natural_topology.gd")
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const RandomMapZones := preload("res://scripts/random_map_zones.gd")
@@ -402,7 +404,7 @@ static func _land_component_lookup(size: Vector2i, terrain_ids: Array[int], clif
 
 
 static func _seeded_water_cell(cell: Vector2i, size: Vector2i, starts: Array[Vector2], topology: String, generator: Dictionary, seed: int) -> bool:
-	return Topology.water_at(Vector2(cell) + Vector2(0.5, 0.5), Topology.prepare(size, starts, topology, generator, seed))
+	return NaturalTopology.water_at(Vector2(cell) + Vector2(0.5, 0.5), NaturalTopology.prepare(size, starts, topology, generator, seed))
 
 
 static func _smooth_water_mask(terrain_ids: Array[int], size: Vector2i) -> void:
@@ -997,19 +999,63 @@ static func _vector2(value: Variant) -> Vector2:
 
 
 static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary) -> Dictionary:
-	if int(generator.get("version", -1)) != Landscape.VERSION:
+	var version := int(generator.get("version", -1))
+	if version not in [Landscape.VERSION, NaturalLandscape.VERSION]:
 		return {"generation_error": "random_map_generator_version_unsupported"}
+	if version == Landscape.VERSION:
+		return _landscape_candidate_map(definition, size, seed, generator, progress, diagnostics)
+	var started := Time.get_ticks_usec()
+	var selected: Dictionary = {}
+	var selected_diagnostics: Dictionary = {}
+	var scores: Array = []
+	var best := -INF
+	var winner := 0
+	var count := Landscape.candidate_count(size)
+	for candidate in range(count):
+		var candidate_diagnostics: Dictionary = {}
+		var candidate_progress := func(value: float, stage: String): _report_progress(progress, (candidate + value * 0.95) / float(count), "%s · вариант %d/%d" % [stage, candidate + 1, count])
+		var data := _landscape_candidate_map(definition, size, seed, generator, candidate_progress, candidate_diagnostics, candidate)
+		var evaluation := NaturalLandscape.evaluate(definition, data)
+		evaluation["index"] = candidate
+		evaluation["seed"] = seed ^ (0x2A63B91 + candidate * 104729)
+		scores.append(evaluation)
+		if selected.is_empty() or float(evaluation["score"]) > best:
+			best = float(evaluation["score"])
+			selected = data
+			selected_diagnostics = candidate_diagnostics
+			winner = candidate
+	var selected_fields: Dictionary = selected["_fields"]
+	var reserved: Dictionary = selected["_reserved"]
+	selected.erase("_fields")
+	selected.erase("_reserved")
+	selected["generation_candidates"] = {"scope": "final_landscape", "candidate_count": count, "scores": scores,
+		"selected_candidate_index": winner, "selected_candidate_seed": int(scores[winner]["seed"])}
+	selected["ecology"]["composition"] = scores[winner]["composition"]
+	_report_progress(progress, 0.99, "Размещение природных деталей")
+	selected["scenery"] = Landscape.scenery(selected, selected_fields, reserved, seed ^ 0x665ACA, float(generator.get("decoration_density", 1.0)), _starting_entity_exclusion_cells(definition, size))
+	selected["content_hash"] = NaturalLandscape.fingerprint(selected)
+	diagnostics.merge(selected_diagnostics, true)
+	diagnostics["candidate_count"] = count
+	diagnostics["total_ms"] = float(Time.get_ticks_usec() - started) / 1000.0
+	_report_progress(progress, 1.0, "Карта готова")
+	return selected
+
+
+static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary, candidate: int = 0) -> Dictionary:
+	var natural := int(generator.get("version", -1)) == NaturalLandscape.VERSION
 	var started := Time.get_ticks_usec()
 	var checkpoint := started
 	var starts: Array[Vector2] = []
 	for player in definition.get("players", []): starts.append(Vector2(player["start"]))
 	var topology := String(generator.get("topology", "inland"))
-	var layout := Topology.prepare(size, starts, topology, generator, seed)
+	var layout := NaturalTopology.prepare(size, starts, topology, generator, seed) if natural else Topology.prepare(size, starts, topology, generator, seed)
 	var terrain: Array[int] = []
 	terrain.resize(size.x * size.y)
 	for y in range(size.y):
 		for x in range(size.x):
-			terrain[y * size.x + x] = 1 if Topology.water_at(Vector2(x + 0.5, y + 0.5), layout) else 0
+			var point := Vector2(x + 0.5, y + 0.5)
+			var water := NaturalTopology.water_at(point, layout) if natural else Topology.water_at(point, layout)
+			terrain[y * size.x + x] = 1 if water else 0
 		_report_row_progress(progress, y, size.y, 0.02, 0.15, "Создание суши и морей")
 	_smooth_water_mask(terrain, size)
 	var water_features := RandomMapWater.apply(terrain, size, seed, topology)
@@ -1017,7 +1063,7 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	var cliffs := _profile_cliff_cells(size, String(generator.get("cliff_profile", "")), seed)
 	checkpoint = _landscape_checkpoint(diagnostics, "coast", checkpoint)
 	_report_progress(progress, 0.18, "Выбор рельефа и природных областей")
-	var fields := Landscape.select_fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed)
+	var fields := NaturalLandscape.fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed ^ (0x2A63B91 + candidate * 104729)) if natural else Landscape.select_fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed)
 	var levels: Array[int] = fields["vertex_levels"]
 	var rock_ridges := Landscape.rock_ridges(size, terrain, starts, fields, cliffs, seed ^ 0xCF67)
 	cliffs = rock_ridges["cells"]
@@ -1035,14 +1081,15 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	var naval_reserved := _reserved_naval_cells(naval_zones, maxi(0, int(naval_settings.get("dock_footprint_radius_cells", 1))))
 	var reserved_foundations: Array = naval_reserved.keys()
 	reserved_foundations.sort_custom(func(a, b): return a.y < b.y or (a.y == b.y and a.x < b.x))
-	var result := {"size": size, "seed": seed, "generator_version": Landscape.VERSION, "theme": "temperate_v2", "environment_pack": "aoe2_temperate",
+	var result := {"size": size, "seed": seed, "generator_version": NaturalLandscape.VERSION if natural else Landscape.VERSION, "theme": "temperate_v3" if natural else "temperate_v2", "environment_pack": "aoe2_temperate",
 		"terrain_ids": terrain, "vertex_levels": levels, "cliff_cells": cliffs, "cliff_obstructions": rock_ridges["scenery"], "strategic_zones": zones, "water_features": water_features,
 		"naval_start_zones": naval_zones, "reserved_foundation_cells": reserved_foundations, "resources": [], "scenery": [],
-		"generation_candidates": fields["generation_candidates"]}
-	Landscape.paint_ground(result, fields)
+		"generation_candidates": fields.get("generation_candidates", {})}
+	if natural: NaturalLandscape.paint_ground(result, fields)
+	else: Landscape.paint_ground(result, fields)
 	checkpoint = _landscape_checkpoint(diagnostics, "fields_and_relief", checkpoint)
 	_report_progress(progress, 0.43, "Резервирование проходов и расширений")
-	var graph := LandscapeNavigation.routes(definition, result)
+	var graph := LandscapeNavigation.routes(definition, result, fields if natural else {})
 	var reserved: Dictionary = graph["reserved"]
 	reserved.merge(naval_reserved, true)
 	reserved.merge(_starting_entity_exclusion_cells(definition, size), true)
@@ -1079,27 +1126,32 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	for item in rock_ridges["scenery"]:
 		var center := Vector2i(item["position"])
 		item["source_elevation"] = float(levels[center.y * (size.x + 1) + center.x])
-	Landscape.paint_ground(result, fields)
+	if natural: NaturalLandscape.paint_ground(result, fields)
+	else: Landscape.paint_ground(result, fields)
 	checkpoint = _landscape_checkpoint(diagnostics, "economy", checkpoint)
 	_report_progress(progress, 0.77, "Создание лесных массивов и опушек")
-	Landscape.forests(result, fields, reserved, seed ^ 0x561332)
+	if natural: NaturalLandscape.forests(result, fields, reserved, seed ^ 0x561332)
+	else: Landscape.forests(result, fields, reserved, seed ^ 0x561332)
 	Landscape.paint_resource_grounds(result)
 	Landscape.paint_cliff_grounds(result)
 	checkpoint = _landscape_checkpoint(diagnostics, "forests", checkpoint)
 	_report_progress(progress, 0.91, "Размещение камней и лесных деталей")
-	result["scenery"] = Landscape.scenery(result, fields, reserved, seed ^ 0x665ACA, float(generator.get("decoration_density", 1.0)), _starting_entity_exclusion_cells(definition, size))
+	if not natural: result["scenery"] = Landscape.scenery(result, fields, reserved, seed ^ 0x665ACA, float(generator.get("decoration_density", 1.0)), _starting_entity_exclusion_cells(definition, size))
 	var tree_sources := {"ror": 0, "aoe2": 0}
 	for resource in result["resources"]:
 		if resource.get("kind", "") != "tree": continue
 		var source := "aoe2" if resource.has("environment_asset") else "ror"
 		tree_sources[source] += 1
-	result["ecology"] = {"forest_cells": result["forest_mask"].count(1), "tree_sources": tree_sources, "reserved_route_cells": reserved.size(), "material_policy": "temperate_connected_v2"}
+	result["ecology"] = {"forest_cells": result["forest_mask"].count(1), "tree_sources": tree_sources, "reserved_route_cells": reserved.size(), "material_policy": "temperate_natural_v3" if natural else "temperate_connected_v2"}
 	var marine_counts := {"shore_fish": 0, "deep_fish": 0, "whale": 0}
 	for resource in result["resources"]:
 		var kind := String(resource.get("kind", ""))
 		if marine_counts.has(kind): marine_counts[kind] += 1
 	result["marine_resources"] = marine_counts
-	result["content_hash"] = Landscape.fingerprint(result)
+	if natural:
+		result["_fields"] = fields
+		result["_reserved"] = reserved
+	else: result["content_hash"] = Landscape.fingerprint(result)
 	_landscape_checkpoint(diagnostics, "scenery_and_hash", checkpoint)
 	diagnostics["total_ms"] = float(Time.get_ticks_usec() - started) / 1000.0
 	_report_progress(progress, 1.0, "Карта готова")

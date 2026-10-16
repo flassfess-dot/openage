@@ -81,7 +81,7 @@ func _ready() -> void:
 	_show_main_menu()
 	# Release templates do not support --script. Drive their real launcher
 	# through an explicit diagnostic entry point after the scene is ready.
-	for diagnostic in [["--verify-gate-icons", "res://tests/manual/verify_gate_icons.gd"], ["--verify-gate-occlusion", "res://tests/manual/verify_gate_occlusion.gd"], ["--verify-gate-wall-insertion", "res://tests/manual/verify_gate_wall_insertion.gd"], ["--verify-interface-player-colors", "res://tests/manual/verify_interface_player_colors.gd"], ["--profile-long-graphical-match", "res://tests/manual/profile_long_graphical_match.gd"], ["--live-packaged-probe", "res://tests/manual/live_packaged_game_probe.gd"]]:
+	for diagnostic in [["--verify-target-outline-feedback", "res://tests/manual/verify_target_outline_feedback.gd"], ["--verify-gate-icons", "res://tests/manual/verify_gate_icons.gd"], ["--verify-gate-occlusion", "res://tests/manual/verify_gate_occlusion.gd"], ["--verify-gate-wall-insertion", "res://tests/manual/verify_gate_wall_insertion.gd"], ["--verify-interface-player-colors", "res://tests/manual/verify_interface_player_colors.gd"], ["--profile-long-graphical-match", "res://tests/manual/profile_long_graphical_match.gd"], ["--live-packaged-probe", "res://tests/manual/live_packaged_game_probe.gd"]]:
 		if diagnostic[0] in OS.get_cmdline_user_args() and not get_tree().has_meta("graphical_verification_started"):
 			get_tree().set_meta("graphical_verification_started", true)
 			hide()

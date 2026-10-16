@@ -181,6 +181,7 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	world.emit_domain_event("entity_created", {
 		"entity_id": entity_id,
 		"entity_category": "unit",
+		"population": world.get_population(team),
 		"kind": kind,
 		"team": team,
 	})

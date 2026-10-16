@@ -72,22 +72,45 @@ static func nearest_open(size: Vector2i, walkable: PackedByteArray, origin: Vect
 	return -1
 
 
-static func routes(definition: Dictionary, map_data: Dictionary) -> Dictionary:
+static func routes(definition: Dictionary, map_data: Dictionary, landscape_fields: Dictionary = {}) -> Dictionary:
 	var size: Vector2i = map_data["size"]
 	var walkable := mask(map_data, {}, false)
 	var players: Array = definition.get("players", [])
 	var reserved: Dictionary = {}
 	var edges: Array = []
+	var natural_paths: AStarGrid2D
+	if not landscape_fields.is_empty():
+		natural_paths = AStarGrid2D.new()
+		natural_paths.region = Rect2i(Vector2i.ZERO, size)
+		natural_paths.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_NEVER
+		natural_paths.update()
+		for index in range(walkable.size()):
+			var cell := Vector2i(index % size.x, index / size.x)
+			natural_paths.set_point_solid(cell, walkable[index] == 0)
+			var forest := float(landscape_fields["forest_strength"][index])
+			var threshold := float(landscape_fields["recipe"]["forest_threshold"])
+			var canopy := smoothstep(threshold - 0.08, threshold + 0.16, forest)
+			var level := int(map_data["vertex_levels"][cell.y * (size.x + 1) + cell.x])
+			natural_paths.set_point_weight_scale(cell, 1.0 + canopy * 5.0 + level * 0.18)
 	# A ring plus a reachable central expansion creates alternate approaches.
 	# On islands only edges within a connected landmass are admitted.
 	for i in range(players.size()):
 		var start := Vector2i(players[i]["start"])
-		var field := flood(size, walkable, start)
+		var field := flood(size, walkable, start) if natural_paths == null else {}
 		var destinations: Array = [Vector2i(players[(i + 1) % players.size()]["start"]), size / 2]
 		for j in range(destinations.size()):
 			var target := nearest_open(size, walkable, destinations[j])
-			if target < 0 or int(field["distances"][target]) < 0: continue
-			var path := trace(field, target)
+			if target < 0: continue
+			var path := PackedInt32Array()
+			if natural_paths != null:
+				var origin := nearest_open(size, walkable, start)
+				if origin < 0: continue
+				for cell in natural_paths.get_id_path(Vector2i(origin % size.x, origin / size.x), Vector2i(target % size.x, target / size.x)):
+					path.append(cell.y * size.x + cell.x)
+				if path.is_empty(): continue
+			else:
+				if int(field["distances"][target]) < 0: continue
+				path = trace(field, target)
 			reserve_path(reserved, path, size, walkable, 2)
 			edges.append({"from_team": int(players[i]["team"]), "to_team": int(players[(i + 1) % players.size()]["team"]) if j == 0 else 0,
 				"role": ("ally_link" if int(players[i].get("alliance_id", players[i]["team"])) == int(players[(i + 1) % players.size()].get("alliance_id", players[(i + 1) % players.size()]["team"])) else "front") if j == 0 else "expansion",

@@ -3,6 +3,7 @@ extends Control
 
 signal restart_requested
 signal menu_requested
+signal statistics_requested
 
 const PresentationModel := preload("res://scripts/scenario_presentation_model.gd")
 
@@ -123,7 +124,7 @@ func _build_interface() -> void:
 	add_child(briefing_layer)
 
 	result_layer = _full_layer()
-	var result_panel := _center_panel(Vector2(600, 330))
+	var result_panel := _center_panel(Vector2(600, 440))
 	result_layer.add_child(result_panel)
 	var result_column := _panel_column(result_panel)
 	result_title = _heading_label()
@@ -136,13 +137,18 @@ func _build_interface() -> void:
 	observe_button.custom_minimum_size.y = 42
 	observe_button.pressed.connect(_dismiss_result)
 	result_column.add_child(observe_button)
+	var statistics_button := Button.new()
+	statistics_button.text = "СТАТИСТИКА · TimeLine"
+	statistics_button.custom_minimum_size.y = 42
+	statistics_button.pressed.connect(func(): statistics_requested.emit())
+	result_column.add_child(statistics_button)
 	var retry_button := Button.new()
 	retry_button.text = "ПОВТОРИТЬ"
 	retry_button.custom_minimum_size.y = 42
 	retry_button.pressed.connect(func(): restart_requested.emit())
 	result_column.add_child(retry_button)
 	var menu_button := Button.new()
-	menu_button.text = "ВЫБОР ИГРЫ"
+	menu_button.text = "ГЛАВНОЕ МЕНЮ…"
 	menu_button.custom_minimum_size.y = 42
 	menu_button.pressed.connect(func(): menu_requested.emit())
 	result_column.add_child(menu_button)

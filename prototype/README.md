@@ -21,7 +21,8 @@ Controls:
 - a boarding selection may exceed transport capacity: everyone approaches, free seats fill, and the rest wait on shore
 - `Ctrl+1`-`Ctrl+9`: assign a control group
 - `1`-`9`: recall a group; press again to center, use `Shift` to add it
-- `F5`-`F10`: line, protective box, column, wedge, staggered, and split flank formations
+- `F5`-`F9`: line, protective box, column, wedge, and staggered formations; `Shift+F9`: split flank
+- `F10`: open/close the match menu; `F1`: in-game help
 - `T`: train a clubman for 50 food
 - `WASD` / arrows: move camera
 - mouse wheel: zoom
@@ -33,9 +34,18 @@ Controls:
 - `B`: open construction choices for selected villagers; Gates unlock with Small Wall research
 - `Tab` during gate placement: turn the 4x1 footprint; select a finished gate for Auto / Open / Locked modes
 - gates follow Small / Medium / Fortified Wall research and retain their mode, orientation and health ratio; see `docs/gates.md`
-- `R`: choose a repair target for selected villagers; restart when no villager is selected or the battle has ended
+- `R`: choose a repair target for selected villagers
 - `Del`: delete selected own objects
-- `Esc`: cancel targeting or return from construction; quit when no command or submenu is active
+- `Esc`: cancel targeting or return from construction, then open the match menu; inside it, go back or resume
+
+The match menu has separate save/load dialogs, audio/camera/window/game-speed
+settings, achievements, population/age TimeLine, scenario instructions and help.
+Loading, overwriting, restarting, resigning and leaving require confirmation.
+TimeLine is recorded during play and retained in checkpoints. Old current-format
+saves remain loadable, with history explicitly starting at restoration.
+While a player is active, detailed opponent statistics are hidden; the final
+screen opens achievements and TimeLine for the completed match.
+See `doc/ror-modern/MATCH_MENU_CONTRACT.md` for evidence and validation.
 
 Each group remembers its own formation. Selecting another group only updates the
 highlighted formation button; a mixed selection keeps each group's layout when

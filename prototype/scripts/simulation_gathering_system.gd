@@ -227,6 +227,7 @@ func gather(resource_id: int, worker: Dictionary) -> float:
 	world.set_entity_field(worker, "carried_resource_type_id", resource_type_id)
 	if simulation_world.capture_domain_events:
 		simulation_world.emit_domain_event("resource_gathered", {
+			"team": int(worker.get("team", 0)),
 			"worker_id": int(worker["id"]),
 			"resource_id": int(resource["id"]),
 			"resource_type_id": resource_type_id,

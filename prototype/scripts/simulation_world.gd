@@ -174,6 +174,7 @@ var simulation_rng := RandomNumberGenerator.new()
 var tick_pipeline := SimulationTickPipeline.new()
 var capture_domain_events: bool = false
 var pending_domain_events: Array[Dictionary] = []
+var match_statistics := preload("res://scripts/match_statistics.gd").new()
 var bulk_load_depth: int = 0
 
 var gamespec_data: Dictionary = {}
@@ -480,6 +481,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	ai_distress_system.reset()
 	pending_domain_events.clear()
 	capture_domain_events = false
+	match_statistics.reset()
 	entity_id_sequence.reset(1)
 	spatial_index.clear()
 	spatial_sync_system.reset()
@@ -2730,6 +2732,7 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 		"entity_id": entity_id,
 		"old_team": old_team,
 		"new_team": new_team,
+		"new_population": get_population(new_team),
 		"converter_id": converter_id,
 		"ownership_reason": ownership_reason,
 		"technology_locked": bool(entity.get("technology_locked", false)),

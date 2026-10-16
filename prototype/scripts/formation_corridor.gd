@@ -75,10 +75,18 @@ static func member_waypoint_sets(plan_data: Dictionary, member_count: int, forma
 		var turn := bool(plan_data.get("bends", {}).get(index, false))
 		if count != previous_columns or is_final or turn:
 			var local := Geometry.ranks(member_count, count, spacing) if count > 0 else Geometry.local_slots(member_count, formation_type, spacing)
-			var forward := _world_route_direction(route, index) if count > 0 else final_forward
+			var forward := _world_route_direction(route, index)
 			if is_final and plan_data.has("deployment_local"):
 				local.assign(plan_data["deployment_local"])
 				forward = plan_data["deployment_forward"]
+			elif is_final:
+				forward = final_forward
+			if not is_final:
+				# These are passage gates, not places to deploy the whole column.
+				# Projecting all rank depths onto a bend sent the head past the goal
+				# and the tail backwards, often outside the map for large armies.
+				# Ranks follow the same lanes and deploy only at their final homes.
+				for slot_id in range(local.size()): local[slot_id].y = 0.0
 			var slots := Geometry.world_slots(local, route[index], forward)
 			for slot_id in range(member_count): result[slot_id].append(slots[slot_id])
 		previous_columns = count

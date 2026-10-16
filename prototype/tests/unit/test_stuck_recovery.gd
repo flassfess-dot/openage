@@ -9,6 +9,7 @@ func _initialize() -> void:
 	test_recovery_sequence_without_teleport()
 	test_progress_resets_recovery()
 	test_orbit_and_slow_route_progress()
+	test_convoy_patience_remains_bounded()
 
 	if failures.is_empty():
 		print("N-007 stuck recovery tests passed")
@@ -37,6 +38,16 @@ func test_progress_resets_recovery() -> void:
 	assert_equal(unit["stuck_ticks"], 0, "progress resets counter")
 	assert_equal(unit["push_priority"], 2, "progress restores base priority")
 	assert_equal(unit["diagnostic_reason"], "", "progress clears stuck reason")
+
+
+func test_convoy_patience_remains_bounded() -> void:
+	var unit := {"push_priority": 2, "base_push_priority": 2, "stuck_ticks": 0, "diagnostic_reason": ""}
+	var actions: Array[String] = []
+	for tick in range(1, 91):
+		var action := StuckRecovery.update_squared(unit, 0.0, 90)
+		if action != "": actions.append(action)
+		if action == "stop": assert_equal(tick, 90, "queue gets its bounded patience window")
+	assert_equal(actions, ["local_repath", "priority_boost", "global_repath", "stop"], "waiting does not issue repeated A-star requests")
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:

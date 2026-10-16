@@ -3,6 +3,7 @@ extends SceneTree
 # does not prove that the user's exported game contains the current generator.
 const Settings := preload("res://scripts/skirmish_settings.gd")
 const Landscape := preload("res://scripts/random_map_landscape.gd")
+const NaturalLandscape := preload("res://scripts/random_map_natural_landscape.gd")
 const Pack := preload("res://scripts/environment_pack.gd")
 const Decorations := preload("res://scripts/random_map_decorations.gd")
 const Navigation := preload("res://scripts/random_map_navigation.gd")
@@ -38,7 +39,7 @@ func run() -> void:
 		check(built.get("valid", false), label + ": playable match " + str(built.get("errors", [])))
 		if not built.get("valid", false): continue
 		var data: Dictionary = built["map_data"]
-		check(data.get("generator_version", -1) == Landscape.VERSION, label + ": current generator")
+		check(data.get("generator_version", -1) == NaturalLandscape.VERSION, label + ": current generator")
 		check(data.get("ecology", {}).get("tree_sources", {}).get("ror", 0) > 0, label + ": native trees")
 		check(data.get("ecology", {}).get("tree_sources", {}).get("aoe2", 0) > 0, label + ": imported trees")
 		var coverage := measure_woodland(data)

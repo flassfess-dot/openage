@@ -23,6 +23,12 @@ func _initialize() -> void:
 	check(Archive.validate(archive).is_empty(), "only the current checkpoint archive is valid")
 	check(archive["state_sha256"] == packed["sha256"], "archive integrity uses the checkpoint digest without rehashing a live world")
 	check(not Checkpoint.unpack(packed).is_empty(), "current checkpoint has a complete restoration contract")
+	var oversized := packed.duplicate()
+	oversized["size"] = Checkpoint.MAX_BYTES + 1
+	check(Checkpoint.unpack(oversized).is_empty(), "large-map support retains a finite decompression limit")
+	var corrupted := packed.duplicate()
+	corrupted["sha256"] = "0".repeat(64)
+	check(Checkpoint.unpack(corrupted).is_empty(), "large-map support still rejects a corrupted checkpoint digest")
 	var stale := archive.duplicate(true)
 	stale["checkpoint"]["version"] = 1
 	check(Archive.validate(stale) == "checkpoint_invalid", "old checkpoint blobs cannot enter a current archive")

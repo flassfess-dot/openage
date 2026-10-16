@@ -5,7 +5,7 @@ const Roles := preload("res://scripts/formation_roles.gd")
 const RETENTION_BONUS: float = 4.0
 const SIZE_PENALTY: float = 10000.0
 const ROLE_WEIGHT: float = 25.0
-const EXACT_ASSIGNMENT_LIMIT: int = 64
+const EXACT_ASSIGNMENT_LIMIT: int = 32
 const ROLE_ORDER := [
 	Roles.PRIEST,
 	Roles.SIEGE,
@@ -91,12 +91,33 @@ static func _assign_scalable(ordered_units: Array, slots: Array, count: int, pre
 			role_units[role] = []
 		role_units[role].append(unit)
 	var middle_y := _slot_middle_y(slots)
+	var forward: Vector2 = slots[0].get("forward", Vector2.DOWN)
+	var right_axis := Vector2(forward.y, -forward.x)
+	var spatial_keys: Dictionary = {}
+	for unit in remaining_units:
+		var position: Vector2 = unit.get("pos", Vector2.ZERO)
+		spatial_keys[int(unit["id"])] = Vector2(position.dot(right_axis), position.dot(forward))
 	for role in ROLE_ORDER:
 		var members: Array = role_units.get(role, [])
 		if members.is_empty():
 			continue
-		members.sort_custom(func(left, right): return _unit_spatial_less(left, right, Vector2(slots[0].get("forward", Vector2.DOWN))))
-		available_slots.sort_custom(func(left, right): return _role_slot_less(role, left, right, middle_y))
+		members.sort_custom(func(left, right):
+			var left_id := int(left["id"])
+			var right_id := int(right["id"])
+			var a: Vector2 = spatial_keys[left_id]
+			var b: Vector2 = spatial_keys[right_id]
+			return a.y < b.y or (is_equal_approx(a.y, b.y) and (a.x < b.x or (is_equal_approx(a.x, b.x) and left_id < right_id))))
+		# If this role receives every remaining slot, ranking them by role and
+		# immediately sorting them spatially again cannot change the assignment.
+		if members.size() < available_slots.size():
+			var role_keys: Dictionary = {}
+			for slot in available_slots:
+				var local: Vector2 = slot.get("local", slot.get("world", Vector2.ZERO))
+				role_keys[int(slot["slot_id"])] = _layout_slot_key(role, slot, local, middle_y)
+			available_slots.sort_custom(func(left, right):
+				var a: Vector3 = role_keys[int(left["slot_id"])]
+				var b: Vector3 = role_keys[int(right["slot_id"])]
+				return _vector3_less(a, b) if a != b else int(left["slot_id"]) < int(right["slot_id"]))
 		var selected_slots: Array = available_slots.slice(0, members.size())
 		available_slots = available_slots.slice(members.size())
 		selected_slots.sort_custom(_slot_spatial_less)

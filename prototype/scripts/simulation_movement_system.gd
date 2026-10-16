@@ -38,6 +38,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			if planner.direct_cell_path(Vector2i(Vector2(unit["pos"]).floor()), Vector2i(Vector2(unit["target"]).floor()), String(unit["movement_domain"]), int(unit["terrain_restriction"]), float(unit["footprint_radius"])).is_empty():
 				assign_unit_destination(unit, unit["destination"], false)
 		world.set_entity_field(unit, "path_knowledge_revision", planner.grid.revision)
+	_advance_formation_corner(unit, planner)
 	var difference: Vector2 = unit["target"] - unit["pos"]
 	if difference.length_squared() < 0.001225:
 		var arrival_displacement := difference
@@ -163,7 +164,14 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		var movement_facing := facing_for_vector(actual_displacement)
 		world.set_entity_field(unit, "movement_facing", movement_facing)
 		world.set_entity_field(unit, "facing", movement_facing)
-	var recovery_action := StuckRecovery.update_route_progress(unit)
+	var stop_tick := StuckRecovery.STOP_TICK
+	var group = simulation_world.formation_groups_view.get(int(unit["formation_group_id"]))
+	if group != null and group.has_compression:
+		# Waiting in a convoy can outlast the ordinary 1.5-second stall window.
+		# Keep retries bounded (one local and one global replan), and cap patience
+		# at nine seconds even for the largest group. Real deadlocks still stop.
+		stop_tick += mini(150, group.member_ids.size() * 2)
+	var recovery_action := StuckRecovery.update_route_progress(unit, stop_tick)
 	match recovery_action:
 		"local_repath":
 			assign_unit_destination(unit, unit["destination"], false)
@@ -190,6 +198,19 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	if probe != null:
 		simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 	return true
+
+
+func _advance_formation_corner(unit: Dictionary, planner) -> void:
+	if int(unit["formation_group_id"]) < 0 or String(unit["task"]) not in ["move", "attack_move"]: return
+	var path: Array = unit["path"]
+	var next_index := int(unit["path_index"]) + 1
+	if next_index >= path.size() or Vector2(unit["pos"]).distance_squared_to(unit["target"]) > 0.75 * 0.75: return
+	# Intermediate gates must not require every rank to touch the same exact
+	# point. Advance only when the entire swept footprint to the next leg is
+	# clear; the final reserved destination still uses the precise arrival rule.
+	if not planner.grid.is_segment_walkable_for(unit["pos"], path[next_index], float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])): return
+	world.set_entity_field(unit, "path_index", next_index)
+	world.set_entity_field(unit, "target", path[next_index])
 
 
 # Legacy saves can contain a ship whose centre is legal but whose hull
@@ -407,16 +428,17 @@ func assign_unit_destination(unit: Dictionary, destination: Vector2, reserve_des
 
 
 func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destination: Vector2, prevalidated_direct: bool = false, open_envelope: Dictionary = {}) -> bool:
-	world.open_movement_envelopes_by_id.erase(int(unit["id"]))
+	var simulation_world = world
+	simulation_world.open_movement_envelopes_by_id.erase(int(unit["id"]))
 	if not OrderPipeline.is_active(unit, "move"):
-		world.begin_entity_order(unit, "move", -1, destination, false)
-	world.transition_entity_order(unit, OrderPipeline.PLAN_PATH)
-	var planner = knowledge.planner(world, int(unit.get("team", 0)))
-	var requested_destination := Coordinates.clamp_world(destination, world.map_size)
-	var reserved_destination: Vector2 = world.destination_reservations.reserve(int(unit["id"]), requested_destination, float(unit.get("footprint_radius", 0.3)), planner.grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+		simulation_world.begin_entity_order(unit, "move", -1, destination, false)
+	simulation_world.transition_entity_order(unit, OrderPipeline.PLAN_PATH)
+	var planner = knowledge.planner(simulation_world, int(unit.get("team", 0)))
+	var requested_destination := Coordinates.clamp_world(destination, simulation_world.map_size)
+	var reserved_destination: Vector2 = simulation_world.destination_reservations.reserve(int(unit["id"]), requested_destination, float(unit.get("footprint_radius", 0.3)), planner.grid, int(unit.get("formation_group_id", -1)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
 	var direct_segments_allowed: bool = prevalidated_direct and reserved_destination.is_equal_approx(requested_destination)
-	world.set_entity_field(unit, "reserved_destination", reserved_destination)
-	world.set_entity_field(unit, "destination", reserved_destination)
+	simulation_world.set_entity_field(unit, "reserved_destination", reserved_destination)
+	simulation_world.set_entity_field(unit, "destination", reserved_destination)
 	var targets := waypoints.duplicate()
 	if targets.is_empty() or targets[targets.size() - 1].distance_squared_to(reserved_destination) > 0.0001:
 		targets.append(reserved_destination)
@@ -425,20 +447,20 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 	var combined: Array[Vector2] = []
 	var cursor: Vector2 = unit["pos"]
 	for target in targets:
-		var clamped_target := Coordinates.clamp_world(target, world.map_size)
+		var clamped_target := Coordinates.clamp_world(target, simulation_world.map_size)
 		# A duplicate waypoint needs no query. An empty zero-length query would
 		# otherwise overwrite the last successful segment's navigation status.
 		if cursor.distance_squared_to(clamped_target) <= 0.0001:
 			continue
 		var path_result: Dictionary
 		if direct_segments_allowed:
-			path_result = world.navigation_service.register_prevalidated_direct_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
+			path_result = simulation_world.navigation_service.register_prevalidated_direct_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)))
 		else:
-			path_result = world.navigation_service.request_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)), planner)
-		world.set_entity_field(unit, "path_knowledge_revision", planner.grid.revision)
-		world.set_entity_field(unit, "path_request_id", int(path_result["request_id"]))
-		world.set_entity_field(unit, "path_status", String(path_result["status"]))
-		world.set_entity_field(unit, "path_grid_revision", int(path_result["grid_revision"]))
+			path_result = simulation_world.navigation_service.request_path(int(unit["id"]), cursor, clamped_target, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), "formation_segment", float(unit.get("footprint_radius", 0.3)), planner)
+		simulation_world.set_entity_field(unit, "path_knowledge_revision", planner.grid.revision)
+		simulation_world.set_entity_field(unit, "path_request_id", int(path_result["request_id"]))
+		simulation_world.set_entity_field(unit, "path_status", String(path_result["status"]))
+		simulation_world.set_entity_field(unit, "path_grid_revision", int(path_result["grid_revision"]))
 		var segment: Array[Vector2] = path_result["path"]
 		if segment.is_empty():
 			return _fail_group_route(unit)
@@ -452,21 +474,21 @@ func assign_unit_waypoints(unit: Dictionary, waypoints: Array[Vector2], destinat
 	# endpoint cannot fulfil the member's reserved formation destination.
 	if cursor.distance_squared_to(reserved_destination) > 0.001225:
 		return _fail_group_route(unit)
-	world.set_entity_field(unit, "path", combined)
-	world.set_entity_field(unit, "path_index", 0)
+	simulation_world.set_entity_field(unit, "path", combined)
+	simulation_world.set_entity_field(unit, "path_index", 0)
 	if combined.is_empty():
-		world.set_entity_field(unit, "target", unit["pos"])
-		world.set_entity_field(unit, "task", "idle")
-		world.set_entity_field(unit, "path_status", "arrived")
-		world.set_entity_field(unit, "diagnostic_reason", "")
-		world.complete_entity_order(unit, "destination_reached")
+		simulation_world.set_entity_field(unit, "target", unit["pos"])
+		simulation_world.set_entity_field(unit, "task", "idle")
+		simulation_world.set_entity_field(unit, "path_status", "arrived")
+		simulation_world.set_entity_field(unit, "diagnostic_reason", "")
+		simulation_world.complete_entity_order(unit, "destination_reached")
 		restore_formation_facing(unit)
 		return true
 	if direct_segments_allowed and bool(open_envelope.get("open", false)):
-		world.open_movement_envelopes_by_id[int(unit["id"])] = open_envelope
-	world.set_entity_field(unit, "target", combined[0])
-	world.set_entity_field(unit, "diagnostic_reason", "group_corridor" if waypoints.size() > 1 else "")
-	world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
+		simulation_world.open_movement_envelopes_by_id[int(unit["id"])] = open_envelope
+	simulation_world.set_entity_field(unit, "target", combined[0])
+	simulation_world.set_entity_field(unit, "diagnostic_reason", "group_corridor" if waypoints.size() > 1 else "")
+	simulation_world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
 	return true
 
 

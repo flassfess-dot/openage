@@ -76,8 +76,8 @@ static func build(map_type: Dictionary, size: Vector2i, starts: Array[Vector2]) 
 	clusters = prioritized_clusters
 	return {
 		"type": "landscape_skirmish_v2",
-		"version": 2,
-		"theme": "temperate_v2",
+		"version": 3,
+		"theme": "temperate_v3",
 		"map_type_id": String(map_type.get("id", "grasslands")),
 		"profile": profile,
 		"source_profile": source_profile,

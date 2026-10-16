@@ -57,7 +57,7 @@ E5-006C3 extends the generated naval contract to four and eight participants on 
 
 ## Match controls
 
-Space pauses; comma/period change the fixed-tick speed; R restarts the same definition and seed; Shift+R submits resign; Escape closes the application. These inputs are presentation intents only and do not mutate simulation objects directly.
+Space pauses; comma/period change the fixed-tick speed. R is reserved for villager repair and Shift+R has no destructive shortcut. Escape cancels targeting/construction first, then opens the match menu; F10 opens/closes that menu, and F1 opens help. Restart/resign/load/exit are explicit confirmed menu intents. Split flank formation moved from F10 to Shift+F9. These inputs are presentation intents only and do not mutate simulation objects directly. See `MATCH_MENU_CONTRACT.md` for sections, TimeLine, confirmation and layout rules.
 
 ## Evidence and limits
 

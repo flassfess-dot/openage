@@ -37,8 +37,8 @@ func _initialize() -> void:
 	overlay.show_menu()
 	assert_true(overlay.is_blocking(), "menu blocks world input")
 	assert_true(overlay.menu_panel.visible and not overlay.diplomacy_panel.visible, "menu owns the visible modal panel")
-	assert_equal(overlay.resume_button.get_theme_color("font_color"), Color("f4e6c7"), "Roman menu actions remain readable on the dark source buttons")
-	assert_equal(overlay.resume_button.custom_minimum_size, Vector2(108, 20), "modal action keeps native wide source-button dimensions")
+	assert_equal(overlay.resume_button.get_theme_color("font_color"), Color("f0e7d3"), "Menu actions use high contrast text on dark buttons")
+	assert_true(overlay.resume_button.custom_minimum_size.y >= 32, "menu actions have readable click targets")
 	overlay.set_save_available(false)
 	assert_true(overlay.load_button.disabled, "load action reports an absent quick save")
 	overlay.set_save_available(true)
@@ -46,7 +46,9 @@ func _initialize() -> void:
 	var save_requested := [false]
 	overlay.save_requested.connect(func(): save_requested[0] = true)
 	overlay.save_button.emit_signal("pressed")
-	assert_true(save_requested[0], "menu delegates save ownership to the game scene")
+	assert_true(not save_requested[0] and overlay.active_section == "confirm", "existing quick save requires overwrite confirmation")
+	overlay._confirm_action()
+	assert_true(save_requested[0], "confirmed quick save delegates ownership to the game scene")
 	overlay.close()
 	assert_true(not overlay.visible and not overlay.is_blocking(), "close releases the modal layer")
 

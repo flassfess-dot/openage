@@ -8,6 +8,7 @@ const Selection := preload("res://scripts/formation_selection.gd")
 const Main := preload("res://main.gd")
 const Replay := preload("res://scripts/replay_system.gd")
 const Cohesion := preload("res://scripts/formation_cohesion.gd")
+const Recovery := preload("res://scripts/stuck_recovery.gd")
 var failures: Array[String] = []
 
 func _initialize() -> void:
@@ -17,6 +18,7 @@ func _initialize() -> void:
 		test_casualties_keep_routes(native)
 	test_cache_does_not_change_canonical_state()
 	test_replay_policy_and_legacy_hash()
+	test_new_formation_order_replaces_stalled_intent()
 	for failure in failures: push_error(failure)
 	print("Formation group orders: %d failures" % failures.size())
 	quit(0 if failures.is_empty() else 1)
@@ -64,6 +66,25 @@ func test_selection_does_not_transfer_formation() -> void:
 	flush(controller)
 	check(controller.formation_groups[first_id].formation_type == "COLUMN" and controller.formation_groups[second_id].formation_type == "LINE", "a mixed move preserves both formations")
 	game.free()
+
+
+func test_new_formation_order_replaces_stalled_intent() -> void:
+	var world = World.new(Vector2i(32, 32))
+	var controller = Controller.new(world)
+	var ids := add_group(world, Vector2(8, 10), 3)
+	controller.enqueue_command(Commands.FormationMoveCommand.new(1, ids, Vector2(23, 10), "LINE", Vector2.RIGHT))
+	flush(controller)
+	var unit: Dictionary = world.find_unit(ids[0])
+	var previous_revision := int(unit["components"]["order"]["revision"])
+	Recovery.update_route_progress(unit)
+	unit["stuck_ticks"] = 17
+	unit["push_priority"] = unit["base_push_priority"] + 2
+	controller.enqueue_command(Commands.FormationMoveCommand.new(controller.tick_index + 1, ids, Vector2(12, 20), "LINE", Vector2.DOWN))
+	flush(controller)
+	check(int(unit["components"]["order"]["revision"]) > previous_revision, "a new formation command starts a new authoritative order")
+	check(unit["stuck_ticks"] == 0 and not unit.has("navigation_progress"), "new manual intent immediately clears the previous stall budget")
+	check(unit["push_priority"] == unit["base_push_priority"], "new intent clears the old congestion priority boost")
+	world.task_coordinator.shutdown()
 
 func test_queue_and_mixed_speed_march(native: bool) -> void:
 	var world = World.new(Vector2i(48, 48))

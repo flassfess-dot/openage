@@ -11,6 +11,7 @@ const SimulationEventStream := preload("res://scripts/simulation_event_stream.gd
 const CombatAwarenessSystem := preload("res://scripts/combat_awareness_system.gd")
 const WildlifeBehaviorSystem := preload("res://scripts/wildlife_behavior_system.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
+const StuckRecovery := preload("res://scripts/stuck_recovery.gd")
 
 # Prototype-owned 20 Hz simulation step, independent of rendering and AI cadence.
 # libopenage/time/clock.cpp clamps long clock gaps to 50 ms; it does not prescribe
@@ -512,6 +513,8 @@ func _emit_runtime_task_changes(previous_tasks: Array) -> void:
 
 func _forward_domain_events() -> void:
 	for domain_event in simulation_world.drain_domain_events():
+		if simulation_world.get("match_statistics") != null:
+			simulation_world.match_statistics.consume(simulation_world, String(domain_event.get("type", "")), domain_event.get("payload", {}), tick_index)
 		event_stream.emit(tick_index, String(domain_event.get("type", "unknown")), domain_event.get("payload", {}))
 
 
@@ -1121,8 +1124,11 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 	var member_waypoint_sets := FormationCorridor.member_waypoint_sets(corridor_plan, ordered.size(), formation_name, group.spacing, forward)
 	var route_envelope := _formation_route_envelope(ordered, member_waypoint_sets)
 	var prevalidated_direct_routes := bool(route_envelope.get("open", false))
+	var intent_microseconds := 0
+	var route_microseconds := 0
 	for unit in ordered: simulation_world.release_unit_destination(unit)
 	for unit in ordered:
+		var member_started := Time.get_ticks_usec() if performance_probe != null else 0
 		var assigned_slot: Dictionary = group.slot_for(int(unit["id"]))
 		simulation_world.conversion_system.cancel(unit, "new_order")
 		simulation_world.healing_system.cancel(unit, "new_order")
@@ -1149,11 +1155,21 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 		var slot_id := int(assigned_slot["slot_id"])
 		if slot_id >= 0 and slot_id < member_waypoint_sets.size():
 			member_waypoints.assign(member_waypoint_sets[slot_id])
+		# A command replaces intent even when the previous task was also move.
+		# Route refreshes inside recovery keep their existing order and budget.
+		simulation_world.begin_entity_order(unit, "move", -1, assigned_slot["world"], false)
+		StuckRecovery.reset(unit)
+		if performance_probe != null:
+			intent_microseconds += Time.get_ticks_usec() - member_started
+			member_started = Time.get_ticks_usec()
 		if simulation_world.assign_unit_waypoints(unit, member_waypoints, assigned_slot["world"], prevalidated_direct_routes, route_envelope):
 			simulation_world.set_entity_field(unit, "formation_home", unit["destination"])
 			assigned_slot["world"] = unit["destination"]
 			resolved_count += 1
+		if performance_probe != null: route_microseconds += Time.get_ticks_usec() - member_started
 	if performance_probe != null:
+		performance_probe.observe_microseconds("formation.member_intents", intent_microseconds)
+		performance_probe.observe_microseconds("formation.path_publication", route_microseconds)
 		performance_probe.observe_microseconds("formation.member_routes", Time.get_ticks_usec() - formation_probe_started)
 	_set_group_lifecycle_state(group, FormationLifecycle.TRAVEL if resolved_count > 0 else FormationLifecycle.ASSEMBLE, "formation_command" if resolved_count > 0 else "route_blocked")
 	for replaced_group_id in replaced_group_ids.keys():
@@ -1329,20 +1345,23 @@ func _configure_group_route(group, members: Array, start_center: Vector2) -> Dic
 		corridor_plan = FormationCorridor.plan(start_center, group.anchor, group.formation_type, members.size(), group.spacing, maximum_radius, planner, planner.grid, movement_domain, restriction_id)
 	if not corridor_plan["route"].is_empty():
 		group.anchor = corridor_plan["route"][-1]
-		var columns: Array = corridor_plan.get("columns", [])
-		var deployed := int(columns[-1]) if not columns.is_empty() else 0
-		var deployment_forward: Vector2 = FormationCorridor._world_route_direction(corridor_plan["route"], corridor_plan["route"].size() - 1) if deployed > 0 else group.forward
+		# Tail clearance controls travel, not the final deployment. A long army
+		# can finish crossing a short passage and then assemble in the open area.
+		# Keeping the corridor's last column count here produced enormous final
+		# columns extending beyond the map even when the preferred shape fitted.
+		var deployed := 0
+		var deployment_forward: Vector2 = group.forward
 		var geometry = FormationGroup.Geometry
-		var local: Array[Vector2] = geometry.ranks(members.size(), deployed, group.spacing) if deployed > 0 else geometry.local_slots(members.size(), group.formation_type, group.spacing)
+		var local: Array[Vector2] = geometry.local_slots(members.size(), group.formation_type, group.spacing)
 		var planner = simulation_world.movement_system.knowledge.planner(simulation_world, int(members[0].get("team", 0)))
-		var attempts := geometry.line_width(members.size()) if deployed == 0 else deployed
-		while attempts > 0:
-			var positions: Array[Vector2] = geometry.world_slots(local, group.anchor, deployment_forward)
-			var fits := positions.all(func(position): return planner.grid.is_position_walkable_for(position, maximum_radius, movement_domain, restriction_id))
-			if fits: break
-			deployed = attempts
-			attempts -= 1
-			local = geometry.ranks(members.size(), deployed, group.spacing)
+		var preferred_positions: Array[Vector2] = geometry.world_slots(local, group.anchor, deployment_forward)
+		if not preferred_positions.all(func(position): return planner.grid.is_position_walkable_for(position, maximum_radius, movement_domain, restriction_id)):
+			deployment_forward = FormationCorridor._world_route_direction(corridor_plan["route"], corridor_plan["route"].size() - 1)
+			for width in range(geometry.line_width(members.size()), 0, -1):
+				deployed = width
+				local = geometry.ranks(members.size(), width, group.spacing)
+				var candidate_positions: Array[Vector2] = geometry.world_slots(local, group.anchor, deployment_forward)
+				if candidate_positions.all(func(position): return planner.grid.is_position_walkable_for(position, maximum_radius, movement_domain, restriction_id)): break
 		group.deployed_columns = deployed
 		corridor_plan["deployment_local"] = local
 		corridor_plan["deployment_forward"] = deployment_forward
@@ -1350,6 +1369,7 @@ func _configure_group_route(group, members: Array, start_center: Vector2) -> Dic
 		for index in range(group.slots.size()):
 			group.slots[index]["local"] = local[index]
 			group.slots[index]["world"] = positions[index]
+			group.slots[index]["forward"] = deployment_forward
 			group.slots[index]["protected_layout"] = group.formation_type == geometry.BLOCK and deployed == 0
 	group.route.assign(corridor_plan["route"])
 	group.corridor_modes.assign(corridor_plan["modes"])
@@ -1458,6 +1478,8 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 			return false
 	_inject_replay_commands_for_current_tick()
 	tick_index += 1
+	if simulation_world.get("match_statistics") != null:
+		simulation_world.match_statistics.begin(simulation_world, tick_index - 1)
 	simulation_world.begin_event_capture()
 	var command_started := Time.get_ticks_usec() if performance_probe != null else 0
 	process_commands()
@@ -1494,6 +1516,8 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 	var event_started := Time.get_ticks_usec() if performance_probe != null else 0
 	simulation_world.end_event_capture()
 	_forward_domain_events()
+	if simulation_world.get("match_statistics") != null:
+		simulation_world.match_statistics.sample(simulation_world, tick_index, simulation_world.battle_over)
 	for change in simulation_world.end_runtime_task_capture():
 		event_stream.emit(tick_index, "task_changed", change)
 	if replay_recorder != null and record_replay_state_hashes:

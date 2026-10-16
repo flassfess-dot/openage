@@ -62,7 +62,12 @@ func test_keyboard_actions() -> void:
 	var adapter = InputAdapter.new()
 	var formation := adapter.translate(key_event(KEY_F8))[0]
 	assert_equal(formation, {"type": "set_formation", "formation": "WEDGE"}, "formation key is device mapping only")
-	assert_equal(adapter.translate(key_event(KEY_F10)), [{"type": "set_formation", "formation": "FLANK"}], "F10 selects only the split formation")
+	assert_equal(adapter.translate(key_event(KEY_F10)), [{"type": "open_game_menu"}], "F10 opens the game menu")
+	assert_equal(adapter.translate(key_event(KEY_ESCAPE)), [{"type": "open_game_menu"}], "Escape opens the menu instead of quitting")
+	assert_equal(adapter.translate(key_event(KEY_F1)), [{"type": "open_help"}], "F1 opens in-game help")
+	var split := key_event(KEY_F9)
+	split.shift_pressed = true
+	assert_equal(adapter.translate(split), [{"type": "set_formation", "formation": "FLANK"}], "Shift+F9 retains split formation")
 	var calibration := key_event(KEY_F10)
 	calibration.ctrl_pressed = true
 	assert_equal(adapter.translate(calibration), [{"type": "open_calibration"}], "Ctrl+F10 opens calibration without changing formation")
@@ -72,8 +77,8 @@ func test_keyboard_actions() -> void:
 	assert_equal(group, {"type": "control_group", "number": 4, "assign": true, "additive": false}, "control group modifiers retained")
 	var resign_event := key_event(KEY_R)
 	resign_event.shift_pressed = true
-	assert_equal(adapter.translate(resign_event)[0], {"type": "resign"}, "Shift+R maps to explicit resign intent")
-	assert_equal(adapter.translate(key_event(KEY_R))[0], {"type": "reset_game"}, "R keeps deterministic match restart")
+	assert_equal(adapter.translate(resign_event), [], "Shift+R cannot accidentally resign")
+	assert_equal(adapter.translate(key_event(KEY_R)), [], "R without repair context cannot reset the match")
 	assert_equal(adapter.translate(key_event(KEY_DELETE))[0], {"type": "delete_context"}, "Delete defers Martyrdom-versus-deletion routing to current simulation state")
 	assert_equal(adapter.translate(key_event(KEY_U))[0].get("type"), "unload", "U maps to the replayable unload intent")
 	var shift_unload := key_event(KEY_U)

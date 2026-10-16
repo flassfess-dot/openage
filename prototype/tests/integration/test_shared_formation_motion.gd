@@ -42,6 +42,7 @@ func test_shared_march_preserves_spacing_and_restores_individual_avoidance() -> 
 	for unit in members_for_ids(world, ids):
 		assert_true(bool(unit["formation_shared_motion"]), "preformed group uses shared translation")
 		assert_true(bool(unit["formation_shared_isolated"]), "isolated group skips member avoidance")
+		assert_true(not unit.has("_formation_path_cache"), "rigid march needs no per-member distance cache")
 	for _tick in range(12):
 		controller.advance_frame(0.05, 1, 2)
 	var translated_distances := pair_distances(members_for_ids(world, ids))

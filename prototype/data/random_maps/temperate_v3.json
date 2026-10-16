@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "temperate_v3",
+  "profiles": {
+    "grasslands": {"relief": 4, "forest_threshold": 0.53, "moisture_bias": 0.02, "rock_threshold": 0.74},
+    "highlands": {"relief": 7, "forest_threshold": 0.50, "moisture_bias": -0.04, "rock_threshold": 0.60},
+    "hill_country": {"relief": 6, "forest_threshold": 0.51, "moisture_bias": 0.0, "rock_threshold": 0.64},
+    "narrows": {"relief": 4, "forest_threshold": 0.53, "moisture_bias": 0.0, "rock_threshold": 0.68},
+    "coastal": {"relief": 4, "forest_threshold": 0.52, "moisture_bias": 0.07, "rock_threshold": 0.73},
+    "continental": {"relief": 5, "forest_threshold": 0.51, "moisture_bias": 0.04, "rock_threshold": 0.69},
+    "mediterranean": {"relief": 4, "forest_threshold": 0.54, "moisture_bias": -0.07, "rock_threshold": 0.66},
+    "islands": {"relief": 4, "forest_threshold": 0.51, "moisture_bias": 0.10, "rock_threshold": 0.74},
+    "small_islands": {"relief": 3, "forest_threshold": 0.52, "moisture_bias": 0.08, "rock_threshold": 0.75}
+  }
+}

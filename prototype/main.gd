@@ -196,6 +196,9 @@ var hud_controls: HUDControls
 var top_bar_controls: TopBarControls
 var hud_modal_overlay: HUDModalOverlay
 var modal_restore_paused := false
+var match_preferences := preload("res://scripts/match_preferences.gd").new()
+var menu_details_tick := -1
+var launcher_quit_confirmation: ConfirmationDialog
 var launcher_suspended := false
 var launcher_restore_paused := false
 var launcher_audio_states: Array[Dictionary] = []
@@ -249,6 +252,9 @@ var cached_projection_offset := Vector2(INF, INF)
 var cached_projection_zoom := -1.0
 
 func _ready() -> void:
+	match_preferences.load_settings()
+	get_tree().auto_accept_quit = false
+	get_window().close_requested.connect(_request_window_quit)
 	preload("res://scripts/rendering_configuration.gd").apply_window_presentation()
 	font = ThemeDB.fallback_font
 	resource_catalog = ResourceCatalog.new()
@@ -342,13 +348,21 @@ func _ready() -> void:
 	hud_modal_overlay.named_load_requested.connect(_load_named_game)
 	hud_modal_overlay.resign_requested.connect(_resign_from_hud_modal)
 	hud_modal_overlay.launcher_requested.connect(_return_to_launcher)
+	hud_modal_overlay.restart_requested.connect(_restart_from_menu)
+	hud_modal_overlay.quit_requested.connect(func(): get_tree().quit())
+	hud_modal_overlay.preferences_requested.connect(_apply_menu_preferences)
+	hud_modal_overlay.details_requested.connect(_refresh_menu_details)
 	hud_modal_overlay.diplomacy_relation_requested.connect(_change_diplomacy_from_hud)
 	hud_modal_overlay.tribute_requested.connect(_pay_tribute_from_hud)
 	scenario_overlay = ScenarioOverlay.new()
 	add_child(scenario_overlay)
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
 	scenario_overlay.restart_requested.connect(_restart_from_scenario_overlay)
-	scenario_overlay.menu_requested.connect(_return_to_launcher)
+	scenario_overlay.menu_requested.connect(_request_return_to_launcher)
+	scenario_overlay.statistics_requested.connect(func():
+		_open_hud_modal(HUDModalOverlay.MODE_MENU)
+		hud_modal_overlay.show_section("achievements")
+	)
 
 	navigation_loading_label = Label.new()
 	navigation_loading_label.text = "Подготовка карты…"
@@ -357,6 +371,10 @@ func _ready() -> void:
 	navigation_loading_label.hide()
 	add_child(navigation_loading_label)
 	reset_game()
+	_apply_audio_preferences()
+	if get_viewport() == get_tree().root and FileAccess.file_exists(match_preferences.PATH):
+		get_window().mode = Window.MODE_FULLSCREEN if bool(match_preferences.values["fullscreen"]) else Window.MODE_WINDOWED
+		if get_window().mode == Window.MODE_WINDOWED: get_window().size = match_preferences.values["screen_size"]
 	if not network_role.is_empty():
 		_start_network_match()
 		if network_session != null:
@@ -587,6 +605,8 @@ func _process(delta: float) -> void:
 	if scenario_overlay != null and scenario_overlay.is_blocking():
 		return
 	if hud_modal_overlay != null and hud_modal_overlay.is_blocking():
+		if network_session != null and hud_modal_overlay.active_section in ["achievements", "timeline", "instructions"] and game_controller.tick_index % 20 == 0 and menu_details_tick != game_controller.tick_index:
+			_refresh_menu_details()
 		return
 	stage_started = Time.get_ticks_usec() if probe != null else 0
 	update_camera(delta)
@@ -617,7 +637,7 @@ func update_camera(delta: float) -> void:
 	if get_window().has_focus():
 		direction += PointerController.edge_scroll_direction(get_viewport().get_mouse_position(), get_viewport_rect().size, PointerController.EDGE_SCROLL_MARGIN, hud_top_height(), hud_bottom_height())
 	if direction != Vector2.ZERO:
-		view_offset += direction.normalized() * 430.0 * delta
+		view_offset += direction.normalized() * 430.0 * float(match_preferences.values["scroll"]) * delta
 
 func update_units(delta: float) -> void:
 	if game_controller == null or simulation_world == null:
@@ -1061,7 +1081,7 @@ func handle_minimap_input(event: InputEvent) -> bool:
 
 
 func handle_input_action(action: Dictionary) -> void:
-	if local_spectator and String(action.get("type", "")) not in ["consume_outside_world", "zoom", "pointer_moved", "toggle_audio", "toggle_pause", "change_speed", "toggle_diagnostics", "toggle_status_indicators", "next_sound_cue", "reset_game", "quit"]:
+	if local_spectator and String(action.get("type", "")) not in ["consume_outside_world", "zoom", "pointer_moved", "toggle_audio", "toggle_pause", "change_speed", "toggle_diagnostics", "toggle_status_indicators", "next_sound_cue", "reset_game", "quit", "open_game_menu", "open_help"]:
 		return
 	match String(action.get("type", "")):
 		"consume_outside_world":
@@ -1155,15 +1175,20 @@ func handle_input_action(action: Dictionary) -> void:
 			issue_unload_at_pointer(bool(action.get("queue_order", false)))
 		"reset_game":
 			if network_session == null:
-				reset_game()
+				_open_hud_modal(HUDModalOverlay.MODE_MENU)
+				hud_modal_overlay.request_confirmation("restart")
 			else:
 				game_message = "Перезапуск сетевого матча требует нового лобби"
 		"resign":
-			var command = RoRCommands.ResignCommand.new(game_controller.tick_index + 1)
-			_queue_local_command(command)
-			_register_local_feedback(command, "Вы сдались", "", null)
+			_open_hud_modal(HUDModalOverlay.MODE_MENU)
+			hud_modal_overlay.request_confirmation("resign")
+		"open_game_menu":
+			_toggle_game_menu()
+		"open_help":
+			_open_hud_modal(HUDModalOverlay.MODE_MENU)
+			hud_modal_overlay.show_section("help")
 		"quit":
-			get_tree().quit()
+			_request_window_quit()
 
 
 func _show_diplomacy_summary() -> void:
@@ -1201,11 +1226,12 @@ func _open_hud_modal(mode: String) -> void:
 	if network_session == null:
 		game_controller.set_paused(true)
 	hud_modal_overlay.set_snapshot(presentation_snapshot)
+	hud_modal_overlay.set_capabilities(network_session != null)
 	if mode == HUDModalOverlay.MODE_DIPLOMACY:
 		hud_modal_overlay.show_diplomacy()
 	else:
 		hud_modal_overlay.set_save_available(FileAccess.file_exists(GameSaveArchive.SAVE_PATH))
-		hud_modal_overlay.set_named_saves(GameSaveArchive.list_named_saves())
+		hud_modal_overlay.set_named_saves(GameSaveArchive.list_saves())
 		hud_modal_overlay.set_menu_status("")
 		hud_modal_overlay.show_menu()
 
@@ -1230,10 +1256,104 @@ func _resign_from_hud_modal() -> void:
 	_queue_local_command(command)
 	_register_local_feedback(command, "Вы сдались", "", null)
 
+func _restart_from_menu() -> void:
+	if network_session != null: return
+	_close_hud_modal()
+	game_controller.set_paused(false)
+	reset_game()
+
+func _request_window_quit() -> void:
+	if launcher_suspended:
+		if not is_instance_valid(launcher_quit_confirmation):
+			launcher_quit_confirmation = ConfirmationDialog.new()
+			launcher_quit_confirmation.title = "Выйти из игры?"
+			launcher_quit_confirmation.dialog_text = "Текущий матч хранится в памяти. При закрытии игры несохранённый прогресс будет потерян."
+			launcher_quit_confirmation.ok_button_text = "Выйти"
+			launcher_quit_confirmation.cancel_button_text = "Отмена"
+			launcher_quit_confirmation.confirmed.connect(func(): get_tree().quit())
+			get_tree().current_scene.add_child(launcher_quit_confirmation)
+		launcher_quit_confirmation.popup_centered(Vector2i(480, 180))
+		launcher_quit_confirmation.get_cancel_button().grab_focus()
+		return
+	if hud_modal_overlay == null: return
+	_open_hud_modal(HUDModalOverlay.MODE_MENU)
+	hud_modal_overlay.request_confirmation("quit")
+
+func _request_return_to_launcher() -> void:
+	_open_hud_modal(HUDModalOverlay.MODE_MENU)
+	hud_modal_overlay.request_confirmation("launcher")
+
+func _apply_audio_preferences() -> void:
+	if audio_player != null: audio_player.volume_db = linear_to_db(maxf(0.00001, float(match_preferences.values["music"]))) - 14.0
+	for player in sfx_players:
+		if is_instance_valid(player): player.volume_db = linear_to_db(maxf(0.00001, float(match_preferences.values["sound"]))) - 3.0
+
+func _apply_menu_preferences(values: Dictionary) -> void:
+	var error := match_preferences.save_settings(values)
+	_apply_audio_preferences()
+	if network_session == null and values.has("speed"): game_controller.set_speed_multiplier(float(values["speed"]))
+	if get_viewport() == get_tree().root:
+		var window := get_window()
+		window.mode = Window.MODE_FULLSCREEN if bool(values.get("fullscreen", false)) else Window.MODE_WINDOWED
+		if not bool(values.get("fullscreen", false)):
+			window.size = values.get("screen_size", window.size)
+			window.move_to_center()
+	hud_modal_overlay.set_menu_status("Настройки применены" if error == OK else "Настройки применены, но не удалось сохранить их на диск", error != OK)
+
+func _refresh_menu_details() -> void:
+	if simulation_world == null or game_controller == null: return
+	var recorder = simulation_world.match_statistics
+	var tick := mini(game_controller.tick_index, recorder.finished_tick) if recorder.finished_tick >= 0 else game_controller.tick_index
+	menu_details_tick = game_controller.tick_index
+	recorder.begin(simulation_world, tick)
+	var history: Dictionary = recorder.state()
+	var reveal := battle_over or local_spectator
+	var allowed: Array = simulation_world.player_registry.all_teams() if reveal else [local_player_team]
+	history["current_tick"] = tick
+	history["reveal_all"] = reveal
+	var rows := {}
+	var current_values := {}
+	for team_value in allowed:
+		var team := int(team_value)
+		var row: Dictionary = history["teams"].get(team, {}).duplicate(true)
+		row["population"] = simulation_world.get_population(team)
+		row["peak_population"] = maxi(int(row.get("peak_population", 0)), int(row["population"]))
+		row["age"] = simulation_world.get_current_age(team)
+		row["status"] = simulation_world.player_registry.status(team)
+		var identity: Dictionary = simulation_world.player_registry.players.get(team, {})
+		row["color_index"] = int(identity.get("color_index", team))
+		row["name"] = "Игрок %d · %s" % [team, hud_modal_overlay._civilization_name(int(identity.get("civilization_id", -1)))]
+		row["temples"] = 0
+		row["ruins"] = 0
+		row["artifacts"] = 0
+		for building in simulation_world.get_buildings():
+			if int(building.get("team", 0)) == team and float(building.get("hp", 0)) > 0 and String(building.get("state", "complete")) == "complete" and String(building.get("kind", "")) == "temple": row["temples"] += 1
+		for objective in simulation_world.victory_objectives:
+			if int(objective.get("team", 0)) == team and bool(objective.get("active", true)) and bool(objective.get("completed", true)):
+				var category := String(objective.get("category", ""))
+				if category == "artifact": row["artifacts"] += 1
+				elif category == "ruin": row["ruins"] += 1
+		rows[team] = row
+		current_values[team] = {"population": row["population"], "age": row["age"]}
+	history["teams"] = rows
+	for sample in history["samples"]:
+		for team in sample["teams"].keys():
+			if team not in allowed: sample["teams"].erase(team)
+	history["markers"] = history["markers"].filter(func(marker): return int(marker.get("team", 0)) in allowed)
+	if history["samples"].is_empty() or int(history["samples"][-1]["tick"]) != tick: history["samples"].append({"tick": tick, "teams": current_values})
+	hud_modal_overlay.set_statistics(history)
+	var model: Dictionary = scenario_overlay.presentation_model.duplicate(true) if scenario_overlay != null else {}
+	for key in ["title", "briefing", "start_message", "hints", "history"]:
+		if match_definition.has(key): model[key] = match_definition[key]
+	hud_modal_overlay.set_instructions(model)
+	var values: Dictionary = match_preferences.values.duplicate(true)
+	values["screen_size"] = get_window().size
+	values["fullscreen"] = get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
+	hud_modal_overlay.set_preferences(values, game_controller.get_speed_multiplier())
+
 
 func _save_quick_game() -> void:
 	if request_save_game_to_path(GameSaveArchive.SAVE_PATH):
-		hud_modal_overlay.set_save_available(true)
 		hud_modal_overlay.set_menu_status("Сохранение…")
 	else:
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
@@ -1242,6 +1362,7 @@ func _save_quick_game() -> void:
 func _load_quick_game() -> void:
 	if not load_game_from_path(GameSaveArchive.SAVE_PATH):
 		if hud_modal_overlay != null:
+			hud_modal_overlay.show_section("load")
 			hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
 
@@ -1251,7 +1372,7 @@ func _save_named_game(name: String) -> void:
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message("slot_name_invalid"), true)
 		return
 	if request_save_game_to_path(path, GameSaveArchive.normalized_slot_name(name)):
-		hud_modal_overlay.set_named_saves(GameSaveArchive.list_named_saves())
+		hud_modal_overlay.set_named_saves(GameSaveArchive.list_saves())
 		hud_modal_overlay.set_menu_status("Сохранение…")
 	else:
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
@@ -1259,6 +1380,7 @@ func _save_named_game(name: String) -> void:
 
 func _load_named_game(path: String) -> void:
 	if not load_game_from_path(path):
+		hud_modal_overlay.show_section("load")
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
 
@@ -1328,7 +1450,7 @@ func _poll_save_jobs() -> void:
 		last_save_error = ""
 		if hud_modal_overlay != null:
 			hud_modal_overlay.set_save_available(true)
-			hud_modal_overlay.set_named_saves(GameSaveArchive.list_named_saves())
+			hud_modal_overlay.set_named_saves(GameSaveArchive.list_saves())
 			hud_modal_overlay.set_menu_status("Игра сохранена" if String(result["path"]) == GameSaveArchive.SAVE_PATH else "Именованное сохранение создано")
 
 func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
@@ -2327,7 +2449,8 @@ func sync_world_state(force: bool = true) -> void:
 
 func _restart_from_scenario_overlay() -> void:
 	if network_session == null:
-		reset_game()
+		_open_hud_modal(HUDModalOverlay.MODE_MENU)
+		hud_modal_overlay.request_confirmation("restart")
 	else:
 		game_message = "Для новой сетевой игры вернитесь в лобби"
 
@@ -2336,6 +2459,7 @@ func _return_to_launcher() -> void:
 	if launcher_suspended:
 		return
 	if network_session != null or not network_role.is_empty():
+		get_tree().auto_accept_quit = true
 		if network_relay != null:
 			network_relay.close()
 		get_tree().change_scene_to_file("res://launcher.tscn")
@@ -2365,6 +2489,7 @@ func _return_to_launcher() -> void:
 
 
 func resume_from_launcher() -> void:
+	get_tree().auto_accept_quit = false
 	if launcher_suspended:
 		game_controller.set_paused(launcher_restore_paused)
 		for state in launcher_audio_states:

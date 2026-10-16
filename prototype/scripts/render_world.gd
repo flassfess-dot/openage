@@ -467,6 +467,10 @@ func _cache_resource_sprite(item: Dictionary) -> void:
 	if cached_sprite_scale > 0.0 and not item.has("projection_anchor"):
 		item["projection_anchor"] = (Vector2(item["screen_position"]) - current_projection_origin) / cached_sprite_scale
 		item["projection_sort_y"] = (float(item["screen_y"]) - current_projection_origin.y) / cached_sprite_scale
+	# Control records may share a body frame descriptor. They must still reach
+	# their outline/health renderer, including on retained and animated updates.
+	if String(item["kind"]) not in ["building", "building_part", "resource", "resource_shadow", "unit", "unit_part", "projectile", "effect", "marker", "environment", "rally_flag"]:
+		return
 	var info: Dictionary = item["frame_info"]
 	var texture: Texture2D = info.get("texture")
 	if cached_sprite_scale <= 0.0 or texture == null or info.has("gate_polygon") or info.has("rotation") or bool(info.get("mirrored", false)): return

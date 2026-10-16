@@ -9,7 +9,7 @@ const STOP_TICK: int = 30
 # Measure forward progress along the active leg, rather than velocity. A
 # circling actor moves every tick but cannot improve its best leg distance.
 # Replanning the same order does not reset the escalation budget.
-static func update_route_progress(unit: Dictionary) -> String:
+static func update_route_progress(unit: Dictionary, stop_tick: int = STOP_TICK) -> String:
 	var goal: Vector2 = unit.get("destination", unit["target"])
 	var leg: Vector2 = unit["target"]
 	var revision := int(unit.get("components", {}).get("order", {}).get("revision", 0))
@@ -24,20 +24,20 @@ static func update_route_progress(unit: Dictionary) -> String:
 		var forward := float(watch["best"]) - Vector2(unit["pos"]).distance_to(Vector2(watch["leg"]))
 		watch["leg"] = leg
 		watch["best"] = distance
-		return update_squared(unit, forward * forward if forward >= 0.015 else 0.0)
+		return update_squared(unit, forward * forward if forward >= 0.015 else 0.0, stop_tick)
 	var improvement := float(watch["best"]) - distance
 	# Accumulate slow forward movement instead of requiring a minimum speed.
 	if improvement >= 0.015:
 		watch["best"] = distance
-		return update_squared(unit, improvement * improvement)
-	return update_squared(unit, 0.0)
+		return update_squared(unit, improvement * improvement, stop_tick)
+	return update_squared(unit, 0.0, stop_tick)
 
 
 static func update(unit: Dictionary, progress_distance: float) -> String:
 	return update_squared(unit, progress_distance * progress_distance)
 
 
-static func update_squared(unit: Dictionary, progress_distance_squared: float) -> String:
+static func update_squared(unit: Dictionary, progress_distance_squared: float, stop_tick: int = STOP_TICK) -> String:
 	if progress_distance_squared > 0.000001:
 		if int(unit["stuck_ticks"]) != 0:
 			unit["stuck_ticks"] = 0
@@ -60,9 +60,9 @@ static func update_squared(unit: Dictionary, progress_distance_squared: float) -
 		GLOBAL_REPATH_TICK:
 			unit["diagnostic_reason"] = "stuck_global_repath"
 			return "global_repath"
-		STOP_TICK:
-			unit["diagnostic_reason"] = "stuck_stopped_nearest_valid"
-			return "stop"
+	if int(unit["stuck_ticks"]) >= maxi(STOP_TICK, stop_tick):
+		unit["diagnostic_reason"] = "stuck_stopped_nearest_valid"
+		return "stop"
 	return ""
 
 

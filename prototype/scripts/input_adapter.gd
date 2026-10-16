@@ -70,8 +70,9 @@ func translate(event: InputEvent, in_world_area: bool = true) -> Array[Dictionar
 			KEY_F6: actions.append({"type": "set_formation", "formation": "RECTANGLE"})
 			KEY_F7: actions.append({"type": "set_formation", "formation": "COLUMN"})
 			KEY_F8: actions.append({"type": "set_formation", "formation": "WEDGE"})
-			KEY_F9: actions.append({"type": "set_formation", "formation": "STAGGERED"})
-			KEY_F10: actions.append({"type": "open_calibration"} if event.ctrl_pressed else {"type": "set_formation", "formation": "FLANK"})
+			KEY_F9: actions.append({"type": "set_formation", "formation": "FLANK" if event.shift_pressed else "STAGGERED"})
+			KEY_F10: actions.append({"type": "open_calibration"} if event.ctrl_pressed else {"type": "open_game_menu"})
+			KEY_F1: actions.append({"type": "open_help"})
 			KEY_Z: actions.append({"type": "train_shortcut", "archetype": "swordsman"})
 			KEY_T: actions.append({"type": "train_shortcut", "archetype": "scout"})
 			KEY_F11: actions.append({"type": "toggle_status_indicators"})
@@ -83,8 +84,7 @@ func translate(event: InputEvent, in_world_area: bool = true) -> Array[Dictionar
 			KEY_F3: actions.append({"type": "toggle_diagnostics"})
 			KEY_DELETE: actions.append({"type": "delete_context"})
 			KEY_U: actions.append({"type": "unload", "position": pointer_position, "queue_order": event.shift_pressed})
-			KEY_R: actions.append({"type": "resign"} if event.shift_pressed else {"type": "reset_game"})
-			KEY_ESCAPE: actions.append({"type": "quit"})
+			KEY_ESCAPE: actions.append({"type": "open_game_menu"})
 	return actions
 
 

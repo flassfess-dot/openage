@@ -6,6 +6,7 @@ const MatchDefinition := preload("res://scripts/match_definition.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 const RandomMapContract := preload("res://scripts/random_map_contract.gd")
 const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
+const NaturalTopology := preload("res://scripts/random_map_natural_topology.gd")
 const RandomMapQuality := preload("res://scripts/random_map_quality.gd")
 const SkirmishAiPolicy := preload("res://scripts/skirmish_ai_policy.gd")
 
@@ -285,7 +286,9 @@ static func _start_positions(count: int, size: Vector2i, map_type: String, seed:
 			var side_count := first_side_count if first_side else second_side_count
 			var spacing := clampf(float(rank + 1) / float(side_count + 1) + rng.randf_range(-0.025, 0.025), 0.08, 0.92)
 			if map_type == "mediterranean":
-				result.append(_safe_start_position(Vector2(size.x * spacing, size.y * ((0.23 if first_side else 0.77) + rng.randf_range(-0.025, 0.025))), Vector2(size) * 0.5, size, map_type, map_profile, seed))
+				var point := NaturalTopology.orient(Vector2(size.x * spacing, size.y * ((0.22 if first_side else 0.78) + rng.randf_range(-0.025, 0.025))), size, seed)
+				point = point.clamp(Vector2(5, 5), Vector2(size) - Vector2(5, 5))
+				result.append(_safe_start_position(point, Vector2(size) * 0.5, size, map_type, map_profile, seed))
 			else:
 				result.append(_safe_start_position(Vector2(size.x * ((0.23 if first_side else 0.77) + rng.randf_range(-0.025, 0.025)), size.y * spacing), Vector2(size) * 0.5, size, map_type, map_profile, seed))
 		return result
@@ -297,8 +300,8 @@ static func _start_positions(count: int, size: Vector2i, map_type: String, seed:
 	var minimum_margin := maxf(8.0, mini(size.x, size.y) * 0.18) if map_type in ["coastal", "continental"] else 5.0
 	var phase := rng.randf_range(-PI / float(maxi(1, count)), PI / float(maxi(1, count)))
 	for index in range(count):
-		var angle := -PI * 0.5 + phase + TAU * float(index) / float(maxi(1, count)) + rng.randf_range(-0.035, 0.035)
-		var point := center + Vector2(cos(angle), sin(angle)) * radius * rng.randf_range(0.96, 1.04)
+		var angle := -PI * 0.5 + phase + TAU * float(index) / float(maxi(1, count)) + rng.randf_range(-0.11, 0.11)
+		var point := center + Vector2(cos(angle), sin(angle)) * radius * rng.randf_range(0.89, 1.11)
 		point.x = clampf(point.x, minimum_margin, float(size.x) - 5.0)
 		point.y = clampf(point.y, minimum_margin, float(size.y) - 5.0)
 		result.append(_safe_start_position(point, center, size, map_type, map_profile, seed))
@@ -396,7 +399,7 @@ static func _generated_victory_objectives(definition: Dictionary, map_data: Dict
 	var total_cells := size.x * size.y
 	var accessible := PackedByteArray()
 	accessible.resize(total_cells)
-	if int(map_data.get("generator_version", 0)) == 2:
+	if int(map_data.get("generator_version", 0)) in [2, 3]:
 		var navigation := RandomMapGenerator.LandscapeNavigation.mask(map_data, definition)
 		for start in starts:
 			var distances: PackedInt32Array = RandomMapGenerator.LandscapeNavigation.flood(size, navigation, Vector2i(start))["distances"]

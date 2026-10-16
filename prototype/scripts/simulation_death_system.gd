@@ -39,7 +39,7 @@ func corpse_animation_duration(source: Dictionary, team: int) -> float:
 	return maxf(0.0, float(graphic.get("frames_per_angle", 1)) * float(graphic.get("frame_rate", 0.0)))
 
 
-func begin_death(unit: Dictionary) -> void:
+func begin_death(unit: Dictionary, source_context: Dictionary = {}) -> void:
 	if String(unit.get("death_phase", "alive")) != "alive":
 		return
 	world.dying_units.append(unit)
@@ -49,6 +49,7 @@ func begin_death(unit: Dictionary) -> void:
 	world.emit_domain_event("death", {
 		"entity_id": int(unit.get("id", -1)),
 		"entity_category": "unit",
+		"killer_team": int(source_context.get("team", 0)),
 		"kind": String(unit.get("kind", "")),
 		"team": int(unit.get("team", 0)),
 	})
@@ -92,18 +93,19 @@ func begin_entity_death(entity: Dictionary, source_context: Dictionary = {}) -> 
 			world.set_entity_field(entity, "killed_by_worker", bool(source_context.get("is_worker", false)))
 			world.set_entity_field(entity, "killer_entity_id", int(source_context.get("entity_id", -1)))
 			world.set_entity_field(entity, "killer_team", int(source_context.get("team", 0)))
-		begin_death(entity)
+		begin_death(entity, source_context)
 		return
-	begin_building_destruction(entity)
+	begin_building_destruction(entity, source_context)
 
 
-func begin_building_destruction(building: Dictionary) -> void:
+func begin_building_destruction(building: Dictionary, source_context: Dictionary = {}) -> void:
 	if building == null or String(building.get("death_phase", "alive")) != "alive":
 		return
 	world.dying_buildings.append(building)
 	world.emit_domain_event("death", {
 		"entity_id": int(building.get("id", -1)),
 		"entity_category": "building",
+		"killer_team": int(source_context.get("team", 0)),
 		"kind": String(building.get("kind", "")),
 		"team": int(building.get("team", 0)),
 	})

@@ -65,20 +65,55 @@ static func update_active_groups(
 			if int(unit.get("formation_group_id", -1)) != group_id:
 				continue
 			unit.erase("formation_steering_target")
-			unit["cohesion_speed_scale"] = 1.0
-			unit["formation_shared_motion"] = false
 			unit["formation_shared_isolated"] = false
 			members.append(unit)
 		if not members.is_empty():
 			groups[group_id] = members
 	for members_value in groups.values():
 		var members: Array = members_value
-		var march_speed := _update_group(members)
 		var group = group_records[int(members[0]["formation_group_id"])]
+		var shared_speed := _prepare_shared_march(group, members, open_envelopes, grid_revision)
+		if shared_speed > 0.0:
+			group.march_speed = shared_speed
+			group.march_anchor = group.march_anchor.move_toward(group.anchor, shared_speed * delta)
+			continue
+		for unit in members:
+			unit["cohesion_speed_scale"] = 1.0
+			unit["formation_shared_motion"] = false
+		var march_speed := _update_group(members, not group.has_compression)
 		group.march_speed = march_speed
 		_steer_open_group(group, members, delta, open_envelopes, grid_revision)
 		_mark_shared_motion(members)
 	_mark_isolated_shared_groups_spatial(groups, has_external_unit_in_bounds, maximum_unit_radius, maximum_unit_clearance)
+
+
+static func _prepare_shared_march(group, members: Array, envelopes: Dictionary, grid_revision: int) -> float:
+	if group.has_compression or members.size() < 2 or envelopes.is_empty(): return 0.0
+	var first: Dictionary = members[0]
+	var displacement: Vector2 = Vector2(first["target"]) - Vector2(first["pos"])
+	if displacement.length_squared() <= SHARED_DISPLACEMENT_TOLERANCE * SHARED_DISPLACEMENT_TOLERANCE: return 0.0
+	var march_speed := INF
+	var maximum_radius := 0.0
+	var maximum_clearance := 0.0
+	var minimum_slot_distance := INF
+	for unit in members:
+		if not _eligible_for_shared_motion(unit): return 0.0
+		var envelope: Dictionary = envelopes.get(int(unit["id"]), {})
+		if envelope.is_empty() or int(envelope.get("grid_revision", -1)) != grid_revision: return 0.0
+		var own_displacement: Vector2 = Vector2(unit["target"]) - Vector2(unit["pos"])
+		if own_displacement.distance_squared_to(displacement) > SHARED_DISPLACEMENT_TOLERANCE * SHARED_DISPLACEMENT_TOLERANCE: return 0.0
+		march_speed = minf(march_speed, float(unit["speed"]))
+		maximum_radius = maxf(maximum_radius, float(unit["footprint_radius"]))
+		maximum_clearance = maxf(maximum_clearance, float(unit["minimum_clearance"]))
+		minimum_slot_distance = minf(minimum_slot_distance, float(unit.get("formation_slot_capacity", 0.45)) * 2.0)
+	if march_speed <= 0.0 or maximum_radius * 2.0 + maximum_clearance > minimum_slot_distance: return 0.0
+	# Equal displacements and common speed preserve every pair distance. There
+	# is no formation error to correct and no need to allocate distance caches,
+	# rebuild a moving reference frame or repeat the eligibility pass each tick.
+	for unit in members:
+		unit["cohesion_speed_scale"] = march_speed / float(unit["speed"])
+		unit["formation_shared_motion"] = true
+	return march_speed
 
 
 static func remaining_distance(unit: Dictionary) -> float:
@@ -99,7 +134,7 @@ static func remaining_distance(unit: Dictionary) -> float:
 	return unit["pos"].distance_to(path[path_index]) + float(cache["suffix"][path_index])
 
 
-static func _update_group(members: Array) -> float:
+static func _update_group(members: Array, hold_front: bool = true) -> float:
 	var active: Array = []
 	var distances := PackedFloat64Array()
 	var march_speed := INF
@@ -116,7 +151,9 @@ static func _update_group(members: Array) -> float:
 		minimum = minf(minimum, remaining)
 		maximum = maxf(maximum, remaining)
 	if active.is_empty(): return 0.0
-	var pressure := clampf((maximum - minimum - COHESION_TOLERANCE) / 3.0, 0.0, 1.0)
+	# In a passage the head must keep exiting so that the tail can enter.
+	# Holding it for the rear compresses everyone onto the same gate.
+	var pressure := clampf((maximum - minimum - COHESION_TOLERANCE) / 3.0, 0.0, 1.0) if hold_front else 0.0
 	for index in range(active.size()):
 		var unit: Dictionary = active[index]
 		var requested := march_speed
