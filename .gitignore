@@ -79,6 +79,7 @@ perf.data*
 /.venv/
 /.tools/
 /.tmp/
+/tmp/
 /dist/
 /prototype/.godot/
 /prototype/assets/audio/

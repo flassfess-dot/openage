@@ -5,6 +5,10 @@ signal restart_requested
 signal menu_requested
 signal statistics_requested
 
+const MenuTheme := preload("res://scripts/match_menu_theme.gd")
+const LauncherTheme := preload("res://scripts/launcher_theme.gd")
+const Backdrop := preload("res://scripts/match_menu_backdrop.gd")
+
 const PresentationModel := preload("res://scripts/scenario_presentation_model.gd")
 
 var model_builder := PresentationModel.new()
@@ -14,19 +18,24 @@ var briefing_dismissed := false
 var result_dismissed := false
 
 var briefing_layer: ColorRect
+var briefing_panel: PanelContainer
 var briefing_title: Label
 var briefing_text: Label
 var briefing_objectives: Label
 var objectives_panel: PanelContainer
 var objectives_text: Label
 var result_layer: ColorRect
+var result_panel: PanelContainer
 var result_title: Label
 var result_text: Label
 
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	theme = MenuTheme.shared_theme()
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_build_interface()
+	resized.connect(_layout_panels)
 	visible = false
 
 
@@ -73,6 +82,7 @@ func set_snapshot(snapshot: Dictionary) -> void:
 	objectives_panel.visible = briefing_dismissed and not result_layer.visible
 	if over:
 		var victory := String(presentation_model.get("outcome", "")) == "victory"
+		result_layer.get_node("Backdrop").show_section("victory" if victory else "defeat")
 		result_title.text = "ПОБЕДА" if victory else "ПОРАЖЕНИЕ"
 		var reason := String(scenario_state.get("result", {}).get("reason", ""))
 		var reason_label := String({"conquest": "завоевание", "score": "счёт или время", "wonder": "чудо света", "ruins": "руины", "artifacts": "артефакты", "scenario": "условия сценария"}.get(reason, reason))
@@ -106,16 +116,17 @@ func _build_interface() -> void:
 	objectives_panel.add_child(_with_margin(objectives_text, 12))
 	add_child(objectives_panel)
 
-	briefing_layer = _full_layer()
-	var briefing_panel := _center_panel(Vector2(720, 500))
+	briefing_layer = _full_layer("instructions")
+	briefing_panel = _center_panel(Vector2(720, 500))
 	briefing_layer.add_child(briefing_panel)
 	var briefing_column := _panel_column(briefing_panel)
 	briefing_title = _heading_label()
 	briefing_column.add_child(briefing_title)
+	var briefing_body := _scroll_body(briefing_column)
 	briefing_text = _body_label(140)
-	briefing_column.add_child(briefing_text)
+	briefing_body.add_child(briefing_text)
 	briefing_objectives = _body_label(120)
-	briefing_column.add_child(briefing_objectives)
+	briefing_body.add_child(briefing_objectives)
 	var begin_button := Button.new()
 	begin_button.text = "НАЧАТЬ МИССИЮ"
 	begin_button.custom_minimum_size.y = 46
@@ -123,15 +134,16 @@ func _build_interface() -> void:
 	briefing_column.add_child(begin_button)
 	add_child(briefing_layer)
 
-	result_layer = _full_layer()
-	var result_panel := _center_panel(Vector2(600, 440))
+	result_layer = _full_layer("victory")
+	result_panel = _center_panel(Vector2(600, 440))
 	result_layer.add_child(result_panel)
 	var result_column := _panel_column(result_panel)
 	result_title = _heading_label()
 	result_column.add_child(result_title)
+	var result_body := _scroll_body(result_column)
 	result_text = _body_label(76)
 	result_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	result_column.add_child(result_text)
+	result_body.add_child(result_text)
 	var observe_button := Button.new()
 	observe_button.text = "НАБЛЮДАТЬ"
 	observe_button.custom_minimum_size.y = 42
@@ -166,11 +178,15 @@ func _dismiss_result() -> void:
 	result_layer.visible = false
 
 
-func _full_layer() -> ColorRect:
+func _full_layer(section: String) -> ColorRect:
 	var layer := ColorRect.new()
-	layer.color = Color(0.01, 0.015, 0.02, 0.82)
+	layer.color = Color("100a05")
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	var background := Backdrop.new()
+	background.name = "Backdrop"
+	background.show_section(section)
+	layer.add_child(background)
 	return layer
 
 
@@ -179,16 +195,29 @@ func _center_panel(panel_size: Vector2) -> PanelContainer:
 	panel.set_anchors_preset(Control.PRESET_CENTER)
 	panel.position = -panel_size * 0.5
 	panel.size = panel_size
-	panel.add_theme_stylebox_override("panel", _panel_style(Color(0.10, 0.08, 0.055, 0.98)))
+	panel.add_theme_stylebox_override("panel", MenuTheme.screen_panel_style())
+	panel.set_meta("preferred_size", panel_size)
+	panel.minimum_size_changed.connect(_queue_layout)
 	return panel
 
 
 func _panel_column(panel: PanelContainer) -> VBoxContainer:
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 18)
-	panel.add_child(_with_margin(column, 30))
+	column.add_theme_constant_override("separation", 10)
+	column.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	panel.add_child(column)
 	return column
 
+func _scroll_body(column: VBoxContainer) -> VBoxContainer:
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", 12)
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(body)
+	column.add_child(scroll)
+	return body
 
 func _with_margin(child: Control, amount: int) -> MarginContainer:
 	var margin := MarginContainer.new()
@@ -200,9 +229,9 @@ func _with_margin(child: Control, amount: int) -> MarginContainer:
 
 func _heading_label() -> Label:
 	var label := Label.new()
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 28)
-	label.add_theme_color_override("font_color", Color("f1d890"))
+	LauncherTheme.heading(label, 28)
 	return label
 
 
@@ -210,18 +239,22 @@ func _body_label(minimum_height: float) -> Label:
 	var label := Label.new()
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.custom_minimum_size.y = minimum_height
-	label.add_theme_font_size_override("font_size", 15)
-	label.add_theme_color_override("font_color", Color("e6d6ae"))
+	LauncherTheme.body(label, 15)
 	return label
 
 
-func _panel_style(fill: Color) -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.bg_color = fill
-	style.border_color = Color("c6a866")
-	style.set_border_width_all(2)
-	style.corner_radius_top_left = 3
-	style.corner_radius_top_right = 3
-	style.corner_radius_bottom_left = 3
-	style.corner_radius_bottom_right = 3
-	return style
+func _panel_style(_fill: Color) -> StyleBoxFlat:
+	return LauncherTheme.panel_style(true)
+
+func _queue_layout() -> void:
+	_layout_panels.call_deferred()
+
+func _layout_panels() -> void:
+	for panel in [briefing_panel, result_panel]:
+		if panel == null: continue
+		panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		var gutter := 12.0 if size.y < 600 else 24.0
+		var available := (size - Vector2.ONE * gutter * 2).max(Vector2(160,120))
+		panel.get_child(0).custom_minimum_size.x = minf(860, maxf(0, available.x - 36))
+		panel.size = available
+		panel.position = ((size - panel.size) * 0.5).floor()

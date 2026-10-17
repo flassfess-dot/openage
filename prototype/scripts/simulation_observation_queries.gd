@@ -30,11 +30,12 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	var command_ids: Dictionary = {}
 	for id in options.get("command_option_entity_ids", []):
 		command_ids[int(id)] = true
+	var keep_actors: bool = restricted and command_ids.is_empty()
 	var replacements: Dictionary = {}
 	var units: Array = []
 	var worker_options: Array = []
 	var worker_options_ready := false
-	for row_value in snapshot.get("units", []):
+	for row_value in ([] if keep_actors else snapshot.get("units", [])):
 		var row: Dictionary = row_value
 		if int(row.get("team", 0)) == team and (not restricted or command_ids.has(int(row.get("id", -1)))) and world.entity_is_worker(row):
 			row = row.duplicate()
@@ -50,9 +51,11 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 			row = row.duplicate()
 			row["ai_profile"] = AiProfile.actor(world, row, team)
 		units.append(row)
+	if keep_actors: units = snapshot.get("units", [])
 	result["units"] = units
 	var buildings: Array = []
-	for row_value in snapshot.get("buildings", []):
+	var profile_cache: Dictionary = options.get("_ai_profile_cache", {})
+	for row_value in ([] if keep_actors else snapshot.get("buildings", [])):
 		var row: Dictionary = row_value
 		if int(row.get("team", 0)) == team and not bool(row.get("last_known", false)) and (not restricted or command_ids.has(int(row.get("id", -1)))):
 			var source: Variant = world.find_building(int(row.get("id", -1)))
@@ -74,7 +77,7 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 				if not technologies.is_empty():
 					append_planning_research_options(world, row, source, team, technologies)
 				if bool(options.get("include_ai_profiles", false)):
-					row["command_options"] = AiProfile.decorate_options(world, row.get("command_options", {}), team, options.get("foundation_units", units))
+					row["command_options"] = AiProfile.decorate_options(world, row.get("command_options", {}), team, options.get("foundation_units", units), profile_cache)
 					row["ai_drop_site"] = world.entity_has_behavior_tag(source, "drop_site")
 					var accepted: Array = []
 					for type_id in range(4):
@@ -85,8 +88,9 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 			row = row.duplicate()
 			row["ai_profile"] = AiProfile.actor(world, row, team)
 		buildings.append(row)
+	if keep_actors: buildings = snapshot.get("buildings", [])
 	result["buildings"] = buildings
-	for category in ["control_units", "control_buildings"]:
+	for category in ([] if keep_actors else ["control_units", "control_buildings"]):
 		if snapshot.has(category):
 			var controls: Array = []
 			for row in snapshot[category]:
@@ -117,7 +121,8 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	started = Time.get_ticks_usec() if probe != null else 0
 	var sites: Dictionary = {}
 	if bool(options.get("defer_build_sites", false)) and world.has_method("capture_ai_build_site_queries"):
-		result["build_site_queries"] = world.capture_ai_build_site_queries(team, available_kinds, tick, maxi(0, int(options.get("build_site_cache_ticks", 0))), maxi(1, int(options.get("maximum_build_sites_per_kind", 4))), maxi(1, int(options.get("build_site_search_radius", 12))), options.get("preferred_build_sites", {}), options.get("strict_preferred_build_site_kinds", []), maxf(0.0, float(options.get("minimum_structure_gap", 0.0))))
+		if bool(options.get("defer_site_capture", false)): result["_pending_build_site_kinds"] = available_kinds
+		else: result["build_site_queries"] = capture_deferred_sites(world, result, available_kinds, options)
 		result["build_site_candidate_filter"] = options.get("build_site_candidate_filter", Callable()).is_valid()
 	elif not requested_kinds.is_empty():
 		sites = requested_build_sites(world, tick, team, available_kinds, options, units, buildings)
@@ -126,6 +131,9 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	result["build_sites"] = sites
 	_observe(probe, prefix + ".build_sites", started)
 	return result
+
+static func capture_deferred_sites(world, snapshot: Dictionary, kinds: Array, options: Dictionary) -> Array:
+	return world.capture_ai_build_site_queries(int(snapshot["observer_team"]), kinds, int(snapshot["tick"]), maxi(0, int(options.get("build_site_cache_ticks", 0))), maxi(1, int(options.get("maximum_build_sites_per_kind", 4))), maxi(1, int(options.get("build_site_search_radius", 12))), options.get("preferred_build_sites", {}), options.get("strict_preferred_build_site_kinds", []), maxf(0.0, float(options.get("minimum_structure_gap", 0.0))))
 
 
 static func _observe(probe, metric: String, started: int) -> void:

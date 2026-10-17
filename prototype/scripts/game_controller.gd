@@ -20,9 +20,9 @@ const StuckRecovery := preload("res://scripts/stuck_recovery.gd")
 const FIXED_STEP_SECONDS: float = 0.05
 const GAME_SPEEDS := [1.0, 1.5, 2.0]
 const MAX_STEPS_PER_FRAME: int = 4
-const FRAME_SIMULATION_BUDGET_USEC: int = 24000
-const MAX_RECOVERABLE_PREPARATION_WAIT_SECONDS := 0.15
-# Retain one short preparation wait at the fastest selected speed, while
+const FRAME_SIMULATION_BUDGET_USEC: int = 16000
+const MAX_RECOVERABLE_PREPARATION_WAIT_SECONDS := 0.5
+# Preparation can span several rendered frames. Retain bounded time debt,
 # executing at most four ordered steps in any rendered frame.
 const MAX_ACCUMULATED_SECONDS: float = FIXED_STEP_SECONDS * (MAX_STEPS_PER_FRAME + 3)
 const FORMATION_RECONCILE_INTERVAL_TICKS: int = 2
@@ -42,6 +42,8 @@ var accumulator_seconds: float = 0.0
 var preparation_waiting := false
 var preparation_wait_seconds := 0.0
 var preparation_preserved_debt := 0.0
+var _render_deadline_usec := 0
+var _deferred_ready_tick := -1
 var speed_index: int = 1
 var paused: bool = false
 var formation_groups: Dictionary = {}
@@ -61,6 +63,8 @@ func _init(world = null) -> void:
 
 func set_world(world) -> void:
 	simulation_world = world
+	_render_deadline_usec = 0
+	_deferred_ready_tick = -1
 	_rebuild_queued_unit_index()
 	if simulation_world != null and simulation_world.has_method("set_performance_probe"):
 		simulation_world.set_performance_probe(performance_probe)
@@ -157,6 +161,8 @@ func clear_queue() -> void:
 	command_queue.clear()
 
 func reset_timing() -> void:
+	_render_deadline_usec = 0
+	_deferred_ready_tick = -1
 	tick_index = 0
 	accumulator_seconds = 0.0
 	preparation_waiting = false
@@ -204,6 +210,8 @@ func get_interpolation_alpha() -> float:
 
 
 func replay_until_tick(target_tick: int, player_team: int, enemy_team: int) -> bool:
+	_render_deadline_usec = 0
+	_deferred_ready_tick = -1
 	if replay_source == null or simulation_world == null or target_tick < tick_index:
 		return false
 	var was_paused := paused
@@ -1320,6 +1328,7 @@ func _formation_partitions(members: Array) -> Array:
 
 
 func _configure_group_route(group, members: Array, start_center: Vector2) -> Dictionary:
+	var route_stage := Time.get_ticks_usec() if performance_probe != null else 0
 	var maximum_radius := 0.0
 	var movement_domain := String(members[0].get("movement_domain", "land")) if not members.is_empty() else "land"
 	var restriction_id := int(members[0].get("terrain_restriction", -1)) if not members.is_empty() else -1
@@ -1342,7 +1351,13 @@ func _configure_group_route(group, members: Array, start_center: Vector2) -> Dic
 					best = distance
 					start_cell = Vector2i(position.floor())
 			start_center = Vector2(start_cell) + Vector2(0.5, 0.5)
+		if performance_probe != null:
+			performance_probe.observe_microseconds("formation.corridor.knowledge", Time.get_ticks_usec() - route_stage)
+			route_stage = Time.get_ticks_usec()
 		corridor_plan = FormationCorridor.plan(start_center, group.anchor, group.formation_type, members.size(), group.spacing, maximum_radius, planner, planner.grid, movement_domain, restriction_id)
+		if performance_probe != null:
+			performance_probe.observe_microseconds("formation.corridor.plan", Time.get_ticks_usec() - route_stage)
+			route_stage = Time.get_ticks_usec()
 	if not corridor_plan["route"].is_empty():
 		group.anchor = corridor_plan["route"][-1]
 		# Tail clearance controls travel, not the final deployment. A long army
@@ -1355,13 +1370,13 @@ func _configure_group_route(group, members: Array, start_center: Vector2) -> Dic
 		var local: Array[Vector2] = geometry.local_slots(members.size(), group.formation_type, group.spacing)
 		var planner = simulation_world.movement_system.knowledge.planner(simulation_world, int(members[0].get("team", 0)))
 		var preferred_positions: Array[Vector2] = geometry.world_slots(local, group.anchor, deployment_forward)
-		if not preferred_positions.all(func(position): return planner.grid.is_position_walkable_for(position, maximum_radius, movement_domain, restriction_id)):
+		if not preferred_positions.all(func(position): return planner.is_position_walkable(position, maximum_radius, movement_domain, restriction_id)):
 			deployment_forward = FormationCorridor._world_route_direction(corridor_plan["route"], corridor_plan["route"].size() - 1)
 			for width in range(geometry.line_width(members.size()), 0, -1):
 				deployed = width
 				local = geometry.ranks(members.size(), width, group.spacing)
 				var candidate_positions: Array[Vector2] = geometry.world_slots(local, group.anchor, deployment_forward)
-				if candidate_positions.all(func(position): return planner.grid.is_position_walkable_for(position, maximum_radius, movement_domain, restriction_id)): break
+				if candidate_positions.all(func(position): return planner.is_position_walkable(position, maximum_radius, movement_domain, restriction_id)): break
 		group.deployed_columns = deployed
 		corridor_plan["deployment_local"] = local
 		corridor_plan["deployment_forward"] = deployment_forward
@@ -1375,6 +1390,7 @@ func _configure_group_route(group, members: Array, start_center: Vector2) -> Dic
 	group.corridor_modes.assign(corridor_plan["modes"])
 	group.required_corridor_width = int(corridor_plan["required_width"])
 	group.has_compression = bool(corridor_plan["has_compression"])
+	if performance_probe != null: performance_probe.observe_microseconds("formation.corridor.deployment", Time.get_ticks_usec() - route_stage)
 	return corridor_plan
 
 
@@ -1448,10 +1464,12 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 		accumulator_seconds = minf(MAX_ACCUMULATED_SECONDS, accumulator_seconds + elapsed * get_speed_multiplier())
 
 	var frame_started := Time.get_ticks_usec()
+	var frame_budget := FRAME_SIMULATION_BUDGET_USEC
+	_render_deadline_usec = frame_started + frame_budget
 	var steps := 0
 	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
 		# Complete at least one whole tick, then return time to input/rendering.
-		if steps > 0 and Time.get_ticks_usec() - frame_started >= FRAME_SIMULATION_BUDGET_USEC:
+		if steps > 0 and Time.get_ticks_usec() - frame_started >= frame_budget:
 			break
 		if not _run_fixed_tick(player_team, enemy_team):
 			if not preparation_waiting:
@@ -1464,6 +1482,7 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 		preparation_preserved_debt = 0.0
 		accumulator_seconds -= FIXED_STEP_SECONDS
 		steps += 1
+	_render_deadline_usec = 0
 	return simulation_world.get_last_battle_message()
 
 func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
@@ -1476,6 +1495,14 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 			if performance_probe != null:
 				performance_probe.increment("controller.preparation_yields")
 			return false
+		# Only explicitly repeatable preparation may yield here. A callback that
+		# commits AI state/commands must proceed to its target tick exactly once.
+		# Allow the same ready boundary through on its next attempt, so an
+		# unusually expensive readiness callback cannot starve simulation.
+		if preparation is Dictionary and bool(preparation.get("can_defer", false)) and _render_deadline_usec > 0 and Time.get_ticks_usec() >= _render_deadline_usec and _deferred_ready_tick != tick_index + 1:
+			_deferred_ready_tick = tick_index + 1
+			return false
+	_deferred_ready_tick = -1
 	_inject_replay_commands_for_current_tick()
 	tick_index += 1
 	if simulation_world.get("match_statistics") != null:

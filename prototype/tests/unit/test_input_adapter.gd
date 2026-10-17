@@ -128,9 +128,15 @@ func test_edge_scroll_direction() -> void:
 	assert_equal(PointerController.edge_scroll_direction(Vector2(600, 751), viewport), Vector2.UP, "bottom edge moves the world up")
 	assert_equal(PointerController.edge_scroll_direction(Vector2(600, 300), viewport), Vector2.ZERO, "central pointer leaves the camera still")
 	assert_equal(PointerController.edge_scroll_direction(Vector2(-1, 300), viewport), Vector2.ZERO, "pointer outside the window cannot scroll")
-	assert_equal(PointerController.edge_scroll_direction(Vector2(600, 32), viewport, 16, 32, 128), Vector2.DOWN, "top playable edge scrolls above the world")
-	assert_equal(PointerController.edge_scroll_direction(Vector2(600, 623), viewport, 16, 32, 128), Vector2.UP, "bottom playable edge scrolls above the HUD")
-	assert_equal(PointerController.edge_scroll_direction(Vector2(600, 751), viewport, 16, 32, 128), Vector2.ZERO, "hovering the HUD does not scroll the camera")
+	assert_equal(PointerController.edge_scroll_direction(Vector2(600, 32), viewport), Vector2.ZERO, "HUD boundary inside window cannot scroll")
+	assert_equal(PointerController.edge_scroll_direction(Vector2(600, 623), viewport), Vector2.ZERO, "world/HUD boundary cannot scroll")
+	assert_equal(PointerController.edge_scroll_direction(Vector2(600, 751), viewport), Vector2.UP, "bottom window edge scrolls even over HUD")
+	assert_equal(PointerController.edge_scroll_direction(Vector2(0, 12), viewport), Vector2(1,1), "window corner scrolls diagonally over top bar")
+	var window := Rect2(200, 100, 1280, 752)
+	assert_equal(PointerController.window_edge_scroll_direction(Vector2(800, 851), window), Vector2.UP, "screen coordinates use the whole window bottom")
+	assert_equal(PointerController.window_edge_scroll_direction(Vector2(800, 723), window), Vector2.ZERO, "inner viewport bottom cannot become a window edge")
+	assert_equal(PointerController.window_edge_scroll_direction(Vector2(199, 400), window), Vector2.ZERO, "pointer outside the moved window cannot scroll")
+
 
 
 func mouse_button(button: MouseButton, pressed: bool, position: Vector2) -> InputEventMouseButton:

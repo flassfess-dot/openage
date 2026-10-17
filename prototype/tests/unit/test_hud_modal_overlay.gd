@@ -37,7 +37,7 @@ func _initialize() -> void:
 	overlay.show_menu()
 	assert_true(overlay.is_blocking(), "menu blocks world input")
 	assert_true(overlay.menu_panel.visible and not overlay.diplomacy_panel.visible, "menu owns the visible modal panel")
-	assert_equal(overlay.resume_button.get_theme_color("font_color"), Color("f0e7d3"), "Menu actions use high contrast text on dark buttons")
+	assert_equal(overlay.resume_button.get_theme_color("font_color"), Color("383a35"), "Match menus use the main menu marble plaques and dark lettering")
 	assert_true(overlay.resume_button.custom_minimum_size.y >= 32, "menu actions have readable click targets")
 	overlay.set_save_available(false)
 	assert_true(overlay.load_button.disabled, "load action reports an absent quick save")
@@ -70,6 +70,26 @@ func _initialize() -> void:
 	overlay.diplomacy_relation_buttons[2]["neutral"].emit_signal("pressed")
 	assert_equal(requested, [[2, "neutral"]], "relation control emits a directed user request")
 	assert_true(overlay.diplomacy_relation_buttons[2]["neutral"].button_pressed, "pending relation is reflected without mutating simulation state")
+	var eight_players: Array = []
+	for team in range(1, 9):
+		eight_players.append({"team": team, "controller": "human" if team == 1 else "ai", "civilization_id": team, "status": "active"})
+	viewport.size = Vector2i(640, 480)
+	overlay.set_viewport_size(Vector2(640, 480))
+	overlay.set_snapshot({"player_state": {"team": 1, "allies": [1, 3], "players": eight_players}})
+	overlay.show_diplomacy()
+	for _frame in range(5): await process_frame
+	assert_equal(overlay.diplomacy_relation_buttons.size(), 7, "compact diplomacy retains all seven foreign participants")
+	assert_equal(overlay.diplomacy_rows.get_child_count(), 9, "eight player rows and one allied tribute row remain available")
+	assert_inside(overlay.diplomacy_panel, viewport.size, "compact diplomacy frame")
+	assert_inside(overlay.diplomacy_close_button, viewport.size, "compact diplomacy close action")
+	var diplomacy_column := overlay.diplomacy_rows.get_parent().get_parent()
+	assert_inside(diplomacy_column.get_child(0), viewport.size, "compact diplomacy heading")
+	var diplomacy_scroll: ScrollContainer = overlay.diplomacy_rows.get_parent()
+	assert_true(diplomacy_scroll.get_v_scroll_bar().max_value > diplomacy_scroll.size.y, "eight player list scrolls separately from heading and close action")
+	diplomacy_scroll.scroll_vertical = int(diplomacy_scroll.get_v_scroll_bar().max_value)
+	await process_frame
+	var final_row: Control = overlay.diplomacy_rows.get_child(overlay.diplomacy_rows.get_child_count() - 1)
+	assert_true(final_row.get_global_rect().intersects(diplomacy_scroll.get_global_rect()), "last player remains reachable by scrolling")
 	viewport.free()
 
 	if failures.is_empty():
@@ -95,6 +115,11 @@ func collect_text(node: Node) -> String:
 func assert_true(value: bool, context: String) -> void:
 	if not value:
 		failures.append("%s: expected true" % context)
+
+
+func assert_inside(control: Control, viewport_size: Vector2, context: String) -> void:
+	var rect := control.get_global_rect()
+	assert_true(rect.position.x >= 0 and rect.position.y >= 0 and rect.end.x <= viewport_size.x + 1 and rect.end.y <= viewport_size.y + 1, context)
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:

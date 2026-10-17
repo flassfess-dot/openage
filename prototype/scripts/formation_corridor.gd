@@ -4,6 +4,8 @@ const Geometry := preload("res://scripts/formation_geometry.gd")
 
 
 static func plan(start_world: Vector2, goal_world: Vector2, formation_type: String, member_count: int, spacing: float, member_radius: float, pathfinder, navigation_grid, movement_domain: String = "land", restriction_id: int = -1) -> Dictionary:
+	var probe: Variant = pathfinder.performance_probe
+	var started := Time.get_ticks_usec() if probe != null else 0
 	var empty := {"route": [], "modes": [], "columns": [], "required_width": 1, "has_compression": false}
 	var start := Vector2i(start_world.floor())
 	var requested_goal := Vector2i(goal_world.floor())
@@ -14,22 +16,34 @@ static func plan(start_world: Vector2, goal_world: Vector2, formation_type: Stri
 	if cells.is_empty():
 		cells = pathfinder.find_cell_path(start, goal, movement_domain, restriction_id, member_radius)
 	if cells.is_empty(): return empty
+	if probe != null:
+		probe.observe_microseconds("formation.corridor.search", Time.get_ticks_usec() - started)
+		started = Time.get_ticks_usec()
 	var bend_cells: Dictionary = {}
 	# A direct route has no bends. For an obstacle detour use the existing native
 	# smoother instead of repeatedly tracing long candidate lines in GDScript.
 	if not direct:
 		var smoothed: Array[Vector2i] = pathfinder.find_smoothed_cell_path(start, goal, movement_domain, restriction_id, member_radius) if pathfinder.uses_native_kernel() else pathfinder.smooth_cells(cells, movement_domain, restriction_id, member_radius)
 		for cell in smoothed: bend_cells[cell] = true
+	if probe != null:
+		probe.observe_microseconds("formation.corridor.smoothing", Time.get_ticks_usec() - started)
+		started = Time.get_ticks_usec()
 	var bends: Dictionary = {}
 	for index in range(1, cells.size() - 1):
 		if bend_cells.has(cells[index]): bends[index] = true
 	var required_width := _required_width(formation_type, member_count, spacing, member_radius)
 	var route: Array[Vector2] = []
 	var widths: Array[int] = []
+	if pathfinder.uses_native_kernel():
+		var kernel = pathfinder._native_kernel_for(movement_domain, restriction_id)
+		if kernel.has_method("corridor_widths"): widths.assign(kernel.corridor_widths(cells, required_width, member_radius))
 	for index in range(cells.size()):
 		route.append(Vector2(cells[index]) + Vector2(0.5, 0.5))
-		widths.append(_available_lateral_width(navigation_grid, cells[index], _route_direction(cells, index), required_width, movement_domain, restriction_id, member_radius))
+		if widths.size() < cells.size(): widths.append(_available_lateral_width(navigation_grid, cells[index], _route_direction(cells, index), required_width, movement_domain, restriction_id, member_radius))
 	if goal == requested_goal: route[route.size() - 1] = goal_world
+	if probe != null:
+		probe.observe_microseconds("formation.corridor.widths", Time.get_ticks_usec() - started)
+		started = Time.get_ticks_usec()
 	var modes: Array[String] = []
 	var columns: Array[int] = []
 	var has_compression := false
@@ -51,6 +65,7 @@ static func plan(start_world: Vector2, goal_world: Vector2, formation_type: Stri
 		columns.append(retained_columns)
 		modes.append("compressed" if retained_columns > 0 else "preferred")
 		has_compression = has_compression or retained_columns > 0
+	if probe != null: probe.observe_microseconds("formation.corridor.modes", Time.get_ticks_usec() - started)
 	return {"route": route, "modes": modes, "columns": columns, "required_width": required_width, "has_compression": has_compression, "bends": bends}
 
 

@@ -19,8 +19,12 @@ const MODE_NONE := ""
 const MODE_MENU := "menu"
 const MODE_DIPLOMACY := "diplomacy"
 const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
-const Typography := preload("res://scripts/hud_typography.gd")
+const Typography := preload("res://scripts/launcher_typography.gd")
+const LauncherTheme := preload("res://scripts/launcher_theme.gd")
+const MenuTheme := preload("res://scripts/match_menu_theme.gd")
+const Backdrop := preload("res://scripts/match_menu_backdrop.gd")
 const Timeline := preload("res://scripts/match_timeline.gd")
+const SaveArchive := preload("res://scripts/game_save_archive.gd")
 
 var interface_skin
 var localization
@@ -30,7 +34,9 @@ var latest_snapshot: Dictionary = {}
 var match_definition: Dictionary = {}
 
 var shade: ColorRect
-var menu_panel: PanelContainer
+var menu_panel: Control
+var menu_card: PanelContainer
+var backdrop: TextureRect
 var diplomacy_panel: PanelContainer
 var diplomacy_rows: VBoxContainer
 var resume_button: Button
@@ -95,6 +101,7 @@ func _init() -> void:
 	set_process_unhandled_input(false)
 	_build_interface()
 	menu_panel.minimum_size_changed.connect(_queue_panel_layout)
+	diplomacy_panel.minimum_size_changed.connect(_queue_panel_layout)
 	visible = false
 
 
@@ -104,7 +111,7 @@ func configure(skin, definition: Dictionary, requested_style_index: int = 0, loc
 	match_definition = definition.duplicate(true)
 	instructions_label.text = instruction_summary(match_definition)
 	style_index = clampi(requested_style_index, 0, 4)
-	for button in _all_buttons(self): _apply_menu_button_style(button)
+	_style_controls(self)
 	_refresh_capabilities()
 
 
@@ -222,16 +229,20 @@ static func match_status_summary(snapshot: Dictionary) -> String:
 
 func set_menu_status(text: String, failed: bool = false) -> void:
 	menu_status.text = text
+	menu_status.visible = not text.is_empty()
 	menu_status.add_theme_color_override("font_color", Color("e57b68") if failed else Color("85cf80"))
 
 
 func show_diplomacy() -> void:
 	active_mode = MODE_DIPLOMACY
+	backdrop.show_section("diplomacy")
 	menu_panel.visible = false
 	diplomacy_panel.visible = true
 	_rebuild_diplomacy_rows()
 	visible = true
 	set_process_unhandled_input(true)
+	_layout_panels()
+	_queue_panel_layout()
 	if is_inside_tree():
 		diplomacy_close_button.grab_focus()
 
@@ -276,9 +287,11 @@ func _collect_focus(node: Node, controls: Array[Control]) -> void:
 	for child in node.get_children(): _collect_focus(child, controls)
 
 func _build_interface() -> void:
+	backdrop = Backdrop.new()
+	add_child(backdrop)
 	shade = ColorRect.new()
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	shade.color = Color(0.0, 0.0, 0.0, 0.66)
+	shade.color = Color(0.0, 0.0, 0.0, 0.10)
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(shade)
 
@@ -308,20 +321,22 @@ func _build_interface() -> void:
 
 
 func _build_menu_pages() -> void:
-	var theme := Theme.new()
-	theme.default_font = Typography.body_font()
-	theme.default_font_size = 15
+	var theme: Theme = MenuTheme.shared_theme().duplicate()
 	theme.set_color("font_color", "Label", Color("e9e1ce"))
 	theme.set_color("font_color", "Tree", Color("e9e1ce"))
 	theme.set_color("title_button_color", "Tree", Color("d8bd83"))
 	theme.set_constant("v_separation", "Tree", 4)
-	theme.set_stylebox("panel", "Tree", _surface_style(Color("181d1e"), Color("5b5547")))
-	theme.set_stylebox("selected", "Tree", _surface_style(Color("343d3e"), Color("b3945d")))
-	theme.set_stylebox("selected_focus", "Tree", _surface_style(Color("343d3e"), Color("dab978")))
+	theme.set_stylebox("panel", "Tree", LauncherTheme.inset_style())
+	theme.set_stylebox("selected", "Tree", _surface_style(Color("4a3a25"), MenuTheme.BRONZE))
+	theme.set_stylebox("selected_focus", "Tree", _surface_style(Color("4a3a25"), LauncherTheme.GOLD))
 	set_theme(theme)
-	menu_panel = _center_panel(Vector2(560, 430))
-	menu_panel.set_meta("preferred_size", Vector2(800, 650))
-	var column := _panel_column(menu_panel)
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	menu_panel = Control.new()
+	menu_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	menu_card = _center_panel(Vector2(800, 650))
+	menu_card.minimum_size_changed.connect(_queue_panel_layout)
+	menu_panel.add_child(menu_card)
+	var column := _panel_column(menu_card)
 	page_title = _heading("МЕНЮ ИГРЫ")
 	column.add_child(page_title)
 	match_status_label = _row_label("", Color("cbbb96"))
@@ -334,6 +349,7 @@ func _build_menu_pages() -> void:
 	column.add_child(body_scroll)
 	page_body = VBoxContainer.new()
 	page_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	page_body.add_theme_constant_override("separation", 10)
 	body_scroll.add_child(page_body)
 	for key in ["menu", "save", "load", "settings", "achievements", "timeline", "instructions", "help", "confirm"]:
@@ -425,14 +441,15 @@ func _build_menu_pages() -> void:
 	var timeline_toolbar := HFlowContainer.new()
 	timeline_mode = OptionButton.new()
 	for title in ["Доля населения · %", "Численность · люди"]: timeline_mode.add_item(title)
-	timeline_mode.custom_minimum_size.y = 34
+	timeline_mode.custom_minimum_size = Vector2(200, 36)
+	MenuTheme.apply_option(timeline_mode)
 	timeline_toolbar.add_child(timeline_mode)
 	var table_link := _action_button("← Статистика")
-	table_link.custom_minimum_size.x = 140
+	table_link.custom_minimum_size.x = 160
 	table_link.pressed.connect(func(): show_section("achievements"))
 	timeline_toolbar.add_child(table_link)
 	timeline_roster_button = _action_button("Игроки и события")
-	timeline_roster_button.custom_minimum_size.x = 170
+	timeline_roster_button.custom_minimum_size.x = 190
 	timeline_roster_button.pressed.connect(func():
 		timeline_roster_only = not timeline_roster_only
 		body_scroll.scroll_vertical = 0
@@ -468,7 +485,7 @@ func _build_menu_pages() -> void:
 	instructions_text = _rich_text()
 	pages["instructions"].add_child(instructions_text)
 	var help := _rich_text()
-	help.text = "УПРАВЛЕНИЕ\n\nEsc — отменить выбранную команду; затем открыть меню.\nF10 — открыть или закрыть меню. F1 — помощь.\nЛевая кнопка мыши — выделение; правая — приказ.\nShift + приказ — добавить в очередь.\nB — строительство; R с рабочим — ремонт.\nCtrl + 1–9 — запомнить группу; 1–9 — выбрать её.\nWASD / стрелки / край экрана — камера; колесо — масштаб.\nПробел — пауза; запятая и точка — скорость одиночной игры.\nF5–F9 — формации; Shift + F9 — фланги.\nDel — удалить выбранные свои объекты.\n\nСОХРАНЕНИЯ\n\nСохраняйте матч в отдельном разделе меню. Загрузка, перезапуск и выход требуют подтверждения. Esc отменяет подтверждение и возвращает назад.\n\nTIME LINE\n\nЦветная область показывает долю населения игрока; режим «Численность» показывает количество людей. Числа над графиком — общее население отмеченных игроков. II — эпоха орудий, III — бронзовый век, IV — железный век, × — выход из матча. Наведение или стрелки меняют выбранный момент; таблица показывает точные записанные значения. Выберите строку игрока для просмотра событий. История сохраняется вместе с матчем.\n\nВ сетевом матче меню не останавливает игру. Пауза, изменение скорости и локальное сохранение/загрузка недоступны."
+	help.text = "УПРАВЛЕНИЕ\n\nEsc — отменить выбранную команду; затем открыть меню.\nF10 — открыть или закрыть меню. F1 — помощь.\nAlt+Enter — полный экран без рамки / возврат в окно.\nЛевая кнопка мыши — выделение; правая — приказ.\nShift + приказ — добавить в очередь.\nB — строительство; R с рабочим — ремонт.\nCtrl + 1–9 — запомнить группу; 1–9 — выбрать её.\nWASD / стрелки / край окна — камера; колесо — масштаб.\nПробел — пауза; запятая и точка — скорость одиночной игры.\nF5–F9 — формации; Shift + F9 — фланги.\nDel — удалить выбранные свои объекты.\n\nСОХРАНЕНИЯ\n\nСохраняйте матч в отдельном разделе меню. Загрузка, перезапуск и выход требуют подтверждения. Esc отменяет подтверждение и возвращает назад.\n\nTIME LINE\n\nЦветная область показывает долю населения игрока; режим «Численность» показывает количество людей. Числа над графиком — общее население отмеченных игроков. II — эпоха орудий, III — бронзовый век, IV — железный век, × — выход из матча. Наведение или стрелки меняют выбранный момент; таблица показывает точные записанные значения. Выберите строку игрока для просмотра событий. История сохраняется вместе с матчем.\n\nВ сетевом матче меню не останавливает игру. Пауза, изменение скорости и локальное сохранение/загрузка недоступны."
 	pages["help"].add_child(help)
 	confirm_text = _wrapping_label("")
 	pages["confirm"].add_child(confirm_text)
@@ -484,6 +501,7 @@ func _build_menu_pages() -> void:
 	cancel_button.pressed.connect(go_back)
 	confirm_button.pressed.connect(_confirm_action)
 	menu_status = _wrapping_label("")
+	menu_status.visible = false
 	column.add_child(menu_status)
 	back_button = _action_button("Продолжить игру · Esc")
 	back_button.set_meta("primary", true)
@@ -524,6 +542,7 @@ func _wrapping_label(text: String) -> Label:
 func show_section(section: String) -> void:
 	if not pages.has(section): return
 	active_section = section
+	backdrop.show_section(section)
 	for key in pages: pages[key].visible = key == section
 	page_title.text = {"menu": "МЕНЮ ИГРЫ", "save": "СОХРАНИТЬ ИГРУ", "load": "ЗАГРУЗИТЬ ИГРУ", "settings": "НАСТРОЙКИ", "achievements": "СТАТИСТИКА МАТЧА", "timeline": "ХОД МАТЧА · TIMELINE", "instructions": "ЦЕЛИ И УСЛОВИЯ", "help": "ПОМОЩЬ", "confirm": "ПОДТВЕРЖДЕНИЕ"}.get(section, section)
 	back_button.text = "Продолжить игру · Esc" if section == "menu" else "Назад · Esc"
@@ -531,6 +550,7 @@ func show_section(section: String) -> void:
 	settings_apply_button.visible = section == "settings"
 	body_scroll.scroll_vertical = 0
 	menu_status.text = ""
+	menu_status.visible = false
 	_refresh_capabilities()
 	_layout_panels()
 	_queue_panel_layout()
@@ -577,6 +597,9 @@ func _confirm_action() -> void:
 
 func _request_save() -> void:
 	var name := named_save_input.text.strip_edges()
+	if name == SaveArchive.AUTOSAVE_NAME:
+		set_menu_status(SaveArchive.error_message("slot_name_reserved"), true)
+		return
 	if name.is_empty():
 		set_menu_status("Введите имя сохранения", true)
 		return
@@ -624,22 +647,31 @@ func _apply_queued_panel_layout() -> void:
 
 func _layout_panels() -> void:
 	if menu_panel == null or size.x <= 0 or size.y <= 0: return
-	var available := Vector2(maxf(160, size.x - 24), maxf(120, size.y - 24))
-	var desired := Vector2(640, 450) if active_section == "menu" else Vector2(1040, 720)
-	if active_section == "timeline": desired = Vector2(1280, 820)
-	if active_section == "achievements": desired.y = clampf(320 + statistics.get("teams", {}).size() * 34, 400, 650)
-	if active_section == "confirm": desired = Vector2(560, 300)
+	var gutter := 12.0 if size.x < 1000 or size.y < 600 else 24.0
+	var available := (size - Vector2.ONE * gutter * 2).max(Vector2(160,120))
 	menu_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	menu_panel.size = desired.min(available)
-	menu_panel.position = ((size - menu_panel.size) * 0.5).floor()
+	menu_panel.position = Vector2.ZERO
+	menu_panel.size = size
+	menu_card.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	menu_card.size = available
+	menu_card.position = ((size - menu_card.size) * 0.5).floor()
+	page_body.alignment = BoxContainer.ALIGNMENT_CENTER if active_section in ["menu", "confirm"] else BoxContainer.ALIGNMENT_BEGIN
+	for key in ["menu", "save", "load", "settings", "confirm", "help", "instructions"]:
+		pages[key].size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		pages[key].custom_minimum_size.x = minf(960 if key in ["help", "instructions"] else 760, maxf(0, available.x - 52))
+	var footer: HBoxContainer = back_button.get_parent()
+	footer.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	footer.custom_minimum_size.x = minf(760, maxf(0, available.x - 36))
+	var heading_size := 30 if size.y >= 800 else 24
+	if page_title.get_theme_font_size("font_size") != heading_size: LauncherTheme.heading(page_title, heading_size)
 	if pages.has("menu"):
 		var grid: GridContainer = pages["menu"].get_child(0)
-		grid.columns = 1 if menu_panel.size.x < 430 else 2
+		grid.columns = 1 if menu_card.size.x < 430 else 2
 		exit_grid.columns = grid.columns
 	if timeline != null:
-		var wide := menu_panel.size.x >= 950
+		var wide := menu_card.size.x >= 950
 		timeline_content.vertical = not wide
-		var compact := not wide and menu_panel.size.y < 600
+		var compact := not wide and menu_card.size.y < 600
 		timeline_note.visible = not compact
 		timeline_roster_button.visible = compact
 		timeline_roster_button.text = "Показать график" if timeline_roster_only else "Игроки и события"
@@ -647,22 +679,20 @@ func _layout_panels() -> void:
 		timeline.visible = not compact or not timeline_roster_only
 		timeline_side.visible = not compact or timeline_roster_only
 		timeline_side.custom_minimum_size.x = 440 if wide else 0
-		timeline.custom_minimum_size.y = clampf(menu_panel.size.y - 350, 300, 430) if wide else clampf(menu_panel.size.y * 0.36, 205, 300)
+		timeline.custom_minimum_size.y = clampf(menu_card.size.y - 330, 280, 700) if wide else clampf(menu_card.size.y * 0.36, 205, 340)
 	for row in pages["settings"].get_children():
 		if row is BoxContainer:
-			row.vertical = menu_panel.size.x < 430
+			row.vertical = menu_card.size.x < 430
 			row.get_child(0).custom_minimum_size.x = 0 if row.vertical else 175
 	if diplomacy_panel != null:
 		diplomacy_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-		diplomacy_panel.size = Vector2(800, 500).min(available)
+		diplomacy_panel.size = available
 		diplomacy_panel.position = ((size - diplomacy_panel.size) * 0.5).floor()
 
-func _all_buttons(node: Node) -> Array[Button]:
-	var result: Array[Button] = []
-	for child in node.get_children():
-		if child is Button: result.append(child)
-		result.append_array(_all_buttons(child))
-	return result
+func _style_controls(node: Node) -> void:
+	if node is Button: _apply_menu_button_style(node)
+	elif node is LineEdit: MenuTheme.apply_line_edit(node)
+	for child in node.get_children(): _style_controls(child)
 
 func _build_settings_page() -> void:
 	var page: VBoxContainer = pages["settings"]
@@ -693,7 +723,9 @@ func _build_settings_page() -> void:
 	preference_controls["screen_size"] = resolution
 	_settings_row(page, "Размер окна", resolution)
 	var fullscreen := CheckBox.new()
-	fullscreen.text = "Полный экран"
+	fullscreen.text = "Полный экран · Alt+Enter"
+	fullscreen.tooltip_text = "Безрамочный полноэкранный режим; Alt+Enter возвращает прежний размер окна."
+	MenuTheme.apply_checkbox(fullscreen)
 	preference_controls["fullscreen"] = fullscreen
 	fullscreen.custom_minimum_size.y = 32
 	page.add_child(fullscreen)
@@ -766,10 +798,9 @@ func set_statistics(data: Dictionary) -> void:
 		timeline_rows[team] = item
 		if int(team) == selected_team: item.select(0)
 	if selected_team == -1 and not ids.is_empty(): timeline_rows[ids[0]].select(0)
-	timeline_players.custom_minimum_size.y = 42 + ids.size() * 28
+	timeline_players.custom_minimum_size.y = 42 + ids.size() * 32
 	timeline_note.text = "Цвет — игрок, высота области — его население. Метки эпох II–IV — для выбранного игрока; × — выход. Сумма населения — над графиком."
 	if bool(data.get("partial", false)): timeline_note.text += " История начинается с загрузки старого сохранения."
-	if not bool(data.get("reveal_all", false)): timeline_note.text += " Данные соперников откроются после матча."
 	_update_timeline_readout()
 	_show_timeline_events()
 
@@ -891,7 +922,6 @@ func _render_statistics() -> void:
 	if stat_category.selected == 2: stats_text.text += " · Ресурсы, собранные за матч"
 	if stat_category.selected in [1, 2, 4]: stats_text.text += "\nШирокая таблица прокручивается по горизонтали."
 	if bool(statistics.get("partial", false)): stats_text.text += "\nИстория старого сохранения начинается с загрузки."
-	if not bool(statistics.get("reveal_all", false)): stats_text.text += "\nДанные соперников откроются после матча."
 
 func set_instructions(model: Dictionary) -> void:
 	var lines: Array[String] = []
@@ -932,8 +962,9 @@ func _rebuild_diplomacy_rows() -> void:
 		var civilization_id := int(player.get("civilization_id", definition.get("civilization_id", -1)))
 		var controller := String(player.get("controller", definition.get("controller", "ai")))
 		var status := _status_label(String(player.get("status", "active")))
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 7)
+		var row := HFlowContainer.new()
+		row.add_theme_constant_override("h_separation", 7)
+		row.add_theme_constant_override("v_separation", 5)
 		var identity := _row_label("Игрок %d   ·   %s" % [team, _civilization_name(civilization_id)], Color("efe2c0"))
 		identity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(identity)
@@ -961,8 +992,9 @@ func _rebuild_diplomacy_rows() -> void:
 			row.add_child(controls)
 		diplomacy_rows.add_child(row)
 		if team != own_team and relation == "ally" and String(player.get("status", "active")) == "active":
-			var tribute_row := HBoxContainer.new()
-			tribute_row.add_theme_constant_override("separation", 6)
+			var tribute_row := HFlowContainer.new()
+			tribute_row.add_theme_constant_override("h_separation", 6)
+			tribute_row.add_theme_constant_override("v_separation", 5)
 			tribute_row.add_child(_row_label("Дань игроку %d" % team, Color("dfd0aa")))
 			var resource_choice := OptionButton.new()
 			var resource_names := ["Еда", "Дерево", "Камень", "Золото"]
@@ -982,10 +1014,12 @@ func _rebuild_diplomacy_rows() -> void:
 			tribute_row.add_child(pay_button)
 			diplomacy_rows.add_child(tribute_row)
 
+	_style_controls(diplomacy_rows)
+
 
 func _relation_button(team: int, relation: String, selected: bool) -> Button:
 	var button := _action_button({"ally": "СОЮЗ", "neutral": "НЕЙТР.", "enemy": "ВРАГ"}.get(relation, relation.to_upper()))
-	button.custom_minimum_size = Vector2(55, 20)
+	button.custom_minimum_size = Vector2(92, 36)
 	button.toggle_mode = true
 	button.button_pressed = selected
 	button.tooltip_text = {"ally": "Не атаковать; обмен обзором после Writing", "neutral": "Автоматически атаковать войска и здания, но не рабочих", "enemy": "Атаковать все допустимые цели"}.get(relation, "")
@@ -1051,7 +1085,7 @@ func _panel_column(panel: PanelContainer) -> VBoxContainer:
 	column.add_theme_constant_override("separation", 10)
 	var margin := MarginContainer.new()
 	for side in ["margin_left", "margin_right", "margin_top", "margin_bottom"]:
-		margin.add_theme_constant_override(side, 14)
+		margin.add_theme_constant_override(side, 0)
 	margin.add_child(column)
 	panel.add_child(margin)
 	return column
@@ -1061,8 +1095,8 @@ func _heading(text: String) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 24)
-	label.add_theme_color_override("font_color", Color("ecd28b"))
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	LauncherTheme.heading(label, 24)
 	return label
 
 
@@ -1072,7 +1106,7 @@ func _action_button(text: String) -> Button:
 	button.clip_text = true
 	button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	button.tooltip_text = text
-	button.custom_minimum_size = Vector2(180, 34)
+	button.custom_minimum_size = Vector2(180, 36)
 	button.focus_mode = Control.FOCUS_ALL
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.add_theme_font_override("font", Typography.title_font())
@@ -1106,24 +1140,12 @@ func _surface_style(background: Color, border: Color) -> StyleBoxFlat:
 	return style
 
 func _apply_menu_button_style(button: Button) -> void:
-	var background := Color("343c3e")
-	var border := Color("777464")
-	if button.get_meta("danger", false):
-		background = Color("352c29")
-		border = Color("786050")
-	if button.get_meta("primary", false):
-		background = Color("695334")
-		border = Color("c2a36a")
-	button.add_theme_stylebox_override("normal", _surface_style(background, border))
-	button.add_theme_stylebox_override("hover", _surface_style(background.lightened(0.12), Color("dfc18a")))
-	button.add_theme_stylebox_override("pressed", _surface_style(Color("695334"), Color("e2c080")))
-	button.add_theme_stylebox_override("disabled", _surface_style(background.darkened(0.25), border.darkened(0.35)))
-	var focus := _surface_style(Color.TRANSPARENT, Color("ffe2a0"))
-	focus.set_border_width_all(2)
-	button.add_theme_stylebox_override("focus", focus)
-	for key in ["font_color", "font_hover_color", "font_pressed_color"]:
-		button.add_theme_color_override(key, Color("f0e7d3"))
-	button.add_theme_color_override("font_disabled_color", Color("8b887e"))
+	if button is CheckBox:
+		MenuTheme.apply_checkbox(button)
+		return
+	if button is OptionButton: MenuTheme.apply_option(button, 15)
+	else: MenuTheme.apply_button(button, 15, true)
+	button.custom_minimum_size.y = maxf(36, button.custom_minimum_size.y)
 
 func _group_heading(text: String) -> Label:
 	var label := _row_label(text, Color("d6b77a"))
@@ -1138,8 +1160,4 @@ func _menu_group(title: String) -> VBoxContainer:
 	return group
 
 func _panel_style() -> StyleBoxFlat:
-	var style := _surface_style(Color("222727"), Color("b3935b"))
-	style.set_border_width_all(2)
-	style.shadow_color = Color(0, 0, 0, 0.55)
-	style.shadow_size = 12
-	return style
+	return MenuTheme.screen_panel_style()

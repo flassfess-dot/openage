@@ -176,7 +176,8 @@ static func capture_frozen(value: Dictionary) -> Dictionary:
 	return detached if freeze_detached(detached) else {}
 
 static func seal(value: Dictionary) -> Dictionary:
-	if not is_detached(value):
+	var validated_readonly := is_trusted_immutable(value)
+	if not validated_readonly and not is_detached(value):
 		return {}
 	seal_mutex.lock()
 	if value.is_read_only() and _has_seal(value) and sealed_roots.has(value[SEAL_KEY]) and is_same(sealed_roots[value[SEAL_KEY]], value):
@@ -189,7 +190,8 @@ static func seal(value: Dictionary) -> Dictionary:
 	root[SEAL_KEY] = token
 	# Tree work must happen outside the registry mutex: validated immutable
 	# children consult the same registry, and workers may finish concurrently.
-	_freeze(root)
+	if validated_readonly: root.make_read_only()
+	else: _freeze(root)
 	seal_mutex.lock()
 	while sealed_roots.size() >= MAX_SEALED_ROOTS:
 		sealed_roots.erase(sealed_roots.keys()[0])

@@ -3,7 +3,7 @@ extends RefCounted
 
 const Data := preload("res://scripts/isolated_task_data.gd")
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
-const DEFAULT_PREPARE_CELLS := 2048
+const DEFAULT_PREPARE_CELLS := 256
 const OFFSETS := [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
 const BUCKET_NAMES := ["land", "water", "frontier_land", "frontier_water", "reachable_land", "reachable_water", "reachable_frontier_land", "reachable_frontier_water"]
 
@@ -89,7 +89,10 @@ func snapshot(world, fog, team: int, probe: Variant = null, maximum_region_units
 
 
 # Both full and exact incremental updates retain bounded cell portions.
-func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPARE_CELLS) -> bool:
+func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPARE_CELLS, budget_usec: int = 4000) -> bool:
+	var portion_started := Time.get_ticks_usec()
+	var probe: Variant = world.tick_pipeline.performance_probe
+	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	last_prepared_cells = 0
 	fog.ensure_player(team)
 	var grid = world.navigation_grid
@@ -98,6 +101,8 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 	var topology := CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
 	var exploration := CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
 	var reach := _reachable_components(world, team)
+	_observe_stage(probe, "prepare.dependencies", stage_started)
+	stage_started = Time.get_ticks_usec() if probe != null else 0
 	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
 	var signature := [topology["stamp"], CacheDependency.stamp(world, CacheDependency.NAVIGATION_SURFACE), exploration["stamp"], reach["signature"]]
 	var pending: Dictionary = pending_preparations.get(team, {})
@@ -121,6 +126,7 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 			if not bool(pending["full"]) or states[index] != 0:
 				_refresh_cell(entry, index, size, states, grid, pending["reach"])
 		last_prepared_cells = finish - start
+		_observe_stage(probe, "prepare.cells", stage_started)
 		pending["cursor"] = finish
 		if finish < total:
 			return false
@@ -133,11 +139,23 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 		entry["exploration_stamp"] = exploration["stamp"]
 		fog.track_navigation_exploration(team)
 		fog.consume_navigation_exploration(team)
+		pending["cells_ready"] = true
+		if budget_usec > 0 and Time.get_ticks_usec() - portion_started >= budget_usec: return false
+	if not bool(pending.get("buckets_ready", false)):
+		stage_started = Time.get_ticks_usec() if probe != null else 0
 		_apply_bucket_changes(entry)
 		_refresh_result_buckets(entry)
-		pending["cells_ready"] = true
-	if not _region_targets(world, team, entry, 96): return false
+		_observe_stage(probe, "prepare.buckets", stage_started)
+		pending["buckets_ready"] = true
+		if budget_usec > 0 and Time.get_ticks_usec() - portion_started >= budget_usec: return false
+	stage_started = Time.get_ticks_usec() if probe != null else 0
+	if not _region_targets(world, team, entry, 8):
+		_observe_stage(probe, "prepare.regions", stage_started)
+		return false
+	_observe_stage(probe, "prepare.regions", stage_started)
+	stage_started = Time.get_ticks_usec() if probe != null else 0
 	_freeze_publication(entry["result"])
+	_observe_stage(probe, "prepare.freeze", stage_started)
 	entries[team] = entry
 	pending_preparations.erase(team)
 	return true
@@ -380,7 +398,7 @@ func _region_targets(world, team: int, entry: Dictionary, maximum_units: int = 9
 		var origin := Vector2(unit["pos"])
 		var cell := Vector2i(origin.floor())
 		var recovery_radius := float(unit.get("footprint_radius", 0.3))
-		if not planner.grid.is_position_walkable_for(origin, recovery_radius, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+		if not planner.is_position_walkable(origin, recovery_radius, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
 			recovery_radius = 0.0
 		var best: Variant = null
 		var best_distance := INF
@@ -391,7 +409,7 @@ func _region_targets(world, team: int, entry: Dictionary, maximum_units: int = 9
 				var point := Vector2(next) + Vector2(0.5, 0.5)
 				var distance := origin.distance_squared_to(point)
 				if distance <= 0.5625 or distance >= best_distance: continue
-				if not planner.grid.is_position_walkable_for(point, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))): continue
+				if not planner.is_position_walkable(point, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))): continue
 				var occupied: bool = world.query_units_near(point, float(unit.get("footprint_radius", 0.3)) + 1.0).any(func(other): return int(other["id"]) != int(unit["id"]) and float(other.get("hp", 0.0)) > 0 and world.is_entity_visible_to(team, other) and point.distance_squared_to(Vector2(other["pos"])) < pow(float(unit.get("footprint_radius", 0.3)) + float(other.get("footprint_radius", 0.3)) + 0.1, 2))
 				if occupied: continue
 				if planner.cells_connected(cell, next, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), recovery_radius):

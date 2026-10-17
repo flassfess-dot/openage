@@ -18,20 +18,22 @@ var anchor := Vector2.ZERO
 var current := Vector2.ZERO
 
 
-static func edge_scroll_direction(position: Vector2, viewport_size: Vector2, margin: float = EDGE_SCROLL_MARGIN, top_inset: float = 0.0, bottom_inset: float = 0.0) -> Vector2:
-	var playfield_bottom := viewport_size.y - bottom_inset
-	if position.x < 0.0 or position.y < top_inset or position.x >= viewport_size.x or position.y >= playfield_bottom:
+static func edge_scroll_direction(position: Vector2, window_size: Vector2, margin: float = EDGE_SCROLL_MARGIN) -> Vector2:
+	if position.x < 0.0 or position.y < 0.0 or position.x >= window_size.x or position.y >= window_size.y:
 		return Vector2.ZERO
 	var direction := Vector2.ZERO
 	if position.x < margin:
 		direction.x += 1.0
-	elif position.x >= viewport_size.x - margin:
+	elif position.x >= window_size.x - margin:
 		direction.x -= 1.0
-	if position.y < top_inset + margin:
+	if position.y < margin:
 		direction.y += 1.0
-	elif position.y >= playfield_bottom - margin:
+	elif position.y >= window_size.y - margin:
 		direction.y -= 1.0
 	return direction
+
+static func window_edge_scroll_direction(screen_position: Vector2, window_rect: Rect2) -> Vector2:
+	return edge_scroll_direction(screen_position - window_rect.position, window_rect.size)
 
 
 func begin_primary(position: Vector2) -> void:

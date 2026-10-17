@@ -18,7 +18,10 @@ func recall(group_number: int, available_ids: Array[int], current_ids: Array[int
 	for entity_id in available_ids:
 		available_lookup[entity_id] = true
 
-	var stored: Array[int] = groups.get(group_number, [])
+	# A Dictionary fallback [] is untyped. Copy IDs into our own typed array
+	# instead of relying on the runtime type of an empty dictionary value.
+	var stored: Array[int] = []
+	stored.assign(groups.get(group_number, []))
 	var valid: Array[int] = []
 	for entity_id in stored:
 		if available_lookup.has(entity_id):

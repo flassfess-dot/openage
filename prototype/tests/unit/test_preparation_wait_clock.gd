@@ -35,6 +35,11 @@ func _initialize() -> void:
 		# simulated; the original pre-barrier debt is resumed in full.
 		controller.advance_frame(0.25, 1, 2)
 		expected.advance_frame(0.16, 1, 2)
+		# The wall-time rendering budget may yield at different whole ticks on
+		# two machines/runs. Compare after consuming only their existing debt;
+		# zero-delta frames must not add any simulated time.
+		drain_debt(controller)
+		drain_debt(expected)
 		check(controller.tick_index == expected.tick_index, "resumption consumes exactly the preserved fixed ticks")
 		check(is_equal_approx(controller.accumulator_seconds, expected.accumulator_seconds), "resumption preserves the interpolation remainder")
 	check(Replay.new().world_state_hash(actual["world"], controller.tick_index, controller) == Replay.new().world_state_hash(reference["world"], expected.tick_index, expected), "long waits preserve authoritative world and command state")
@@ -75,6 +80,21 @@ func _initialize() -> void:
 	short_reference["controller"].advance_frame(0.1, 1, 2)
 	check(short_actual["controller"].tick_index == short_reference["controller"].tick_index, "short AI waits recover selected game speed")
 	check(Replay.new().world_state_hash(short_actual["world"], short_actual["controller"].tick_index, short_actual["controller"]) == Replay.new().world_state_hash(short_reference["world"], short_reference["controller"].tick_index, short_reference["controller"]), "short-wait recovery preserves authoritative tick order and movement")
+	var medium_actual := fixture()
+	var medium_reference := fixture()
+	var medium_gate := {"ready": false}
+	medium_actual["controller"].set_before_fixed_tick(func(_tick): return {"ready": medium_gate["ready"]})
+	medium_actual["controller"].advance_frame(0.05, 1, 2)
+	for _frame in range(10): medium_actual["controller"].advance_frame(0.02, 1, 2)
+	medium_gate["ready"] = true
+	medium_actual["controller"].advance_frame(0.0, 1, 2)
+	medium_reference["controller"].advance_frame(0.25, 1, 2)
+	drain_debt(medium_actual["controller"])
+	drain_debt(medium_reference["controller"])
+	check(medium_actual["controller"].tick_index == 5, "a 200 ms preparation retains selected game time across bounded rendered frames")
+	check(Replay.new().world_state_hash(medium_actual["world"], 5, medium_actual["controller"]) == Replay.new().world_state_hash(medium_reference["world"], 5, medium_reference["controller"]), "medium preparation retains exact ordered simulation state")
+	medium_actual["world"].shutdown_derived_state()
+	medium_reference["world"].shutdown_derived_state()
 	short_actual["world"].shutdown_derived_state()
 	short_reference["world"].shutdown_derived_state()
 	actual["world"].task_coordinator.shutdown()
@@ -84,6 +104,12 @@ func _initialize() -> void:
 	if failures.is_empty():
 		print("Preparation wait clock: 400 delayed frames, bounded debt, matching authoritative state")
 	quit(0 if failures.is_empty() else 1)
+
+func drain_debt(controller) -> void:
+	for _frame in range(16):
+		if controller.accumulator_seconds + 0.000001 < Controller.FIXED_STEP_SECONDS: return
+		controller.advance_frame(0.0, 1, 2)
+	check(false, "existing time debt drains within the bounded frame count")
 
 func fixture() -> Dictionary:
 	var world := World.new(Vector2i(16, 16))

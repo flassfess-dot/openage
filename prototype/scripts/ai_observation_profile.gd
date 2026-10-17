@@ -38,10 +38,23 @@ static func actor(world, row: Dictionary, team: int) -> Dictionary:
 	return data
 
 
-static func decorate_options(world, options: Dictionary, team: int, units: Array) -> Dictionary:
+static func decorate_options(world, options: Dictionary, team: int, units: Array, generation_cache: Variant = null) -> Dictionary:
 	var result := options.duplicate(true)
+	# This cache belongs to one pinned observer generation, never to live team
+	# state. All producers use the same researched rules and owned army counts.
+	var retained: Dictionary = generation_cache if generation_cache is Dictionary else {}
+	if not retained.has("train"): retained["train"] = {}
+	if not retained.has("research"): retained["research"] = {}
+	if not result.get("train", []).is_empty() and not retained.has("effects"):
+		retained["effects"] = world.technology_system.persistent_entity_effects(team)
 	for option in result.get("train", []):
 		var source_id := int(option.get("source_unit_id", -1))
+		var profile_key := "%d:%s:%s" % [source_id, String(option.get("kind", "")), str("transport" in option.get("behavior_tags", []))]
+		if retained["train"].has(profile_key):
+			var previous: Dictionary = retained["train"][profile_key]
+			option["ai_profile"] = previous["profile"].duplicate(true)
+			option["population_points_cost"] = previous["population"]
+			continue
 		var source: Dictionary = world.object_record_by_id(source_id, team)
 		if source.is_empty():
 			source = world.object_record_for(String(option.get("kind", "")), team)
@@ -49,7 +62,7 @@ static func decorate_options(world, options: Dictionary, team: int, units: Array
 		var probe := {"source_unit_id": int(source.get("unit_id", source_id)), "team": team}
 		# Apply the owner's already researched public modifiers to a detached
 		# estimate using the same pure operators as authoritative combat.
-		for effect in world.technology_system.persistent_entity_effects(team):
+		for effect in retained["effects"]:
 			if not world.technology_effect_matches_entity(probe, effect):
 				continue
 			var raw := int(effect.get("type_id", -1))
@@ -74,14 +87,27 @@ static func decorate_options(world, options: Dictionary, team: int, units: Array
 		data["transport"] = "transport" in option.get("behavior_tags", [])
 		option["ai_profile"] = data
 		option["population_points_cost"] = world.unit_population_points_cost(String(option.get("kind", "")), team)
-	var counts: Dictionary = {}
-	for unit in units:
-		if int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0:
-			var id := int(unit.get("source_unit_id", -1))
-			counts[id] = int(counts.get(id, 0)) + 1
-	var ids: Array = counts.keys()
-	ids.sort()
+		if retained["train"].size() < 256:
+			retained["train"][profile_key] = {"profile": data.duplicate(true), "population": option["population_points_cost"]}
+	if not retained.has("counts"):
+		var owned_counts := {}
+		for unit in units:
+			if int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0:
+				var id := int(unit.get("source_unit_id", -1))
+				owned_counts[id] = int(owned_counts.get(id, 0)) + 1
+		var owned_ids: Array = owned_counts.keys()
+		owned_ids.sort()
+		retained["counts"] = owned_counts
+		retained["ids"] = owned_ids
+	var counts: Dictionary = retained["counts"]
+	var ids: Array = retained["ids"]
 	for option in result.get("research", []):
+		var technology_id := int(option.get("technology_id", -1))
+		if retained["research"].has(technology_id):
+			var previous: Array = retained["research"][technology_id]
+			option["ai_relevance"] = previous[0]
+			option["ai_economic"] = previous[1]
+			continue
 		var relevance := 0.0
 		var economic := false
 		for effect in world.technology_system.effect_commands(int(option.get("technology_id", -1))):
@@ -105,4 +131,5 @@ static func decorate_options(world, options: Dictionary, team: int, units: Array
 					economic = true
 		option["ai_relevance"] = relevance
 		option["ai_economic"] = economic
+		if retained["research"].size() < 512: retained["research"][technology_id] = [relevance, economic]
 	return result

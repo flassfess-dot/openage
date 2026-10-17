@@ -20,14 +20,29 @@ var surface_revision: int = 0
 # far away can affect them; null means the region is no longer bounded and the
 # caller must treat the whole grid as changed.
 var _change_log: Array = []
+# Derived publication metadata is bounded by the number of 16x16 map pages.
+# Unlike the short route journal, it retains a page's last change indefinitely.
+var task_page_revisions: Dictionary = {}
+var task_full_revision := 0
 
 
 func _record_change(cell: Vector2i) -> void:
 	ChangeJournal.record_cell(_change_log, revision, cell, 96, 48)
+	task_page_revisions[Vector2i(cell.x / 16, cell.y / 16)] = revision + 1
 
 
 func _record_full_change() -> void:
 	ChangeJournal.record_full(_change_log, revision, revision + 1, 96)
+	task_page_revisions.clear()
+	task_full_revision = revision + 1
+
+
+func changed_task_pages_since(old_revision: int) -> Variant:
+	if old_revision < task_full_revision or old_revision > revision: return null
+	var pages: Array[Vector2i] = []
+	for key in task_page_revisions:
+		if int(task_page_revisions[key]) > old_revision: pages.append(key)
+	return pages
 
 
 func change_region_since(old_revision: int) -> Variant:
@@ -40,10 +55,11 @@ func changed_cells_since(old_revision: int) -> Variant:
 	return change["cells"] if not bool(change["full"]) and bool(change["exact"]) else null
 
 
-func _init(grid_size: Vector2i = Vector2i.ONE) -> void:
+func _init(grid_size: Vector2i = Vector2i.ONE, initialize_cells: bool = true) -> void:
 	size = Vector2i(maxi(1, grid_size.x), maxi(1, grid_size.y))
-	configure_terrain()
-	configure_elevation()
+	if initialize_cells:
+		configure_terrain()
+		configure_elevation()
 
 
 func configure_terrain(provider: Callable = Callable()) -> void:

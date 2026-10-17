@@ -8,6 +8,10 @@ config_version=5
 config/name="Rise of Rome — Formation Prototype"
 run/main_scene="res://launcher.tscn"
 
+[autoload]
+
+WindowMode="*res://scripts/window_mode.gd"
+
 [display]
 
 window/size/viewport_width=1280

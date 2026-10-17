@@ -79,6 +79,26 @@ func _ready() -> void:
 			campaign_matches.append(entry)
 	_build_shell()
 	_show_main_menu()
+	if "--verify-match-smoothness" in OS.get_cmdline_user_args():
+		hide()
+		get_tree().root.add_child.call_deferred(load("res://tests/manual/verify_match_smoothness.gd").new())
+		return
+	if "--verify-autosave-live" in OS.get_cmdline_user_args():
+		hide()
+		get_tree().root.add_child.call_deferred(load("res://tests/manual/verify_autosave_live.gd").new())
+		return
+	if "--verify-autosave" in OS.get_cmdline_user_args():
+		hide()
+		get_tree().root.add_child.call_deferred(load("res://tests/manual/verify_autosave.gd").new())
+		return
+	if "--verify-tower-fire" in OS.get_cmdline_user_args():
+		hide()
+		get_tree().root.add_child.call_deferred(load("res://tests/manual/verify_tower_fire.gd").new())
+		return
+	if "--verify-control-group-lifecycle" in OS.get_cmdline_user_args():
+		hide()
+		get_tree().root.add_child.call_deferred(load("res://tests/manual/verify_control_group_lifecycle.gd").new())
+		return
 	# Release templates do not support --script. Drive their real launcher
 	# through an explicit diagnostic entry point after the scene is ready.
 	for diagnostic in [["--verify-target-outline-feedback", "res://tests/manual/verify_target_outline_feedback.gd"], ["--verify-gate-icons", "res://tests/manual/verify_gate_icons.gd"], ["--verify-gate-occlusion", "res://tests/manual/verify_gate_occlusion.gd"], ["--verify-gate-wall-insertion", "res://tests/manual/verify_gate_wall_insertion.gd"], ["--verify-interface-player-colors", "res://tests/manual/verify_interface_player_colors.gd"], ["--profile-long-graphical-match", "res://tests/manual/profile_long_graphical_match.gd"], ["--live-packaged-probe", "res://tests/manual/live_packaged_game_probe.gd"]]:
@@ -854,14 +874,14 @@ func _show_save_menu() -> void:
 	_set_save_status("Сохранение выполняется…" if _saving_current_game else "Матч приостановлен. Можно сохранить его или загрузить другую игру." if is_instance_valid(active_game) else "Чтобы создать сохранение, сначала начните игру. Загрузка доступна сразу.")
 
 
-func _refresh_saved_games() -> void:
+func _refresh_saved_games(completed_entries: Array[Dictionary] = []) -> void:
 	if save_list == null:
 		return
 	var selected_path := ""
 	var selection := save_list.get_selected_items()
 	if not selection.is_empty() and selection[0] < saved_games.size():
 		selected_path = String(saved_games[selection[0]]["path"])
-	saved_games = GameSaveArchive.list_saves()
+	saved_games = GameSaveArchive.list_saves() if completed_entries.is_empty() else completed_entries
 	save_list.clear()
 	var selected := 0
 	for index in range(saved_games.size()):
@@ -911,6 +931,9 @@ func _request_launcher_save() -> void:
 	if not is_instance_valid(active_game) or _saving_current_game or save_name_input == null:
 		return
 	var name := GameSaveArchive.normalized_slot_name(save_name_input.text)
+	if name == GameSaveArchive.AUTOSAVE_NAME:
+		_set_save_status(GameSaveArchive.error_message("slot_name_reserved"), true)
+		return
 	if not GameSaveArchive.valid_slot_name(name):
 		_set_save_status(GameSaveArchive.error_message("slot_name_invalid"), true)
 		return
@@ -945,6 +968,8 @@ func _poll_launcher_save() -> void:
 	if not is_instance_valid(active_game):
 		return
 	var queue = active_game.background_saves
+	if active_game._poll_autosave(0.0) and current_screen == SCREEN_SAVES:
+		_refresh_saved_games(GameSaveArchive.with_autosave_result(saved_games, {"path": active_game.autosave.save_path, "tick": active_game.autosave.last_tick, "saved_at_unix": int(Time.get_unix_time_from_system())}))
 	var had_pending: bool = queue.active_request >= 0 or not queue.waiting.is_empty() or not queue.completed.is_empty()
 	active_game._poll_save_jobs()
 	if queue.active_request >= 0 or not queue.waiting.is_empty():

@@ -13,6 +13,10 @@ const PROFILES := [
 var textures: Dictionary = {}
 var cache: Dictionary = {}
 
+func prewarm_textures() -> void:
+	for group in range(GROUPS.size()):
+		if not textures.has(group): textures[group] = load("res://assets/gates/%s-leaves.png" % GROUPS[group])
+
 static func project(position: Vector2, height: float = 0.0) -> Vector2:
 	return Vector2((position.x-position.y)*32.0, (position.x+position.y)*16.0-height)
 
@@ -52,7 +56,7 @@ func frame_info(registry, building: Dictionary, player: int) -> Dictionary:
 	var base: Dictionary = registry._resolved_frame(graphic,player,2,0)
 	var profile: Dictionary = PROFILES[group]
 	var height: float = float(profile["height"])
-	if wall_id != 117:
+	if wall_id == 155:
 		var reference_source: Dictionary = registry.object_catalog.get("objects", {}).get("%d:117" % civilization,{})
 		var reference: Dictionary = registry._resolved_frame(int(reference_source.get("graphics",{}).get("idle",-1)),player,2,0)
 		if base.get("texture") != null and reference.get("texture") != null:

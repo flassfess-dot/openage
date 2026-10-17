@@ -8,6 +8,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_assign_recall_and_center()
 	test_additive_and_dead_member_filter()
+	test_destroyed_and_unassigned_groups()
 
 	if failures.is_empty():
 		print("C-004 control group tests passed")
@@ -38,6 +39,17 @@ func test_additive_and_dead_member_filter() -> void:
 	assert_equal(result["ids"], [2, 7, 9], "Shift recall adds living members")
 	assert_equal(groups.groups[3], [2, 7], "missing member is removed from group")
 	assert_equal(result["center"], false, "additive recall never centers")
+
+
+func test_destroyed_and_unassigned_groups() -> void:
+	var groups = ControlGroups.new()
+	groups.assign(1, [2, 4, 7])
+	for _repeat in range(3):
+		var result: Dictionary = groups.recall(1, [9], [], false)
+		assert_equal(result["ids"], [], "destroyed group recall is empty")
+		assert_equal(result["center"], false, "destroyed group cannot request camera centering")
+	assert_equal(groups.recall(1, [9], [9], true)["ids"], [9], "Shift recall preserves living current selection")
+	assert_equal(groups.recall(8, [9], [], false)["ids"], [], "unassigned group is safe")
 
 
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:

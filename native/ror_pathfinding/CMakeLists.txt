@@ -19,6 +19,7 @@ add_library(ror_pathfinding SHARED
     src/ror_visibility_kernel.cpp
     src/ror_terrain_kernel.cpp
     src/ror_read_model_kernel.cpp
+    src/ror_save_file_kernel.cpp
 )
 
 target_include_directories(ror_pathfinding PRIVATE src)

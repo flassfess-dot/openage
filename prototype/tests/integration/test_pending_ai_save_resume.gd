@@ -3,6 +3,7 @@ const Task := preload("res://scripts/ai_planning_task.gd")
 const Queue := preload("res://scripts/ai_decision_queue.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 const Replay := preload("res://scripts/replay_system.gd")
+const Ready := preload("res://tests/support/match_ready.gd")
 const SAVE_PATH := "res://qa/pending-ai-save-resume.json"
 var failures: Array[String] = []
 
@@ -13,6 +14,11 @@ func _run() -> void:
 	var scene: PackedScene = load("res://main.tscn")
 	var game = scene.instantiate()
 	root.add_child(game)
+	game.game_controller.set_paused(true)
+	if not await Ready.wait_for_ready(self, game, 120000):
+		check(false, "initial navigation completes before the pending-plan fixture")
+		finish(game)
+		return
 	game.set_process(false)
 	await process_frame
 	game.ai_decision_queue.cancel(game.task_coordinator)
@@ -44,7 +50,15 @@ func _run() -> void:
 	var expected_states: Array = game.ai_players.map(func(player): return player.canonical_state())
 	var expected_commands: Array = game.game_controller.replay_recorder.command_records.duplicate(true)
 	check(game.load_game_from_path(SAVE_PATH), "checkpoint restores a plan captured before its saved tick")
+	game.game_controller.set_paused(true)
+	game.set_process(true)
+	if not await Ready.wait_for_ready(self, game, 120000):
+		check(false, "restored navigation completes before resumed fixed ticks")
+		finish(game)
+		return
+	game.set_process(false)
 	check(game.game_controller.tick_index == saved_tick and game.ai_decision_queue.source_tick == source and game.ai_decision_queue.apply_tick == target, "loading preserves all three tick boundaries")
+	game.game_controller.set_paused(false)
 	await advance_to(game, target)
 	check(verifier.world_state_hash(game.simulation_world, target, game.game_controller) == expected_hash, "resumed plan reproduces the authoritative state hash")
 	check(game.ai_players.map(func(player): return player.canonical_state()) == expected_states, "resumed plan reproduces AI state")

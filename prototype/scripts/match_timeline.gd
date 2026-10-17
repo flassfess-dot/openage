@@ -2,7 +2,7 @@ class_name RoRMatchTimeline
 extends Control
 
 signal selection_changed
-const Typography := preload("res://scripts/hud_typography.gd")
+const Typography := preload("res://scripts/launcher_typography.gd")
 const Palette := preload("res://scripts/player_palette.gd")
 const AGE_NAMES := ["Каменный век", "Эпоха орудий", "Бронзовый век", "Железный век"]
 var history: Dictionary = {}
@@ -117,7 +117,7 @@ func _draw() -> void:
 	var ids := visible_teams()
 	var start := int(history.get("start_tick", 0))
 	var end := maxi(start + 1, int(history.get("current_tick", start)))
-	draw_rect(plot, Color("141a1b"))
+	draw_rect(plot, Color("17110b"))
 	if samples.is_empty() or ids.is_empty():
 		draw_string(font, plot.position + Vector2(12, 30), "Нет данных" if samples.is_empty() else "Выберите игрока в таблице ниже", HORIZONTAL_ALIGNMENT_LEFT, plot.size.x - 24, 14, ink)
 		return
@@ -196,7 +196,7 @@ func _draw() -> void:
 			if used.grow(3).intersects(badge): overlaps = true; break
 		if overlaps: continue
 		occupied.append(badge)
-		draw_rect(badge, Color("202322"))
+		draw_rect(badge, Color("291e12"))
 		draw_rect(badge, team_color(team).lightened(0.5), false, 1)
 		var text: String = ["I", "II", "III", "IV"][clampi(int(marker.get("value", 100)) - 100, 0, 3)] if kind == "age" else "×"
 		draw_string(font, badge.position + Vector2(0, 15), text, HORIZONTAL_ALIGNMENT_CENTER, 26, 13, ink)
@@ -207,7 +207,7 @@ func _draw() -> void:
 		if (bounds.y - bounds.x) * plot.size.y < 20: continue
 		var y := plot.end.y - (bounds.x + bounds.y) * 0.5 * plot.size.y
 		var badge := Rect2(plot.position.x + 5, y - 9, 20, 18)
-		draw_rect(badge, Color("202322"))
+		draw_rect(badge, Color("291e12"))
 		draw_string(font, badge.position + Vector2(0, 14), str(team), HORIZONTAL_ALIGNMENT_CENTER, 20, 12, ink)
 	var selected := selected_sample()
 	var cursor := plot.position.x + plot.size.x * float(int(selected.get("tick", start)) - start) / (end - start)

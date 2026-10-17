@@ -233,9 +233,11 @@ var kills: int = 0
 var battle_over: bool = false
 var battle_message: String = ""
 
-func _init(world_size: Vector2i = Vector2i(24, 24)) -> void:
+func _init(world_size: Vector2i = Vector2i(24, 24), restoring_checkpoint: bool = false) -> void:
 	map_size = Vector2i(world_size.x, world_size.y)
-	terrain_elevation = TerrainElevation.new(map_size)
+	# A checkpoint supplies every terrain cell and elevation vertex. Do not
+	# allocate a throwaway full map on the recovery thread before replacing it.
+	terrain_elevation = TerrainElevation.new(map_size, not restoring_checkpoint)
 	economy_system = SimulationEconomySystem.new()
 	economy_system.reset()
 	production_system = SimulationProductionSystem.new(self)
@@ -262,8 +264,8 @@ func _init(world_size: Vector2i = Vector2i(24, 24)) -> void:
 	resource_stockpiles_by_team = economy_system.resource_stockpiles_by_team
 	visibility_system = SimulationVisibilitySystem.new(map_size, Callable(self, "get_units"), Callable(self, "get_buildings"))
 	fog_of_war = visibility_system.get_fog()
-	navigation_grid = NavigationGrid.new(map_size)
-	navigation_grid.configure_elevation(Callable(self, "terrain_profile_at"))
+	navigation_grid = NavigationGrid.new(map_size, not restoring_checkpoint)
+	if not restoring_checkpoint: navigation_grid.configure_elevation(Callable(self, "terrain_profile_at"))
 	pathfinder = Pathfinder.new(navigation_grid)
 	navigation_service = NavigationService.new(pathfinder)
 	simulation_rng.seed = simulation_seed
@@ -294,9 +296,9 @@ func set_gamespec(data: Dictionary) -> void:
 	attack_animation_spec_cache.clear()
 
 
-func set_terrain_catalog(data: Dictionary) -> void:
+func set_terrain_catalog(data: Dictionary, refresh_cells: bool = true) -> void:
 	navigation_grid.configure_restrictions(data.get("restrictions", []))
-	navigation_grid.configure_terrain_ids(Callable(self, "terrain_id_at_cell"))
+	if refresh_cells: navigation_grid.configure_terrain_ids(Callable(self, "terrain_id_at_cell"))
 	pathfinder.clear_cache()
 	navigation_service.clear_observations()
 
@@ -2274,8 +2276,8 @@ func capture_ai_build_site_queries(team: int, kinds: Array, tick: int, maximum_a
 			pending_kinds.append(kind)
 		requests.append(request)
 	if not pending_kinds.is_empty():
-		var base: Dictionary = BuildSiteTask.capture(self, team, pending_kinds)
-		if not TaskData.freeze_detached(base):
+		var base: Dictionary = TaskData.capture_frozen(BuildSiteTask.capture(self, team, pending_kinds))
+		if base.is_empty():
 			push_error("AI build-site capture must be detached")
 		for request in requests:
 			if request.has("input"):

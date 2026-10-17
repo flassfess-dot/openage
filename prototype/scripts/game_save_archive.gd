@@ -7,6 +7,8 @@ const SoundCueHistory := preload("res://scripts/sound_cue_history.gd")
 const FORMAT_VERSION := 7
 const CHECKPOINT_FORMAT_VERSION := FORMAT_VERSION
 const SAVE_PATH := "user://saves/quicksave.json"
+const AUTOSAVE_PATH := "user://saves/autosave.json"
+const AUTOSAVE_NAME := "Автосохранение"
 const NAMED_SAVE_DIRECTORY := "user://saves/named"
 const MAX_SLOT_NAME_LENGTH := 64
 const MAX_TICK := 20_000_000
@@ -123,7 +125,7 @@ static func valid_slot_name(name: String) -> bool:
 
 
 static func named_path(name: String, directory: String = NAMED_SAVE_DIRECTORY) -> String:
-	if not valid_slot_name(name):
+	if not valid_slot_name(name) or normalized_slot_name(name) == AUTOSAVE_NAME:
 		return ""
 	return "%s/slot_%s.json" % [directory, fingerprint({"slot_name": normalized_slot_name(name)}).substr(0, 24)]
 
@@ -164,20 +166,41 @@ static func list_named_saves(directory_path: String = NAMED_SAVE_DIRECTORY) -> A
 	return result
 
 
-static func list_saves() -> Array[Dictionary]:
-	var entries := list_named_saves()
-	if FileAccess.file_exists(SAVE_PATH):
-		var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
+static func list_saves(named_directory: String = NAMED_SAVE_DIRECTORY, quick_path: String = SAVE_PATH, autosave_path: String = AUTOSAVE_PATH) -> Array[Dictionary]:
+	var entries := list_named_saves(named_directory)
+	for path in [autosave_path, quick_path]:
+		if not FileAccess.file_exists(path): continue
+		var file := FileAccess.open(path, FileAccess.READ)
 		var data: Variant = JSON.parse_string(file.get_as_text()) if file != null else null
 		if data is Dictionary and int(data.get("format_version", -1)) == FORMAT_VERSION:
 			var metadata: Dictionary = data.get("metadata", {})
-			entries.append({"path": SAVE_PATH, "slot_name": "Быстрое сохранение", "saved_at_unix": int(metadata.get("saved_at_unix", 0)), "tick": int(data.get("tick", 0)), "quicksave": true})
+			entries.append({"path": path, "slot_name": AUTOSAVE_NAME if path == autosave_path else "Быстрое сохранение", "saved_at_unix": int(metadata.get("saved_at_unix", 0)), "tick": int(data.get("tick", 0)), "quicksave": path == quick_path, "autosave": path == autosave_path})
 	entries.sort_custom(func(left, right):
 		if int(left["saved_at_unix"]) != int(right["saved_at_unix"]):
 			return int(left["saved_at_unix"]) > int(right["saved_at_unix"])
 		return String(left["slot_name"]) < String(right["slot_name"])
 	)
 	return entries
+
+static func commit_autosave(staging_path: String, target_path: String = AUTOSAVE_PATH) -> Error:
+	# Rename in the same directory replaces the destination atomically. Never
+	# remove/move the previous slot before the complete new file is in place.
+	if not ClassDB.class_exists("RoRSaveFileKernel"): return ERR_UNAVAILABLE
+	var kernel = ClassDB.instantiate("RoRSaveFileKernel")
+	return kernel.replace_atomic(ProjectSettings.globalize_path(staging_path), ProjectSettings.globalize_path(target_path))
+
+static func with_autosave_result(entries: Array[Dictionary], result: Dictionary) -> Array[Dictionary]:
+	# Completion updates a cached menu model; it must not reread every archive
+	# on the render thread just because an automatic write finished.
+	var updated: Array[Dictionary] = []
+	for entry in entries:
+		if not bool(entry.get("autosave", false)) and String(entry.get("path", "")) != String(result["path"]): updated.append(entry)
+	updated.append({"path": String(result["path"]), "slot_name": AUTOSAVE_NAME, "saved_at_unix": int(result.get("saved_at_unix", 0)), "tick": int(result["tick"]), "autosave": true, "quicksave": false})
+	updated.sort_custom(func(a, b):
+		if int(a.get("saved_at_unix", 0)) != int(b.get("saved_at_unix", 0)): return int(a.get("saved_at_unix", 0)) > int(b.get("saved_at_unix", 0))
+		return String(a.get("slot_name", "")) < String(b.get("slot_name", ""))
+	)
+	return updated
 
 static func error_message(error: String) -> String:
 	if error.begins_with("state_hash_mismatch"):
@@ -192,10 +215,11 @@ static func error_message(error: String) -> String:
 		"metadata_invalid", "schema_features_missing", "state_sections_missing", "json_invalid", "replay_invalid", "state_hash_invalid", "sound_cue_history_invalid": return "Сохранение повреждено или неполно"
 		"match_path_mismatch", "match_fingerprint_mismatch": return "Сохранение относится к другой игре или настройкам матча"
 		"slot_name_invalid": return "Введите имя сохранения длиной до 64 символов"
+		"slot_name_reserved": return "Это имя используется автосохранением. Введите другое имя"
 		_: return "Не удалось загрузить или сохранить игру (%s)" % error
 
 
-static func write(path: String, archive: Dictionary) -> Error:
+static func write(path: String, archive: Dictionary, atomic_replace: bool = false) -> Error:
 	var validation_error := validate(archive)
 	if not validation_error.is_empty():
 		return ERR_INVALID_DATA
@@ -210,7 +234,13 @@ static func write(path: String, archive: Dictionary) -> Error:
 		return FileAccess.get_open_error()
 	file.store_string(JSON.stringify(archive, "\t", true, true))
 	file.flush()
+	var write_error := file.get_error()
 	file.close()
+	if write_error != OK:
+		DirAccess.remove_absolute(temporary_path)
+		return write_error
+	if atomic_replace:
+		return commit_autosave(temporary_path, absolute_path)
 	if FileAccess.file_exists(backup_path):
 		DirAccess.remove_absolute(backup_path)
 	if FileAccess.file_exists(absolute_path):

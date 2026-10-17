@@ -25,9 +25,13 @@ static func build(map_size: Vector2i, rectangle: Rect2, center: Vector2, scale: 
 	return result
 
 
-static func build_fog(map_size: Vector2i, rectangle: Rect2, center: Vector2, scale: float, fog_cells: Variant) -> Image:
+static func build_fog(map_size: Vector2i, rectangle: Rect2, center: Vector2, scale: float, fog_cells: Variant, native_enabled: bool = true) -> Image:
 	var width := maxi(1, roundi(rectangle.size.x))
 	var height := maxi(1, roundi(rectangle.size.y))
+	if native_enabled and fog_cells is PackedByteArray and ClassDB.class_exists("RoRReadModelKernel"):
+		var kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if kernel.has_method("rasterize_minimap_fog"):
+			return Image.create_from_data(width, height, false, Image.FORMAT_RGBA8, kernel.rasterize_minimap_fog(map_size, rectangle, center, scale, fog_cells))
 	var result := Image.create(width, height, false, Image.FORMAT_RGBA8)
 	result.fill(Color.TRANSPARENT)
 	if map_size.x <= 0 or map_size.y <= 0 or scale <= 0.0 or fog_cells.size() < map_size.x * map_size.y:

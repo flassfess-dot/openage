@@ -5,8 +5,8 @@ const Queries := preload("res://scripts/simulation_observation_queries.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 const MAX_CAPTURES := 8
 const ACTORS_PER_PORTION := 96
-const PRODUCERS_PER_PORTION := 12
-const CAPTURE_BUDGET_USEC := 4000
+const PRODUCERS_PER_PORTION := 1
+const CAPTURE_BUDGET_USEC := 7000
 var captures: Dictionary = {}
 
 func clear() -> void:
@@ -22,6 +22,10 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 		assert(captures.size() < MAX_CAPTURES)
 		var initial_options: Dictionary = ai.presentation_options()
 		initial_options["defer_build_sites"] = true
+		initial_options["_ai_profile_cache"] = {}
+		if probe != null:
+			initial_options["performance_probe"] = probe
+			initial_options["performance_prefix"] = "presentation.ai.observation"
 		pending = {"world": weakref(world), "token": world.pin_read_generation(), "source_tick": source_tick, "apply_tick": apply_tick, "options": initial_options, "phase": "actors", "projection": {}, "snapshot": {}, "unit_cursor": 0, "building_cursor": 0, "units": [], "buildings": [], "owner_us": 0, "prepare_us": 0, "snapshot_us": 0}
 		captures[team] = pending
 	if int(pending["source_tick"]) != source_tick or int(pending["apply_tick"]) != apply_tick or pending["world"].get_ref() != world or int(pending["token"]["epoch"]) != int(world.entity_changes.epoch):
@@ -79,7 +83,24 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 			"queries":
 				var query_options: Dictionary = options.duplicate()
 				query_options["command_option_entity_ids"] = []
-				var knowledge: Dictionary = Queries.enrich(world, pending["snapshot"], query_options)
+				query_options["defer_site_capture"] = true
+				pending["snapshot"] = Queries.enrich(world, pending["snapshot"], query_options)
+				pending["phase"] = "sites"
+			"sites":
+				var snapshot: Dictionary = pending["snapshot"]
+				if snapshot.has("_pending_build_site_kinds"):
+					var kinds: Array = snapshot["_pending_build_site_kinds"]
+					snapshot.erase("_pending_build_site_kinds")
+					snapshot["build_site_queries"] = Queries.capture_deferred_sites(world, snapshot, kinds, options)
+				pending["phase"] = "publish"
+			"publish":
+				var knowledge: Dictionary = pending["snapshot"]
+				# These exact roots were validated by our resource/navigation
+				# producers or by the portion capture above. They stay immutable
+				# while this read generation is pinned, even if the LRU evicts them.
+				for key in ["units", "buildings", "resources", "navigation"]:
+					var publication: Variant = knowledge.get(key)
+					if (publication is Array or publication is Dictionary) and publication.is_read_only(): Data._retain_immutable(publication)
 				var capture_started := Time.get_ticks_usec() if probe != null else 0
 				var captured: Dictionary = Planning.capture(ai, knowledge, apply_tick)
 				world.release_read_generation(pending["token"])
@@ -88,6 +109,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 					var elapsed := Time.get_ticks_usec() - started
 					var capture_us := Time.get_ticks_usec() - capture_started
 					probe.observe_microseconds("presentation.ai.portion", elapsed)
+					probe.observe_microseconds("presentation.ai.phase.publish", elapsed)
 					probe.observe_microseconds("presentation.ai.prepare", int(pending["prepare_us"]))
 					probe.observe_microseconds("presentation.ai.snapshot", int(pending["snapshot_us"]) + elapsed - capture_us)
 					probe.observe_microseconds("presentation.ai.capture", capture_us)
@@ -100,6 +122,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 			var metric := "prepare_us" if phase in ["actors", "navigation", "resources"] else "snapshot_us"
 			pending[metric] = int(pending[metric]) + elapsed
 			probe.observe_microseconds("presentation.ai.portion", elapsed)
+			probe.observe_microseconds("presentation.ai.phase." + phase, elapsed)
 			probe.increment("ai.capture.portions")
 		if Time.get_ticks_usec() - frame_started >= maxi(1, budget_usec):
 			if probe != null:

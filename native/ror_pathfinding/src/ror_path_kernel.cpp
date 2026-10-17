@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <unordered_set>
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/math.hpp>
@@ -22,6 +23,11 @@ constexpr int32_t DIRECTIONS[8][2] = {
 }
 
 void RoRPathKernel::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("corridor_widths", "cells", "maximum", "radius"), &RoRPathKernel::corridor_widths);
+    ClassDB::bind_method(D_METHOD("is_position_walkable", "position", "radius"), &RoRPathKernel::position_walkable);
+    ClassDB::bind_method(D_METHOD("is_segment_walkable", "start", "finish", "radius"), &RoRPathKernel::is_segment_walkable);
+    ClassDB::bind_method(D_METHOD("direct_cell_path", "start", "goal", "radius"), &RoRPathKernel::direct_cell_path);
+    ClassDB::bind_method(D_METHOD("nearest_walkable", "requested", "radius"), &RoRPathKernel::nearest_walkable);
     ClassDB::bind_method(D_METHOD("create_search_context"), &RoRPathKernel::create_search_context);
     ClassDB::bind_method(D_METHOD("create_movement_context"), &RoRPathKernel::create_movement_context);
     ClassDB::bind_method(D_METHOD("connectivity_labels", "radius"), &RoRPathKernel::connectivity_labels, DEFVAL(0.0));
@@ -38,6 +44,7 @@ void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("calculate_movement", "unit_id", "target", "speed", "cohesion_scale", "delta"), &RoRPathKernel::calculate_movement);
     ClassDB::bind_method(D_METHOD("get_revision"), &RoRPathKernel::get_revision);
     ClassDB::bind_method(D_METHOD("get_walkability_version"), &RoRPathKernel::get_walkability_version);
+    ClassDB::bind_method(D_METHOD("get_connectivity_rebuild_count"), &RoRPathKernel::get_connectivity_rebuild_count);
     ClassDB::bind_method(D_METHOD("get_last_expanded_nodes"), &RoRPathKernel::get_last_expanded_nodes);
     ClassDB::bind_method(D_METHOD("get_last_path_was_direct"), &RoRPathKernel::get_last_path_was_direct);
     ClassDB::bind_method(D_METHOD("is_configured"), &RoRPathKernel::is_configured);
@@ -88,6 +95,9 @@ bool RoRPathKernel::install_connectivity(const PackedInt32Array &labels, double 
     if (!is_configured() || static_cast<size_t>(labels.size()) != walkable_->size()) return false;
     for (int64_t i = 0; i < labels.size(); ++i) {
         if (labels[i] < -1 || labels[i] >= labels.size()) return false;
+        // Installed labels also serve as centred-footprint passability. Verify
+        // that proof once during preparation before any A* edge can use them.
+        if ((labels[i] >= 0) != cell_walkable_for(int32_t(i % width_), int32_t(i / width_), radius)) return false;
     }
     radius = radius <= 0.5 ? 0.0 : radius;
     uint64_t key = 0;
@@ -394,16 +404,20 @@ bool RoRPathKernel::update_walkable(int64_t revision, const PackedInt32Array &in
     if (!differs) { revision_ = revision; return true; }
     if (!walkable_.unique()) walkable_ = std::make_shared<std::vector<uint8_t>>(*walkable_);
     std::vector<int32_t> changed;
+    bool only_opening = true;
     changed.reserve(static_cast<size_t>(indices.size()));
     for (int64_t i = 0; i < indices.size(); ++i) {
         const uint8_t value = values[i] != 0;
-        if ((*walkable_)[indices[i]] != value) changed.push_back(indices[i]);
+        if ((*walkable_)[indices[i]] != value) {
+            changed.push_back(indices[i]);
+            if (!value) only_opening = false;
+        }
         (*walkable_)[indices[i]] = value;
     }
     for (auto it = components_by_radius_.begin(); it != components_by_radius_.end();) {
         double radius = 0.0;
         std::memcpy(&radius, &it->first, sizeof(radius));
-        if (patch_components(radius, changed, it->second)) ++it;
+        if (only_opening ? patch_open_components(radius, changed, it->second) : patch_components(radius, changed, it->second)) ++it;
         else it = components_by_radius_.erase(it);
     }
     ++walkability_version_;
@@ -414,7 +428,86 @@ bool RoRPathKernel::update_walkable(int64_t revision, const PackedInt32Array &in
 // Keep a component only when a bounded local flood proves that its surviving
 // cells remain connected and that no two old components have been joined.
 // The unchanged outer ring contains every connection to the rest of the map.
+bool RoRPathKernel::patch_open_components(double radius, const std::vector<int32_t> &changed,
+        std::shared_ptr<const std::vector<int32_t>> &labels) const {
+    if (!std::isfinite(radius) || radius > std::max(width_, height_)) return false;
+    const int margin = int(std::ceil(std::max(0.0, radius))) + 2;
+    std::unordered_set<int32_t> candidates, added;
+    for (const int32_t index : changed) {
+        const int x = index % width_, y = index / width_;
+        for (int dy = -margin; dy <= margin; ++dy) for (int dx = -margin; dx <= margin; ++dx) {
+            if (contains(x + dx, y + dy)) candidates.insert((y + dy) * width_ + x + dx);
+        }
+        if (candidates.size() > 16384) return false;
+    }
+    for (const int32_t index : candidates) {
+        if ((*labels)[index] < 0 && cell_walkable_for(index % width_, index / width_, radius)) added.insert(index);
+    }
+    if (added.empty()) return true;
+    std::unordered_map<int32_t, int32_t> parents;
+    auto root_for = [&parents](int32_t value) {
+        parents.emplace(value, value);
+        int32_t root = value;
+        while (parents[root] != root) root = parents[root];
+        while (parents[value] != value) { const int32_t next = parents[value]; parents[value] = root; value = next; }
+        return root;
+    };
+    for (const int32_t index : added) {
+        root_for(index);
+        const int x = index % width_, y = index / width_;
+        for (const auto &direction : DIRECTIONS) {
+            const int nx = x + direction[0], ny = y + direction[1];
+            if (!contains(nx, ny)) continue;
+            const int32_t next = ny * width_ + nx, old = (*labels)[next];
+            if ((old < 0 && !added.count(next)) || !can_step(index, next, radius)) continue;
+            const int32_t first = root_for(index), second = root_for(old >= 0 ? old : next);
+            parents[std::max(first, second)] = std::min(first, second);
+        }
+    }
+    // Openings can merge regions but cannot split them. Relabeling their old
+    // IDs is a linear integer pass, without repeating a full map flood.
+    auto patched = std::make_shared<std::vector<int32_t>>(*labels);
+    bool merged = false;
+    for (const auto &item : parents) if (!added.count(item.first) && root_for(item.first) != item.first) { merged = true; break; }
+    if (merged) for (int32_t &label : *patched) {
+        if (label >= 0 && parents.count(label)) label = root_for(label);
+    }
+    for (const int32_t index : added) (*patched)[index] = root_for(index);
+    labels = std::move(patched);
+    return true;
+}
+
 bool RoRPathKernel::patch_components(double radius, const std::vector<int32_t> &changed,
+        std::shared_ptr<const std::vector<int32_t>> &labels) const {
+    if (changed.size() < 2 || changed.size() > 512 || !std::isfinite(radius) || radius > std::max(width_, height_)) return patch_component_region(radius, changed, labels);
+    // Distant tree/building edits must not invalidate the entire map merely
+    // because their joint bounding rectangle is large. Overlapping expanded
+    // neighborhoods are checked together; independent regions keep the same
+    // conservative split/merge proof as the single-region implementation.
+    const int distance = (int(std::ceil(std::max(0.0, radius))) + 2) * 2 + 1;
+    std::unordered_set<int32_t> remaining(changed.begin(), changed.end());
+    std::vector<std::vector<int32_t>> regions;
+    for (const int32_t root : changed) {
+        if (!remaining.erase(root)) continue;
+        regions.push_back({root});
+        if (regions.size() > 16) return false;
+        auto &region = regions.back();
+        for (size_t cursor = 0; cursor < region.size(); ++cursor) {
+            const int x = region[cursor] % width_, y = region[cursor] / width_;
+            for (int dy = -distance; dy <= distance; ++dy) {
+                for (int dx = -distance; dx <= distance; ++dx) {
+                    if (!contains(x + dx, y + dy)) continue;
+                    const int32_t next = (y + dy) * width_ + x + dx;
+                    if (remaining.erase(next)) region.push_back(next);
+                }
+            }
+        }
+    }
+    for (const auto &region : regions) if (!patch_component_region(radius, region, labels)) return false;
+    return true;
+}
+
+bool RoRPathKernel::patch_component_region(double radius, const std::vector<int32_t> &changed,
         std::shared_ptr<const std::vector<int32_t>> &labels) const {
     if (changed.empty()) return true;
     if (!std::isfinite(radius) || radius > std::max(width_, height_)) return false;
@@ -440,6 +533,7 @@ bool RoRPathKernel::patch_components(double radius, const std::vector<int32_t> &
     }
     std::vector<int32_t> group_labels;
     std::unordered_map<int32_t, int32_t> group_by_old_label;
+    std::unordered_set<int32_t> checked_roots;
     std::vector<int32_t> queue;
     for (int32_t root = 0; root < area; ++root) {
         if (!passable[root] || groups[root] >= 0) continue;
@@ -452,6 +546,9 @@ bool RoRPathKernel::patch_components(double radius, const std::vector<int32_t> &
             const int32_t local = queue[cursor], x = local % local_width, y = local / local_width;
             const int32_t previous = (*labels)[(min_y + y) * width_ + min_x + x];
             if (previous >= 0) {
+                // Keep root IDs attached to surviving walkable cells. An old
+                // blocked root must never alias a newly opened isolated cell.
+                if (checked_roots.insert(previous).second && !cell_walkable_for(previous % width_, previous / width_, radius)) return false;
                 if (old_label >= 0 && old_label != previous) return false; // Possible merge.
                 old_label = previous;
             }
@@ -507,11 +604,20 @@ const std::vector<int32_t> &RoRPathKernel::components(double radius) {
     std::memcpy(&key, &radius, sizeof(key));
     auto found = components_by_radius_.find(key);
     if (found != components_by_radius_.end()) return *found->second;
+    ++connectivity_rebuild_count_;
     if (components_by_radius_.size() >= 16) components_by_radius_.clear();
     std::vector<int32_t> labels(walkable_->size(), -1);
-    std::vector<uint8_t> passable(walkable_->size(), 0);
-    for (int32_t i = 0; i < static_cast<int32_t>(labels.size()); ++i)
-        passable[i] = cell_walkable_for(i % width_, i / width_, radius);
+    std::vector<uint8_t> passable;
+    if (radius <= 0.5) passable = *walkable_;
+    else {
+        passable.resize(walkable_->size(), 0);
+        for (int32_t i = 0; i < static_cast<int32_t>(labels.size()); ++i)
+            passable[i] = cell_walkable_for(i % width_, i / width_, radius);
+    }
+    // Every legal diagonal has both orthogonal neighbors, so it adds no new
+    // connectivity beyond these four edges. Partitions and row-major root IDs
+    // remain identical; a full rebuild needs half as many neighbor visits.
+    static constexpr int CARDINAL_DIRECTIONS[4][2] = {{0,-1},{-1,0},{1,0},{0,1}};
     std::vector<int32_t> queue;
     for (int32_t root = 0; root < static_cast<int32_t>(labels.size()); ++root) {
         if (!passable[root] || labels[root] >= 0) continue;
@@ -520,12 +626,11 @@ const std::vector<int32_t> &RoRPathKernel::components(double radius) {
         labels[root] = root;
         for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
             const int32_t current = queue[cursor], x = current % width_, y = current / width_;
-            for (const auto &d : DIRECTIONS) {
+            for (const auto &d : CARDINAL_DIRECTIONS) {
                 const int32_t nx = x + d[0], ny = y + d[1];
                 if (!contains(nx, ny)) continue;
                 const int32_t next = ny * width_ + nx;
                 if (!passable[next] || labels[next] >= 0) continue;
-                if (d[0] && d[1] && (!passable[y * width_ + nx] || !passable[ny * width_ + x])) continue;
                 labels[next] = root;
                 queue.push_back(next);
             }
@@ -583,11 +688,17 @@ bool RoRPathKernel::cells_connected(const Vector2i &start, const Vector2i &goal,
 PackedInt32Array RoRPathKernel::find_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius) {
     PackedInt32Array result;
     last_expanded_nodes_ = 0;
+    // Corridor smoothing immediately requests the same raw A* route. Retain
+    // one bounded value result; walkability generations invalidate it exactly.
+    if (cached_search_version_ == walkability_version_ && cached_search_start_ == start && cached_search_goal_ == goal && cached_search_radius_ == clearance_radius) return cached_search_path_;
+    cached_search_version_ = -1;
+    cached_search_path_ = PackedInt32Array();
     if (!is_configured() || !contains(start.x, start.y) || !contains(goal.x, goal.y) || !cell_walkable_for(goal.x, goal.y, clearance_radius)) {
         return result;
     }
 
     if (!cells_connected(start, goal, clearance_radius)) return result;
+    const auto &passable_labels = components(clearance_radius);
 
     ++search_generation_;
     if (search_generation_ == 0) {
@@ -623,7 +734,11 @@ PackedInt32Array RoRPathKernel::find_cell_path(const Vector2i &start, const Vect
                 continue;
             }
             const int32_t next = next_y * width_ + next_x;
-            if (!can_step(current, next, clearance_radius)) {
+            // Connectivity already used the exact centred-circle footprint.
+            // Reuse its passability instead of repeating geometry/divisions
+            // for every A* edge. A blocked origin may still step out as before.
+            if (passable_labels[next] < 0 || (direction[0] && direction[1] &&
+                    (passable_labels[current_y * width_ + next_x] < 0 || passable_labels[next_y * width_ + current_x] < 0))) {
                 continue;
             }
             const double step_cost = direction[0] != 0 && direction[1] != 0 ? DIAGONAL_COST : CARDINAL_COST;
@@ -655,6 +770,13 @@ PackedInt32Array RoRPathKernel::find_cell_path(const Vector2i &start, const Vect
     for (auto iterator = reversed.rbegin(); iterator != reversed.rend(); ++iterator) {
         result.set(output++, *iterator % width_);
         result.set(output++, *iterator / width_);
+    }
+    if (result.size() <= 32768) {
+        cached_search_version_ = walkability_version_;
+        cached_search_start_ = start;
+        cached_search_goal_ = goal;
+        cached_search_radius_ = clearance_radius;
+        cached_search_path_ = result;
     }
     return result;
 }
@@ -708,6 +830,7 @@ PackedInt32Array RoRPathKernel::find_smoothed_cell_path(const Vector2i &start, c
 }
 
 int64_t RoRPathKernel::get_walkability_version() const { return walkability_version_; }
+int64_t RoRPathKernel::get_connectivity_rebuild_count() const { return connectivity_rebuild_count_; }
 
 int64_t RoRPathKernel::get_revision() const {
     return revision_;
@@ -734,6 +857,9 @@ bool RoRPathKernel::cell_walkable(int32_t x, int32_t y) const {
 }
 
 bool RoRPathKernel::cell_walkable_for(int32_t x, int32_t y, double clearance_radius) const {
+    // At a cell centre, circles up to half a cell fit entirely within it;
+    // tangency with neighboring squares is legal under the shared geometry.
+    if (clearance_radius <= 0.5) return cell_walkable(x, y);
     return position_walkable(Vector2(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5), clearance_radius);
 }
 
@@ -759,7 +885,15 @@ bool RoRPathKernel::direct_path(int32_t start, int32_t goal, double clearance_ra
     const int32_t start_y = start / width_;
     const int32_t goal_x = goal % width_;
     const int32_t goal_y = goal / width_;
-    if (!cell_walkable_for(start_x, start_y, clearance_radius) || !cell_walkable_for(goal_x, goal_y, clearance_radius)) {
+    double normalized_radius = clearance_radius <= 0.5 ? 0.0 : clearance_radius;
+    uint64_t radius_key = 0;
+    std::memcpy(&radius_key, &normalized_radius, sizeof(radius_key));
+    const auto retained = components_by_radius_.find(radius_key);
+    const std::vector<int32_t> *labels = retained == components_by_radius_.end() ? nullptr : retained->second.get();
+    const auto accessible = [&](int32_t x, int32_t y) {
+        return contains(x, y) && (labels ? (*labels)[y * width_ + x] >= 0 : cell_walkable_for(x, y, clearance_radius));
+    };
+    if (!accessible(start_x, start_y) || !accessible(goal_x, goal_y)) {
         return false;
     }
     if (result != nullptr) {
@@ -773,6 +907,7 @@ bool RoRPathKernel::direct_path(int32_t start, int32_t goal, double clearance_ra
     const int32_t difference_y = goal_y - start_y;
     const int32_t steps = std::max(std::abs(difference_x), std::abs(difference_y));
     int32_t previous = start;
+    int32_t previous_x = start_x, previous_y = start_y;
     for (int32_t index = 1; index <= steps; ++index) {
         const double ratio = static_cast<double>(index) / static_cast<double>(steps);
         const int32_t current_x = static_cast<int32_t>(std::round(static_cast<double>(start_x) + static_cast<double>(difference_x) * ratio));
@@ -781,7 +916,8 @@ bool RoRPathKernel::direct_path(int32_t start, int32_t goal, double clearance_ra
         if (current == previous) {
             continue;
         }
-        if (!can_step(previous, current, clearance_radius)) {
+        if (!accessible(current_x, current_y) || (current_x != previous_x && current_y != previous_y &&
+                (!accessible(current_x, previous_y) || !accessible(previous_x, current_y)))) {
             if (result != nullptr) {
                 result->clear();
             }
@@ -791,6 +927,8 @@ bool RoRPathKernel::direct_path(int32_t start, int32_t goal, double clearance_ra
             result->push_back(current);
         }
         previous = current;
+        previous_x = current_x;
+        previous_y = current_y;
     }
     return true;
 }
@@ -816,9 +954,9 @@ bool RoRPathKernel::frontier_less(const FrontierEntry &left, const FrontierEntry
     if (!Math::is_equal_approx(left.score, right.score)) {
         return left.score < right.score;
     }
-    const int32_t left_y = left.index / width_;
-    const int32_t right_y = right.index / width_;
-    return left_y < right_y || (left_y == right_y && left.index % width_ < right.index % width_);
+    // Valid cell indices are row-major: comparing them is exactly the same
+    // y/x tie order, without two integer divisions at every heap comparison.
+    return left.index < right.index;
 }
 
 void RoRPathKernel::frontier_push(const FrontierEntry &entry) {
@@ -886,6 +1024,98 @@ bool RoRPathKernel::position_walkable(const Vector2 &position, double radius) co
             if (x == center_x && y == center_y) continue;
             const double dx = std::max(std::max(static_cast<double>(x) - position.x, 0.0), static_cast<double>(position.x) - (x + 1.0));
             if (dx * dx + dy * dy < radius_squared && !cell_walkable(x, y)) return false;
+        }
+    }
+    return true;
+}
+
+PackedInt32Array RoRPathKernel::corridor_widths(const TypedArray<Vector2i> &cells, int64_t maximum, double radius) const {
+    PackedInt32Array widths; widths.resize(cells.size());
+    for (int64_t i = 0; i < cells.size(); ++i) {
+        const Vector2i cell = cells[i];
+        const Vector2i direction = cells.size() <= 1 ? Vector2i(1, 0) : (i == cells.size() - 1 ? cell - Vector2i(cells[i - 1]) : Vector2i(cells[i + 1]) - cell);
+        const Vector2 forward = Vector2(direction).normalized();
+        const Vector2 lateral(-forward.y, forward.x), center = Vector2(cell) + Vector2(0.5, 0.5);
+        double half_width = 0;
+        for (int64_t step = 1; step <= maximum; ++step) {
+            const Vector2 offset = lateral * double(step) * 0.5;
+            if (!position_walkable(center + offset, radius) || !position_walkable(center - offset, radius)) break;
+            half_width = double(step) * 0.5;
+        }
+        widths[i] = std::max<int64_t>(1, std::min<int64_t>(maximum, int64_t(std::floor(half_width * 2.0 + radius * 2.0))));
+    }
+    return widths;
+}
+
+PackedInt32Array RoRPathKernel::direct_cell_path(const Vector2i &start, const Vector2i &goal, double radius) const {
+    std::vector<int32_t> cells;
+    if (!contains(start.x, start.y) || !contains(goal.x, goal.y) || !cell_walkable_for(start.x, start.y, radius) || !cell_walkable_for(goal.x, goal.y, radius)) return PackedInt32Array();
+    return direct_path(start.y * width_ + start.x, goal.y * width_ + goal.x, radius, &cells) ? pack_cells(cells) : PackedInt32Array();
+}
+
+Vector2i RoRPathKernel::nearest_walkable(const Vector2i &requested, double radius) const {
+    if (cell_walkable_for(requested.x, requested.y, radius)) return requested;
+    for (int ring = 1; ring <= std::max(width_, height_); ++ring) {
+        Vector2i best(-1, -1);
+        int64_t best_distance = std::numeric_limits<int64_t>::max();
+        for (int y = requested.y - ring; y <= requested.y + ring; ++y) {
+            const bool edge = std::abs(y - requested.y) == ring;
+            for (int x = requested.x - ring; x <= requested.x + ring; x += edge ? 1 : ring * 2) {
+                if (!cell_walkable_for(x, y, radius)) continue;
+                const int64_t dx = int64_t(x) - requested.x, dy = int64_t(y) - requested.y;
+                const int64_t distance = dx * dx + dy * dy;
+                if (distance < best_distance || (distance == best_distance && (y < best.y || (y == best.y && x < best.x)))) {
+                    best_distance = distance; best = Vector2i(x, y);
+                }
+            }
+        }
+        if (best.x >= 0) return best;
+    }
+    return Vector2i(-1, -1);
+}
+
+bool RoRPathKernel::is_segment_walkable(const Vector2 &start, const Vector2 &finish, double radius) const {
+    if (!position_walkable(start, radius) || !position_walkable(finish, radius)) return false;
+    const Vector2 delta = finish - start;
+    const int steps = std::max(1, int(std::ceil(std::max(std::abs(double(delta.x)), std::abs(double(delta.y))))));
+    const int margin = std::max(1, int(std::ceil(radius)));
+    std::unordered_set<uint64_t> visited;
+    const double radius_squared = radius * radius;
+    auto point_distance = [](const Vector2 &point, int x, int y) {
+        const double dx = std::max(std::max(double(x) - point.x, 0.0), double(point.x) - (x + 1.0));
+        const double dy = std::max(std::max(double(y) - point.y, 0.0), double(point.y) - (y + 1.0));
+        return dx * dx + dy * dy;
+    };
+    for (int i = 0; i <= steps; ++i) {
+        const Vector2 center = start.lerp(finish, double(i) / steps).floor();
+        for (int y = int(center.y) - margin; y <= int(center.y) + margin; ++y) {
+            for (int x = int(center.x) - margin; x <= int(center.x) + margin; ++x) {
+                const uint64_t key = (uint64_t(uint32_t(x)) << 32) | uint32_t(y);
+                if (!visited.insert(key).second || cell_walkable(x, y)) continue;
+                const Vector2 lower(x, y), upper(x + 1, y + 1);
+                double enter = 0, leave = 1;
+                for (int axis = 0; axis < 2; ++axis) {
+                    if (Math::is_zero_approx(delta[axis])) {
+                        if (start[axis] < lower[axis] || start[axis] > upper[axis]) { enter = 2; break; }
+                    } else {
+                        const double first = (double(lower[axis]) - start[axis]) / delta[axis];
+                        const double last = (double(upper[axis]) - start[axis]) / delta[axis];
+                        enter = std::max(enter, std::min(first, last));
+                        leave = std::min(leave, std::max(first, last));
+                    }
+                }
+                double distance = 0;
+                if (enter > leave) {
+                    distance = std::min(point_distance(start, x, y), point_distance(finish, x, y));
+                    for (const Vector2 &corner : {lower, upper, Vector2(lower.x, upper.y), Vector2(upper.x, lower.y)}) {
+                        const real_t length = delta.length_squared();
+                        const real_t t = length > 0 ? std::max(real_t(0), std::min(real_t(1), (corner - start).dot(delta) / length)) : 0;
+                        const Vector2 nearest = start + delta * t;
+                        distance = std::min(distance, double(corner.distance_squared_to(nearest)));
+                    }
+                }
+                if (distance < radius_squared || (radius <= 0.0001 && Math::is_zero_approx(distance))) return false;
+            }
         }
     }
     return true;

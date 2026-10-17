@@ -16,6 +16,11 @@ var assets_by_resource_id: Dictionary = {}
 var clock_seconds: float = 0.0
 var request_sequence: int = 0
 var last_played_by_category: Dictionary = {}
+const MAX_STREAMS := 128
+const MAX_STREAM_BYTES := 32 * 1024 * 1024
+var streams: Dictionary = {}
+var stream_sizes: Dictionary = {}
+var stream_bytes := 0
 
 
 func configure(runtime_data: Dictionary, sound_data: Dictionary, asset_records: Variant, graphics_data: Dictionary = {}, object_data: Dictionary = {}, indexed_audio_assets: Dictionary = {}) -> void:
@@ -24,9 +29,13 @@ func configure(runtime_data: Dictionary, sound_data: Dictionary, asset_records: 
 	sound_catalog = sound_data
 	graphics_catalog = graphics_data
 	assets_by_resource_id.clear()
+	streams.clear()
+	stream_sizes.clear()
+	stream_bytes = 0
 	if not indexed_audio_assets.is_empty():
 		assets_by_resource_id = indexed_audio_assets.duplicate()
 		reset()
+		_prewarm_construction()
 		return
 	var records: Array = asset_records.values() if asset_records is Dictionary else asset_records if asset_records is Array else []
 	for metadata_value in records:
@@ -35,6 +44,43 @@ func configure(runtime_data: Dictionary, sound_data: Dictionary, asset_records: 
 			continue
 		assets_by_resource_id[int(metadata["id"])] = String(metadata.get("file", ""))
 	reset()
+	_prewarm_construction()
+
+func _stream_for(resource_id: int) -> AudioStream:
+	if streams.has(resource_id):
+		var retained: AudioStream = streams[resource_id]
+		streams.erase(resource_id)
+		streams[resource_id] = retained
+		return retained
+	var filename := String(assets_by_resource_id.get(resource_id, ""))
+	var path := "res://assets/generated/%s" % filename
+	if filename.is_empty() or not ResourceLoader.exists(path): return null
+	var stream := load(path) as AudioStream
+	if stream == null: return null
+	var bytes: int = MAX_STREAM_BYTES
+	if stream is AudioStreamWAV: bytes = (stream as AudioStreamWAV).get_data().size() + 256
+	if bytes > MAX_STREAM_BYTES: return stream
+	while not streams.is_empty() and (streams.size() >= MAX_STREAMS or stream_bytes + bytes > MAX_STREAM_BYTES):
+		var expired: Variant = streams.keys()[0]
+		stream_bytes -= int(stream_sizes[expired])
+		stream_sizes.erase(expired)
+		streams.erase(expired)
+	streams[resource_id] = stream
+	stream_sizes[resource_id] = bytes
+	stream_bytes += bytes
+	return stream
+
+func _prewarm_construction() -> void:
+	# Configure runs behind loading. Warming all variants must not consume a
+	# sound-selection seed or start a category cooldown before a real event.
+	var ids := {}
+	for archetype in runtime_catalog.get("archetypes", {}).values():
+		for record in archetype.get("records", {}).values():
+			var reference: Dictionary = record.get("presentation", {}).get("sounds", {}).get("construction", {})
+			if bool(reference.get("available", false)): ids[int(reference.get("sound_id", -1))] = true
+	for sound_id in ids:
+		for item in sound_catalog.get("sounds", {}).get(str(sound_id), {}).get("items", []):
+			if bool(item.get("audio", {}).get("valid", false)): _stream_for(int(item.get("resource_id", -1)))
 
 
 func reset() -> void:
@@ -120,8 +166,7 @@ func request_sound_id(sound_id: int, fallback_category: String, civilization_id:
 			break
 		roll -= int(candidate["weight"])
 	var selected_resource_id := int(selected.get("resource_id", -1))
-	var file_name := String(assets_by_resource_id.get(selected_resource_id, ""))
-	var stream: AudioStream = load("res://assets/generated/%s" % file_name)
+	var stream: AudioStream = _stream_for(selected_resource_id)
 	if stream == null:
 		return {"accepted": false, "reason": "asset_unavailable", "sound_id": sound_id, "category": category}
 	last_played_by_category[category] = clock_seconds

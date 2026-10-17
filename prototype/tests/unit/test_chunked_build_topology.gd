@@ -35,6 +35,9 @@ func _initialize() -> void:
 	# A skipped/expired delta requires a full publication, never a partial update.
 	for i in range(120): grid.set_terrain_id(Vector2i(i % 48, i / 48), i + 20)
 	var full := Nav.capture_chunked(grid, third)
+	check(full["changed_pages"] != null and full["changed_pages"].size() < 9, "expired cell journal retains exact bounded page updates")
+	check(is_same(third["cell_pages"]["terrain_cells"][Vector2i(2, 2)], full["cell_pages"]["terrain_cells"][Vector2i(2, 2)]), "journal expiry does not recopy a distant map page")
+	check(grid.task_page_revisions.size() <= 9, "page history is bounded by map area")
 	Nav.update_chunked_grid(worker, full)
 	compare(grid, worker)
 	var decoded: Dictionary = bytes_to_var(var_to_bytes(full))
@@ -44,6 +47,22 @@ func _initialize() -> void:
 	var replaced := Nav.capture_chunked(replacement, {}, 1)
 	check(not is_same(planner, executor.build_planner(replaced)), "source replacement discards the private planner")
 	compare(replacement, executor.planner.grid)
+	# A worker that skipped an intermediate publication still rebuilds correctly.
+	var skipped = Nav.create_grid(first)
+	Nav.update_chunked_grid(skipped, full)
+	compare(grid, skipped)
+	grid.configure_terrain(func(_cell): return "water")
+	var reset := Nav.capture_chunked(grid, full)
+	check(reset["changed_pages"] == null, "bulk reset invalidates all pages")
+	compare(grid, Nav.create_grid(reset))
+	var ragged := Grid.new(Vector2i(35, 19))
+	ragged.set_terrain(Vector2i(34, 18), "water")
+	compare(ragged, Nav.create_grid(Nav.capture_chunked(ragged)))
+	if ClassDB.class_exists("RoRReadModelKernel"):
+		var kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if kernel.has_method("capture_navigation_pages"):
+			var unsafe := {"terrain_cells": {Vector2i.ZERO: {Vector2i.ZERO: RefCounted.new()}}}
+			check(kernel.capture_navigation_pages({}, unsafe, [], Vector2i.ONE).is_empty(), "native page sharing rejects unsafe retained objects")
 	var knowledge := Knowledge.new(Vector2i(24, 24))
 	knowledge.learned[26] = 1
 	var learned := Nav.capture_chunked(knowledge)

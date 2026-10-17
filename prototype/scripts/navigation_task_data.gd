@@ -78,13 +78,32 @@ const PAGE_SIZE := 16
 static func capture_chunked(grid, previous: Dictionary = {}, source_generation: int = 0) -> Dictionary:
 	if int(previous.get("source_generation", -1)) == source_generation and int(previous.get("epoch", -1)) == int(grid.cache_epoch) and int(previous.get("revision", -1)) == int(grid.revision):
 		return previous
-	var changes: Variant = null
+	var changed_pages: Variant = null
 	if int(previous.get("source_generation", -1)) == source_generation and previous.get("size") == grid.size and int(previous.get("epoch", -1)) == int(grid.cache_epoch):
-		changes = grid.changed_cells_since(int(previous.get("revision", -1)))
-	var pages: Dictionary = {}
+		changed_pages = grid.changed_task_pages_since(int(previous.get("revision", -1)))
+	var keys: Array = []
+	if changed_pages == null:
+		for y in range(ceili(float(grid.size.y) / PAGE_SIZE)):
+			for x in range(ceili(float(grid.size.x) / PAGE_SIZE)): keys.append(Vector2i(x, y))
+	else: keys = changed_pages
+	var sources: Dictionary = {}
+	for field in CELL_FIELDS: sources[field] = grid.get(field)
+	var old_pages: Dictionary = previous.get("cell_pages", {}) if changed_pages != null else {}
+	var pages: Dictionary
+	if ClassDB.class_exists("RoRReadModelKernel") and ClassDB.instantiate("RoRReadModelKernel").has_method("capture_navigation_pages"):
+		pages = ClassDB.instantiate("RoRReadModelKernel").capture_navigation_pages(sources, old_pages, keys, grid.size)
+	else:
+		pages = _rebuild_pages(sources, old_pages, keys, grid.size)
+		if not Data.is_detached(pages): return {}
+	# Every page has engine-enforced scalar leaves. The native producer validates
+	# retained pages and freezes the complete result before this ownership hook.
 	for field in CELL_FIELDS:
-		pages[field] = _paged_cells(grid.get(field), field, previous.get("cell_pages", {}).get(field, {}), changes)
-	var result := {"source_generation": source_generation, "size": grid.size, "epoch": grid.cache_epoch, "revision": grid.revision, "previous_revision": previous.get("revision", -1), "surface_revision": grid.surface_revision, "cell_pages": pages, "changed_cells": changes, "change_log": Data.copy(grid._change_log), "terrain_restrictions": previous["terrain_restrictions"] if changes != null else Data.copy(grid.terrain_restrictions)}
+		if not pages.has(field): return {}
+		Data._retain_immutable(pages[field])
+	Data._retain_immutable(pages)
+	var history: Array = Data.capture_frozen({"history": grid._change_log})["history"]
+	Data._retain_immutable(history)
+	var result := {"source_generation": source_generation, "size": grid.size, "epoch": grid.cache_epoch, "revision": grid.revision, "previous_revision": previous.get("revision", -1), "surface_revision": grid.surface_revision, "cell_pages": pages, "changed_pages": changed_pages, "changed_cells": null, "change_log": history, "terrain_restrictions": previous["terrain_restrictions"] if changed_pages != null else Data.copy(grid.terrain_restrictions)}
 	if grid is KnowledgeGrid: result["learned"] = grid.learned.duplicate()
 	return Data.seal(result)
 
@@ -101,34 +120,40 @@ static func _empty_page(field: String) -> Dictionary:
 	var flags: Dictionary[Vector2i, bool] = {}
 	return flags
 
-static func _paged_cells(source: Dictionary, field: String, previous: Dictionary, changes: Variant) -> Dictionary:
-	var pages: Dictionary = previous.duplicate() if changes != null else {}
-	var copied: Dictionary = {}
-	var cells: Array = source.keys() if changes == null else changes
-	for cell in cells:
-		var key := _page_key(cell)
-		var page: Dictionary = pages.get(key, {})
-		var present := source.has(cell)
-		var value: Variant = true if field == "occupied_cells" else source.get(cell)
-		if changes != null and present == page.has(cell) and (not present or page[cell] == value): continue
-		if not copied.has(key):
-			page = page.duplicate() if pages.has(key) else _empty_page(field)
-			pages[key] = page
-			copied[key] = true
-		if present: page[cell] = value
-		else: page.erase(cell)
-	for key in copied: pages[key].make_read_only()
-	pages.make_read_only()
-	return pages
+static func _rebuild_pages(sources: Dictionary, previous: Dictionary, keys: Array, size: Vector2i) -> Dictionary:
+	var result: Dictionary = {}
+	for field in CELL_FIELDS:
+		var pages: Dictionary = previous.get(field, {}).duplicate()
+		var source: Dictionary = sources[field]
+		for key in keys:
+			var page := _empty_page(field)
+			for y in range(key.y * PAGE_SIZE, mini(size.y, (key.y + 1) * PAGE_SIZE)):
+				for x in range(key.x * PAGE_SIZE, mini(size.x, (key.x + 1) * PAGE_SIZE)):
+					var cell := Vector2i(x, y)
+					if source.has(cell): page[cell] = true if field == "occupied_cells" else source[cell]
+			if page.is_empty(): pages.erase(key)
+			else:
+				page.make_read_only()
+				pages[key] = page
+		pages.make_read_only()
+		result[field] = pages
+	result.make_read_only()
+	return result
 
 static func update_chunked_grid(grid, input: Dictionary) -> void:
 	var changes: Variant = input.get("changed_cells")
-	var incremental: bool = changes != null and int(input.get("previous_revision", -1)) == int(grid.revision)
+	var changed_pages: Variant = input.get("changed_pages")
+	var incremental: bool = int(input.get("previous_revision", -1)) == int(grid.revision)
 	if int(input["revision"]) != int(grid.revision) or grid.size != input["size"]:
 		for field in CELL_FIELDS:
 			var target: Dictionary = grid.get(field)
 			var pages: Dictionary = input["cell_pages"][field]
-			if incremental:
+			if incremental and changed_pages != null:
+				for key in changed_pages:
+					for y in range(key.y * PAGE_SIZE, mini(input["size"].y, (key.y + 1) * PAGE_SIZE)):
+						for x in range(key.x * PAGE_SIZE, mini(input["size"].x, (key.x + 1) * PAGE_SIZE)): target.erase(Vector2i(x, y))
+					target.merge(pages.get(key, {}), true)
+			elif incremental and changes != null:
 				for cell in changes:
 					var page: Dictionary = pages.get(_page_key(cell), {})
 					if page.has(cell): target[cell] = page[cell]

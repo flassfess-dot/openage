@@ -4,17 +4,20 @@ extends RefCounted
 const Coordinator := preload("res://scripts/isolated_task_coordinator.gd")
 const NavigationData := preload("res://scripts/navigation_task_data.gd")
 const Preparation := preload("res://scripts/navigation_preparation_task.gd")
+const BuildSites := preload("res://scripts/build_site_task.gd")
 var coordinator := Coordinator.new()
 var records: Array = []
 var complete := true
 var match_players: Array = []
 var pending_ai_teams: Array[int] = []
+var prepare_build_topology := true
 
 func is_loading() -> bool:
 	return not complete
 
-func begin(world, players: Array = []) -> void:
+func begin(world, players: Array = [], build_topology: bool = true) -> void:
 	shutdown()
+	prepare_build_topology = build_topology
 	match_players = players.duplicate(true)
 	for player in match_players:
 		var team := int(player.get("team", 0))
@@ -84,7 +87,7 @@ func poll(world) -> bool:
 		var grid = record["planner"].grid
 		var output: Dictionary = record["output"]
 		if int(output["revision"]) != grid.revision or int(output["surface_revision"]) != grid.surface_revision:
-			begin(world, match_players)
+			begin(world, match_players, prepare_build_topology)
 			return false
 	for record in records:
 		var planner = record["planner"]
@@ -102,9 +105,18 @@ func poll(world) -> bool:
 	# its first decision (two consecutive pauses in a three-player save).
 	if not pending_ai_teams.is_empty():
 		var team := pending_ai_teams[0]
-		var navigation_ready: bool = world.ai_navigation_knowledge.prepare_snapshot(world, world.get_fog_of_war(), team)
+		var navigation_ready: bool = world.ai_navigation_knowledge.prepare_snapshot(world, world.get_fog_of_war(), team, 2048, 0)
 		var resources_ready: bool = world.prepare_known_ai_resource_snapshot(team)
 		if navigation_ready and resources_ready:
+			if prepare_build_topology: BuildSites.prepare_topology(world, team)
+			var warmed := {}
+			for building in world.get_buildings():
+				if int(building.get("team", 0)) != team: continue
+				var key: Array = building.get("unit_lineage", [int(building.get("source_unit_id", -1))])
+				if warmed.has(key): continue
+				warmed[key.duplicate()] = true
+				world.get_unit_production_options(int(building["id"]), team)
+				world.get_research_options(int(building["id"]), team)
 			pending_ai_teams.pop_front()
 	complete = pending_ai_teams.is_empty()
 	return complete

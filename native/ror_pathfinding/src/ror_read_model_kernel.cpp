@@ -684,6 +684,8 @@ String entity_type(const Dictionary &source) {
 } // namespace
 
 void RoRReadModelKernel::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("rasterize_minimap_fog", "size", "rectangle", "center", "scale", "fog"), &RoRReadModelKernel::rasterize_minimap_fog);
+    ClassDB::bind_method(D_METHOD("capture_navigation_pages", "sources", "previous", "keys", "size"), &RoRReadModelKernel::capture_navigation_pages);
     ClassDB::bind_method(D_METHOD("refresh_interpolated_items", "items", "project", "alpha", "depth_index", "sprite_scale"), &RoRReadModelKernel::refresh_interpolated_items);
     ClassDB::bind_method(D_METHOD("cache_actor_sprites", "items", "scale"), &RoRReadModelKernel::cache_actor_sprites);
     ClassDB::bind_method(D_METHOD("changed_combat_ids", "delta", "units", "buildings", "sources", "classifications"), &RoRReadModelKernel::changed_combat_ids);
@@ -1013,6 +1015,72 @@ Dictionary RoRReadModelKernel::capture_frozen(const Variant &source, const Array
     result["value"] = capture.valid ? value : Variant();
     result["shared_indices"] = shared_indices;
     return result;
+}
+
+Dictionary RoRReadModelKernel::capture_navigation_pages(const Dictionary &sources, const Dictionary &previous, const Array &keys, const Vector2i &size) const {
+    const char *fields[] = {"terrain_cells", "terrain_ids", "occupied_cells", "elevation_cells", "slope_cells"};
+    const Variant::Type types[] = {Variant::STRING, Variant::INT, Variant::BOOL, Variant::INT, Variant::BOOL};
+    Dictionary result;
+    for (int field = 0; field < 5; ++field) {
+        const String name(fields[field]);
+        const Dictionary source = sources.get(name, Dictionary());
+        const Dictionary retained = previous.get(name, Dictionary());
+        // Sharing is safe by the engine's scalar type constraints, even after
+        // a publication has been evicted from the script identity registry.
+        const Array retained_keys = retained.keys();
+        for (int64_t i = 0; i < retained_keys.size(); ++i) {
+            if (retained_keys[i].get_type() != Variant::VECTOR2I || retained[retained_keys[i]].get_type() != Variant::DICTIONARY) return Dictionary();
+            const Dictionary page = retained[retained_keys[i]];
+            if (!page.is_read_only() || page.get_typed_key_builtin() != Variant::VECTOR2I || page.get_typed_value_builtin() != types[field]) return Dictionary();
+        }
+        Dictionary pages = retained.duplicate();
+        for (int64_t i = 0; i < keys.size(); ++i) {
+            if (keys[i].get_type() != Variant::VECTOR2I) return Dictionary();
+            const Vector2i key = keys[i];
+            if (key.x < 0 || key.y < 0 || key.x * 16 >= size.x || key.y * 16 >= size.y) return Dictionary();
+            Dictionary page;
+            page.set_typed(Variant::VECTOR2I, StringName(), Variant(), types[field], StringName(), Variant());
+            for (int y = key.y * 16; y < std::min(size.y, (key.y + 1) * 16); ++y) {
+                for (int x = key.x * 16; x < std::min(size.x, (key.x + 1) * 16); ++x) {
+                    const Vector2i cell(x, y);
+                    if (!source.has(cell)) continue;
+                    const Variant value = field == 2 ? Variant(true) : source[cell];
+                    if (value.get_type() != types[field]) return Dictionary();
+                    page[cell] = value;
+                }
+            }
+            if (page.is_empty()) pages.erase(key);
+            else { page.make_read_only(); pages[key] = page; }
+        }
+        pages.make_read_only(); result[name] = pages;
+    }
+    result.make_read_only();
+    return result;
+}
+
+PackedByteArray RoRReadModelKernel::rasterize_minimap_fog(const Vector2i &size, const Rect2 &rectangle, const Vector2 &center, double scale, const PackedByteArray &fog) const {
+    const int width = std::max(1, int(Math::round(rectangle.size.x)));
+    const int height = std::max(1, int(Math::round(rectangle.size.y)));
+    PackedByteArray pixels;
+    pixels.resize(int64_t(width) * height * 4);
+    pixels.fill(255);
+    uint8_t *target = pixels.ptrw();
+    for (int64_t i = 3; i < pixels.size(); i += 4) target[i] = 0;
+    if (size.x <= 0 || size.y <= 0 || scale <= 0.0 || fog.size() < int64_t(size.x) * size.y) return pixels;
+    const uint8_t *states = fog.ptr();
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const Vector2 relative = rectangle.position + Vector2(x + 0.5, y + 0.5) - center;
+            const double difference = relative.x / scale, sum = relative.y * 2.0 / scale;
+            const Vector2 world((sum + difference) * 0.5, (sum - difference) * 0.5);
+            if (world.x < 0 || world.y < 0 || world.x >= size.x || world.y >= size.y) continue;
+            const int cell_x = int(Math::floor(world.x)), cell_y = int(Math::floor(world.y));
+            const int64_t offset = (int64_t(y) * width + x) * 4;
+            target[offset] = target[offset + 1] = target[offset + 2] = 0;
+            target[offset + 3] = states[int64_t(cell_y) * size.x + cell_x] == 0 ? 255 : uint8_t(0.58f * 255.0f);
+        }
+    }
+    return pixels;
 }
 
 } // namespace godot

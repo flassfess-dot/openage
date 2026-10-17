@@ -13,6 +13,14 @@ It also uses the correct Stone Age Town Center, berry bush and oak graphics,
 full idle/move/attack animations, original player colors, original voice
 responses, terrain, interface stonework, and music.
 
+Single-player matches keep one **Автосохранение** recovery slot. The first save
+is scheduled after 15 seconds of active play, then every 60 seconds. Menus,
+loading screens, and pauses do not advance its timer. The slot appears in both
+load menus and is replaced atomically only after a background write succeeds.
+It preserves the full match, player controls, AI state, fog memory and TimeLine.
+Large checkpoint capture/compression runs on an isolated worker simulation;
+the foreground transfers only new commands and small player/AI state.
+
 Controls:
 
 - left mouse: select units or drag a selection rectangle
@@ -23,8 +31,10 @@ Controls:
 - `1`-`9`: recall a group; press again to center, use `Shift` to add it
 - `F5`-`F9`: line, protective box, column, wedge, and staggered formations; `Shift+F9`: split flank
 - `F10`: open/close the match menu; `F1`: in-game help
+- `Alt+Enter`: toggle borderless fullscreen and restore the previous window
 - `T`: train a clubman for 50 food
 - `WASD` / arrows: move camera
+- mouse at the game window's outer edge: scroll camera, including over the HUD
 - mouse wheel: zoom
 - `M`: toggle music
 - `Space`: pause/resume simulation
@@ -43,8 +53,10 @@ settings, achievements, population/age TimeLine, scenario instructions and help.
 Loading, overwriting, restarting, resigning and leaving require confirmation.
 TimeLine is recorded during play and retained in checkpoints. Old current-format
 saves remain loadable, with history explicitly starting at restoration.
-While a player is active, detailed opponent statistics are hidden; the final
-screen opens achievements and TimeLine for the completed match.
+TimeLine and statistics include every participant during the match. Match menus,
+diplomacy, scenario briefing and results fill the window with Roman illustrations
+and the main menu's marble and bronze styling. The main menu and HUD artwork
+remain unchanged.
 See `doc/ror-modern/MATCH_MENU_CONTRACT.md` for evidence and validation.
 
 Each group remembers its own formation. Selecting another group only updates the

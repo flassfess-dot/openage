@@ -98,8 +98,8 @@ static func capture(world, controller, definition: Dictionary, map: Dictionary) 
 	for team in world.movement_system.knowledge.entries:
 		var entry: Dictionary = world.movement_system.knowledge.entries[team]
 		var grid := _capture_fields(entry["grid"], GRID_FIELDS)
-		grid["learned"] = entry["grid"].learned
-		knowledge[team] = {"grid": grid, "source_revision": entry["source_revision"], "fog_revision": entry.get("fog_revision", -1)}
+		grid["learned"] = entry["grid"].learned.duplicate()
+		knowledge[team] = {"grid": grid, "source_revision": entry["source_revision"], "fog_revision": entry.get("fog_revision", -1), "gate_revision": entry.get("gate_revision", -1)}
 	var world_state := _capture_fields(world, WORLD_FIELDS)
 	for unit in world_state["units"]:
 		unit.erase("_formation_path_cache")
@@ -287,7 +287,7 @@ static func restore(data: Dictionary, world, controller) -> bool:
 		grid.terrain_restrictions = world.navigation_grid.terrain_restrictions
 		var planner := Pathfinder.new(grid)
 		planner.set_native_enabled(world.pathfinder.native_enabled)
-		world.movement_system.knowledge.entries[team] = {"source": world.navigation_grid, "grid": grid, "planner": planner, "source_revision": saved["source_revision"], "fog_revision": saved["fog_revision"]}
+		world.movement_system.knowledge.entries[team] = {"source": world.navigation_grid, "grid": grid, "planner": planner, "source_revision": saved["source_revision"], "fog_revision": saved["fog_revision"], "gate_revision": saved.get("gate_revision", -1)}
 		fog.track_path_knowledge(int(team))
 	world.simulation_rng.state = int(data["rng_state"])
 	world.entity_id_sequence.reset(int(data["next_entity_id"]))

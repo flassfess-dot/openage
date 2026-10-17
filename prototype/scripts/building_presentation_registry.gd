@@ -4,6 +4,11 @@ extends RefCounted
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
 const CompositeGraphic := preload("res://scripts/composite_graphic.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
+
+# Shared ambient fire has a one-second interval in the raw graphic record.
+# Compose it at the 50 ms cadence of the source tower's idle sequence. Keep this
+# presentation correction separate from gameplay/attack animation timing.
+const CONTINUOUS_LAYER_FRAME_SECONDS := {"dethfire": 0.05}
 const DamageSelector := preload("res://scripts/presentation_damage_selector.gd")
 const WallPlacement := preload("res://scripts/wall_placement.gd")
 const GatePresentation := preload("res://scripts/gate_presentation.gd")
@@ -125,7 +130,7 @@ func _resolve_frame_info(building: Dictionary, animation_time: float = 0.0) -> D
 	var presentation_facing := _presentation_facing(building, base_graphic)
 	var result := _resolved_frame(base_graphic, player, presentation_facing, presentation_time)
 	result["graphic_id"] = base_graphic
-	var parts := _composite_parts(base_graphic, player, presentation_facing, presentation_time)
+	var parts := _composite_parts(base_graphic, player, presentation_facing, presentation_time, _idle_presentation_time(building, animation_time))
 	if base_graphic == 273 and String(building.get("kind", "")) == "farm":
 		parts = parts.map(func(part): return part.duplicate())
 		var field := _farm_layer_frame("field", player)
@@ -252,6 +257,9 @@ func _ensure_loaded(graphic_id: int, player: int) -> String:
 		return ""
 	var spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(graphic_id), {})
 	var sequence_type := int(spec.get("sequence_type", 0))
+	if CONTINUOUS_LAYER_FRAME_SECONDS.has(String(spec.get("filename", ""))):
+		spec = spec.duplicate()
+		spec["frame_rate"] = CONTINUOUS_LAYER_FRAME_SECONDS[String(spec["filename"])]
 	var descriptor := GraphicDescriptor.new(asset_name, spec, frames.size(), sequence_type != 0 and (sequence_type & 0x08) == 0)
 	descriptor.set_hotspots(hotspots)
 	textures_by_key[requested_key] = frames
@@ -370,7 +378,7 @@ func _resolved_frame(graphic_id: int, player: int, logical_facing: int, animatio
 	return result.duplicate()
 
 
-func _composite_parts(base_graphic_id: int, player: int, logical_facing: int, animation_time: float) -> Array:
+func _composite_parts(base_graphic_id: int, player: int, logical_facing: int, animation_time: float, ambient_time: float = -1.0) -> Array:
 	var key := Vector3i(base_graphic_id, player, logical_facing)
 	if not composite_templates.has(key):
 		var template: Array = []
@@ -381,7 +389,9 @@ func _composite_parts(base_graphic_id: int, player: int, logical_facing: int, an
 		if entry.size() > 2:
 			result.append(entry[2])
 			continue
-		var part := _resolved_frame(int(entry[0]), player, logical_facing, animation_time)
+		var spec: Dictionary = graphics_catalog.get("graphics", {}).get(String.num_int64(int(entry[0])), {})
+		var layer_time := ambient_time if ambient_time >= 0.0 and CONTINUOUS_LAYER_FRAME_SECONDS.has(String(spec.get("filename", ""))) else animation_time
+		var part := _resolved_frame(int(entry[0]), player, logical_facing, layer_time)
 		if part.get("texture") == null: continue
 		part["graphic_id"] = int(entry[0])
 		part["screen_offset"] = entry[1]

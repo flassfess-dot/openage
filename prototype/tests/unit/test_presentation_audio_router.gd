@@ -11,6 +11,12 @@ func _initialize() -> void:
 	catalog.load()
 	var router = PresentationAudioRouter.new()
 	router.configure(catalog.runtime_catalog_data, catalog.sound_catalog_data, catalog.asset_records, catalog.graphics_catalog_data, catalog.object_catalog_data)
+	assert_true(router.request_sequence == 0 and router.last_played_by_category.is_empty(), "loading construction audio consumes no seed or cooldown")
+	var construction: Dictionary = router.request("town_center", "construction", 13, 71)
+	assert_true(bool(construction.get("accepted", false)), "a warmed construction cue remains playable")
+	assert_true(router.streams.has(int(construction.get("resource_id", -1))), "construction audio stays resident in the bounded stream cache")
+	assert_true(router.streams.size() <= router.MAX_STREAMS and router.stream_bytes <= router.MAX_STREAM_BYTES, "audio cache respects resource and byte limits")
+	router.reset()
 
 	var selection: Dictionary = router.request("villager", "selection", 13, 7)
 	assert_true(bool(selection.get("accepted", false)), "villager selection resolves through runtime sound ID")

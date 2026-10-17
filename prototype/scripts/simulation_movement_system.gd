@@ -208,7 +208,7 @@ func _advance_formation_corner(unit: Dictionary, planner) -> void:
 	# Intermediate gates must not require every rank to touch the same exact
 	# point. Advance only when the entire swept footprint to the next leg is
 	# clear; the final reserved destination still uses the precise arrival rule.
-	if not planner.grid.is_segment_walkable_for(unit["pos"], path[next_index], float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])): return
+	if not planner.is_segment_walkable(unit["pos"], path[next_index], float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])): return
 	world.set_entity_field(unit, "path_index", next_index)
 	world.set_entity_field(unit, "target", path[next_index])
 
@@ -508,7 +508,7 @@ func ensure_navigation_destination(unit: Dictionary, destination: Vector2) -> vo
 	if not path.is_empty() and path_index >= 0 and path_index < path.size() and int(unit.get("formation_group_id", -1)) < 0 and not bool(unit.get("formation_shared_motion", false)) and Vector2i(previous_destination.floor()) == Vector2i(destination.floor()) and Vector2i(Vector2(path.back()).floor()) == Vector2i(destination.floor()):
 		var planner = knowledge.planner(world, int(unit.get("team", 0)))
 		var final_segment_origin: Vector2 = unit["pos"] if path_index == path.size() - 1 else path[-2]
-		if int(unit.get("path_knowledge_revision", -1)) == int(planner.grid.revision) and planner.grid.is_segment_walkable_for(final_segment_origin, destination, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+		if int(unit.get("path_knowledge_revision", -1)) == int(planner.grid.revision) and planner.is_segment_walkable(final_segment_origin, destination, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
 			# A same-cell endpoint adjustment can still cut an obstacle corner.
 			# Reuse the route only when its new incoming segment remains clear.
 			var updated: Array = path.duplicate()

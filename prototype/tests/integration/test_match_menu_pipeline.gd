@@ -14,6 +14,15 @@ func _initialize() -> void:
 		return
 	game.set_process(false)
 	game.game_controller.set_paused(false)
+	game.view_offset += Vector2(137, -83)
+	var camera_before: Vector2 = game.screen_to_world(game.viewport_focus)
+	viewport.size = Vector2i(800,600)
+	await process_frame
+	await process_frame
+	check(game.screen_to_world(game.viewport_focus).distance_to(camera_before) < 0.01, "resizing/fullscreen layout preserves the camera's world focus")
+	viewport.size = Vector2i(640,480)
+	await process_frame
+	await process_frame
 	var event := InputEventKey.new()
 	event.keycode = KEY_ESCAPE
 	event.pressed = true
@@ -21,12 +30,12 @@ func _initialize() -> void:
 	await process_frame
 	check(game.hud_modal_overlay.is_blocking() and game.game_controller.paused, "Escape opens menu and pauses the single-player match")
 	await process_frame
-	check(Rect2(0,0,640,480).encloses(game.hud_modal_overlay.menu_panel.get_global_rect()), "first menu opening in the real scene fits 640x480 after container layout")
+	check(Rect2(0,0,640,480).encloses(game.hud_modal_overlay.menu_card.get_global_rect()), "first menu opening in the real scene fits 640x480 after container layout")
 	for section in ["save", "load", "settings", "achievements", "timeline", "instructions", "help", "menu"]:
 		game.hud_modal_overlay.show_section(section)
 		await process_frame
 		await process_frame
-		check(Rect2(0,0,640,480).encloses(game.hud_modal_overlay.menu_panel.get_global_rect()), "real scene %s fits 640x480" % section)
+		check(Rect2(0,0,640,480).encloses(game.hud_modal_overlay.menu_card.get_global_rect()), "real scene %s fits 640x480" % section)
 	game._close_hud_modal()
 	check(not game.game_controller.paused, "closing menu restores running state")
 	game._request_window_quit()
@@ -46,7 +55,14 @@ func _initialize() -> void:
 	check(game.game_controller.tick_index == before_tick and not game.hud_modal_overlay.visible, "R without repair context cannot restart the match")
 	game._toggle_game_menu()
 	game.hud_modal_overlay.show_section("timeline")
-	check(game.hud_modal_overlay.timeline.history["teams"].keys() == [game.local_player_team], "active timeline cannot expose opponents through fog")
+	var participants: Array = game.simulation_world.player_registry.all_teams()
+	check(participants.size() >= 2, "fixture has multiple participants in an active match")
+	check(game.hud_modal_overlay.timeline.history["teams"].size() == participants.size(), "active timeline lists all match participants")
+	for team in participants:
+		check(game.hud_modal_overlay.timeline.history["teams"].has(team), "active timeline includes participant %d" % team)
+		for sample in game.hud_modal_overlay.timeline.history["samples"]:
+			check(sample["teams"].has(team), "recorded population of participant %d remains visible" % team)
+	check(game.hud_modal_overlay.timeline_rows.size() == participants.size(), "player table includes opponents before match completion")
 	game.hud_modal_overlay.show_section("instructions")
 	check(not game.hud_modal_overlay.instructions_text.text.is_empty(), "match instructions have actual content")
 	var queued: int = game.game_controller.command_queue.size()

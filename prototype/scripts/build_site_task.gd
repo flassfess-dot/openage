@@ -71,10 +71,7 @@ static func capture(world, team: int, kinds: Array) -> Dictionary:
 		if technology_id >= 0:
 			researched[technology_id] = world.technology_system.is_researched(team, technology_id)
 		profiles[kind] = {"stats": Data.copy(world.unit_stats(kind)), "metadata": metadata, "exists": world.data_repository.has_archetype(kind), "category": world.data_repository.category(kind), "affordable": world.can_afford_resource_cost(team, world.building_cost(kind, team))}
-	var cache: Dictionary = world.ai_build_capture_cache.get(team, {})
-	if int(cache.get("epoch", -1)) != int(world.entity_changes.epoch): cache = {"epoch": world.entity_changes.epoch, "units": {}, "buildings": {}, "retained": {}, "bytes": 0}
-	if not world.ai_build_capture_cache.has(team) and world.ai_build_capture_cache.size() >= 8: world.ai_build_capture_cache.erase(world.ai_build_capture_cache.keys()[0])
-	world.ai_build_capture_cache[team] = cache
+	var cache := _capture_cache(world, team)
 	var workers: Array = []
 	var mobile_cells: Dictionary[Vector2i, bool] = {}
 	var seen_units: Dictionary = {}
@@ -415,6 +412,19 @@ static func capture_build_topology(world, cache: Dictionary, planner) -> Diction
 		cache.erase("topology")
 	var topology := NavigationData.capture_chunked(planner.grid, cache.get("topology", {}), int(cache["topology_generation"]))
 	cache["topology"] = topology
+	# This producer retains a previously validated immutable publication. Refresh
+	# its certificate before the caller freezes the small placement envelope.
+	if not topology.is_empty(): Data._retain_immutable(topology)
 	if world.tick_pipeline.performance_probe != null:
 		world.tick_pipeline.performance_probe.observe_microseconds("navigation.task_topology.capture", Time.get_ticks_usec() - started)
 	return topology
+
+static func _capture_cache(world, team: int) -> Dictionary:
+	var cache: Dictionary = world.ai_build_capture_cache.get(team, {})
+	if int(cache.get("epoch", -1)) != int(world.entity_changes.epoch): cache = {"epoch": world.entity_changes.epoch, "units": {}, "buildings": {}, "retained": {}, "bytes": 0}
+	if not world.ai_build_capture_cache.has(team) and world.ai_build_capture_cache.size() >= 8: world.ai_build_capture_cache.erase(world.ai_build_capture_cache.keys()[0])
+	world.ai_build_capture_cache[team] = cache
+	return cache
+
+static func prepare_topology(world, team: int) -> void:
+	capture_build_topology(world, _capture_cache(world, team), world.movement_system.knowledge.planner(world, team))

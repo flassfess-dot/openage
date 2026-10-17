@@ -109,6 +109,18 @@ func uses_native_kernel() -> bool:
 	return native_enabled and native_available
 
 
+func is_position_walkable(position: Vector2, radius: float, domain: String = "land", restriction: int = -1) -> bool:
+	if uses_native_kernel():
+		var kernel = _native_kernel_for(domain, restriction)
+		if kernel.has_method("is_position_walkable"): return kernel.is_position_walkable(position, radius)
+	return grid.is_position_walkable_for(position, radius, domain, restriction)
+
+func is_segment_walkable(start: Vector2, finish: Vector2, radius: float, domain: String = "land", restriction: int = -1) -> bool:
+	if uses_native_kernel():
+		var kernel = _native_kernel_for(domain, restriction)
+		if kernel.has_method("is_segment_walkable"): return kernel.is_segment_walkable(start, finish, radius)
+	return grid.is_segment_walkable_for(start, finish, radius, domain, restriction)
+
 func detached_task_topology() -> Dictionary:
 	if task_topology_source != grid or task_topology_revision != int(grid.revision) or task_topology_epoch != int(grid.cache_epoch):
 		var started := Time.get_ticks_usec() if performance_probe != null else 0
@@ -583,16 +595,16 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		var same_cell_destination := goal_world if goal == requested_goal else Vector2(goal) + Vector2(0.5, 0.5)
 		if start_world.distance_squared_to(same_cell_destination) > 0.0001:
 			result.append(same_cell_destination)
-	if goal == requested_goal and not result.is_empty() and grid.is_position_walkable_for(goal_world, clearance_radius, movement_domain, restriction_id):
+	if goal == requested_goal and not result.is_empty() and is_position_walkable(goal_world, clearance_radius, movement_domain, restriction_id):
 		var before_goal := result[result.size() - 2] if result.size() > 1 else start_world
-		if result[-1].is_equal_approx(goal_world) or grid.is_segment_walkable_for(before_goal, goal_world, clearance_radius, movement_domain, restriction_id):
+		if result[-1].is_equal_approx(goal_world) or is_segment_walkable(before_goal, goal_world, clearance_radius, movement_domain, restriction_id):
 			result[result.size() - 1] = goal_world
 		elif not result[-1].is_equal_approx(goal_world):
 			result.append(goal_world)
 	# Cell smoothing assumes a centred origin. A worker leaving its off-centre
 	# work slot can otherwise cut through the obstacle beside its starting cell.
 	var start_center := Vector2(start) + Vector2(0.5, 0.5)
-	if not result.is_empty() and not start_world.is_equal_approx(start_center) and not grid.is_segment_walkable_for(start_world, result[0], clearance_radius, movement_domain, restriction_id):
+	if not result.is_empty() and not start_world.is_equal_approx(start_center) and not is_segment_walkable(start_world, result[0], clearance_radius, movement_domain, restriction_id):
 		result.push_front(start_center)
 	cache[key] = result.duplicate()
 	_record_geometry("world", key, result, start, requested_goal, clearance_radius)
@@ -620,6 +632,7 @@ func _geometry_bucket(name: String) -> Dictionary:
 func _sync_route_revision() -> void:
 	if grid.revision == route_cache_revision:
 		return
+	var revision_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var changed: Variant = grid.changed_cells_since(route_cache_revision) if route_cache_revision >= 0 and grid.has_method("changed_cells_since") else null
 	for name in ["world", "cells", "smooth"]:
 		var bucket := _geometry_bucket(name)
@@ -638,6 +651,7 @@ func _sync_route_revision() -> void:
 				metadata.erase(key)
 	fallback_components.clear()
 	route_cache_revision = grid.revision
+	if performance_probe != null: performance_probe.observe_microseconds("navigation.geometry_revision_sync", Time.get_ticks_usec() - revision_started)
 
 
 func _trim_geometry_cache(name: String) -> void:
@@ -792,8 +806,10 @@ func _search_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String 
 
 func _find_native_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String, restriction_id: int, clearance_radius: float) -> Array[Vector2i]:
 	var kernel = _native_kernel_for(movement_domain, restriction_id)
+	var native_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var packed: PackedInt32Array = kernel.find_cell_path(start, goal, clearance_radius)
 	if performance_probe != null:
+		performance_probe.observe_microseconds("navigation.native_search", Time.get_ticks_usec() - native_started)
 		performance_probe.increment("navigation.native_path_queries")
 		performance_probe.increment("navigation.expanded_nodes", int(kernel.get_last_expanded_nodes()))
 	var result: Array[Vector2i] = []
@@ -831,8 +847,10 @@ func _find_native_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement_d
 
 func _search_native_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String, restriction_id: int, clearance_radius: float) -> Dictionary:
 	var kernel = _native_kernel_for(movement_domain, restriction_id)
+	var native_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var packed: PackedInt32Array = kernel.find_smoothed_cell_path(start, goal, clearance_radius)
 	if performance_probe != null:
+		performance_probe.observe_microseconds("navigation.native_smoothing", Time.get_ticks_usec() - native_started)
 		performance_probe.increment("navigation.native_path_queries")
 		performance_probe.increment("navigation.expanded_nodes", int(kernel.get_last_expanded_nodes()))
 	var result: Array[Vector2i] = []
@@ -973,6 +991,13 @@ func line_walkable(start: Vector2i, goal: Vector2i, movement_domain: String = "l
 func direct_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
 	if grid == null or not grid.contains(start) or not grid.contains(goal):
 		return []
+	if uses_native_kernel():
+		var kernel = _native_kernel_for(movement_domain, restriction_id)
+		if kernel.has_method("direct_cell_path"):
+			var packed: PackedInt32Array = kernel.direct_cell_path(start, goal, clearance_radius)
+			var cells: Array[Vector2i] = []
+			for i in range(0, packed.size(), 2): cells.append(Vector2i(packed[i], packed[i + 1]))
+			return cells
 	if not _cell_walkable(start, movement_domain, restriction_id, clearance_radius) or not _cell_walkable(goal, movement_domain, restriction_id, clearance_radius):
 		return []
 	var result: Array[Vector2i] = [start]
@@ -994,6 +1019,9 @@ func direct_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String =
 
 
 func nearest_walkable(requested: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Vector2i:
+	if uses_native_kernel():
+		var kernel = _native_kernel_for(movement_domain, restriction_id)
+		if kernel.has_method("nearest_walkable"): return kernel.nearest_walkable(requested, clearance_radius)
 	if grid.contains(requested) and _cell_walkable(requested, movement_domain, restriction_id, clearance_radius):
 		return requested
 	if endpoint_cache_revision != int(grid.revision):

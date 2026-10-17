@@ -21,7 +21,8 @@ func _initialize() -> void:
 			await process_frame
 			await process_frame
 			var bounds := Rect2(Vector2.ZERO, Vector2(dimensions)).grow(0.1)
-			check(bounds.encloses(menu.menu_panel.get_global_rect()), "%s at %s fits viewport: %s" % [section, dimensions, menu.menu_panel.get_global_rect()])
+			check(bounds.encloses(menu.menu_card.get_global_rect()), "%s at %s fits viewport: %s" % [section, dimensions, menu.menu_panel.get_global_rect()])
+			check(menu.menu_panel.get_global_rect().size == Vector2(dimensions), "match menu fills the complete window")
 			check(bounds.encloses(menu.back_button.get_global_rect()), "%s at %s retains Back" % [section, dimensions])
 			if section == "menu" and dimensions.x >= 640:
 				for button in menu.menu_buttons.values():
@@ -66,6 +67,28 @@ func _initialize() -> void:
 	check(menu.stats_table.get_column_title(1) == "Еда", "economy tab opens resource totals")
 	menu.statistic_tabs[4].pressed.emit()
 	check(menu.stats_table.get_root().get_child(0).get_text(2) == "00:00:07", "technology table exposes recorded age transition times")
+	menu.show_section("settings")
+	await process_frame
+	await process_frame
+	var checkbox: CheckBox = menu.preference_controls["fullscreen"]
+	check(checkbox.get_theme_stylebox("normal") is StyleBoxEmpty, "checkbox uses a tick without a plaque background")
+	check(checkbox.size_flags_horizontal == Control.SIZE_SHRINK_BEGIN, "checkbox does not expand into a column-wide button")
+	var option: OptionButton = menu.preference_controls["speed"]
+	var surface := option.get_theme_stylebox("normal")
+	check(surface.get_content_margin(SIDE_LEFT) >= 14 and surface.get_content_margin(SIDE_RIGHT) >= 14, "option text stays inside the marble face")
+	check(option.get_theme_constant("arrow_margin") >= 12, "option arrow is inset from its visual frame")
+	menu.body_scroll.ensure_control_visible(checkbox)
+	await process_frame
+	await process_frame
+	var before_check := checkbox.button_pressed
+	for pressed in [true, false]:
+		var click := InputEventMouseButton.new()
+		click.position = checkbox.get_global_rect().position + Vector2(10, 16)
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.pressed = pressed
+		click.button_mask = MOUSE_BUTTON_MASK_LEFT if pressed else 0
+		viewport.push_input(click, true)
+	check(checkbox.button_pressed != before_check, "clicking the square toggles the actual fullscreen checkbox")
 	var emitted: Array = []
 	menu.named_save_requested.connect(func(name: String): emitted.append(["save", name]))
 	menu.named_load_requested.connect(func(path: String): emitted.append(["load", path]))

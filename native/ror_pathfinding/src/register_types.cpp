@@ -8,6 +8,7 @@
 #include "ror_visibility_kernel.hpp"
 #include "ror_terrain_kernel.hpp"
 #include "ror_read_model_kernel.hpp"
+#include "ror_save_file_kernel.hpp"
 
 using namespace godot;
 
@@ -20,6 +21,7 @@ void initialize_ror_pathfinding(ModuleInitializationLevel level) {
     GDREGISTER_CLASS(RoRTerrainKernel);
     GDREGISTER_CLASS(RoRStaticSpriteProjection);
     GDREGISTER_CLASS(RoRReadModelKernel);
+    GDREGISTER_CLASS(RoRSaveFileKernel);
 }
 
 void uninitialize_ror_pathfinding(ModuleInitializationLevel level) {

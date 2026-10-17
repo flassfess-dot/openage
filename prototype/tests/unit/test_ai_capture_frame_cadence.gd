@@ -6,6 +6,7 @@ const Ai := preload("res://scripts/ai_player.gd")
 const Task := preload("res://scripts/ai_planning_task.gd")
 const Queue := preload("res://scripts/ai_decision_queue.gd")
 const Coordinator := preload("res://scripts/isolated_task_coordinator.gd")
+const Queries := preload("res://scripts/simulation_observation_queries.gd")
 var failures: Array[String] = []
 func _initialize() -> void:
 	var world := World.new(Vector2i(24, 24))
@@ -17,6 +18,9 @@ func _initialize() -> void:
 	var first: Dictionary = preparation.capture(world, store, ai, 0, 8, null, 1_000_000)
 	check(not first.is_empty() and not first.get("pending", false), "short stages finish without holding another frame")
 	check(world.read_generation_pins == 0 and preparation.captures.is_empty(), "completed capture releases its generation")
+	var facts: Dictionary = first["snapshot"]
+	var spatial_only := Queries.enrich(world, facts, {"command_option_entity_ids": [], "include_navigation": false, "include_build_sites": false})
+	check(is_same(spatial_only["units"], facts["units"]) and is_same(spatial_only["buildings"], facts["buildings"]), "spatial-only enrichment retains already frozen actor arrays")
 	var second: Dictionary = preparation.capture(world, store, ai, 0, 8, null, 1_000_000)
 	check(not second.get("pending", false), "warm capture has no mandatory frame gaps")
 	check(int(second.get("tick", -1)) == 8 and int(second.get("snapshot", {}).get("tick", -1)) == 0, "source and predetermined apply tick stay distinct")

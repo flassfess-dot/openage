@@ -56,6 +56,8 @@ public:
     Dictionary project_ai(const Dictionary &source, const Dictionary &previous, int64_t observer_team, const Array &fields, const Array &array_fields, const Array &private_trade_fields) const;
     Dictionary encode_replay_variant(const Variant &source, bool quantize_numbers = true) const;
     Dictionary capture_frozen(const Variant &source, const Array &trusted) const;
+    Dictionary capture_navigation_pages(const Dictionary &sources, const Dictionary &previous, const Array &keys, const Vector2i &size) const;
+    PackedByteArray rasterize_minimap_fog(const Vector2i &size, const Rect2 &rectangle, const Vector2 &center, double scale, const PackedByteArray &fog) const;
 
 protected:
     static void _bind_methods();

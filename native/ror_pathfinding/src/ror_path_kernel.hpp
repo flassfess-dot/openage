@@ -46,12 +46,17 @@ public:
     Vector4 calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) const;
     int64_t get_revision() const;
     int64_t get_walkability_version() const;
+    int64_t get_connectivity_rebuild_count() const;
     int32_t get_last_expanded_nodes() const;
     bool get_last_path_was_direct() const;
     bool is_configured() const;
     int32_t component_id(const Vector2i &cell, double clearance_radius = 0.0);
     Dictionary group_points_by_component(const TypedArray<Vector2> &points, double clearance_radius = 0.0);
     bool cells_connected(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
+    PackedInt32Array corridor_widths(const TypedArray<Vector2i> &cells, int64_t maximum, double radius) const;
+    bool is_segment_walkable(const Vector2 &start, const Vector2 &finish, double radius) const;
+    PackedInt32Array direct_cell_path(const Vector2i &start, const Vector2i &goal, double radius) const;
+    Vector2i nearest_walkable(const Vector2i &requested, double radius) const;
 
 protected:
     static void _bind_methods();
@@ -67,8 +72,13 @@ private:
     int32_t height_ = 0;
     int64_t revision_ = -1;
     int64_t walkability_version_ = 0;
+    int64_t connectivity_rebuild_count_ = 0;
     int32_t last_expanded_nodes_ = 0;
     bool last_path_was_direct_ = false;
+    int64_t cached_search_version_ = -1;
+    Vector2i cached_search_start_, cached_search_goal_;
+    double cached_search_radius_ = 0.0;
+    PackedInt32Array cached_search_path_;
     uint32_t search_generation_ = 0;
     std::shared_ptr<std::vector<uint8_t>> walkable_ = std::make_shared<std::vector<uint8_t>>();
     std::vector<double> costs_;
@@ -78,6 +88,10 @@ private:
     std::unordered_map<uint64_t, std::shared_ptr<const std::vector<int32_t>>> components_by_radius_;
     const std::vector<int32_t> &components(double clearance_radius);
     bool patch_components(double radius, const std::vector<int32_t> &changed,
+        std::shared_ptr<const std::vector<int32_t>> &labels) const;
+    bool patch_component_region(double radius, const std::vector<int32_t> &changed,
+        std::shared_ptr<const std::vector<int32_t>> &labels) const;
+    bool patch_open_components(double radius, const std::vector<int32_t> &changed,
         std::shared_ptr<const std::vector<int32_t>> &labels) const;
     // All terrain-specific kernels borrow the same immutable neighbor generation.
     struct MovementSnapshot {

@@ -133,6 +133,7 @@ func rally_flag_frame_info(team: int, animation_time: float) -> Dictionary:
 
 func prewarm_match_entities(units: Array, buildings: Array) -> void:
 	unit_presentations.prewarm_units(units)
+	building_presentations.gate_presentations.prewarm_textures()
 	building_presentations.prewarm_buildings(buildings)
 	for building in buildings:
 		if String(building.get("state", "")) == "complete":

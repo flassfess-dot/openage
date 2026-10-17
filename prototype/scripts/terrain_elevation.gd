@@ -38,9 +38,9 @@ var maximum_vertex_level: int = 0
 var maximum_vertex_level_dirty: bool = false
 
 
-func _init(map_size: Vector2i = Vector2i.ONE) -> void:
+func _init(map_size: Vector2i = Vector2i.ONE, initialize_vertices: bool = true) -> void:
 	size = Vector2i(maxi(1, map_size.x), maxi(1, map_size.y))
-	clear()
+	if initialize_vertices: clear()
 
 
 func clear(level: int = 0) -> void:

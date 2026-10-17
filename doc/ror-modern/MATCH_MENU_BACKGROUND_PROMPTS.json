@@ -1,0 +1,23 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-10-17",
+  "purpose": "New backgrounds for fullscreen match menus. Existing launcher artwork and theme are unchanged.",
+  "assets": [
+    {
+      "file": "prototype/assets/menu/in-match-camp-v1.png",
+      "source": "exec-0457f7d1-49be-4a11-a80d-43cb6efe217d.png",
+      "prompt": "Use case: historical-scene. Asset type: final full-screen background illustration for the in-match pause/save/settings menus of a Roman-era RTS, not a UI mockup. Generate one polished cinematic 16:9 landscape, ideally 2560x1440 or larger. Scene: inside a Roman command pavilion at dusk, looking toward a Mediterranean fortified camp and distant aqueduct. Main visual interest in the LEFT THIRD: a finely carved marble bust, bronze oil lamps, an ivory-and-bronze helmet, folded red cloak and rolled papyrus on a stone table; through the left arch, orderly legionary tents and warm watchfires. The RIGHT HALF and lower central area should be visually calm, dark chestnut stone and soft shadow, suitable behind readable menu panels. Match the feel of a beautiful historical RTS main-menu matte painting: convincing Roman architecture, natural detailed marble, aged bronze, burgundy cloth, golden candlelight against cool blue evening. Sophisticated realistic painterly rendering, atmospheric depth, high craft, coherent perspective, no modern objects. The entire scene is an immersive environment, not a framed picture. Important motifs remain within central 4:3 crop; expendable scenery at extreme sides for ultrawide cropping. No people close to camera. No words, text, lettering, logos, menus, charts, buttons, watermark or ornamental UI border. Opaque background.",
+      "width": 1672,
+      "height": 941,
+      "sha256": "5e7ae732cb894c60b548d919e6ead66998da8b1d8bb70981b1852af6d3cf6402"
+    },
+    {
+      "file": "prototype/assets/menu/in-match-chronicles-v1.png",
+      "source": "exec-cba55b92-fed0-4a3c-b537-0232d6d51950.png",
+      "prompt": "Use case: historical-scene. Asset type: final full-screen background illustration for an ancient Roman RTS's match statistics, TimeLine, objectives and diplomacy screens, not a UI mockup. Generate one polished cinematic 16:9 landscape, ideally 2560x1440 or larger. A Roman hall of chronicles at blue hour: warm bronze lamps illuminate marble columns, carved wall reliefs of legionary processions, shelves of papyrus scrolls, a bronze astrolabe-like ancient armillary sphere and a broad dark wooden writing desk with a few unmarked scrolls and campaign-map fragments near the edges. A distant arched balcony overlooks a luminous Roman harbor at twilight. Main architectural details and warm highlights frame the LEFT and UPPER EDGES; keep the central and RIGHT regions comparatively calm, low contrast dark umber stone, so wide statistics panels remain readable. Same visual family as a premium historical RTS main-menu painting: realistic material detail, warm amber light, restrained burgundy textiles, ivory marble, aged bronze, soft blue distance, elegant perspective and atmospheric depth. Spacious composition, richly painted but not cluttered. Important scene survives center 4:3 crop and ultrawide edge cropping. No recognizable written text, letters, numbers, logos, menus, UI frames, charts, grids, buttons or watermark. No modern technology, no fantasy motifs. Opaque background.",
+      "width": 1672,
+      "height": 941,
+      "sha256": "557a622c9eab5ac00e4fb13736a236116ee529d561294e35db92b40fadb768f4"
+    }
+  ]
+}

@@ -47,6 +47,8 @@ const BackgroundSaveTask := preload("res://scripts/background_save_task.gd")
 const BackgroundSaveQueue := preload("res://scripts/background_save_queue.gd")
 const TaskData := preload("res://scripts/isolated_task_data.gd")
 var background_saves := BackgroundSaveQueue.new()
+const BackgroundAutosave := preload("res://scripts/background_autosave.gd")
+var autosave := BackgroundAutosave.new()
 const TaskCoordinator := preload("res://scripts/isolated_task_coordinator.gd")
 const AiPlanningTask := preload("res://scripts/ai_planning_task.gd")
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
@@ -198,6 +200,7 @@ var hud_modal_overlay: HUDModalOverlay
 var modal_restore_paused := false
 var match_preferences := preload("res://scripts/match_preferences.gd").new()
 var menu_details_tick := -1
+var viewport_focus := Vector2.ZERO
 var launcher_quit_confirmation: ConfirmationDialog
 var launcher_suspended := false
 var launcher_restore_paused := false
@@ -372,16 +375,14 @@ func _ready() -> void:
 	add_child(navigation_loading_label)
 	reset_game()
 	_apply_audio_preferences()
-	if get_viewport() == get_tree().root and FileAccess.file_exists(match_preferences.PATH):
-		get_window().mode = Window.MODE_FULLSCREEN if bool(match_preferences.values["fullscreen"]) else Window.MODE_WINDOWED
-		if get_window().mode == Window.MODE_WINDOWED: get_window().size = match_preferences.values["screen_size"]
+	get_node("/root/WindowMode").mode_changed.connect(_on_window_mode_changed)
 	if not network_role.is_empty():
 		_start_network_match()
 		if network_session != null:
 			_create_network_chat_input()
 	setup_audio()
 	setup_sfx()
-	get_viewport().size_changed.connect(center_initial_view)
+	get_viewport().size_changed.connect(func(): center_initial_view(false))
 	center_initial_view()
 func unit_stats(kind: String) -> Dictionary:
 	if simulation_world == null:
@@ -442,7 +443,7 @@ func play_audio_request(request: Dictionary) -> void:
 	player.stream = request["stream"]
 	player.play()
 
-func center_initial_view() -> void:
+func center_initial_view(recenter: bool = true) -> void:
 	var size := get_viewport_rect().size
 	if hud_controls != null:
 		hud_controls.position = Vector2.ZERO
@@ -457,19 +458,25 @@ func center_initial_view() -> void:
 		scenario_overlay.size = size
 	if network_chat_input != null:
 		network_chat_input.position = Vector2(16, size.y - hud_bottom_height() - 40)
-	var initial_world := Vector2(map_size.x / 2.0, map_size.y / 2.0)
-	var local_team := local_player_team
-	for player_value in match_definition.get("players", []):
-		var player: Dictionary = player_value
-		if int(player.get("team", 0)) == local_team:
-			initial_world = player.get("start", initial_world)
-			break
-	var initial_screen := iso_raw(initial_world) * view_zoom
-	view_offset = Vector2(size.x * 0.5, (size.y - hud_bottom_height() + hud_top_height()) * 0.48) - initial_screen
+	var focus := Vector2(size.x * 0.5, (size.y - hud_bottom_height() + hud_top_height()) * 0.48)
+	if not recenter and viewport_focus != Vector2.ZERO:
+		view_offset += focus - viewport_focus
+	else:
+		var initial_world := Vector2(map_size.x / 2.0, map_size.y / 2.0)
+		var local_team := local_player_team
+		for player_value in match_definition.get("players", []):
+			var player: Dictionary = player_value
+			if int(player.get("team", 0)) == local_team:
+				initial_world = player.get("start", initial_world)
+				break
+		var initial_screen := iso_raw(initial_world) * view_zoom
+		view_offset = focus - initial_screen
+	viewport_focus = focus
 	_sync_terrain_canvas()
 	queue_redraw()
 
 func reset_game() -> void:
+	autosave.shutdown()
 	PickingService.SelectionResolver.clear_hit_images()
 	navigation_loading.shutdown()
 	background_saves.drain()
@@ -563,6 +570,7 @@ func reset_game() -> void:
 		hud_modal_overlay.close()
 	game_message = String(bootstrap.get("message", "Матч начат"))
 	message_time = 7.0
+	_seed_autosave()
 	queue_redraw()
 
 func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dictionary:
@@ -591,6 +599,7 @@ func _process(delta: float) -> void:
 			navigation_loading_label.hide()
 	task_coordinator.reap_abandoned()
 	_poll_save_jobs()
+	_poll_autosave(delta)
 	if resource_catalog != null:
 		resource_catalog.unit_presentations.poll_background_loading()
 	if probe != null: probe.observe_microseconds("presentation.process.background_loading", Time.get_ticks_usec() - frame_started)
@@ -635,7 +644,8 @@ func update_camera(delta: float) -> void:
 	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): direction.y += 1.0
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): direction.y -= 1.0
 	if get_window().has_focus():
-		direction += PointerController.edge_scroll_direction(get_viewport().get_mouse_position(), get_viewport_rect().size, PointerController.EDGE_SCROLL_MARGIN, hud_top_height(), hud_bottom_height())
+		var window := get_window()
+		direction += PointerController.window_edge_scroll_direction(Vector2(DisplayServer.mouse_get_position()), Rect2(Vector2(window.position), Vector2(window.size)))
 	if direction != Vector2.ZERO:
 		view_offset += direction.normalized() * 430.0 * float(match_preferences.values["scroll"]) * delta
 
@@ -1266,6 +1276,7 @@ func _request_window_quit() -> void:
 	if launcher_suspended:
 		if not is_instance_valid(launcher_quit_confirmation):
 			launcher_quit_confirmation = ConfirmationDialog.new()
+			launcher_quit_confirmation.theme = preload("res://scripts/match_menu_theme.gd").shared_theme()
 			launcher_quit_confirmation.title = "Выйти из игры?"
 			launcher_quit_confirmation.dialog_text = "Текущий матч хранится в памяти. При закрытии игры несохранённый прогресс будет потерян."
 			launcher_quit_confirmation.ok_button_text = "Выйти"
@@ -1293,12 +1304,14 @@ func _apply_menu_preferences(values: Dictionary) -> void:
 	_apply_audio_preferences()
 	if network_session == null and values.has("speed"): game_controller.set_speed_multiplier(float(values["speed"]))
 	if get_viewport() == get_tree().root:
-		var window := get_window()
-		window.mode = Window.MODE_FULLSCREEN if bool(values.get("fullscreen", false)) else Window.MODE_WINDOWED
-		if not bool(values.get("fullscreen", false)):
-			window.size = values.get("screen_size", window.size)
-			window.move_to_center()
+		get_node("/root/WindowMode").apply_settings(bool(values.get("fullscreen", false)), values.get("screen_size", get_window().size))
 	hud_modal_overlay.set_menu_status("Настройки применены" if error == OK else "Настройки применены, но не удалось сохранить их на диск", error != OK)
+
+func _on_window_mode_changed(fullscreen: bool) -> void:
+	match_preferences.values["fullscreen"] = fullscreen
+	match_preferences.values["screen_size"] = get_node("/root/WindowMode").windowed_size
+	if hud_modal_overlay != null:
+		hud_modal_overlay.preference_controls["fullscreen"].set_pressed_no_signal(fullscreen)
 
 func _refresh_menu_details() -> void:
 	if simulation_world == null or game_controller == null: return
@@ -1307,13 +1320,12 @@ func _refresh_menu_details() -> void:
 	menu_details_tick = game_controller.tick_index
 	recorder.begin(simulation_world, tick)
 	var history: Dictionary = recorder.state()
-	var reveal := battle_over or local_spectator
-	var allowed: Array = simulation_world.player_registry.all_teams() if reveal else [local_player_team]
+	var participants: Array = simulation_world.player_registry.all_teams()
 	history["current_tick"] = tick
-	history["reveal_all"] = reveal
+	history["reveal_all"] = true
 	var rows := {}
 	var current_values := {}
-	for team_value in allowed:
+	for team_value in participants:
 		var team := int(team_value)
 		var row: Dictionary = history["teams"].get(team, {}).duplicate(true)
 		row["population"] = simulation_world.get_population(team)
@@ -1336,10 +1348,6 @@ func _refresh_menu_details() -> void:
 		rows[team] = row
 		current_values[team] = {"population": row["population"], "age": row["age"]}
 	history["teams"] = rows
-	for sample in history["samples"]:
-		for team in sample["teams"].keys():
-			if team not in allowed: sample["teams"].erase(team)
-	history["markers"] = history["markers"].filter(func(marker): return int(marker.get("team", 0)) in allowed)
 	if history["samples"].is_empty() or int(history["samples"][-1]["tick"]) != tick: history["samples"].append({"tick": tick, "teams": current_values})
 	hud_modal_overlay.set_statistics(history)
 	var model: Dictionary = scenario_overlay.presentation_model.duplicate(true) if scenario_overlay != null else {}
@@ -1347,7 +1355,7 @@ func _refresh_menu_details() -> void:
 		if match_definition.has(key): model[key] = match_definition[key]
 	hud_modal_overlay.set_instructions(model)
 	var values: Dictionary = match_preferences.values.duplicate(true)
-	values["screen_size"] = get_window().size
+	values["screen_size"] = get_node("/root/WindowMode").windowed_size if get_node("/root/WindowMode").is_fullscreen() else get_window().size
 	values["fullscreen"] = get_window().mode in [Window.MODE_FULLSCREEN, Window.MODE_EXCLUSIVE_FULLSCREEN]
 	hud_modal_overlay.set_preferences(values, game_controller.get_speed_multiplier())
 
@@ -1367,6 +1375,9 @@ func _load_quick_game() -> void:
 
 
 func _save_named_game(name: String) -> void:
+	if GameSaveArchive.normalized_slot_name(name) == GameSaveArchive.AUTOSAVE_NAME:
+		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message("slot_name_reserved"), true)
+		return
 	var path: String = GameSaveArchive.named_path(name)
 	if path.is_empty():
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message("slot_name_invalid"), true)
@@ -1384,7 +1395,7 @@ func _load_named_game(path: String) -> void:
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
 
-func _capture_save_input(path: String, slot_name: String = "Быстрое сохранение") -> Dictionary:
+func _capture_save_input(path: String, slot_name: String = "Быстрое сохранение", metadata_only: bool = false) -> Dictionary:
 	last_save_error = ""
 	if network_session != null:
 		last_save_error = "network_save_unsupported"
@@ -1410,11 +1421,36 @@ func _capture_save_input(path: String, slot_name: String = "Быстрое со�
 		"speed": game_controller.get_speed_multiplier(),
 		"paused": launcher_restore_paused if launcher_suspended else modal_restore_paused if hud_modal_overlay != null and hud_modal_overlay.is_blocking() else game_controller.paused,
 	}
+	if metadata_only:
+		return match_lifecycle.capture_save_header(game_controller, ai_players, ai_decision_queue, path, slot_name, match_path, match_definition, view_state, controller_state, false)
 	var input: Dictionary = match_lifecycle.capture_save(simulation_world, game_controller, ai_players, ai_decision_queue, path, slot_name, match_path, match_definition, map_definition, view_state, controller_state)
 	if not TaskData.is_detached(input):
 		last_save_error = "capture_not_isolated"
 		return {}
 	return input
+
+func _seed_autosave() -> void:
+	if not autosave.enabled or network_session != null or not network_role.is_empty(): return
+	autosave.seed_from(simulation_world, game_controller, match_definition, map_definition, {"gamespec": gamespec_data, "terrain": resource_catalog.terrain_catalog_data, "objects": resource_catalog.object_catalog_data, "graphics": resource_catalog.graphics_catalog_data, "runtime": resource_catalog.runtime_catalog_data})
+
+func _poll_autosave(delta: float) -> bool:
+	var result := autosave.poll()
+	if not result.is_empty() and int(result["error"]) == OK and hud_modal_overlay != null:
+		hud_modal_overlay.set_named_saves(GameSaveArchive.with_autosave_result(hud_modal_overlay.named_saves, result))
+	var playable := network_session == null and not launcher_suspended and game_controller != null and simulation_world != null and not game_controller.paused and not simulation_world.battle_over and not (scenario_overlay != null and scenario_overlay.is_blocking()) and not (hud_modal_overlay != null and hud_modal_overlay.is_blocking())
+	var committed := not result.is_empty() and int(result["error"]) == OK
+	if not result.is_empty() and not committed:
+		game_message = "Не удалось выполнить автосохранение. Повторим попытку."
+		message_time = 6.0
+	if not autosave.advance(delta, playable): return committed
+	# A pending AI observation can contain a whole navigation map. Wait for its
+	# normal publication instead of encoding it on the render thread.
+	if ai_decision_queue.active or background_saves.active_request >= 0 or not background_saves.waiting.is_empty(): return committed
+	var started := Time.get_ticks_usec()
+	var input := _capture_save_input(GameSaveArchive.AUTOSAVE_PATH, GameSaveArchive.AUTOSAVE_NAME, true)
+	if not input.is_empty(): autosave.submit(input, simulation_world, game_controller)
+	autosave.last_capture_us = Time.get_ticks_usec() - started
+	return committed
 
 func request_save_game_to_path(path: String, slot_name: String = "Быстрое сохранение") -> bool:
 	if background_saves.waiting.size() >= BackgroundSaveQueue.MAX_WAITING:
@@ -1458,8 +1494,13 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	last_save_error = ""
 	if network_session != null:
 		return _load_failed("network_load_unsupported")
+	# Release the worker world before allocating the replacement match. A
+	# failed explicit load reseeds the still-running original match below.
+	autosave.shutdown()
 	var restored: Dictionary = match_lifecycle.restore(path, Callable(self, "_new_simulation_world"), Callable(self, "_new_ai_players"), Callable(self, "_configure_runtime_ai_cadence"), Callable(self, "_capture_ai_decision"), inspected)
-	if not String(restored["error"]).is_empty(): return _load_failed(String(restored["error"]))
+	if not String(restored["error"]).is_empty():
+		_seed_autosave()
+		return _load_failed(String(restored["error"]))
 	var archive: Dictionary = restored["archive"]
 	var restored_definition: Dictionary = restored["definition"]
 	var restored_map: Dictionary = restored["map"]
@@ -1567,6 +1608,7 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	# loading, so the first visible frame only submits cached presentation.
 	cached_fog_slope_neighbor_terrain_revision = _terrain_geometry_revision()
 	_sync_world_fog_texture(presentation_snapshot.get("fog", {}).get("cells", []), int(presentation_snapshot.get("fog_revision", -1)))
+	_seed_autosave()
 	if scenario_overlay != null:
 		scenario_overlay.reset_presentation()
 		scenario_overlay.set_snapshot(presentation_snapshot)
@@ -1597,15 +1639,18 @@ func assign_control_group(group_number: int) -> void:
 
 func recall_control_group(group_number: int, additive: bool) -> void:
 	var available_ids: Array[int] = []
-	for unit in overview_units:
+	# The overview is sampled every four ticks. A key press must validate the
+	# current owned units, including deaths and newly trained units between samples.
+	for unit in simulation_world.get_units():
 		if unit["team"] == local_player_team and unit["hp"] > 0.0:
 			available_ids.append(int(unit["id"]))
 	var result: Dictionary = control_groups.recall(group_number, available_ids, _selection_ids(selected_units()), additive)
-	var recalled_ids: Array[int] = result["ids"]
-	if recalled_ids.is_empty():
+	if result["ids"].is_empty():
 		game_message = "Группа %d пуста" % group_number
 		message_time = 1.5
 		return
+	var recalled_ids: Array[int] = []
+	recalled_ids.assign(result["ids"])
 	player_control_state.replace_or_add(recalled_ids, additive)
 	if result["center"]:
 		center_view_on_units(recalled_ids)
@@ -2506,6 +2551,7 @@ func resume_from_launcher() -> void:
 	queue_redraw()
 
 func _exit_tree() -> void:
+	autosave.shutdown()
 	PickingService.SelectionResolver.clear_hit_images()
 	navigation_loading.shutdown()
 	background_saves.shutdown()

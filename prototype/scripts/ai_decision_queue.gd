@@ -9,7 +9,7 @@ const PlanningTask := preload("res://scripts/ai_planning_task.gd")
 const LOOKAHEAD_TICKS := 8
 const STATE_VERSION := 2
 const MAX_INPUT_BYTES := 64 * 1024 * 1024
-const PREPARATION_BUDGET_USEC := 4000
+const PREPARATION_BUDGET_USEC := 7000
 
 var records: Array = []
 var executors: Dictionary = {}
@@ -70,7 +70,7 @@ func poll(coordinator, current_source_tick: int, frame_id: int, probe: Variant =
 					preparation_usec_left = 0
 					return {"ready": false, "planned": true}
 				var seal_started := Time.get_ticks_usec() if probe != null else 0
-				record["input"] = Data.seal(captured) if not captured.is_empty() else {}
+				record["input"] = Data.seal(Data.capture_frozen(captured)) if not captured.is_empty() else {}
 				if probe != null:
 					probe.observe_microseconds("presentation.ai.seal", Time.get_ticks_usec() - seal_started)
 				if record["input"].is_empty():
@@ -104,7 +104,9 @@ func gate(status: Dictionary, next_tick: int) -> Dictionary:
 	if status.has("error") or not is_prepared():
 		return {"ready": false, "planned": active}
 	if next_tick < apply_tick:
-		return {"ready": true, "planned": false}
+		# This poll has not committed AI state or enqueued gameplay commands.
+		# It is safe to repeat if the controller yields the rendered frame.
+		return {"ready": true, "planned": false, "can_defer": true}
 	return status
 
 func take_ready() -> Array:
