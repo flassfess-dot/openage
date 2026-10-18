@@ -98,14 +98,18 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 	var grid = world.navigation_grid
 	var size: Vector2i = world.map_size
 	var entry: Dictionary = entries.get(team, {})
-	var topology := CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
-	var exploration := CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
-	var reach := _reachable_components(world, team)
+	var pending: Dictionary = pending_preparations.get(team, {})
+	# All portions of a pinned generation see exactly the same dependency set.
+	# Do not re-scan its reachability and journals for every eight actors.
+	var pin_source := [world.entity_changes.epoch, world.entity_changes.revision, grid.cache_epoch, grid.revision, fog.revision_for_player(team)] if world.read_generation_pins > 0 else []
+	var reuse_dependencies: bool = not pin_source.is_empty() and pending.get("pin_source") == pin_source and pending.has("dependencies")
+	var topology: Dictionary = pending["dependencies"]["topology"] if reuse_dependencies else CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
+	var exploration: Dictionary = pending["dependencies"]["exploration"] if reuse_dependencies else CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
+	var reach: Dictionary = pending["dependencies"]["reach"] if reuse_dependencies else _reachable_components(world, team)
 	_observe_stage(probe, "prepare.dependencies", stage_started)
 	stage_started = Time.get_ticks_usec() if probe != null else 0
 	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
 	var signature := [topology["stamp"], CacheDependency.stamp(world, CacheDependency.NAVIGATION_SURFACE), exploration["stamp"], reach["signature"]]
-	var pending: Dictionary = pending_preparations.get(team, {})
 	if pending.is_empty() or pending.get("signature") != signature:
 		var indices: Array = []
 		if full_rebuild:
@@ -113,7 +117,7 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 			entry["building_full"] = true
 		else:
 			indices = _dirty_cell_indices(entry, topology, exploration, reach, size)
-		pending = {"signature": signature, "cursor": 0, "entry": entry, "reach": reach, "full": full_rebuild, "indices": indices, "cells_ready": false}
+		pending = {"signature": signature, "cursor": 0, "entry": entry, "reach": reach, "full": full_rebuild, "indices": indices, "cells_ready": false, "pin_source": pin_source, "dependencies": {"topology":topology,"exploration":exploration,"reach":reach}}
 		pending_preparations[team] = pending
 	entry = pending["entry"]
 	if not bool(pending["cells_ready"]):

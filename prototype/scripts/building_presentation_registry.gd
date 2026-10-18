@@ -52,22 +52,26 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 	_index_imported_graphics(indexed_frame_records)
 
 
-func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary:
+func frame_info(building: Dictionary, animation_time: float = 0.0, retain_static: bool = false) -> Dictionary:
 	# Only complete, healthy, idle compositions with no animated layer qualify.
-	# Damage, construction, farms and moving gate leaves keep their live paths.
+	# Damage, construction, depleted farms and moving gate leaves stay live.
 	var kind := String(building.get("kind", ""))
-	var eligible := kind not in ["gate", "farm"] and String(building.get("state", "complete")) == "complete" and String(building.get("death_phase", "alive")) == "alive" and String(building.get("anim_state", AnimationController.IDLE)) == AnimationController.IDLE and float(building.get("hp", 1.0)) >= maxf(1.0, float(building.get("max_hp", 1.0)))
+	var eligible := kind != "gate" and (kind != "farm" or not bool(building.get("harvestable", false)) or int(building.get("amount", 0)) > 0) and String(building.get("state", "complete")) == "complete" and String(building.get("death_phase", "alive")) == "alive" and String(building.get("anim_state", AnimationController.IDLE)) == AnimationController.IDLE and float(building.get("hp", 1.0)) >= maxf(1.0, float(building.get("max_hp", 1.0)))
 	if not eligible: return _resolve_frame_info(building, animation_time)
 	var civilization := int(building.get("components", {}).get("ownership", {}).get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
 	var cache_key := [kind, int(building.get("team", 1)), int(building.get("source_unit_id", -1)), int(building.get("display_graphic_id", -1)), civilization, int(building.get("presentation_facing", -1)), int(building.get("connection_mask", 0))]
-	if complete_static_frames.has(cache_key): return complete_static_frames[cache_key].duplicate()
+	if complete_static_frames.has(cache_key): return complete_static_frames[cache_key] if retain_static else complete_static_frames[cache_key].duplicate()
 	var result := _resolve_frame_info(building, animation_time)
 	var graphic := int(result.get("graphic_id", -1))
 	var player := _player_asset_id(int(building.get("team", 1)))
 	var facing := _presentation_facing(building, graphic)
 	var template: Array = composite_templates.get(Vector3i(graphic, player, facing), [])
 	var parts: Array = result.get("composite_parts", [])
-	if (result.get("texture") == null or static_resolved_frames.has(Vector3i(graphic, player, facing))) and template.size() == parts.size() and template.all(func(entry): return entry.size() > 2):
+	# The farm renderer replaces its static base with the ground crop layer and
+	# adds one separately anchored hut. Both extracted layers are fixed artwork;
+	# the original recursive template must still prove all other parts static.
+	var farm_layers := kind == "farm" and graphic == 273 and parts.size() == template.size() + 1
+	if (result.get("texture") == null or static_resolved_frames.has(Vector3i(graphic, player, facing))) and (template.size() == parts.size() or farm_layers) and template.all(func(entry): return entry.size() > 2):
 		var retained := result.duplicate(true)
 		var retained_parts: Array = retained.get("composite_parts", [])
 		for part in retained_parts: part.make_read_only()
@@ -76,6 +80,7 @@ func frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary
 		if complete_static_frames.size() >= 8192: complete_static_frames.clear()
 		cache_key.make_read_only()
 		complete_static_frames[cache_key] = retained
+		if retain_static: return retained
 	return result
 
 
@@ -86,6 +91,13 @@ func _resolve_frame_info(building: Dictionary, animation_time: float = 0.0) -> D
 	var source := _source_record(building)
 	if String(building.get("death_phase", "alive")) in ["dying", "ruin"] or String(building.get("state", "complete")) == "destroyed":
 		var death_graphic := int(source.get("graphics", {}).get("death", -1))
+		# Some source buildings (including farms) have no death animation and
+		# instead link directly to a static destroyed/depleted object.
+		if death_graphic < 0:
+			var civilization := int(building.get("components", {}).get("ownership", {}).get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
+			var dead_id := int(source.get("links", {}).get("dead_unit_id", -1))
+			var dead_source: Dictionary = object_catalog.get("objects", {}).get("%d:%d" % [civilization, dead_id], object_catalog.get("objects", {}).get("0:%d" % dead_id, {}))
+			death_graphic = int(dead_source.get("graphics", {}).get("idle", -1))
 		var is_ruin := String(building.get("death_phase", "alive")) == "ruin"
 		var death_time := minf(float(building.get("death_elapsed", animation_time)), maxf(0.0, float(building.get("death_duration", 0.05)) - 0.001)) if is_ruin else float(building.get("death_elapsed", animation_time))
 		if is_ruin:

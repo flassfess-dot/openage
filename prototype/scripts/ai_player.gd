@@ -49,6 +49,8 @@ var operations := Operations.new()
 var failed_gather_expiry: Dictionary = {}
 var failed_gather_seen: Dictionary = {}
 var last_gather_topology: Variant = null
+var planning_metrics: Dictionary = {}
+var economic_resource_index: Variant = null
 
 
 func _init(player_definition: Dictionary) -> void:
@@ -228,18 +230,23 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 
 
 func _collect_adaptive(snapshot: Dictionary, next_tick: int, reserved: Dictionary) -> Array:
+	var started := Time.get_ticks_usec()
 	strategy.observe(snapshot, team, economic_policy)
 	var goal: Dictionary = strategy.choose_goal(snapshot, team, economic_policy, decision_index)
+	planning_metrics["strategy"] = Time.get_ticks_usec() - started
 	decision_index += 1
 	var owned := AdaptiveEconomy.own(snapshot.get("buildings", []), team)
 	var budget := PlanBudget.new(snapshot.get("player_state", {}), owned)
 	var result: Array = []
 	if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
+		started = Time.get_ticks_usec()
 		_expire_failed_gathers(snapshot)
 		_remember_failed_gather_targets(snapshot)
+		planning_metrics["failures"] = Time.get_ticks_usec() - started
 		var policy := economic_policy.duplicate()
 		policy["failed_gather_targets"] = failed_gather_targets
-		result.append_array(AdaptiveEconomy.plan(snapshot, next_tick, team, policy, strategy, budget, reserved))
+		result.append_array(AdaptiveEconomy.plan(snapshot, next_tick, team, policy, strategy, budget, reserved, planning_metrics, economic_resource_index))
+		started = Time.get_ticks_usec()
 		var support_snapshot := snapshot.duplicate()
 		support_snapshot["units"] = snapshot.get("units", []).filter(func(u): return not reserved.has(int(u.get("id", -1))))
 		# Repair costs are charged over time. Keep a wood reserve before assigning
@@ -258,7 +265,9 @@ func _collect_adaptive(snapshot: Dictionary, next_tick: int, reserved: Dictionar
 				result.append(tribute)
 			else: last_tribute_tick = previous_tribute_tick
 		last_economic_tick = next_tick
+		planning_metrics["support"] = Time.get_ticks_usec() - started
 	if last_military_tick < 0 or next_tick - last_military_tick >= military_interval:
+		started = Time.get_ticks_usec()
 		var responding := String(goal.get("type", "")) == "defend"
 		var attack_allowed := responding or (next_tick >= initial_attack_delay and (last_attack_tick < 0 or next_tick - last_attack_tick >= attack_separation))
 		goal["landing_threats"] = strategy.enemies(int(snapshot.get("tick", 0)), economic_policy)
@@ -280,6 +289,7 @@ func _collect_adaptive(snapshot: Dictionary, next_tick: int, reserved: Dictionar
 		result.append_array(military)
 		if military.any(func(c): return String(c.command_type()) == "attack_move") and last_attack_tick < 0: last_attack_tick = next_tick
 		last_military_tick = next_tick
+		planning_metrics["military"] = Time.get_ticks_usec() - started
 	return result
 
 

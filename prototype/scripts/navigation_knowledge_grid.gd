@@ -31,6 +31,9 @@ func surface_accessible(cell: Vector2i, domain: String = "land", restriction_id:
 
 
 func native_walkability_mask(domain: String, restriction_id: int, probe: Variant = null) -> PackedByteArray:
+	if native_masks_enabled and mask_kernel != null and mask_kernel.has_method("walkability_mask"):
+		if probe != null: probe.increment("navigation.native_mask_evaluated_cells", terrain_cells.size())
+		return mask_kernel.walkability_mask(size,terrain_cells,terrain_ids,occupied_cells,terrain_restrictions,learned,true,domain,restriction_id)
 	var mask := PackedByteArray()
 	mask.resize(size.x * size.y)
 	# Unknown terrain is traversable in every domain. Fill it in native code,

@@ -13,6 +13,7 @@ func _initialize() -> void:
 	test_simulation_and_render_visibility()
 	test_gaia_visibility_contract()
 	test_native_visibility_cells_match_gdscript()
+	test_native_source_deltas_match_reference()
 	test_player_revisions_are_isolated()
 	test_presentation_dirty_cells_track_visibility_transitions()
 	test_sparse_source_ids_and_lifecycle()
@@ -44,6 +45,9 @@ func test_native_visibility_cells_match_gdscript() -> void:
 		[Vector2(15.5, 12.5), 6.75],
 		[Vector2(31.8, 23.6), 5.25],
 		[Vector2(9.0, 7.0), 0.0],
+		[Vector2(-8.0, -8.0), 1.0],
+		[Vector2(41.0, 34.0), 2.0],
+		[Vector2(16.0, 12.0), 60.0],
 	]
 	for entry in cases:
 		var native_cells: PackedInt32Array = fog._vision_cells(entry[0], entry[1])
@@ -222,6 +226,46 @@ func test_simulation_and_render_visibility() -> void:
 	world.update_fog_of_war()
 	assert_true(not world.is_entity_visible_to(1, enemy), "dead ally no longer reveals enemy")
 
+
+func test_native_source_deltas_match_reference() -> void:
+	var reference := FogOfWar.new(Vector2i(32, 24))
+	var native := FogOfWar.new(Vector2i(32, 24))
+	assert_true(native.uses_native_kernel() and native.native_kernel.has_method("apply_source_deltas"), "native delta kernel is available")
+	reference.native_deltas_enabled = false
+	for fog in [reference, native]:
+		for team in [1, 2, 3]:
+			fog.ensure_player(team)
+			fog.consume_presentation_dirty_cells(team)
+			fog.track_navigation_exploration(team)
+			fog.track_path_knowledge(team)
+		fog.set_alliance(1, 2, true)
+		fog.set_shared_vision(1, 2, true)
+	var units: Array = []
+	for id in range(1, 19):
+		var unit := vision_entity(1 + id % 3, Vector2(2 + id % 12, 2 + id % 10), 2.5 + id % 4)
+		unit["id"] = id
+		units.append(unit)
+	for tick in range(140):
+		for unit in units:
+			var id := int(unit["id"])
+			unit["pos"] = Vector2(16 + sin(float(tick + id * 3) * 0.13) * 15, 12 + cos(float(tick + id) * 0.17) * 11)
+			unit["hp"] = 0.0 if (tick + id) % 19 < 3 else 10.0
+			unit["team"] = 1 + (id + tick / 17) % 3
+			unit["components"]["vision"]["range"] = 1.5 + (id + tick / 23) % 5
+		if tick % 29 == 0:
+			for fog in [reference, native]: fog.set_shared_vision(1, 2, tick % 58 == 0)
+		if tick % 11 == 0:
+			reference.update(units, [])
+			native.update(units, [])
+		else:
+			var changed: Array = units.filter(func(unit): return int(unit["id"]) % 4 == tick % 4)
+			reference.apply_entity_changes(changed, [], [])
+			native.apply_entity_changes(changed, [], [])
+		if tick % 13 == 0:
+			reference.apply_entity_changes([], [], [2, 6])
+			native.apply_entity_changes([], [], [2, 6])
+		for field in ["states_by_player", "visible_counts_by_player", "revisions_by_player", "exploration_revisions_by_player", "personally_explored_by_player", "newly_explored_cells_by_player", "newly_visible_cells_by_player", "presentation_dirty_cells_by_player", "navigation_newly_explored_by_player", "path_dirty_by_player", "visibility_change_history", "exploration_change_history", "revision"]:
+			assert_equal(native.get(field), reference.get(field), "native source delta preserves %s at tick %d" % [field, tick])
 
 func vision_entity(team: int, position: Vector2, sight_radius: float) -> Dictionary:
 	return {

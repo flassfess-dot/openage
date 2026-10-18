@@ -12,6 +12,8 @@ var store
 var coordinator
 var preparation := Preparation.new()
 var error := ""
+var render_frame_override := -1
+var capture_budget_override := -1
 
 func configure(source_world, source_controller, source_players: Array, source_decisions, source_store, source_coordinator) -> void:
 	if world != source_world or decisions != source_decisions:
@@ -37,7 +39,7 @@ func shutdown() -> void:
 	error = ""
 
 func capture_ai(ai, target_tick: int) -> Dictionary:
-	return preparation.capture(world, store, ai, controller.tick_index, target_tick, controller.performance_probe, mini(Preparation.CAPTURE_BUDGET_USEC, decisions.preparation_usec_left))
+	return preparation.capture(world, store, ai, controller.tick_index, target_tick, controller.performance_probe, mini(capture_budget_override if capture_budget_override > 0 else Preparation.CAPTURE_BUDGET_USEC, decisions.preparation_usec_left))
 
 func next_decision_tick(ai, next_tick: int) -> int:
 	if not ai.enabled or world.player_registry.status(int(ai.team)) != "active":
@@ -73,7 +75,7 @@ func queue_commands(next_tick: int = -1) -> Variant:
 	decisions.begin(due, controller.tick_index, target, Callable(self, "capture_ai"))
 	return _poll(next_tick)
 func _poll(next_tick: int) -> Dictionary:
-	var status: Dictionary = decisions.poll(coordinator, controller.tick_index, Engine.get_process_frames(), controller.performance_probe)
+	var status: Dictionary = decisions.poll(coordinator, controller.tick_index, render_frame_override if render_frame_override >= 0 else Engine.get_process_frames(), controller.performance_probe)
 	if status.has("error"):
 		error = "Ошибка расчёта ИИ: %s" % String(status["error"])
 

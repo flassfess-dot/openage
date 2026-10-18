@@ -103,7 +103,13 @@ static func build_request(kernel, request: Dictionary, subdivisions: int = 16, t
 var kernel: Variant
 var request: Dictionary
 var result: Array = []
+var result_chunks: Array = []
 var timings: Dictionary = {}
 
 func run() -> void:
 	result = build_request(kernel, request, 16, timings)
+	if not result.is_empty() and kernel.has_method("split_mesh_arrays"):
+		var started := Time.get_ticks_usec()
+		result_chunks = kernel.split_mesh_arrays(result, 16384)
+		timings["split_us"] = Time.get_ticks_usec()-started
+		if not result_chunks.is_empty(): result = []

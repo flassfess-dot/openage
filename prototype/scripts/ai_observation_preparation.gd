@@ -7,13 +7,45 @@ const MAX_CAPTURES := 8
 const ACTORS_PER_PORTION := 96
 const PRODUCERS_PER_PORTION := 1
 const CAPTURE_BUDGET_USEC := 7000
+const MAX_COMMAND_RULE_SCHEMA_BYTES := 64 * 1024
 var captures: Dictionary = {}
+var command_rule_caches: Dictionary = {}
 
 func clear() -> void:
 	for pending in captures.values():
 		var world: Variant = pending["world"].get_ref()
 		if world != null: world.release_read_generation(pending["token"])
 	captures.clear()
+	command_rule_caches.clear()
+
+func _command_rule_cache(world, team: int, units: Array, options: Dictionary) -> Dictionary:
+	var counts: Dictionary = {}
+	if bool(options.get("include_ai_profiles",false)):
+		for unit in units:
+			if int(unit.get("team",0)) == team and float(unit.get("hp",0.0)) > 0.0:
+				var source_id := int(unit.get("source_unit_id",-1))
+				counts[source_id] = int(counts.get(source_id,0)) + 1
+	# Army counts affect research relevance. Stocks are repriced separately;
+	# they must not discard unchanged catalog/technology/profile work.
+	var signature := [
+		world.entity_changes.epoch, world.cache_epoch,
+		world.data_repository.get_instance_id(), world.data_repository.revision,
+		world.technology_system.revision(team), world.civilization_by_team.get(team,13),
+		world.full_tech_tree_enabled, counts,
+		options.get("requested_production_only",false),
+		options.get("economic_production_options_only",false),
+		options.get("production_requests",[]), options.get("planning_technology_ids",[]),
+		options.get("include_ai_profiles",false),
+	]
+	if var_to_bytes(signature).size() > MAX_COMMAND_RULE_SCHEMA_BYTES:
+		command_rule_caches.erase(team)
+		return {}
+	var retained: Dictionary = command_rule_caches.get(team,{})
+	if retained.is_empty() or retained["world"].get_ref() != world or retained["signature"] != signature:
+		retained = {"world":weakref(world),"signature":Data.capture_frozen({"schema":signature})["schema"],"entries":{},"sizes":{},"bytes":0}
+		if not command_rule_caches.has(team) and command_rule_caches.size() >= MAX_CAPTURES: command_rule_caches.erase(command_rule_caches.keys()[0])
+		command_rule_caches[team] = retained
+	return retained
 
 func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant = null, budget_usec: int = CAPTURE_BUDGET_USEC) -> Dictionary:
 	var team := int(ai.team)
@@ -22,7 +54,10 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 		assert(captures.size() < MAX_CAPTURES)
 		var initial_options: Dictionary = ai.presentation_options()
 		initial_options["defer_build_sites"] = true
+		initial_options["build_site_filter_in_worker"] = true
 		initial_options["_ai_profile_cache"] = {}
+		initial_options["_ai_build_options_cache"] = {}
+		initial_options["_ai_command_options_cache"] = {}
 		if probe != null:
 			initial_options["performance_probe"] = probe
 			initial_options["performance_prefix"] = "presentation.ai.observation"
@@ -47,6 +82,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 				if world.prepare_known_ai_resource_snapshot(team): pending["phase"] = "facts"
 			"facts":
 				pending["snapshot"] = store.observe(world, source_tick, team, options)
+				options["_ai_command_rule_cache"] = _command_rule_cache(world,team,pending["snapshot"]["units"],options)
 				pending.erase("projection")
 				pending["phase"] = "commands"
 			"commands":
@@ -64,7 +100,9 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 				# Validate/detach this small portion in the existing native kernel.
 				# Recursively freezing every actor in GDScript repeated thousands
 				# of registry probes on an otherwise already immutable read model.
-				var frozen := Data.capture_frozen({"units": decorated["units"], "buildings": decorated["buildings"]})
+				# Enrich owns the new arrays and any mutable decorated row/profile.
+				# Source rows and command templates are borrowed readonly islands.
+				var frozen := Data.freeze_owned({"units": decorated["units"], "buildings": decorated["buildings"]})
 				if frozen.is_empty():
 					clear()
 					return {}
@@ -124,7 +162,9 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 			probe.observe_microseconds("presentation.ai.portion", elapsed)
 			probe.observe_microseconds("presentation.ai.phase." + phase, elapsed)
 			probe.increment("ai.capture.portions")
-		if Time.get_ticks_usec() - frame_started >= maxi(1, budget_usec):
+		# All source reads have finished. Complete the small publication now so
+		# the pinned generation does not hold another whole rendered frame.
+		if pending["phase"] != "publish" and Time.get_ticks_usec() - frame_started >= maxi(1, budget_usec):
 			if probe != null:
 				probe.observe_microseconds("presentation.ai.capture_frame", Time.get_ticks_usec() - frame_started)
 			return {"pending": true}

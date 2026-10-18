@@ -2,6 +2,7 @@ class_name RoRAiEconomicPlanner
 extends RefCounted
 
 const Commands := preload("res://scripts/commands.gd")
+static var native_reachable_lookup_enabled := true
 
 
 # Filter using the same legal observer data and spending rules as plan().
@@ -137,7 +138,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, policy: Dictionary 
 			committed_workers[worker_id] = true
 			break
 	var resources: Array = snapshot.get("resources", []).filter(func(entity): return int(entity.get("amount", 0)) > 0)
-	var reachable_resource_cells := _reachable_cells_by_domain(snapshot.get("navigation", {}))
+	var reachable_resource_cells: Dictionary = snapshot["_economy_reachable_cells"] if snapshot.has("_economy_reachable_cells") else _reachable_cells_by_domain(snapshot.get("navigation", {}))
 	for building_value in snapshot.get("buildings", []):
 		var building: Dictionary = building_value
 		if bool(building.get("harvestable", false)) and int(building.get("team", 0)) == team and int(building.get("amount", 0)) > 0:
@@ -423,6 +424,10 @@ static func _resource_previously_failed_for_worker(resource: Dictionary, worker:
 
 
 static func _reachable_cells_by_domain(navigation: Dictionary) -> Dictionary:
+	if native_reachable_lookup_enabled and ClassDB.class_exists("RoRReadModelKernel"):
+		var kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if kernel.has_method("reachable_cell_lookup"):
+			return kernel.reachable_cell_lookup(navigation)
 	var result: Dictionary = {}
 	var reachable: Dictionary = navigation.get("reachable", {})
 	for domain in ["land", "water"]:

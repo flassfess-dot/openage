@@ -9,8 +9,14 @@ const MobileCollision := preload("res://scripts/mobile_collision.gd")
 const LocalMovement := preload("res://scripts/local_movement.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const StuckRecovery := preload("res://scripts/stuck_recovery.gd")
+const Journal := preload("res://scripts/entity_change_journal.gd")
 
 var knowledge := NavigationKnowledge.new()
+var native_integration_enabled := true
+var integration_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
+var collision_cursor := -1
+var collision_epoch := -1
+var overlap_pending: Dictionary = {}
 
 var world_ref: WeakRef
 var world:
@@ -20,6 +26,75 @@ var world:
 
 func _init(simulation_world) -> void:
 	world_ref = weakref(simulation_world)
+
+
+func settle_mobile_overlaps(active_units: Array, delta: float) -> void:
+	if delta <= 0.0: return
+	# Steering reads an immutable start-of-tick snapshot. Resolve residual
+	# simultaneous contacts using actual positions, including idle actors from
+	# old saves. Subsequent ticks visit only changed actors and unsettled pairs.
+	var simulation_world = world
+	var changes: Dictionary = simulation_world.entity_changes.changes_since(collision_cursor if collision_epoch == simulation_world.entity_changes.epoch else -1)
+	var candidates := overlap_pending.duplicate()
+	overlap_pending.clear()
+	if bool(changes["full"]):
+		for unit in simulation_world.units: candidates[int(unit["id"])] = unit
+	else:
+		for unit in active_units:
+			if not bool(unit.get("formation_shared_isolated", false)): candidates[int(unit["id"])] = unit
+		for id in changes["ids"]:
+			if int(changes["masks"][id]) & (Journal.LIFECYCLE | Journal.POSITION):
+				var unit: Variant = simulation_world.find_unit(int(id))
+				if unit != null and not bool(unit.get("formation_shared_isolated", false)): candidates[int(id)] = unit
+	var ids := candidates.keys()
+	ids.sort()
+	var pairs: Dictionary = {}
+	var neighbors: Array = []
+	for id in ids:
+		var unit: Dictionary = candidates[id]
+		if float(unit.get("hp", 0.0)) <= 0.0 or simulation_world.find_unit(id) == null: continue
+		simulation_world.spatial_index.query_neighbors_into(unit, float(unit["footprint_radius"]) + 0.25, "unit", neighbors)
+		for other in neighbors:
+			var other_id := int(other["id"])
+			if float(other.get("hp", 0.0)) <= 0.0 or String(other.get("movement_domain", "land")) != String(unit.get("movement_domain", "land")): continue
+			var gap: Vector2 = unit["pos"] - other["pos"]
+			var radius := float(unit["footprint_radius"]) + float(other["footprint_radius"])
+			if gap.length_squared() >= (radius - 0.001) * (radius - 0.001): continue
+			var pair := Vector2i(mini(id, other_id), maxi(id, other_id))
+			if pairs.has(pair): continue
+			pairs[pair] = true
+			var distance := gap.length()
+			overlap_pending[id] = unit
+			overlap_pending[other_id] = other
+			var normal := gap / distance if distance > 0.0001 else Vector2(0, -1 if id < other_id else 1)
+			var correction := minf(radius - distance + 0.002, maxf(0.01, delta * 2.0))
+			var first := _separate_mobile(unit, normal * correction * 0.5)
+			var second := _separate_mobile(other, -normal * (correction - first))
+			if second < correction * 0.5: _separate_mobile(unit, normal * (correction * 0.5 - second))
+	collision_cursor = int(changes["revision"])
+	collision_epoch = simulation_world.entity_changes.epoch
+
+
+func _separate_mobile(unit: Dictionary, offset: Vector2) -> float:
+	if offset.length_squared() <= 0.000001: return 0.0
+	var simulation_world = world
+	# A radial push can be blocked at an L-shaped forest corridor even though
+	# sliding along either cell edge frees the contact. Every alternative has
+	# a nonnegative projection away from the other body and still obeys terrain.
+	var directions := [offset, Vector2(offset.x, 0), Vector2(0, offset.y), offset.rotated(PI/4), offset.rotated(-PI/4), offset.orthogonal(), -offset.orthogonal()]
+	for direction in directions:
+		if Vector2(direction).length_squared() <= 0.000001: continue
+		var displacement: Vector2 = Vector2(direction).normalized() * offset.length()
+		var position: Vector2 = unit["pos"] + displacement
+		if position.x < 0.5 or position.y < 0.5 or position.x > simulation_world.map_size.x - 0.5 or position.y > simulation_world.map_size.y - 0.5: continue
+		if not simulation_world.navigation_grid.is_position_walkable_for(position, float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])): continue
+		simulation_world.set_entity_field(unit, "pos", position)
+		if simulation_world.terrain_elevation.nonzero_vertex_count > 0: simulation_world.set_entity_field(unit, "elevation", simulation_world.elevation_at(position))
+		if String(unit["task"]) == "idle" and unit.get("path", []).is_empty():
+			simulation_world.set_entity_field(unit, "target", position)
+			simulation_world.set_entity_field(unit, "destination", position)
+		return displacement.length()
+	return 0.0
 
 
 func move_unit(unit: Dictionary, delta: float) -> bool:
@@ -37,50 +112,49 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		if changed_region == null or segment_bounds.intersects(changed_region):
 			if planner.direct_cell_path(Vector2i(Vector2(unit["pos"]).floor()), Vector2i(Vector2(unit["target"]).floor()), String(unit["movement_domain"]), int(unit["terrain_restriction"]), float(unit["footprint_radius"])).is_empty():
 				assign_unit_destination(unit, unit["destination"], false)
-		world.set_entity_field(unit, "path_knowledge_revision", planner.grid.revision)
+		simulation_world.set_entity_field(unit, "path_knowledge_revision", planner.grid.revision)
 	_advance_formation_corner(unit, planner)
 	var difference: Vector2 = unit["target"] - unit["pos"]
 	if difference.length_squared() < 0.001225:
 		var arrival_displacement := difference
-		world.set_entity_field(unit, "pos", unit["target"])
+		simulation_world.set_entity_field(unit, "pos", unit["target"])
 		if simulation_world.terrain_elevation.nonzero_vertex_count > 0:
-			world.set_entity_field(unit, "elevation", simulation_world.elevation_at(unit["pos"]))
+			simulation_world.set_entity_field(unit, "elevation", simulation_world.elevation_at(unit["pos"]))
 		elif float(unit["elevation"]) != 0.0:
-			world.set_entity_field(unit, "elevation", 0.0)
-		world.set_entity_field(unit, "actual_velocity", arrival_displacement / delta if delta > 0.0 else Vector2.ZERO)
+			simulation_world.set_entity_field(unit, "elevation", 0.0)
+		simulation_world.set_entity_field(unit, "actual_velocity", arrival_displacement / delta if delta > 0.0 else Vector2.ZERO)
 		if arrival_displacement.length_squared() > 0.000001:
 			var arrival_facing := facing_for_vector(arrival_displacement)
-			world.set_entity_field(unit, "movement_facing", arrival_facing)
-			world.set_entity_field(unit, "desired_facing", arrival_facing)
-			world.set_entity_field(unit, "facing", arrival_facing)
+			simulation_world.set_entity_field(unit, "movement_facing", arrival_facing)
+			simulation_world.set_entity_field(unit, "desired_facing", arrival_facing)
+			simulation_world.set_entity_field(unit, "facing", arrival_facing)
 		var path: Array = unit.get("path", [])
 		var next_index := int(unit.get("path_index", 0)) + 1
 		if next_index < path.size():
 			StuckRecovery.reset(unit)
-			world.set_entity_field(unit, "path_index", next_index)
-			world.set_entity_field(unit, "target", path[next_index])
-			world.set_entity_field(unit, "path_knowledge_revision", -1)
-			world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
+			simulation_world.set_entity_field(unit, "path_index", next_index)
+			simulation_world.set_entity_field(unit, "target", path[next_index])
+			simulation_world.set_entity_field(unit, "path_knowledge_revision", -1)
+			simulation_world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
 			if probe != null:
 				simulation_world.movement_arrival_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return true
-		world.set_entity_field(unit, "path", [])
-		world.set_entity_field(unit, "path_index", 0)
+		simulation_world.set_entity_field(unit, "path", [])
+		simulation_world.set_entity_field(unit, "path_index", 0)
 		StuckRecovery.reset(unit)
 		if unit["task"] in ["move", "attack_move"]:
 			if simulation_world.destination_reservations.is_occupied(unit):
-				world.set_entity_field(unit, "task", "idle")
-				world.complete_entity_order(unit, "destination_reached")
+				simulation_world.set_entity_field(unit, "task", "idle")
+				simulation_world.complete_entity_order(unit, "destination_reached")
 				restore_formation_facing(unit)
 			else:
 				assign_unit_destination(unit, unit["reserved_destination"], false)
 		elif unit["task"] in ["attack", "gather"]:
-			world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
+			simulation_world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
 		if probe != null:
 			simulation_world.movement_arrival_microseconds += Time.get_ticks_usec() - movement_phase_started
 		return false
 
-	var start_position: Vector2 = unit["pos"]
 	var unit_id := int(unit["id"])
 	var shared_motion_requested := bool(unit["formation_shared_motion"])
 	var open_envelope: Variant = null
@@ -119,8 +193,8 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		var native_state := roundi(native_result.z)
 		var native_difference: Vector2 = unit["target"] - unit["pos"]
 		var native_speed := maxf(0.0, float(unit["speed"]) * float(unit["cohesion_speed_scale"]))
-		world.set_entity_field(unit, "desired_velocity", native_difference.normalized() * native_speed if native_difference.length_squared() > 0.000001 else Vector2.ZERO)
-		world.set_entity_field(unit, "actual_velocity", Vector2(native_result.x, native_result.y))
+		simulation_world.set_entity_field(unit, "desired_velocity", native_difference.normalized() * native_speed if native_difference.length_squared() > 0.000001 else Vector2.ZERO)
+		simulation_world.set_entity_field(unit, "actual_velocity", Vector2(native_result.x, native_result.y))
 		if native_state == 1:
 			movement_reason = "local_obstacle"
 		elif native_state == 2:
@@ -132,38 +206,22 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	if movement_reason == "local_blocked":
 		var escape_velocity := _escape_invalid_footprint(unit, delta)
 		if escape_velocity.length_squared() > 0.000001:
-			world.set_entity_field(unit, "actual_velocity", escape_velocity)
+			simulation_world.set_entity_field(unit, "actual_velocity", escape_velocity)
 			movement_reason = "escaping_invalid_footprint"
 	if probe != null:
 		simulation_world.movement_local_calculation_microseconds += Time.get_ticks_usec() - movement_phase_started
 		movement_phase_started = Time.get_ticks_usec()
 	if shared_motion and not bool(unit["formation_shared_isolated"]):
-		world.set_entity_field(unit, "actual_velocity", MobileCollision.constrain(unit, unit["actual_velocity"], simulation_world.movement_neighbor_buffer, delta))
+		simulation_world.set_entity_field(unit, "actual_velocity", MobileCollision.constrain(unit, unit["actual_velocity"], simulation_world.movement_neighbor_buffer, delta))
 		if not simulation_world.navigation_grid.is_position_walkable_for(Vector2(unit["pos"]) + Vector2(unit["actual_velocity"]) * delta, float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])):
-			world.set_entity_field(unit, "actual_velocity", Vector2.ZERO)
-	if Vector2(unit["desired_velocity"]).length_squared() > 0.000001:
-		world.set_entity_field(unit, "desired_facing", facing_for_vector(unit["desired_velocity"]))
-	if movement_reason != "":
-		world.set_entity_field(unit, "diagnostic_reason", movement_reason)
-	var step: Vector2 = unit["actual_velocity"] * delta
-	if step.length_squared() >= difference.length_squared() and step.dot(difference) > 0.0:
-		world.set_entity_field(unit, "pos", unit["target"])
+			simulation_world.set_entity_field(unit, "actual_velocity", Vector2.ZERO)
+	if native_integration_enabled and integration_kernel != null and integration_kernel.has_method("integrate_unit_motion"):
+		assert(simulation_world.read_generation_pins == 0, "Pinned observation generation is immutable")
+		var vertices: Dictionary = simulation_world.terrain_elevation.vertex_levels if simulation_world.terrain_elevation.nonzero_vertex_count > 0 else {}
+		var changed_mask: int = integration_kernel.integrate_unit_motion(unit, delta, simulation_world.map_size, vertices, movement_reason)
+		if changed_mask != 0: simulation_world.notify_entity_changed(unit, changed_mask)
 	else:
-		world.set_entity_field(unit, "pos", unit["pos"] + (step))
-	var position: Vector2 = unit["pos"]
-	if position.x < 0.5 or position.y < 0.5 or position.x > float(simulation_world.map_size.x) - 0.5 or position.y > float(simulation_world.map_size.y) - 0.5:
-		world.set_entity_field(unit, "pos", Coordinates.clamp_world(position, simulation_world.map_size))
-	if simulation_world.terrain_elevation.nonzero_vertex_count > 0:
-		world.set_entity_field(unit, "elevation", simulation_world.elevation_at(unit["pos"]))
-	elif float(unit["elevation"]) != 0.0:
-		world.set_entity_field(unit, "elevation", 0.0)
-	var actual_displacement: Vector2 = unit["pos"] - start_position
-	world.set_entity_field(unit, "actual_velocity", actual_displacement / delta if delta > 0.0 else Vector2.ZERO)
-	var actual_displacement_squared := actual_displacement.length_squared()
-	if actual_displacement_squared > 0.000001:
-		var movement_facing := facing_for_vector(actual_displacement)
-		world.set_entity_field(unit, "movement_facing", movement_facing)
-		world.set_entity_field(unit, "facing", movement_facing)
+		_integrate_unit_motion(unit, delta, movement_reason, simulation_world)
 	var stop_tick := StuckRecovery.STOP_TICK
 	var group = simulation_world.formation_groups_view.get(int(unit["formation_group_id"]))
 	if group != null and group.has_compression:
@@ -182,22 +240,50 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			# Release work and formation reservations as well as movement slots;
 			# an abandoned approach must not block every following worker.
 			if String(unit["task"]) == "board":
-				world.set_entity_field(unit, "task", "idle")
+				simulation_world.set_entity_field(unit, "task", "idle")
 				stop_unit_motion(unit, false)
-				world.complete_entity_order(unit, "stuck")
+				simulation_world.complete_entity_order(unit, "stuck")
 			else:
 				simulation_world.halt_unit(unit, "stuck_stopped_nearest_valid")
-			world.set_entity_field(unit, "diagnostic_reason", "stuck_stopped_nearest_valid")
-			world.set_entity_field(unit, "formation_shared_motion", false)
-			world.set_entity_field(unit, "formation_slot_mode", "released")
-			world.set_entity_field(unit, "formation_group_id", -1)
-			world.set_entity_field(unit, "formation_home", null)
+				simulation_world.set_entity_field(unit, "diagnostic_reason", "stuck_stopped_nearest_valid")
+			simulation_world.set_entity_field(unit, "formation_shared_motion", false)
+			simulation_world.set_entity_field(unit, "formation_slot_mode", "released")
+			simulation_world.set_entity_field(unit, "formation_group_id", -1)
+			simulation_world.set_entity_field(unit, "formation_home", null)
 			if probe != null:
 				simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return false
 	if probe != null:
 		simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 	return true
+
+
+func _integrate_unit_motion(unit: Dictionary, delta: float, movement_reason: String, simulation_world) -> void:
+	var start_position: Vector2 = unit["pos"]
+	var difference: Vector2 = unit["target"] - start_position
+	if Vector2(unit["desired_velocity"]).length_squared() > 0.000001:
+		simulation_world.set_entity_field(unit, "desired_facing", facing_for_vector(unit["desired_velocity"]))
+	if movement_reason != "":
+		simulation_world.set_entity_field(unit, "diagnostic_reason", movement_reason)
+	var step: Vector2 = unit["actual_velocity"] * delta
+	if step.length_squared() >= difference.length_squared() and step.dot(difference) > 0.0:
+		simulation_world.set_entity_field(unit, "pos", unit["target"])
+	else:
+		simulation_world.set_entity_field(unit, "pos", unit["pos"] + (step))
+	var position: Vector2 = unit["pos"]
+	if position.x < 0.5 or position.y < 0.5 or position.x > float(simulation_world.map_size.x) - 0.5 or position.y > float(simulation_world.map_size.y) - 0.5:
+		simulation_world.set_entity_field(unit, "pos", Coordinates.clamp_world(position, simulation_world.map_size))
+	if simulation_world.terrain_elevation.nonzero_vertex_count > 0:
+		simulation_world.set_entity_field(unit, "elevation", simulation_world.elevation_at(unit["pos"]))
+	elif float(unit["elevation"]) != 0.0:
+		simulation_world.set_entity_field(unit, "elevation", 0.0)
+	var actual_displacement: Vector2 = unit["pos"] - start_position
+	simulation_world.set_entity_field(unit, "actual_velocity", actual_displacement / delta if delta > 0.0 else Vector2.ZERO)
+	var actual_displacement_squared := actual_displacement.length_squared()
+	if actual_displacement_squared > 0.000001:
+		var movement_facing := facing_for_vector(actual_displacement)
+		simulation_world.set_entity_field(unit, "movement_facing", movement_facing)
+		simulation_world.set_entity_field(unit, "facing", movement_facing)
 
 
 func _advance_formation_corner(unit: Dictionary, planner) -> void:

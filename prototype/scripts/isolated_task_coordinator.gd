@@ -20,10 +20,15 @@ class Job extends RefCounted:
 	func run() -> void:
 		var started := Time.get_ticks_usec()
 		var value: Variant = action.call(input)
+		var calculated := Time.get_ticks_usec()
 		if value is Dictionary and RoRIsolatedTaskData.is_detached(value):
 			result = {"envelope": envelope, "ok": true, "data": value, "worker_us": Time.get_ticks_usec() - started}
 		else:
 			result = {"envelope": envelope, "ok": false, "data": {}, "worker_us": Time.get_ticks_usec() - started}
+		result["action_us"] = calculated - started
+		result["validation_us"] = Time.get_ticks_usec() - calculated
+		if action_owner != null and action_owner.has_method("performance_metrics"):
+			result["stages_us"] = action_owner.performance_metrics().duplicate()
 
 var enabled := true
 var generation := 1

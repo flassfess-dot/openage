@@ -18,6 +18,7 @@ var apply_tick := -1
 var prepare: Callable
 var last_prepared_frame := -1
 var preparation_usec_left := 0
+var preparation_budget_usec := PREPARATION_BUDGET_USEC
 var error := ""
 var active := false
 
@@ -50,6 +51,11 @@ func poll(coordinator, current_source_tick: int, frame_id: int, probe: Variant =
 		match String(collected["status"]):
 			"ready":
 				record["output"] = collected["result"]["data"]
+				if probe != null:
+					probe.observe_microseconds("ai.worker.action", int(collected["result"].get("action_us", 0)))
+					probe.observe_microseconds("ai.worker.validation", int(collected["result"].get("validation_us", 0)))
+					for stage in collected["result"].get("stages_us", {}):
+						probe.observe_microseconds("ai.worker." + stage, int(collected["result"].stages_us[stage]))
 				if not bool(record["output"].get("valid", false)):
 					error = "ai_invalid_proposal"
 			"stale", "missing", "failed":
@@ -58,7 +64,7 @@ func poll(coordinator, current_source_tick: int, frame_id: int, probe: Variant =
 		return {"ready": false, "error": error}
 	if last_prepared_frame != frame_id:
 		last_prepared_frame = frame_id
-		preparation_usec_left = PREPARATION_BUDGET_USEC
+		preparation_usec_left = preparation_budget_usec
 	if preparation_usec_left > 0:
 		for record in records:
 			if bool(record["submitted"]):

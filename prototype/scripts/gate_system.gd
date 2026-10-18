@@ -8,6 +8,7 @@ const HOLD_SECONDS := 1.2
 var world_ref: WeakRef
 var gate_ids: Dictionary = {}
 var policy_revision := 0
+var planning_revisions: Dictionary = {}
 var world:
 	get:
 		return world_ref.get_ref() if world_ref != null else null
@@ -72,6 +73,7 @@ func register(gate: Dictionary, axis: int = 0) -> void:
 
 func reset() -> void:
 	gate_ids.clear()
+	planning_revisions.clear()
 	policy_revision += 1
 
 func _layout(gate: Dictionary) -> void:
@@ -123,7 +125,15 @@ func planning_occupants(team: int, cell: Vector2i, occupants: Array) -> Array:
 func planning_revision(team: int) -> int:
 	if gate_ids.is_empty():
 		return 0
-	return hash([policy_revision, world.get_allied_teams(team)])
+	var simulation_world = world
+	var diplomacy_revision: int = simulation_world.player_registry.navigation_revision
+	var previous: Array = planning_revisions.get(team, [])
+	if previous.size() == 3 and int(previous[0]) == policy_revision and int(previous[1]) == diplomacy_revision:
+		return int(previous[2])
+	var revision := hash([policy_revision, simulation_world.get_allied_teams(team)])
+	if planning_revisions.size() >= 64: planning_revisions.clear()
+	planning_revisions[team] = [policy_revision, diplomacy_revision, revision]
+	return revision
 
 func all_cells() -> Array:
 	var result: Array = []

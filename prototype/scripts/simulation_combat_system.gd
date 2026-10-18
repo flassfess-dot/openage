@@ -286,7 +286,7 @@ func _advance_ground_attack_order(unit: Dictionary, delta: float, result: Dictio
 			simulation_world.halt_unit(unit, "stand_ground_range")
 		else:
 			var ground_destination := FormationCombat.destination(unit, ground_target)
-			world.set_entity_field(unit, "combat_destination", ground_destination)
+			simulation_world.set_entity_field(unit, "combat_destination", ground_destination)
 			simulation_world.ensure_navigation_destination(unit, ground_destination)
 			if unit.get("path", []).is_empty():
 				simulation_world.halt_unit(unit, "no_path")
@@ -295,12 +295,12 @@ func _advance_ground_attack_order(unit: Dictionary, delta: float, result: Dictio
 	else:
 		simulation_world.movement_system.face_unit_toward(unit, ground_position)
 		if float(unit.get("cooldown", 0.0)) <= 0.0:
-			world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
-			world.transition_entity_order(unit, OrderPipeline.PERFORM_ACTION)
+			simulation_world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
+			simulation_world.transition_entity_order(unit, OrderPipeline.PERFORM_ACTION)
 			result["animation_state"] = AnimationController.ATTACK_WINDUP
 			result["attack_target"] = ground_target
 		else:
-			world.transition_entity_order(unit, OrderPipeline.RECOVER)
+			simulation_world.transition_entity_order(unit, OrderPipeline.RECOVER)
 			result["animation_state"] = AnimationController.ATTACK_RECOVER
 
 
@@ -319,9 +319,9 @@ func _advance_target_attack_order(unit: Dictionary, delta: float, result: Dictio
 		simulation_world.finish_combat(unit, "leash_exceeded")
 	else:
 		if OrderPipeline.phase(unit) == OrderPipeline.RECOVER and float(unit.get("cooldown", 0.0)) <= 0.0:
-			world.restart_entity_order(unit)
+			simulation_world.restart_entity_order(unit)
 		var combat_destination := FormationCombat.destination(unit, enemy)
-		world.set_entity_field(unit, "combat_destination", combat_destination)
+		simulation_world.set_entity_field(unit, "combat_destination", combat_destination)
 		var too_close := CombatRules.is_too_close(unit, enemy)
 		if not CombatRules.is_in_range(unit, enemy) or too_close:
 			simulation_world.ensure_navigation_destination(unit, combat_destination)
@@ -329,12 +329,12 @@ func _advance_target_attack_order(unit: Dictionary, delta: float, result: Dictio
 		else:
 			simulation_world.movement_system.face_unit_toward(unit, Vector2(enemy.get("pos", unit.get("pos", Vector2.ZERO))))
 			if float(unit.get("cooldown", 0.0)) <= 0.0:
-				world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
-				world.transition_entity_order(unit, OrderPipeline.PERFORM_ACTION)
+				simulation_world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
+				simulation_world.transition_entity_order(unit, OrderPipeline.PERFORM_ACTION)
 				result["animation_state"] = AnimationController.ATTACK_WINDUP
 				result["attack_target"] = enemy
 			else:
-				world.transition_entity_order(unit, OrderPipeline.RECOVER)
+				simulation_world.transition_entity_order(unit, OrderPipeline.RECOVER)
 				result["animation_state"] = AnimationController.ATTACK_RECOVER
 
 

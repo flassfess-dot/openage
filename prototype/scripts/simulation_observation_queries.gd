@@ -1,6 +1,9 @@
 class_name RoRSimulationObservationQueries
 extends RefCounted
 const AiProfile := preload("res://scripts/ai_observation_profile.gd")
+const Data := preload("res://scripts/isolated_task_data.gd")
+const MAX_COMMAND_RULE_ENTRIES := 256
+const MAX_COMMAND_RULE_BYTES := 2 * 1024 * 1024
 
 # Explicit owner-thread queries. Snapshot projection never calls these services.
 # Only IDs already present in an observer's legal read model may be enriched.
@@ -18,14 +21,40 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	var requested_kinds: Array = options.get("requested_build_site_kinds", [])
 	var requested_options: Array = []
 	var available_kinds: Array = []
+	var worker_build_commands: Dictionary = {}
 	if not requested_kinds.is_empty():
-		var build_options: Array = world.get_build_options_for_kinds(team, requested_kinds) if world.has_method("get_build_options_for_kinds") else world.get_build_options(team)
-		for option in build_options:
-			var kind := String(option.get("kind", ""))
-			if kind in requested_kinds:
-				requested_options.append(option)
-				if bool(option.get("accepted", false)):
-					available_kinds.append(kind)
+		var build_options: Array
+		# The preparation owner pins one exact source generation and shares this
+		# cache only among its small actor portions. Affordability/technology are
+		# queried once for that generation, never retained across decisions.
+		var cache: Dictionary = options.get("_ai_build_options_cache", {})
+		if options.has("_ai_build_options_cache") and bool(cache.get("ready", false)):
+			build_options = cache["options"]
+		else:
+			build_options = world.get_build_options_for_kinds(team, requested_kinds) if world.has_method("get_build_options_for_kinds") else world.get_build_options(team)
+			if options.has("_ai_build_options_cache"):
+				cache["options"] = build_options
+				cache["ready"] = true
+		if options.has("_ai_build_options_cache") and cache.has("worker_commands"):
+			worker_build_commands = cache["worker_commands"]
+			requested_options = worker_build_commands["build"]
+			available_kinds = cache["available_kinds"]
+			Data._retain_immutable(worker_build_commands)
+		else:
+			for option in build_options:
+				var kind := String(option.get("kind", ""))
+				if kind in requested_kinds:
+					requested_options.append(option)
+					if bool(option.get("accepted", false)):
+						available_kinds.append(kind)
+			worker_build_commands = {"build": requested_options}
+			if options.has("_ai_build_options_cache"):
+				# This producer owns the entire option graph for the pinned source.
+				# Freeze it once instead of copying the same menu into every worker.
+				worker_build_commands = Data.capture_frozen(worker_build_commands)
+				requested_options = worker_build_commands["build"]
+				cache["worker_commands"] = worker_build_commands
+				cache["available_kinds"] = available_kinds
 	var restricted := options.has("command_option_entity_ids")
 	var command_ids: Dictionary = {}
 	for id in options.get("command_option_entity_ids", []):
@@ -40,7 +69,7 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 		if int(row.get("team", 0)) == team and (not restricted or command_ids.has(int(row.get("id", -1)))) and world.entity_is_worker(row):
 			row = row.duplicate()
 			if not requested_options.is_empty():
-				row["command_options"] = {"build": requested_options}
+				row["command_options"] = worker_build_commands
 			elif bool(options.get("include_worker_command_options", true)):
 				if not worker_options_ready:
 					worker_options = world.get_build_options(team)
@@ -64,20 +93,8 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 				row["builder_count"] = source.get("builders", {}).size()
 				if String(source.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(source, options.get("foundation_units", units))):
 					row["reachable_builder_ids"] = world.reachable_builder_ids(source)
-				if bool(options.get("requested_production_only", false)):
-					row["command_options"] = requested_production_options(world, source, team, options.get("production_requests", []))
-				elif bool(options.get("economic_production_options_only", false)):
-					row["command_options"] = economic_production_options(world, source, team)
-				else:
-					row["command_options"] = {
-						"train": world.get_unit_production_options(int(source.get("id", -1)), team),
-						"research": world.get_research_options(int(source.get("id", -1)), team),
-					}
-				var technologies: Array = options.get("planning_technology_ids", [])
-				if not technologies.is_empty():
-					append_planning_research_options(world, row, source, team, technologies)
+				row["command_options"] = building_command_options(world,source,team,options,options.get("foundation_units",units),profile_cache)
 				if bool(options.get("include_ai_profiles", false)):
-					row["command_options"] = AiProfile.decorate_options(world, row.get("command_options", {}), team, options.get("foundation_units", units), profile_cache)
 					row["ai_drop_site"] = world.entity_has_behavior_tag(source, "drop_site")
 					var accepted: Array = []
 					for type_id in range(4):
@@ -111,7 +128,12 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	started = Time.get_ticks_usec() if probe != null else 0
 	var site_filter: Callable = options.get("build_site_filter", Callable())
 	if site_filter.is_valid() and not available_kinds.is_empty():
-		if bool(options.get("build_site_filter_snapshot", false)):
+		if bool(options.get("build_site_filter_in_worker", false)):
+			# Demand depends only on these legal facts and the captured AI state.
+			# Leave it to the existing planner worker instead of holding the source
+			# tick while it scans resources and scores every production option.
+			result["build_site_filter_in_worker"] = true
+		elif bool(options.get("build_site_filter_snapshot", false)):
 			available_kinds = site_filter.call(available_kinds, units, buildings, result.get("player_state", {}), navigation, result)
 		elif bool(options.get("build_site_filter_navigation", false)):
 			available_kinds = site_filter.call(available_kinds, units, buildings, result.get("player_state", {}), navigation)
@@ -227,3 +249,94 @@ static func requested_build_sites(world, tick: int, team: int, kinds: Array, opt
 			if bool(candidate_filter.call(kind, sites[kind], units, buildings)):
 				break
 	return result
+
+# The actor/queue key is shared by a pinned capture and its private rule cache.
+# The preparation owner invalidates rules on catalog, technology, army or request
+# changes. Current stock is always repriced; UI callers never receive this cache.
+static func building_command_options(world, source: Dictionary, team: int, options: Dictionary, units: Array, profile_cache: Dictionary) -> Dictionary:
+	var cache: Dictionary = options.get("_ai_command_options_cache",{})
+	var queue: Array = source.get("production_queue",[])
+	var first: Dictionary = queue[0] if not queue.is_empty() else {}
+	var key := [String(source.get("kind","")),int(source.get("team",0)),String(source.get("state","complete")),float(source.get("hp",0.0)) > 0.0,source.get("unit_lineage",[int(source.get("source_unit_id",-1))]),queue.size(),first.get("kind",""),first.get("order_type","unit"),first.get("status","")]
+	if options.has("_ai_command_options_cache") and cache.has(key):
+		var retained: Dictionary = cache[key]
+		Data._retain_immutable(retained)
+		return retained
+	var rules: Dictionary = options.get("_ai_command_rule_cache",{})
+	if not rules.is_empty() and rules["entries"].has(key):
+		var previous: Dictionary = rules["entries"][key]
+		var priced := _price_command_rules(world,team,previous)
+		if not is_same(priced,previous): _remember_command_rules(rules,key,priced)
+		if options.has("_ai_command_options_cache") and cache.size() < MAX_COMMAND_RULE_ENTRIES: cache[key] = priced
+		Data._retain_immutable(priced)
+		return priced
+	var result: Dictionary
+	if bool(options.get("requested_production_only",false)):
+		result = requested_production_options(world,source,team,options.get("production_requests",[]))
+	elif bool(options.get("economic_production_options_only",false)):
+		result = economic_production_options(world,source,team)
+	else:
+		result = {"train":world.get_unit_production_options(int(source.get("id",-1)),team),"research":world.get_research_options(int(source.get("id",-1)),team)}
+	var technologies: Array = options.get("planning_technology_ids",[])
+	if not technologies.is_empty():
+		var row := {"command_options":result}
+		append_planning_research_options(world,row,source,team,technologies)
+		result = row["command_options"]
+	if bool(options.get("include_ai_profiles",false)):
+		result = AiProfile.decorate_options(world,result,team,units,profile_cache)
+	if (options.has("_ai_command_options_cache") and cache.size() < MAX_COMMAND_RULE_ENTRIES) or not rules.is_empty():
+		result = Data.capture_frozen(result)
+		if options.has("_ai_command_options_cache") and cache.size() < MAX_COMMAND_RULE_ENTRIES: cache[key] = result
+		if not rules.is_empty() and not result.is_empty(): _remember_command_rules(rules,key,result)
+	return result
+
+static func _price_command_rules(world, team: int, template: Dictionary) -> Dictionary:
+	var result := template.duplicate()
+	var changed := false
+	for category in ["train","research"]:
+		var next: Array = []
+		var category_changed := false
+		for previous in template.get(category,[]):
+			var option: Dictionary = previous
+			# Queue shape is part of the retained key. Technology/building failures
+			# retain their original precedence; only affordability changes here.
+			if String(previous.get("reason","")) in ["","insufficient_resources"]:
+				var accepted: bool = world.economy_system.can_afford(team,previous.get("cost",{}))
+				var reason := "" if accepted else "insufficient_resources"
+				if accepted != bool(previous.get("accepted",false)) or reason != String(previous.get("reason","")):
+					option = previous.duplicate()
+					option["accepted"] = accepted
+					option["reason"] = reason
+					option.make_read_only()
+					category_changed = true
+			next.append(option)
+		if category_changed:
+			next.make_read_only()
+			result[category] = next
+			changed = true
+	if not changed: return template
+	# Original children belong to a validated immutable template. New children
+	# change scalar flags only, so this producer can certify its new outer root.
+	result.make_read_only()
+	Data._retain_immutable(result)
+	return result
+
+static func _remember_command_rules(cache: Dictionary, key: Array, value: Dictionary) -> void:
+	var bytes := var_to_bytes(value).size() + var_to_bytes(key).size() + 96
+	if bytes > MAX_COMMAND_RULE_BYTES: return
+	if cache["entries"].has(key):
+		cache["bytes"] -= cache["sizes"][key]
+		cache["entries"].erase(key)
+		cache["sizes"].erase(key)
+	while not cache["entries"].is_empty() and (cache["entries"].size() >= MAX_COMMAND_RULE_ENTRIES or int(cache["bytes"]) + bytes > MAX_COMMAND_RULE_BYTES):
+		var expired = cache["entries"].keys()[0]
+		cache["bytes"] -= cache["sizes"][expired]
+		cache["entries"].erase(expired)
+		cache["sizes"].erase(expired)
+	# A lineage array in the live actor can change on upgrade. Dictionary keys
+	# must own their immutable copy rather than retain that mutable array.
+	var frozen_key: Array = Data.capture_frozen({"key":key})["key"]
+	cache["entries"][frozen_key] = value
+	cache["sizes"][frozen_key] = bytes
+	cache["bytes"] += bytes
+	Data._retain_immutable(value)

@@ -8,6 +8,9 @@ const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
 const SpriteAtlas := preload("res://scripts/sprite_atlas.gd")
 var sprite_atlas := SpriteAtlas.new()
 var sprite_atlas_enabled := true
+var native_buildings_enabled := true
+var sprite_template_cache := {"entries":{},"bytes":0}
+var sprite_template_atlas := true
 const AMBIENT_TRAVEL_TICKS := 160
 const AMBIENT_WANDER_RADIUS := 8.0
 const AMBIENT_MIN_WAYPOINT_RADIUS := 5.0
@@ -67,6 +70,7 @@ var native_render_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if
 
 func clear_caches() -> void:
 	sprite_atlas.clear()
+	sprite_template_cache = {"entries":{},"bytes":0}
 	cached_building_depth_index.clear()
 	cached_building_records.clear()
 	camera_cache_ready = false
@@ -145,73 +149,82 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	if performance_probe != null: performance_probe.observe_microseconds("presentation.building.depth_index", Time.get_ticks_usec() - stage_started)
 	var building_frames_us := 0
 	var building_items_started := Time.get_ticks_usec() if performance_probe != null else 0
-	var present_buildings: Dictionary = {}
-	var moved_building_items: Array = []
-	for building in source_buildings:
-		if building["hp"] <= 0.0 and String(building.get("death_phase", "removed")) not in ["dying", "ruin"]:
-			continue
-		if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, building, true):
-			continue
-		var building_position: Vector2 = building["pos"]
-		var building_screen: Vector2 = world_to_screen.call(building_position)
-		var info_started := Time.get_ticks_usec() if performance_probe != null else 0
-		var building_info := _frame_info(frame_info_provider, "building", building)
-		if performance_probe != null: building_frames_us += Time.get_ticks_usec() - info_started
-		var building_id := int(building["id"])
-		var building_elevation := float(building.get("elevation", 0.0))
-		var is_interior_resource := bool(building.get("harvestable", false))
-		var base_sub_order := int(building_info.get("graphic_layer", 20)) * 1000 - (100 if is_interior_resource else 0)
-		present_buildings[building_id] = true
-		var selected: bool = selected_id_lookup.has(building_id)
-		var previewed: bool = preview_id_lookup.has(building_id)
-		var has_rally := selected and bool(building.get("rally_point_set", false))
-		var signature := hash([building_info, building_position, building_elevation, String(building.get("kind", "")), is_interior_resource, selected, previewed, observer_team])
-		var retained: Dictionary = cached_building_records.get(building_id, {})
-		if not has_rally and retained.get("signature") == signature:
-			var moved: bool = retained["screen"] != building_screen or float(retained["scale"]) != cached_sprite_scale
-			var changed: bool = not is_same(retained["source"], building)
-			if moved or changed:
-				for item in retained["items"]:
-					if changed: item["data"] = building
-					if moved:
-						if _can_project_visible(viewport):
-							moved_building_items.append(item)
-						else:
-							item["screen_position"] = building_screen
-							item["screen_y"] = Vector2(world_to_screen.call(building_position + Vector2(item.get("depth_world_offset", Vector2.ZERO)))).y
-							_cache_resource_sprite(item)
-			retained["screen"] = building_screen
-			retained["scale"] = cached_sprite_scale
-			retained["source"] = building
-			drawables.append_array(retained["items"])
-			continue
-		var first_item := drawables.size()
-		drawables.append(RenderItem.create("building", RenderItem.Layer.DECAL if is_interior_resource else RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, building_info, building_elevation, Color.WHITE, 1.0, base_sub_order))
-		var building_part_index := 0
-		for part in building_info.get("composite_parts", []):
-			building_part_index += 1
-			var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + (100 if is_interior_resource else 0) + building_part_index
-			var upright := String(part.get("presentation_layer", "")) == "upright"
-			var part_layer := RenderItem.Layer.SHADOW if String(part.get("presentation_layer", "")) == "shadow" else RenderItem.Layer.UNIT_BUILDING if upright or not is_interior_resource else RenderItem.Layer.DECAL
-			var part_item := RenderItem.create("building_part", part_layer, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order)
-			var depth_offset: Vector2 = part.get("depth_world_offset", Vector2.ZERO)
-			part_item["depth_world_offset"] = depth_offset
-			part_item["screen_y"] = Vector2(world_to_screen.call(building_position + depth_offset)).y
-			drawables.append(part_item)
-		if selected_id_lookup.has(building_id) or preview_id_lookup.has(building_id):
-			drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, building_screen, building_id, building, building_info, building_elevation, team_color(int(building.get("team", 0))), 1.0, 1))
-		if selected_id_lookup.has(building_id) and int(building.get("team", 0)) == observer_team and bool(building.get("rally_point_set", false)) and float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "")) == "complete":
-			var rally_position := Vector2(building.get("rally_point", building_position))
-			var rally_info := _frame_info(frame_info_provider, "rally_flag", building)
-			var flag := RenderItem.create("rally_flag", RenderItem.Layer.UNIT_BUILDING, rally_position, world_to_screen.call(rally_position), building_id, building, rally_info, 0.0, team_color(observer_team), 1.0, 20_001)
-			drawables.append(flag)
-			rally_drawables.append(flag)
-		var items := drawables.slice(first_item)
-		for item in items: _cache_resource_sprite(item)
-		cached_building_records[building_id] = {"signature": signature, "items": items, "source": building, "screen": building_screen, "scale": cached_sprite_scale}
-	if not moved_building_items.is_empty(): native_render_kernel.project_visible_static_items(moved_building_items, current_projection_origin, sprite_scale, Rect2())
-	for id in cached_building_records.keys():
-		if not present_buildings.has(id): cached_building_records.erase(id)
+	if from_snapshot and native_buildings_enabled and native_render_kernel != null and native_render_kernel.has_method("create_building_render_items"):
+		var batch: Dictionary = native_render_kernel.create_building_render_items(source_buildings, world_to_screen, frame_info_provider, Callable(self, "team_color"), cached_building_records, preview_ids, selected_ids, observer_team, sprite_scale, _can_project_visible(viewport), Callable(self, "_cache_sprite_batch"))
+		drawables.append_array(batch["items"])
+		rally_drawables = batch["rally"]
+	else:
+		var present_buildings: Dictionary = {}
+		var moved_building_items: Array = []
+		for building in source_buildings:
+			if building["hp"] <= 0.0 and String(building.get("death_phase", "removed")) not in ["dying", "ruin"]:
+				continue
+			if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, building, true):
+				continue
+			var building_position: Vector2 = building["pos"]
+			var building_screen: Vector2 = world_to_screen.call(building_position)
+			var info_started := Time.get_ticks_usec() if performance_probe != null else 0
+			var building_info := _frame_info(frame_info_provider, "building", building)
+			if performance_probe != null: building_frames_us += Time.get_ticks_usec() - info_started
+			var building_id := int(building["id"])
+			var building_elevation := float(building.get("elevation", 0.0))
+			var is_ruin := String(building.get("death_phase", "")) == "ruin"
+			var is_interior_resource := bool(building.get("harvestable", false)) or is_ruin
+			var base_sub_order := int(building_info.get("graphic_layer", 20)) * 1000 - (100 if is_interior_resource else 0)
+			present_buildings[building_id] = true
+			var selected: bool = selected_id_lookup.has(building_id)
+			var previewed: bool = preview_id_lookup.has(building_id)
+			var has_rally := selected and bool(building.get("rally_point_set", false))
+			var retained: Dictionary = cached_building_records.get(building_id, {})
+			# The catalog may lend its recursively readonly, time-invariant frame.
+			# Actor/control records can change without walking that composition again.
+			var info_signature: int = retained["info_signature"] if building_info.is_read_only() and is_same(retained.get("frame_info"), building_info) else hash(building_info)
+			var signature := hash([info_signature, building_position, building_elevation, String(building.get("kind", "")), is_interior_resource, selected, previewed, observer_team])
+			if not has_rally and retained.get("signature") == signature:
+				var moved: bool = retained["screen"] != building_screen or float(retained["scale"]) != cached_sprite_scale
+				var changed: bool = not is_same(retained["source"], building)
+				if moved or changed:
+					for item in retained["items"]:
+						if changed: item["data"] = building
+						if moved:
+							if _can_project_visible(viewport):
+								moved_building_items.append(item)
+							else:
+								item["screen_position"] = building_screen
+								item["screen_y"] = Vector2(world_to_screen.call(building_position + Vector2(item.get("depth_world_offset", Vector2.ZERO)))).y
+								_cache_resource_sprite(item)
+				retained["screen"] = building_screen
+				retained["scale"] = cached_sprite_scale
+				retained["source"] = building
+				drawables.append_array(retained["items"])
+				continue
+			var first_item := drawables.size()
+			drawables.append(RenderItem.create("building", RenderItem.Layer.DECAL if is_interior_resource else RenderItem.Layer.UNIT_BUILDING, building_position, building_screen, building_id, building, building_info, building_elevation, Color.WHITE, 1.0, base_sub_order))
+			var building_part_index := 0
+			for part in building_info.get("composite_parts", []):
+				building_part_index += 1
+				var part_sub_order := int(part.get("graphic_layer", 20)) * 1000 + (100 if is_interior_resource else 0) + building_part_index
+				var upright := not is_ruin and String(part.get("presentation_layer", "")) == "upright"
+				var part_layer := RenderItem.Layer.SHADOW if String(part.get("presentation_layer", "")) == "shadow" else RenderItem.Layer.UNIT_BUILDING if upright or not is_interior_resource else RenderItem.Layer.DECAL
+				var part_item := RenderItem.create("building_part", part_layer, building_position, building_screen, building_id, building, part, building_elevation, Color.WHITE, 1.0, part_sub_order)
+				var depth_offset: Vector2 = part.get("depth_world_offset", Vector2.ZERO)
+				part_item["depth_world_offset"] = depth_offset
+				part_item["screen_y"] = Vector2(world_to_screen.call(building_position + depth_offset)).y
+				drawables.append(part_item)
+			if selected_id_lookup.has(building_id) or preview_id_lookup.has(building_id):
+				drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, building_position, building_screen, building_id, building, building_info, building_elevation, team_color(int(building.get("team", 0))), 1.0, 1))
+			if selected_id_lookup.has(building_id) and int(building.get("team", 0)) == observer_team and bool(building.get("rally_point_set", false)) and float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "")) == "complete":
+				var rally_position := Vector2(building.get("rally_point", building_position))
+				var rally_info := _frame_info(frame_info_provider, "rally_flag", building)
+				var flag := RenderItem.create("rally_flag", RenderItem.Layer.UNIT_BUILDING, rally_position, world_to_screen.call(rally_position), building_id, building, rally_info, 0.0, team_color(observer_team), 1.0, 20_001)
+				drawables.append(flag)
+				rally_drawables.append(flag)
+			var items := drawables.slice(first_item)
+			for item in items: _cache_resource_sprite(item)
+			cached_building_records[building_id] = {"signature": signature, "frame_info": building_info, "info_signature": info_signature, "items": items, "source": building, "screen": building_screen, "scale": cached_sprite_scale}
+		if not moved_building_items.is_empty(): native_render_kernel.project_visible_static_items(moved_building_items, current_projection_origin, sprite_scale, Rect2())
+		for id in cached_building_records.keys():
+			if not present_buildings.has(id): cached_building_records.erase(id)
 	if performance_probe != null:
 		performance_probe.observe_microseconds("presentation.building.frames", building_frames_us)
 		performance_probe.observe_microseconds("presentation.building.items", Time.get_ticks_usec() - building_items_started - building_frames_us)
@@ -316,12 +329,15 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 		native_render_kernel.project_visible_static_items(camera_actor_statics, current_projection_origin, sprite_scale, Rect2())
 	camera_cache_ready = true
 	if sprite_scale > 0.0:
-		var visible: Array = []
-		for item in drawables:
-			if String(item["kind"]) in ["building", "building_part"]:
-				if viewport.has_area() and item.has("sprite_command") and not viewport.intersects(item["sprite_command"][1], true): continue
-			visible.append(item)
-		drawables = visible
+		if native_buildings_enabled and native_render_kernel != null and native_render_kernel.has_method("clip_building_render_items"):
+			drawables = native_render_kernel.clip_building_render_items(drawables, viewport)
+		else:
+			var visible: Array = []
+			for item in drawables:
+				if String(item["kind"]) in ["building", "building_part"]:
+					if viewport.has_area() and item.has("sprite_command") and not viewport.intersects(item["sprite_command"][1], true): continue
+				visible.append(item)
+			drawables = visible
 	_observe_stage("sort", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	var result: Array = drawables
@@ -462,6 +478,16 @@ func _reproject_statics(drawables: Array, world_to_screen: Callable, old_origin:
 		if String(drawable["kind"]) in ["resource", "resource_shadow", "building", "building_part", "environment"]: _cache_resource_sprite(drawable)
 
 
+func _cache_sprite_batch(items: Array) -> void:
+	if native_render_kernel != null and native_render_kernel.has_method("cache_sprite_items"):
+		if sprite_template_atlas != sprite_atlas_enabled:
+			sprite_template_cache = {"entries":{},"bytes":0}
+			sprite_template_atlas = sprite_atlas_enabled
+		native_render_kernel.cache_sprite_items(items, cached_sprite_scale, current_projection_origin, Callable(sprite_atlas,"texture_for") if sprite_atlas_enabled else Callable(), sprite_template_cache)
+	else:
+		for item in items: _cache_resource_sprite(item)
+
+
 func _cache_resource_sprite(item: Dictionary) -> void:
 	item.erase("sprite_command")
 	if cached_sprite_scale > 0.0 and not item.has("projection_anchor"):
@@ -495,6 +521,10 @@ static func _append_resource_shadow(drawables: Array, resource: Dictionary, fram
 
 
 static func resource_layer(resource: Dictionary) -> int:
+	# Marine resources belong to the water surface, below a hull approaching
+	# from either side of their anchor (including the jumping fish frames).
+	if String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
+		return RenderItem.Layer.DECAL
 	# Carcasses and harvested trunks lie on the ground, below workers on any side.
 	if "carcass" in resource.get("behavior_tags", []) or String(resource.get("tree_phase", "")) in ["felled", "stump"]:
 		return RenderItem.Layer.DECAL

@@ -36,6 +36,13 @@ var queued_refinement: Variant
 var native_enabled := true
 var native_kernel: Variant
 var terrain_mesh: ArrayMesh
+var terrain_mesh_parts: Array[ArrayMesh] = []
+var retired_meshes: Array[ArrayMesh] = []
+var refinement_upload: Variant
+const UPLOAD_BUDGET_USEC := 2000
+const MAX_UPLOADS_PER_FRAME := 2
+const MAX_RETIREMENTS_PER_FRAME := 4
+var peak_chunk_upload_us := 0
 var terrain_mesh_bounds := Rect2i()
 var native_sample_cache: Dictionary = {}
 var native_sample_revision := -1
@@ -122,6 +129,8 @@ func _advance_unchanged_refinement(cells: Array, next_revision: int) -> void:
 		refinement_revision = next_revision
 	if queued_refinement != null and not cells.any(func(cell): return Rect2i(queued_refinement["bounds"]).grow(1).has_point(cell)):
 		queued_refinement["revision"] = next_revision
+	if refinement_upload != null and not cells.any(func(cell): return Rect2i(refinement_upload["bounds"]).grow(1).has_point(cell)):
+		refinement_upload["revision"] = next_revision
 
 
 func _invalidate_terrain_cells(cells: Array) -> void:
@@ -152,7 +161,9 @@ func _draw() -> void:
 		return
 	if terrain_mesh != null and terrain_atlas != null:
 		draw_set_transform(PixelScaling.snap_screen(view_offset), 0.0, Vector2.ONE * (view_zoom if _uses_world_mesh() else 1.0))
-		draw_mesh(terrain_mesh, terrain_atlas)
+		if terrain_mesh_parts.is_empty(): draw_mesh(terrain_mesh, terrain_atlas)
+		else:
+			for part in terrain_mesh_parts: draw_mesh(part, terrain_atlas)
 		draw_set_transform(Vector2.ZERO)
 		return
 	_draw_terrain_fallback()
@@ -253,8 +264,9 @@ func _next_power_of_two(value: int) -> int:
 func _rebuild_terrain_mesh(refine_async: bool = false) -> void:
 	mesh_generation += 1
 	queued_refinement = null
+	_discard_refinement_upload()
+	_retire_current_meshes()
 	last_mesh_build_metrics = {}
-	terrain_mesh = null
 	terrain_mesh_bounds = Rect2i()
 	if terrain_atlas == null or resource_catalog == null or simulation_world == null or not terrain_id_provider.is_valid() or not bounds_provider.is_valid():
 		return
@@ -404,6 +416,7 @@ func _draw_material_layer(layer: Dictionary) -> void:
 
 func _install_native_arrays(arrays: Array) -> void:
 	var started := Time.get_ticks_usec()
+	_retire_current_meshes()
 	terrain_mesh = ArrayMesh.new()
 	terrain_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	last_mesh_build_metrics["upload_us"] = Time.get_ticks_usec() - started
@@ -417,7 +430,7 @@ func _prepare_native_samples() -> void:
 
 
 func _schedule_terrain_prefetch(visible_bounds: Rect2i) -> void:
-	if not native_enabled or native_kernel == null or refinement_task_id >= 0 or queued_refinement != null:
+	if not native_enabled or native_kernel == null or refinement_task_id >= 0 or queued_refinement != null or refinement_upload != null:
 		return
 	_prepare_native_samples()
 	var next_bounds := _expanded_bounds(visible_bounds, MESH_OVERSCAN_CELLS)
@@ -428,7 +441,7 @@ func _schedule_terrain_prefetch(visible_bounds: Rect2i) -> void:
 	_start_queued_refinement()
 
 func _start_queued_refinement() -> void:
-	if refinement_task_id >= 0 or queued_refinement == null: return
+	if refinement_task_id >= 0 or queued_refinement == null or refinement_upload != null: return
 	refinement_job = queued_refinement["job"]
 	refinement_bounds = queued_refinement["bounds"]
 	refinement_revision = int(queued_refinement["revision"])
@@ -440,22 +453,72 @@ func _start_queued_refinement() -> void:
 
 
 func _process(_delta: float) -> void:
-	if refinement_task_id < 0 or not WorkerThreadPool.is_task_completed(refinement_task_id): return
-	WorkerThreadPool.wait_for_task_completion(refinement_task_id)
-	refinement_task_id = -1
-	# Rapid minimap clicks may supersede a request while it is being built.
-	# Never replace the new view with geometry captured for an older view.
-	var bounds_valid := _bounds_contains(refinement_bounds, bounds_provider.call()) if refinement_prefetch else refinement_bounds == terrain_mesh_bounds
-	if refinement_generation == mesh_generation and queued_refinement == null and bounds_valid and refinement_revision == terrain_revision and not refinement_job.result.is_empty():
-		if refinement_prefetch:
-			terrain_mesh_bounds = refinement_bounds
-			last_mesh_build_metrics = refinement_job.timings.duplicate()
-		_install_native_arrays(refinement_job.result)
-		last_mesh_build_metrics["refinement_us"] = refinement_job.timings.get("native_us", 0)
-		queue_redraw()
-	refinement_job = null
+	for _index in range(mini(MAX_RETIREMENTS_PER_FRAME,retired_meshes.size())): retired_meshes.pop_back()
+	if refinement_task_id >= 0:
+		if not WorkerThreadPool.is_task_completed(refinement_task_id): return
+		WorkerThreadPool.wait_for_task_completion(refinement_task_id)
+		refinement_task_id = -1
+		var bounds_valid := _bounds_contains(refinement_bounds, bounds_provider.call()) if refinement_prefetch else refinement_bounds == terrain_mesh_bounds
+		if refinement_generation == mesh_generation and queued_refinement == null and bounds_valid and refinement_revision == terrain_revision:
+			var chunks: Array = refinement_job.result_chunks
+			if chunks.is_empty() and not refinement_job.result.is_empty(): chunks = [refinement_job.result]
+			if not chunks.is_empty():
+				refinement_upload = {"arrays":chunks,"meshes":[],"cursor":0,"generation":refinement_generation,"revision":refinement_revision,"bounds":refinement_bounds,"prefetch":refinement_prefetch,"timings":refinement_job.timings.duplicate(),"upload_us":0,"max_chunk_upload_us":0,"vertices":0}
+		refinement_job = null
+	_upload_refinement_parts()
 	_start_queued_refinement()
-	if refinement_task_id < 0: set_process(false)
+	set_process(refinement_task_id >= 0 or refinement_upload != null or not retired_meshes.is_empty())
+
+func _retire_current_meshes() -> void:
+	if not terrain_mesh_parts.is_empty(): retired_meshes.append_array(terrain_mesh_parts)
+	elif terrain_mesh != null: retired_meshes.append(terrain_mesh)
+	terrain_mesh_parts = []
+	terrain_mesh = null
+	if not retired_meshes.is_empty(): set_process(true)
+
+func _discard_refinement_upload() -> void:
+	if refinement_upload == null: return
+	retired_meshes.append_array(refinement_upload["meshes"])
+	refinement_upload = null
+	if not retired_meshes.is_empty(): set_process(true)
+
+func _upload_refinement_parts() -> void:
+	if refinement_upload == null: return
+	var state: Dictionary = refinement_upload
+	var bounds_valid: bool = _bounds_contains(state["bounds"],bounds_provider.call()) if state["prefetch"] else state["bounds"] == terrain_mesh_bounds
+	if state["generation"] != mesh_generation or state["revision"] != terrain_revision or not bounds_valid or queued_refinement != null:
+		_discard_refinement_upload()
+		return
+	var started := Time.get_ticks_usec()
+	var uploaded := 0
+	while state["cursor"] < state["arrays"].size() and uploaded < MAX_UPLOADS_PER_FRAME:
+		var arrays: Array = state["arrays"][state["cursor"]]
+		var part := ArrayMesh.new()
+		var upload_started := Time.get_ticks_usec()
+		part.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,arrays)
+		var elapsed := Time.get_ticks_usec()-upload_started
+		peak_chunk_upload_us = maxi(peak_chunk_upload_us,elapsed)
+		state["upload_us"] += elapsed
+		state["max_chunk_upload_us"] = maxi(state["max_chunk_upload_us"],elapsed)
+		state["vertices"] += arrays[Mesh.ARRAY_VERTEX].size()
+		state["arrays"][state["cursor"]] = null
+		state["meshes"].append(part)
+		state["cursor"] += 1
+		uploaded += 1
+		if Time.get_ticks_usec()-started >= UPLOAD_BUDGET_USEC: break
+	if state["cursor"] < state["arrays"].size(): return
+	# The old mesh remains visible until every bounded GPU upload is complete.
+	# Publish the complete replacement atomically, in original triangle order.
+	_retire_current_meshes()
+	terrain_mesh_parts.assign(state["meshes"])
+	terrain_mesh = terrain_mesh_parts[0]
+	terrain_mesh_bounds = state["bounds"]
+	last_mesh_build_metrics = state["timings"]
+	last_mesh_build_metrics["refinement_us"] = last_mesh_build_metrics.get("native_us",0)
+	for field in ["upload_us","max_chunk_upload_us","vertices"]: last_mesh_build_metrics[field] = state[field]
+	last_mesh_build_metrics["chunks"] = terrain_mesh_parts.size()
+	refinement_upload = null
+	queue_redraw()
 
 
 func _finish_refinement() -> void:
@@ -464,6 +527,8 @@ func _finish_refinement() -> void:
 	refinement_task_id = -1
 	refinement_job = null
 	queued_refinement = null
+	_discard_refinement_upload()
+	retired_meshes.clear()
 	set_process(false)
 
 

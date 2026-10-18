@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
@@ -16,6 +17,7 @@ public:
     Dictionary build_mesh(const Rect2i &bounds, const PackedInt32Array &cells,
         const PackedFloat32Array &heights, const PackedInt32Array &frames,
         const PackedFloat32Array &materials, int64_t seed, int32_t maximum_subdivisions = 16) const;
+    Array split_mesh_arrays(const Array &arrays, int32_t maximum_vertices = 16384) const;
 protected:
     static void _bind_methods();
 };

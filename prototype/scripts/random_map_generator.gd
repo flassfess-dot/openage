@@ -44,6 +44,7 @@ static func generate(match_definition: Dictionary, progress_callback: Callable =
 	var reserved_naval_cells := _reserved_naval_cells(naval_start_zones, maxi(0, int(naval_start_settings.get("dock_footprint_radius_cells", 1))))
 	var resource_exclusion_cells := reserved_naval_cells.duplicate()
 	resource_exclusion_cells.merge(_starting_entity_exclusion_cells(match_definition, size), true)
+	LandscapeNavigation.reserve_naval_access(match_definition, {"size":size, "terrain_ids":terrain_ids, "naval_start_zones":naval_start_zones}, resource_exclusion_cells)
 	var reserved_foundation_cells: Array = reserved_naval_cells.keys()
 	reserved_foundation_cells.sort_custom(func(left, right):
 		var left_cell := Vector2i(left)
@@ -1094,6 +1095,7 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 	reserved.merge(naval_reserved, true)
 	reserved.merge(_starting_entity_exclusion_cells(definition, size), true)
 	reserved.merge(_clear_start_corridors(terrain, size, starts, {}, topology), true)
+	LandscapeNavigation.reserve_naval_access(definition, result, reserved)
 	for cell in cliffs:
 		for y in range(maxi(0, cell.y - 1), mini(size.y, cell.y + 2)):
 			for x in range(maxi(0, cell.x - 1), mini(size.x, cell.x + 2)): reserved[Vector2i(x, y)] = true

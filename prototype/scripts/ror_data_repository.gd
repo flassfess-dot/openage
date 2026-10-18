@@ -6,20 +6,24 @@ const GateCatalog := preload("res://scripts/gate_catalog.gd")
 var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
 var compatibility_gamespec: Dictionary = {}
+var revision := 0
 
 
 func configure_runtime(data: Dictionary) -> void:
 	GateCatalog.install_runtime(data)
 	runtime_catalog = data
+	revision += 1
 
 
 func configure_objects(data: Dictionary) -> void:
 	GateCatalog.install_objects(data)
 	object_catalog = data
+	revision += 1
 
 
 func configure_compatibility_gamespec(data: Dictionary) -> void:
 	compatibility_gamespec = data
+	revision += 1
 
 
 func is_configured() -> bool:
@@ -57,8 +61,13 @@ func runtime_metadata(alias: String) -> Dictionary:
 	return archetype(alias).get("runtime", {}).duplicate(true)
 
 
+func runtime_field(alias: String, field: String, fallback: Variant = null) -> Variant:
+	var value: Variant = archetype(alias).get("runtime", {}).get(field, fallback)
+	return value.duplicate(true) if value is Array or value is Dictionary else value
+
+
 func train_location_unit_id(alias: String, civilization_id: int = -1) -> int:
-	var runtime := runtime_metadata(alias)
+	var runtime: Dictionary = archetype(alias).get("runtime", {})
 	if runtime.has("train_location_unit_id"):
 		return int(runtime["train_location_unit_id"])
 	return int(normalized_record(alias, civilization_id).get("relationships", {}).get("train_location_unit_id", -1))

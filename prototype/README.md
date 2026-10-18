@@ -66,6 +66,18 @@ an explicit facing. Groups share the slowest member's march speed, narrow their
 ranks through chokepoints, and keep surviving units' slots after casualties.
 `Shift` + right click appends a waypoint for the group.
 
+Mobile sprite picking uses the entire asset rectangle, including transparent
+gaps between animated limbs, with the rendered pivot, scale and reflection.
+Destroyed farms use their source dead-object artwork; settled building rubble
+draws beneath mobile units. Gate hinges attach to the masonry independently of
+the texture crop. Living mobile bodies retain swept collision, and a local
+post-movement pass separates existing overlaps, including idle units restored
+inside narrow forest corners. It visits changed actors and unsettled contacts
+after its first scan, preserving the isolated formation translation path.
+`tests/manual/verify_reported_mobile_overlap.gd` loads an autosave with autosaving
+disabled and checks control group 1 without issuing new orders; `--save=` and
+`--output=` select the source and report directory.
+
 Generated files in `assets/generated` and copied original music are for local
 use only and must not be redistributed.
 
@@ -134,6 +146,100 @@ can disable this path for reference comparisons. Whole-view reuse requires
 immutable resource records as well as an immutable outer array.
 Native depth-list merging preserves the reference comparator
 and automatically falls back to GDScript if that method is unavailable.
+Building-item construction and clipping also use an equivalent native pass;
+set `RenderWorld.native_buildings_enabled = false` for a reference comparison.
+All sprite/texture operations remain on the main thread. Texture geometry
+templates retain at most 4096 entries and 96 MiB of accounted image storage.
+
+The owner-thread movement integration pass updates coordinates, terrain height,
+velocity and facing together, publishing the same union of changed entity groups.
+Its GDScript reference remains available through
+`movement_system.native_integration_enabled = false`. Route decisions, collision
+avoidance, arrivals and stuck recovery retain their existing order. Gate planning
+revisions cache alliance queries until player relations or gate policy change;
+checkpoint dictionary replacement invalidates the derived policy version.
+Visibility footprint generation uses one bounded cell buffer and adds only the
+new footprint fringe to personal exploration, preserving the original ordered
+visibility and exploration journals.
+
+AI actor enrichment uses a native profile builder for complete owned runtime
+records; foreign estimates and incomplete compatibility records retain the
+catalog-based reference path. `AiObservationProfile.native_actor_enabled = false`
+selects that reference. The AI preparation owner can freeze its newly created
+row/profile containers through `IsolatedTaskData.freeze_owned`, relinquishing
+their mutability. Borrowed readonly parents do not transfer ownership of mutable
+descendants, and packed buffers still detach. Ordinary `capture_frozen` continues
+to copy mutable sources without freezing them. Native capture writes back only
+changed/detached children after a shallow copy, preserving all scalar values.
+Healthy completed farms retain their static crop/hut composition and depth
+offsets; damage, construction, depletion and animated layers keep live resolution.
+Immutable observation graphs are recursively validated before reuse. Mutable
+descendants and packed buffers detach even inside a readonly parent.
+
+Saved-match frame measurements use the actual exported Release, natural frame
+intervals and the saved game speed. The default uncapped run disables detailed
+stage instrumentation; add `-ProfileStages` when diagnosing CPU stages:
+
+    powershell -ExecutionPolicy Bypass -File tools/run-saved-match-frames.ps1 -SavePath "path/to/save.json" -Seconds 180 -Size 2560x1080 -Pan
+
+The probe redirects autosaves into its new report directory. It keeps the source
+save and the player's recovery slot unchanged, and records steady frame intervals,
+simulation progress, process memory and a real screenshot. Source-generation
+build options are shared between AI capture portions; pure construction demand
+runs on the planner worker. Native visibility deltas and selected-object control
+projections keep their GDScript reference paths for parity checks.
+The report also distinguishes rendered frame intervals from stalled simulation
+ticks. Planner executors retain bounded, page-versioned terrain audits; resource
+queries, infrastructure scoring and walkability masks have exact native paths.
+Each private planner also retains its current immutable reachability indexes
+(262144 cells total) and resource buckets (262144 records). Amount-only updates
+replace bucket row references; geometry, domain, type or order changes rebuild
+the index. Mutable records never qualify for identity reuse. Catalog field reads
+detach only the requested value, and static building frames can lend an immutable
+descriptor to the renderer while ordinary catalog callers keep editable copies.
+Build-site profiles retain at most 256 entries / 2 MiB per observer and invalidate
+on repository reconfiguration. Actor roots are certified only after recursive
+validation. Private AI production rules have the same entry/payload limits and a
+64 KiB dependency-schema cap; technology, civilization, army and request changes
+invalidate them, while stock changes reprice immutable options. Completed source
+reads publish in the same frame instead of holding another frame at the source.
+Production templates live only for one pinned source generation.
+
+Graphical single-player matches use one persistent simulation owner thread with
+one outstanding frame request. The main thread relinquishes all live world,
+controller and AI access until that request completes. It renders detached
+presentation records, a separate terrain/height view and prepared fog/minimap
+data while the owner advances the authoritative world. Terrain changes update
+that view through bounded journals; a load replaces it completely. Scene input,
+commands, save/load, menus and shutdown join the owner before live access. No GPU
+or scene operations run on the simulation thread, and the world is never cloned
+for each render frame. Interpolation continues from published positions while
+the next job runs. AI capture budgets use the dispatch frame ID.
+The owner has a 64 ms capture budget and 32 ms advance budget so pinned AI facts
+finish promptly and overdue ticks catch up at a 60 FPS display cadence. These
+overrides are restored before ownership returns; the sequential defaults remain
+7 ms for capture and 16 ms for advancing the controller. A completed AI barrier
+does not yield to a presentation deadline on the owner, since drawing proceeds
+independently on the main thread.
+
+Network matches, building placement previews, diagnostics, detailed stage
+profiling and headless fixtures use the sequential path. Pass
+`-- --no-simulation-owner` to compare that path in a graphical run. Frame probes
+read latched simulation metadata and join before changing controller state.
+Normal windows cap rendering at 60 FPS when no explicit engine cap is set.
+`run-saved-match-frames.ps1 -DefaultFrameLimit` measures that production cadence
+without replacing it; the default uncapped benchmark still exposes throughput.
+Full-detail terrain is split into indexed parts of at most 16384 vertices on the
+CPU worker. The main thread uploads at most two parts / 2 ms per frame, retaining
+the complete old mesh until the replacement is ready. Old mesh resources retire
+at most four per frame. Camera generations, surface revisions and world replacement
+discard stale staged work. Triangle order and all vertex/UV/colour values match
+the original full-detail mesh. Camera resource queries use only last-seen memory
+and its spatial buckets; `native_render_resource_queries_enabled = false` retains
+the GDScript reference query for parity checks.
+`test_simulation_owner.gd`, `test_render_terrain_view.gd` and
+`test_simulation_owner_scene.gd` cover canonical state parity, isolation,
+single-request bounds, commands, pending-job save/load and shutdown.
 
 Worker and inspection behavior
 ------------------------------

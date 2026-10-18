@@ -30,6 +30,7 @@ var performance_probe: Variant = null
 var vision_cells_microseconds: int = 0
 var regenerated_sources: int = 0
 var native_enabled: bool = true
+var native_deltas_enabled := true
 var native_available: bool = false
 var native_kernel: Variant = null
 var source_scan_generation: int = 0
@@ -439,6 +440,14 @@ func _collect_source_deltas(
 	previous_replacements: Array[Dictionary],
 	current_replacements: Array[Dictionary]
 ) -> void:
+	# This is an owner-thread call over live source records. No live dictionary
+	# or callback enters a background task. Record every personally seen cell
+	# together with its footprint instead of interpreting that loop per unit.
+	if native_deltas_enabled and uses_native_kernel() and native_kernel.has_method("collect_source_deltas"):
+		var result: Dictionary = native_kernel.collect_source_deltas({"entities": entities, "category": category_id, "buckets": movement_bucket_count, "phase": movement_bucket_index, "sources": vision_sources, "states": states_by_player, "personal": personally_explored_by_player, "generation": source_scan_generation, "profile": performance_probe != null, "added": added_sources, "previous": previous_replacements, "current": current_replacements, "ensure_player": Callable(self, "ensure_player")})
+		vision_cells_microseconds += int(result["vision_us"])
+		regenerated_sources += int(result["regenerated"])
+		return
 	for index in range(entities.size()):
 		var entity: Dictionary = entities[index]
 		if float(entity["hp"]) <= 0.0:
@@ -583,6 +592,9 @@ func _apply_source_deltas(
 	if removed_sources.is_empty() and added_sources.is_empty() and previous_replacements.is_empty():
 		return {}
 
+	if native_deltas_enabled and uses_native_kernel() and native_kernel.has_method("apply_source_deltas"):
+		return _apply_native_source_deltas(removed_sources, added_sources, previous_replacements, current_replacements)
+
 	var changed_players: Dictionary = {}
 	for observer_value in states_by_player.keys():
 		var observer := int(observer_value)
@@ -629,6 +641,20 @@ func _apply_source_deltas(
 			exploration_revisions_by_player[observer] = int(exploration_revisions_by_player.get(observer, 0)) + 1
 	return changed_players
 
+
+# The kernel owns detached packed buffers; legal memory, journals and their
+# revision boundaries stay with the existing owner-thread publication.
+func _apply_native_source_deltas(removed: Array, added: Array, previous: Array, current: Array) -> Dictionary:
+	var changed_players: Dictionary = {}
+	for observer in states_by_player:
+		var publication := {"changes": _visibility_context(observer), "dirty": presentation_dirty_cells_by_player[observer] if presentation_dirty_tracked_players.has(observer) else null, "explored": newly_explored_cells_by_player[observer], "navigation": navigation_newly_explored_by_player.get(observer), "visible": newly_visible_cells_by_player[observer], "path": path_dirty_by_player.get(observer)}
+		var result: Dictionary = native_kernel.apply_source_deltas({"states": states_by_player[observer], "counts": visible_counts_by_player[observer], "allies": shared_vision_by_player.get(observer, {}), "removed": removed, "added": added, "previous": previous, "current": current, "publication": publication})
+		assert(not result.is_empty(), "Invalid visibility delta buffers")
+		states_by_player[observer] = result["states"]
+		visible_counts_by_player[observer] = result["counts"]
+		if not result["visibility"].is_empty(): changed_players[observer] = true
+		if not result["exploration"].is_empty(): exploration_revisions_by_player[observer] = int(exploration_revisions_by_player.get(observer, 0)) + 1
+	return changed_players
 
 func _add_source(source: Dictionary) -> bool:
 	var changed := false

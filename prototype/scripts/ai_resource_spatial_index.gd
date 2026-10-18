@@ -7,11 +7,38 @@ extends RefCounted
 
 const CELL_SIZE := 8.0
 
+static var native_queries_enabled := true
+static var native_rebuild_enabled := true
+static var retained_rebuild_enabled := true
+const MAX_RETAINED_RESOURCES := 262144
+var native_enabled := true
+var native_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 var bucket_lists_by_domain: Dictionary = {}
 var buckets_by_resource_type: Dictionary = {}
+var retained_input: Array = []
+var retained_configuration: Array = []
+var retained_index: Dictionary = {}
 
 
 func rebuild(resources: Array, movement_domains: Array, empty_domains_are_unrestricted: bool = true, index_by_type: bool = false) -> void:
+	if native_rebuild_enabled and native_enabled and native_kernel != null and native_kernel.has_method("build_resource_buckets"):
+		var configuration := [movement_domains, empty_domains_are_unrestricted, index_by_type]
+		if retained_rebuild_enabled and not retained_index.is_empty() and configuration == retained_configuration and native_kernel.has_method("refresh_resource_bucket_rows") and native_kernel.refresh_resource_bucket_rows(retained_index,retained_input,resources):
+			retained_input = resources.duplicate()
+			retained_input.make_read_only()
+			return
+		var index: Dictionary = native_kernel.build_resource_buckets(resources,movement_domains,empty_domains_are_unrestricted,index_by_type,CELL_SIZE)
+		bucket_lists_by_domain = index["lists"]
+		buckets_by_resource_type = index["types"]
+		if retained_rebuild_enabled and resources.size() <= MAX_RETAINED_RESOURCES:
+			retained_index = index
+			retained_configuration = configuration.duplicate(true)
+			retained_input = resources.duplicate()
+			retained_input.make_read_only()
+		else:
+			retained_index = {}; retained_input = []; retained_configuration = []
+		return
+	retained_index = {}; retained_input = []; retained_configuration = []
 	bucket_lists_by_domain.clear()
 	buckets_by_resource_type.clear()
 	var unique_domains: Dictionary = {}
@@ -118,6 +145,8 @@ static func _cell(position: Vector2) -> Vector2i:
 # Bounded candidate query for adaptive worker allocation. The immutable index
 # includes every known resource; only each query's comparisons are bounded.
 func candidates(position: Vector2, domain: String, resource_type: int, maximum: int = 12) -> Array:
+	if native_queries_enabled and native_enabled and native_kernel != null and native_kernel.has_method("query_resource_candidates"):
+		return native_kernel.query_resource_candidates(buckets_by_resource_type.get(domain, {}).get(resource_type, []), position, resource_type, CELL_SIZE, maximum)
 	var buckets: Array = buckets_by_resource_type.get(domain, {}).get(resource_type, []).duplicate()
 	buckets.sort_custom(func(a, b):
 		var ad := _distance_squared_to_cell(position, a["cell"])

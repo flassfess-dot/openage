@@ -37,6 +37,31 @@ func _initialize() -> void:
 	check(Data.is_detached(navigation) and navigation["land"].size() == 50000, "evicted publications remain safely verifiable without point traversal")
 	var evicted_capture: Dictionary = Data.capture(navigation)
 	check(is_same(evicted_capture["land"], points), "typed readonly buckets stay shared after wrapper-registry eviction")
+	if ClassDB.class_exists("RoRReadModelKernel"):
+		var kernel: Variant = ClassDB.instantiate("RoRReadModelKernel")
+		var child := {"position":Vector2.ONE,"tags":["worker"]}
+		child["tags"].make_read_only()
+		child.make_read_only()
+		var immutable := {"actors":[child]}
+		immutable["actors"].make_read_only()
+		immutable.make_read_only()
+		var retained: Dictionary = kernel.capture_frozen(immutable,[])
+		check(retained["valid"] and is_same(retained["value"],immutable), "unregistered immutable graphs are validated without cloning")
+		var live_child := {"path":[Vector2.ONE]}
+		var shallow := {"actor":live_child}
+		shallow.make_read_only()
+		var detached: Dictionary = kernel.capture_frozen(shallow,[])
+		live_child["path"].append(Vector2.ZERO)
+		check(detached["value"]["actor"]["path"].size() == 1 and not live_child.is_read_only(), "readonly parents do not certify mutable descendants or freeze their owner")
+		var buffer := PackedVector2Array([Vector2.ONE])
+		var packed := {"buffer":buffer}
+		packed.make_read_only()
+		var packed_copy: Dictionary = kernel.capture_frozen(packed,[])
+		buffer[0] = Vector2.ZERO
+		check(packed_copy["value"]["buffer"][0] == Vector2.ONE, "packed buffers detach inside readonly parents")
+		var unsafe_readonly := {"child":RefCounted.new()}
+		unsafe_readonly.make_read_only()
+		check(not kernel.capture_frozen(unsafe_readonly,[])["valid"], "unregistered readonly graphs still reject live objects")
 	for failure in failures: push_error(failure)
 	quit(0 if failures.is_empty() else 1)
 

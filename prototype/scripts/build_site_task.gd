@@ -4,11 +4,16 @@ extends RefCounted
 const Data := preload("res://scripts/isolated_task_data.gd")
 const NavigationData := preload("res://scripts/navigation_task_data.gd")
 const Pathfinder := preload("res://scripts/pathfinder.gd")
+const StaticAuditCache := preload("res://scripts/build_site_static_cache.gd")
 const Placement := preload("res://scripts/simulation_building_placement_system.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
 const GateSystem := preload("res://scripts/gate_system.gd")
+const WallPlacement := preload("res://scripts/wall_placement.gd")
+static var native_structure_audits_enabled := true
 const MAX_ACTOR_BYTES := 8 * 1024 * 1024
+const MAX_PROFILE_BYTES := 2 * 1024 * 1024
+const MAX_PROFILES := 256
 
 class Repository extends RefCounted:
 	var profiles: Dictionary = {}
@@ -62,16 +67,21 @@ var separate_fallbacks := false
 var gap_fallbacks: Dictionary = {}
 
 static func capture(world, team: int, kinds: Array) -> Dictionary:
+	var cache := _capture_cache(world, team)
 	var profiles: Dictionary = {}
 	var researched: Dictionary = {}
 	for kind_value in kinds:
 		var kind := String(kind_value)
-		var metadata: Dictionary = Data.copy(world.data_repository.runtime_metadata(kind))
+		var template := _profile_template(world, cache, kind)
+		if template.is_empty(): return {}
+		var metadata: Dictionary = template["metadata"]
 		var technology_id := int(metadata.get("required_technology_id", -1))
 		if technology_id >= 0:
 			researched[technology_id] = world.technology_system.is_researched(team, technology_id)
-		profiles[kind] = {"stats": Data.copy(world.unit_stats(kind)), "metadata": metadata, "exists": world.data_repository.has_archetype(kind), "category": world.data_repository.category(kind), "affordable": world.can_afford_resource_cost(team, world.building_cost(kind, team))}
-	var cache := _capture_cache(world, team)
+		var profile := template.duplicate()
+		profile["affordable"] = world.can_afford_resource_cost(team, world.building_cost(kind, team))
+		profile.make_read_only()
+		profiles[kind] = profile
 	var workers: Array = []
 	var mobile_cells: Dictionary[Vector2i, bool] = {}
 	var seen_units: Dictionary = {}
@@ -87,7 +97,7 @@ static func capture(world, team: int, kinds: Array) -> Dictionary:
 		var previous: Dictionary = cache["units"].get(id, {})
 		if int(previous.get("version", -1)) != version:
 			var row := {"id": id, "team": team, "hp": unit["hp"], "pos": position, "movement_domain": "land", "terrain_restriction": unit.get("terrain_restriction", -1), "footprint_radius": radius}
-			Data.freeze_detached(row, 0, false)
+			if not Data.freeze_detached(row, 0, false): return {}
 			previous = {"version": version, "row": row}
 			_retain_actor(cache, "units", id, previous)
 		workers.append(previous["row"])
@@ -102,12 +112,18 @@ static func capture(world, team: int, kinds: Array) -> Dictionary:
 		var previous: Dictionary = cache["buildings"].get(id, {})
 		if int(previous.get("version", -1)) != version:
 			var row := {"id": id, "team": building.get("team", 0), "hp": building.get("hp", 0.0), "pos": building["pos"], "footprint": Data.copy(building.get("footprint", {})), "occupied_cells": Data.copy(building.get("occupied_cells", [])), "footprint_radius": building.get("footprint_radius", 1.0)}
-			Data.freeze_detached(row, 0, false)
+			if not Data.freeze_detached(row, 0, false): return {}
 			previous = {"version": version, "row": row}
 			_retain_actor(cache, "buildings", id, previous)
 		structures.append(previous["row"])
 	for id in cache["buildings"].keys():
 		if not seen_buildings.has(id): _erase_actor(cache, id)
+	# Every actor row was validated/frozen by this producer, and each profile
+	# contains only a validated template plus the current affordability boolean.
+	# Certify these owned roots instead of revisiting all children in the caller.
+	for publication in [workers, structures, profiles]:
+		publication.make_read_only()
+		Data._retain_immutable(publication)
 	var planner = world.movement_system.knowledge.planner(world, team)
 	return {"navigation": capture_build_topology(world, cache, planner), "native_enabled": planner.native_enabled, "profiles": profiles, "configured": world.data_repository.is_configured(), "researched": researched, "workers": workers, "buildings": structures, "mobile_cells": mobile_cells, "fog": world.get_fog_of_war().states_by_player[team].duplicate()}
 
@@ -222,7 +238,7 @@ static func calculate_queries(base: Dictionary, queries: Array, coordinator, tic
 		merged.erase("fallbacks")
 	return result
 
-static func run(input: Dictionary, private_planner = null) -> Dictionary:
+static func run(input: Dictionary, private_planner = null, static_audits = null) -> Dictionary:
 	var task := RoRBuildSiteTask.new()
 	var base: Dictionary = input["base"]
 	task.navigation_grid = private_planner.grid if private_planner != null else NavigationData.create_grid(base["navigation"])
@@ -238,6 +254,18 @@ static func run(input: Dictionary, private_planner = null) -> Dictionary:
 	task.buildings = base["buildings"]
 	task.mobile_cells = base["mobile_cells"]
 	task.building_placement_system = Placement.new(task)
+	task.tick_pipeline.performance_probe = task.pathfinder.performance_probe
+	task.building_placement_system.page_cache = static_audits
+	if native_structure_audits_enabled and static_audits != null and static_audits.native_kernel != null and static_audits.native_kernel.has_method("foundation_intersects_structures"):
+		task.building_placement_system.structure_audit_kernel = static_audits.native_kernel
+		var structures := {"centers":PackedVector2Array(),"halves":PackedVector2Array(),"cells":[],"ids":[]}
+		for building in task.buildings:
+			if float(building.get("hp",0.0)) <= 0.0: continue
+			structures.centers.append(WallPlacement.masonry_center(building))
+			structures.halves.append(Vector2(building.get("footprint",{}).get("obstruction_half_size",building.get("footprint",{}).get("half_size",Vector2(0.5,0.5)))))
+			structures.cells.append(building.get("occupied_cells",[]))
+			structures.ids.append(int(building.get("id",-1)))
+		task.building_placement_system.structure_audit = structures
 	task.initial_seen = input.get("initial_seen", {})
 	task.scan_ids = input.get("scan_ids", {})
 	task.separate_fallbacks = bool(input.get("separate_fallbacks", false))
@@ -275,10 +303,16 @@ func _mobile_foundation_obstructions() -> Dictionary:
 	return mobile_cells
 
 func _can_place_foundation(team: int, kind: String, position: Vector2, occupied: Dictionary) -> bool:
-	return building_placement_system.can_place_foundation(team, kind, position, occupied)
+	var started := Time.get_ticks_usec() if tick_pipeline.performance_probe != null else 0
+	var result: bool = building_placement_system.can_place_foundation(team, kind, position, occupied)
+	if tick_pipeline.performance_probe != null: tick_pipeline.performance_probe.observe_microseconds("placement.dynamic",Time.get_ticks_usec()-started)
+	return result
 
 func worker_can_reach_foundation(worker: Dictionary, kind: String, position: Vector2) -> bool:
-	return building_placement_system.worker_can_reach_foundation(worker, kind, position)
+	var started := Time.get_ticks_usec() if tick_pipeline.performance_probe != null else 0
+	var result: bool = building_placement_system.worker_can_reach_foundation(worker, kind, position)
+	if tick_pipeline.performance_probe != null: tick_pipeline.performance_probe.observe_microseconds("placement.reach",Time.get_ticks_usec()-started)
+	return result
 
 func foundation_preserves_structure_gap(team: int, kind: String, position: Vector2, gap: float) -> bool:
 	return building_placement_system.foundation_preserves_structure_gap(team, kind, position, gap)
@@ -329,29 +363,16 @@ func search(team: int, kinds: Array, maximum_per_kind: int = 4, search_radius: i
 				continue
 			var worker: Dictionary = worker_value
 			var center := Vector2i(floori(float(worker.get("pos", Vector2.ZERO).x)), floori(float(worker.get("pos", Vector2.ZERO).y)))
-			for radius in range(1, maxi(1, search_radius) + 1):
-				for y in range(center.y - radius, center.y + radius + 1):
-					# Preserve row-major ring order without visiting its interior.
-					var columns: Array = range(center.x - radius, center.x + radius + 1) if absi(y - center.y) == radius else [center.x - radius, center.x + radius]
-					for x in columns:
-						var cell := Vector2i(x, y)
-						if seen_cells.has(cell) or not navigation_grid.contains(cell):
-							continue
-						seen_cells[cell] = true
-						var position := Vector2(cell) + Vector2(0.5, 0.5)
-						if building_placement_system.cached_map_supports_foundation(kind, position) and _can_place_foundation(team, kind, position, mobile_occupied_cells) and worker_can_reach_foundation(worker, kind, position):
-							if foundation_preserves_structure_gap(team, kind, position, minimum_structure_gap):
-								sites.append(position)
-								if sites.size() >= maximum_per_kind:
-									break
-							elif fallback_sites.size() < maximum_per_kind:
-								fallback_sites.append(position)
-					if sites.size() >= maximum_per_kind:
-						break
-				if sites.size() >= maximum_per_kind:
-					break
-			if sites.size() >= maximum_per_kind:
-				break
+			for cell_value in worker_ring_cells(kind,center,search_radius,seen_cells):
+				var cell: Vector2i = cell_value
+				var position := Vector2(cell) + Vector2(0.5, 0.5)
+				if building_placement_system.cached_map_supports_foundation(kind, position) and _can_place_foundation(team, kind, position, mobile_occupied_cells) and worker_can_reach_foundation(worker, kind, position):
+					if foundation_preserves_structure_gap(team, kind, position, minimum_structure_gap):
+						sites.append(position)
+						if sites.size() >= maximum_per_kind: break
+					elif fallback_sites.size() < maximum_per_kind:
+						fallback_sites.append(position)
+			if sites.size() >= maximum_per_kind: break
 		if separate_fallbacks:
 			gap_fallbacks[kind] = fallback_sites
 		else:
@@ -422,9 +443,52 @@ static func capture_build_topology(world, cache: Dictionary, planner) -> Diction
 static func _capture_cache(world, team: int) -> Dictionary:
 	var cache: Dictionary = world.ai_build_capture_cache.get(team, {})
 	if int(cache.get("epoch", -1)) != int(world.entity_changes.epoch): cache = {"epoch": world.entity_changes.epoch, "units": {}, "buildings": {}, "retained": {}, "bytes": 0}
+	if cache.get("profile_source") != world.data_repository or int(cache.get("profile_revision", -1)) != world.data_repository.revision:
+		cache["profiles"] = {}
+		cache["profile_sizes"] = {}
+		cache["profile_bytes"] = 0
+		cache["profile_source"] = world.data_repository
+		cache["profile_revision"] = world.data_repository.revision
 	if not world.ai_build_capture_cache.has(team) and world.ai_build_capture_cache.size() >= 8: world.ai_build_capture_cache.erase(world.ai_build_capture_cache.keys()[0])
 	world.ai_build_capture_cache[team] = cache
 	return cache
 
+static func _profile_template(world, cache: Dictionary, kind: String) -> Dictionary:
+	if cache["profiles"].has(kind): return cache["profiles"][kind]
+	var template := Data.capture_frozen({"stats":world.unit_stats(kind), "metadata":world.data_repository.runtime_metadata(kind), "exists":world.data_repository.has_archetype(kind), "category":world.data_repository.category(kind)})
+	if template.is_empty(): return {}
+	var bytes := var_to_bytes(template).size() + kind.length() * 4
+	if bytes > MAX_PROFILE_BYTES: return template
+	while not cache["profiles"].is_empty() and (cache["profiles"].size() >= MAX_PROFILES or int(cache["profile_bytes"]) + bytes > MAX_PROFILE_BYTES):
+		var expired = cache["profiles"].keys()[0]
+		cache["profile_bytes"] -= cache["profile_sizes"][expired]
+		cache["profile_sizes"].erase(expired)
+		cache["profiles"].erase(expired)
+	cache["profiles"][kind] = template
+	cache["profile_sizes"][kind] = bytes
+	cache["profile_bytes"] += bytes
+	return template
+
 static func prepare_topology(world, team: int) -> void:
-	capture_build_topology(world, _capture_cache(world, team), world.movement_system.knowledge.planner(world, team))
+	var cache := _capture_cache(world, team)
+	capture_build_topology(world, cache, world.movement_system.knowledge.planner(world, team))
+	for kind in world.data_repository.archetype_aliases("building"):
+		_profile_template(world, cache, kind)
+
+func worker_ring_cells(kind: String, center: Vector2i, radius: int, seen: Dictionary) -> Array:
+	var cache: Variant = building_placement_system.page_cache
+	if cache != null and cache.active and cache.native_kernel != null and cache.native_kernel.has_method("build_site_ring_cells"):
+		if not building_placement_system.site_footprint_profiles.has(kind):
+			building_placement_system.cached_map_supports_foundation(kind,Vector2(center)+Vector2(0.5,0.5))
+		if not cache.profiles.has(kind): cache.prepare_kind(kind,building_placement_system.site_footprint_profiles[kind])
+		return cache.ring_cells(kind,center,maxi(1,radius),map_size,seen)
+	var result: Array = []
+	for r in range(1,maxi(1,radius)+1):
+		for y in range(center.y-r,center.y+r+1):
+			var columns: Array = range(center.x-r,center.x+r+1) if absi(y-center.y) == r else [center.x-r,center.x+r]
+			for x in columns:
+				var cell := Vector2i(x,y)
+				if seen.has(cell) or not navigation_grid.contains(cell): continue
+				seen[cell] = true
+				result.append(cell)
+	return result

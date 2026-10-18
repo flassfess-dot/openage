@@ -10,8 +10,17 @@ const NEUTRAL := "neutral"
 const ENEMY := "enemy"
 const VALID_RELATIONS := [ALLY, NEUTRAL, ENEMY]
 
-var players: Dictionary = {}
-var relations: Dictionary = {}
+# Derived navigation policy version; checkpoint assignment also invalidates it.
+# It is deliberately absent from canonical and saved player state.
+var navigation_revision := 0
+var players: Dictionary = {}:
+	set(value):
+		players = value
+		navigation_revision += 1
+var relations: Dictionary = {}:
+	set(value):
+		relations = value
+		navigation_revision += 1
 
 
 func _init() -> void:
@@ -22,6 +31,7 @@ func _init() -> void:
 
 
 func configure(definitions: Array) -> void:
+	navigation_revision += 1
 	players.clear()
 	relations.clear()
 	for definition_value in definitions:
@@ -42,11 +52,13 @@ func configure(definitions: Array) -> void:
 func ensure(team: int, civilization_id: int = 13, controller: String = "unknown") -> void:
 	if team <= 0 or players.has(team):
 		return
+	navigation_revision += 1
 	players[team] = {"team": team, "controller": controller, "civilization_id": civilization_id, "color_index": clampi(team, 1, 8), "status": ACTIVE}
 	relations[team] = {team: ALLY}
 
 
 func reset_match() -> void:
+	navigation_revision += 1
 	reset_statuses()
 	for team in players:
 		relations[team] = {int(team): ALLY}
@@ -70,6 +82,7 @@ func set_relation(first_team: int, second_team: int, relation: String) -> void:
 	var normalized := relation if relation in VALID_RELATIONS else ENEMY
 	if first_team == second_team:
 		normalized = ALLY
+	if relations[first_team].get(second_team) != normalized: navigation_revision += 1
 	relations[first_team][second_team] = normalized
 
 

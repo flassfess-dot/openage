@@ -5,6 +5,7 @@ const FishShoalSelection := preload("res://scripts/fish_shoal_selection.gd")
 const SelectionResolver := preload("res://scripts/selection_resolver.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 const WallPlacement := preload("res://scripts/wall_placement.gd")
+const SpriteGeometry := preload("res://scripts/sprite_geometry.gd")
 
 const SELECTABLE_DRAWABLES := ["unit", "unit_part", "building", "building_part", "resource"]
 
@@ -32,7 +33,7 @@ func hit_stack(screen_position: Vector2, drawables: Array, world_to_screen: Call
 			continue
 		var hit_method := ""
 		if texture_hit(screen_position, drawable, world_to_screen, zoom):
-			hit_method = "opaque_pixel"
+			hit_method = "sprite_bounds" if entity_type == "unit" else "opaque_pixel"
 		elif footprint_hit(screen_position, entity_type, selection_entity, world_to_screen, zoom):
 			hit_method = "footprint"
 		if hit_method.is_empty():
@@ -99,6 +100,13 @@ func texture_hit(screen_position: Vector2, drawable: Dictionary, world_to_screen
 		return false
 	var anchor := PixelScaling.snap_screen(world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO))))
 	anchor += Vector2(frame_info.get("screen_offset", Vector2.ZERO)) * zoom
+	# Mobile targets remain clickable between animated limbs and along their
+	# silhouette. Use the same mirrored pivot and part offsets as drawing.
+	if String(drawable.get("kind", "")) in ["unit", "unit_part"] and zoom > 0.0:
+		var source := SpriteGeometry.screen_to_source(screen_position, anchor, zoom,
+			Vector2(drawable.get("hotspot", frame_info.get("hotspot", Vector2.ZERO))),
+			bool(frame_info.get("mirrored", false)))
+		return Rect2(Vector2.ZERO, texture.get_size()).has_point(source)
 	return SelectionResolver.texture_hit(
 		screen_position,
 		anchor,

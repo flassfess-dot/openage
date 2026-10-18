@@ -300,81 +300,82 @@ static func view(entity: Dictionary) -> Dictionary:
 
 
 static func component_view(entity: Dictionary, name: String) -> Dictionary:
-	var projected := entity.duplicate()
-	projected["components"] = {name: entity.get("components", {}).get(name, {}).duplicate(true)}
-	project_dynamic(projected)
-	return projected["components"][name].duplicate(true)
+	# A selected actor requests four small components. Copying its complete
+	# runtime record and projecting all seven mirrors for each request made HUD
+	# selection cost several milliseconds per tick even for an unchanged group.
+	var result: Dictionary = entity.get("components", {}).get(name, {}).duplicate(true)
+	_project_component(entity, name, result)
+	# These mirrors may install runtime containers; detach those once more.
+	return result.duplicate(true) if name in ["movement", "animation_state"] else result
 
 
 static func project_dynamic(entity: Dictionary) -> void:
 	var components: Dictionary = entity.get("components", {})
-	if components.is_empty():
-		return
-	var transform: Dictionary = components.get("transform", {})
-	transform["position"] = entity.get("pos", transform.get("position", Vector2.ZERO))
-	transform["previous_position"] = entity.get("previous_pos", transform.get("previous_position", transform["position"]))
-	transform["elevation"] = float(entity.get("elevation", transform.get("elevation", 0.0)))
-	transform["facing"] = int(entity.get("facing", transform.get("facing", 0)))
-	transform["movement_facing"] = int(entity.get("movement_facing", transform.get("movement_facing", transform["facing"])))
-	transform["desired_facing"] = int(entity.get("desired_facing", transform.get("desired_facing", transform["facing"])))
-	transform["action_facing"] = int(entity.get("action_facing", transform.get("action_facing", transform["facing"])))
+	for name in ["transform", "health", "movement", "combat", "resource_carrier", "worker", "animation_state"]:
+		if components.has(name):
+			_project_component(entity, name, components[name])
 
-	var health: Dictionary = components.get("health", {})
-	health["current"] = float(entity.get("hp", health.get("current", 0.0)))
-	health["maximum"] = float(entity.get("max_hp", health.get("maximum", 0.0)))
-	health["alive"] = float(health["current"]) > 0.0
-
-	var movement: Dictionary = components.get("movement", {})
-	# Reconstruct compatibility fields only in detached views and serialization.
-	if entity.has("target"):
-		movement["target"] = entity["target"]
-	if entity.has("destination"):
-		movement["destination"] = entity["destination"]
-	if entity.has("path"):
-		movement["path"] = entity["path"]
-	if entity.has("path_index"):
-		movement["path_index"] = entity["path_index"]
-	if entity.has("desired_velocity"):
-		movement["desired_velocity"] = entity["desired_velocity"]
-	if entity.has("path_request_id"):
-		movement["path_request_id"] = entity["path_request_id"]
-	if entity.has("path_status"):
-		movement["path_status"] = entity["path_status"]
-	if entity.has("path_grid_revision"):
-		movement["path_grid_revision"] = entity["path_grid_revision"]
-	if entity.has("actual_velocity"):
-		movement["actual_velocity"] = entity["actual_velocity"]
-	if entity.has("speed"):
-		movement["speed"] = entity["speed"]
-	if entity.has("terrain_restriction"):
-		movement["terrain_restriction"] = entity["terrain_restriction"]
-	if entity.has("movement_domain"):
-		movement["domain"] = entity["movement_domain"]
-
-	var combat: Dictionary = components.get("combat", {})
-	combat["target_id"] = int(entity.get("target_id", combat.get("target_id", -1)))
-	combat["cooldown"] = float(entity.get("cooldown", combat.get("cooldown", 0.0)))
-	combat["stance"] = String(entity.get("stance", combat.get("stance", "passive")))
-	combat["acquisition_range"] = float(entity.get("acquisition_range", combat.get("acquisition_range", 0.0)))
-	combat["chase_range"] = float(entity.get("chase_range", combat.get("chase_range", 0.0)))
-	combat["retaliation_target_id"] = int(entity.get("retaliation_target_id", combat.get("retaliation_target_id", -1)))
-
-	var carrier: Dictionary = components.get("resource_carrier", {})
-	if entity.has("amount"):
-		carrier["amount"] = float(entity["amount"])
-	if entity.has("carried_amount"):
-		carrier["amount"] = float(entity["carried_amount"])
-	if entity.has("carried_resource_type_id"):
-		carrier["resource_type_id"] = int(entity["carried_resource_type_id"])
-
-	var worker: Dictionary = components.get("worker", {})
-	worker["resource_id"] = int(entity.get("resource_id", worker.get("resource_id", -1)))
-	worker["action_cooldown"] = float(entity.get("work", worker.get("action_cooldown", 0.0)))
-
-	var animation: Dictionary = components.get("animation_state", {})
-	animation["state"] = String(entity.get("anim_state", animation.get("state", "Idle")))
-	animation["elapsed"] = float(entity.get("anim", animation.get("elapsed", 0.0)))
-	animation["events_fired"] = entity.get("animation_events_fired", animation.get("events_fired", {}))
+static func _project_component(entity: Dictionary, name: String, component: Dictionary) -> void:
+	match name:
+		"transform":
+			component["position"] = entity.get("pos", component.get("position", Vector2.ZERO))
+			component["previous_position"] = entity.get("previous_pos", component.get("previous_position", component["position"]))
+			component["elevation"] = float(entity.get("elevation", component.get("elevation", 0.0)))
+			component["facing"] = int(entity.get("facing", component.get("facing", 0)))
+			component["movement_facing"] = int(entity.get("movement_facing", component.get("movement_facing", component["facing"])))
+			component["desired_facing"] = int(entity.get("desired_facing", component.get("desired_facing", component["facing"])))
+			component["action_facing"] = int(entity.get("action_facing", component.get("action_facing", component["facing"])))
+		"health":
+			component["current"] = float(entity.get("hp", component.get("current", 0.0)))
+			component["maximum"] = float(entity.get("max_hp", component.get("maximum", 0.0)))
+			component["alive"] = float(component["current"]) > 0.0
+		"movement":
+			# Reconstruct compatibility fields only in detached views and serialization.
+			if entity.has("target"):
+				component["target"] = entity["target"]
+			if entity.has("destination"):
+				component["destination"] = entity["destination"]
+			if entity.has("path"):
+				component["path"] = entity["path"]
+			if entity.has("path_index"):
+				component["path_index"] = entity["path_index"]
+			if entity.has("desired_velocity"):
+				component["desired_velocity"] = entity["desired_velocity"]
+			if entity.has("path_request_id"):
+				component["path_request_id"] = entity["path_request_id"]
+			if entity.has("path_status"):
+				component["path_status"] = entity["path_status"]
+			if entity.has("path_grid_revision"):
+				component["path_grid_revision"] = entity["path_grid_revision"]
+			if entity.has("actual_velocity"):
+				component["actual_velocity"] = entity["actual_velocity"]
+			if entity.has("speed"):
+				component["speed"] = entity["speed"]
+			if entity.has("terrain_restriction"):
+				component["terrain_restriction"] = entity["terrain_restriction"]
+			if entity.has("movement_domain"):
+				component["domain"] = entity["movement_domain"]
+		"combat":
+			component["target_id"] = int(entity.get("target_id", component.get("target_id", -1)))
+			component["cooldown"] = float(entity.get("cooldown", component.get("cooldown", 0.0)))
+			component["stance"] = String(entity.get("stance", component.get("stance", "passive")))
+			component["acquisition_range"] = float(entity.get("acquisition_range", component.get("acquisition_range", 0.0)))
+			component["chase_range"] = float(entity.get("chase_range", component.get("chase_range", 0.0)))
+			component["retaliation_target_id"] = int(entity.get("retaliation_target_id", component.get("retaliation_target_id", -1)))
+		"resource_carrier":
+			if entity.has("amount"):
+				component["amount"] = float(entity["amount"])
+			if entity.has("carried_amount"):
+				component["amount"] = float(entity["carried_amount"])
+			if entity.has("carried_resource_type_id"):
+				component["resource_type_id"] = int(entity["carried_resource_type_id"])
+		"worker":
+			component["resource_id"] = int(entity.get("resource_id", component.get("resource_id", -1)))
+			component["action_cooldown"] = float(entity.get("work", component.get("action_cooldown", 0.0)))
+		"animation_state":
+			component["state"] = String(entity.get("anim_state", component.get("state", "Idle")))
+			component["elapsed"] = float(entity.get("anim", component.get("elapsed", 0.0)))
+			component["events_fired"] = entity.get("animation_events_fired", component.get("events_fired", {}))
 
 
 static func sync_resource_carrier(entity: Dictionary) -> void:

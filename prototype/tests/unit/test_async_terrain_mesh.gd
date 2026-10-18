@@ -62,18 +62,28 @@ func _run() -> void:
 
 func drain(canvas) -> void:
 	var deadline := Time.get_ticks_msec() + 10000
-	while canvas.refinement_task_id >= 0 and Time.get_ticks_msec() < deadline:
+	var coarse: ArrayMesh = canvas.terrain_mesh
+	while (canvas.refinement_task_id >= 0 or canvas.refinement_upload != null) and Time.get_ticks_msec() < deadline:
+		if canvas.refinement_upload != null: check(canvas.terrain_mesh == coarse,"partial GPU uploads keep the complete old mesh visible")
 		await create_timer(0.01).timeout
-	check(canvas.refinement_task_id < 0, "worker completes within timeout")
+	check(canvas.refinement_task_id < 0 and canvas.refinement_upload == null, "worker and bounded GPU uploads complete within timeout")
 
 func compare_full_mesh(canvas, provider: Callable, elevation, label: String) -> void:
 	var arrays := NativeMesh.build_arrays(canvas.native_kernel, canvas.terrain_mesh_bounds, canvas.map_seed, provider, elevation, canvas.resource_catalog.environment_pack, canvas.terrain_atlas_regions, canvas.terrain_atlas_size)
 	var reference := ArrayMesh.new()
 	reference.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	var expected := reference.surface_get_arrays(0)
-	var actual: Array = canvas.terrain_mesh.surface_get_arrays(0)
-	for channel in [Mesh.ARRAY_VERTEX, Mesh.ARRAY_COLOR, Mesh.ARRAY_TEX_UV, Mesh.ARRAY_INDEX]:
-		check(actual[channel] == expected[channel], "%s: exact full-detail channel %d" % [label, channel])
+	var meshes: Array = canvas.terrain_mesh_parts if not canvas.terrain_mesh_parts.is_empty() else [canvas.terrain_mesh]
+	var cursor := 0
+	for mesh in meshes:
+		var actual: Array = mesh.surface_get_arrays(0)
+		for index in actual[Mesh.ARRAY_INDEX]:
+			if cursor >= expected[Mesh.ARRAY_INDEX].size(): check(false,label+": too many triangles");return
+			var other: int = expected[Mesh.ARRAY_INDEX][cursor]
+			for channel in [Mesh.ARRAY_VERTEX,Mesh.ARRAY_COLOR,Mesh.ARRAY_TEX_UV]:
+				if actual[channel][index] != expected[channel][other]: check(false,label+": triangle attribute differs");return
+			cursor += 1
+	check(cursor == expected[Mesh.ARRAY_INDEX].size(),label+": exact full-detail triangle stream")
 
 func check(value: bool, message: String) -> void:
 	if not value: failures.append(message)

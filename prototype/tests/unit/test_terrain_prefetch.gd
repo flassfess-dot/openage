@@ -36,10 +36,10 @@ func run() -> void:
 	canvas.set_view_state(1, Vector2(-128, 0), Vector2(1280, 720), -1)
 	check(canvas.refinement_task_id >= 0 and canvas.refinement_prefetch, "approaching the edge starts background full-quality terrain")
 	check(canvas.mesh_generation == generation and canvas.terrain_mesh == old_mesh, "prefetch keeps valid terrain without a foreground rebuild")
-	for _frame in range(300):
-		if canvas.refinement_task_id < 0: break
-		await process_frame
-	check(canvas.refinement_task_id < 0, "background terrain finishes")
+	var deadline := Time.get_ticks_msec()+10000
+	while (canvas.refinement_task_id >= 0 or canvas.refinement_upload != null) and Time.get_ticks_msec() < deadline:
+		await create_timer(0.01).timeout
+	check(canvas.refinement_task_id < 0 and canvas.refinement_upload == null, "background terrain and bounded GPU uploads finish")
 	check(canvas.terrain_mesh_bounds != original_bounds and canvas._bounds_contains(canvas.terrain_mesh_bounds, state["bounds"]), "finished prefetch extends coverage before the camera exits")
 	state["material"] = 6
 	canvas.set_view_state(1, Vector2(-128, 0), Vector2(1280, 720), 1)

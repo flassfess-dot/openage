@@ -4,6 +4,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 namespace godot {
@@ -15,6 +16,8 @@ public:
     void configure(int32_t width, int32_t height);
     PackedInt32Array vision_cells(const Vector2 &center, double radius) const;
     bool is_configured() const;
+    Dictionary apply_source_deltas(const Dictionary &input) const;
+    Dictionary collect_source_deltas(const Dictionary &input) const;
 
 protected:
     static void _bind_methods();

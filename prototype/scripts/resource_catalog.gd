@@ -301,8 +301,8 @@ func get_composite_parts(base_graphic_id: int, logical_facing: int, animation_ti
 	return result
 
 
-func building_frame_info(building: Dictionary, animation_time: float = 0.0) -> Dictionary:
-	return building_presentations.frame_info(building, animation_time)
+func building_frame_info(building: Dictionary, animation_time: float = 0.0, retain_static: bool = false) -> Dictionary:
+	return building_presentations.frame_info(building, animation_time, retain_static)
 
 
 func resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
@@ -527,8 +527,8 @@ func worker_resource_animation_state(resource_type_id: int, carrying: bool) -> S
 	return String(profile.get("carry_state" if carrying else "work_state", "carry_food" if carrying else "work_food"))
 
 
-func unit_frame_info(unit: Dictionary, animation_state: String, animation_time: float = -1.0) -> Dictionary:
-	return unit_presentations.frame_info(unit, animation_state, animation_time)
+func unit_frame_info(unit: Dictionary, animation_state: String, animation_time: float = -1.0, ambient_time: float = -1.0) -> Dictionary:
+	return unit_presentations.frame_info(unit, animation_state, animation_time, ambient_time)
 
 
 func unit_presentation_state(unit: Dictionary, default_state: String) -> String:

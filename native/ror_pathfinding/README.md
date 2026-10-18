@@ -14,12 +14,30 @@ raw or smoothed cell path requested by the caller. If the
 extension cannot be loaded, `RoRPathfinder` automatically uses its original
 GDScript implementation. The local-movement kernel consumes one immutable
 per-tick snapshot, reproduces stable-ID neighbor order and the existing
-avoidance arithmetic, and returns only a proposed velocity; GDScript still
-owns position integration and every gameplay transition.
+avoidance arithmetic, and returns a proposed velocity. The owner-thread motion
+integration pass applies the same destination clamp, terrain interpolation and
+facing arithmetic, returning one union of changed entity groups. Set
+`movement_system.native_integration_enabled = false` to compare its GDScript
+reference. Route decisions, arrival and stuck recovery remain in the existing
+ordered gameplay loop.
 
-`RoRVisibilityKernel` performs only the bounded circle-to-row-major-cell
-geometry. Player/alliance relations, explored/visible state, overlap counts,
-revisioning and presentation remain in the deterministic GDScript fog system.
+`RoRVisibilityKernel` collects bounded source footprints and applies ordered
+visibility deltas to detached packed buffers. Circle geometry allocates its
+bounded cell buffer once. Personal exploration records only the sorted fringe
+outside the previous footprint for the same owner; reset retires all footprints
+and checkpoint restoration retains their personal exploration together.
+Player/alliance policy and revision boundaries remain with the owner-thread
+GDScript fog system. Hidden observation memory is unchanged.
+
+Owned AI actor profiles are built directly from complete normalized runtime
+records. Incomplete records and foreign estimates use the catalog reference.
+The native capture kernel also accepts an internal ownership-transfer operation:
+all mutable containers reached through mutable parents belong to the producer
+and may be frozen in place, including before a failed validation. Readonly
+borrowed parents retain normal detachment semantics for mutable descendants.
+Packed buffers are always copied, and live objects/callables/signals/RIDs remain
+invalid. Both capture paths avoid rewriting unchanged scalar slots already
+present in a shallow copy.
 
 Build on the development machine from the repository root:
 
@@ -44,6 +62,11 @@ reference (8x8 material blends, 16x16 coast contours). Camera changes display a
 mesh upload remain on the main thread. Only the newest request may install its
 result. Reconfiguration and shutdown join outstanding work. The GDScript renderer
 remains the fallback when the extension is unavailable.
+The CPU worker partitions indexed triangles into at most 16384 vertices per GPU
+part, preserving every attribute and triangle order. Upload and retirement are
+bounded on main; a full replacement publishes only after every part is ready.
+`known_resources_in_bounds` filters the observer's legal memory buckets directly,
+without accepting a live world/resource index or revealing hidden depletion.
 
 Regression coverage:
 

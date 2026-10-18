@@ -118,6 +118,31 @@ static func routes(definition: Dictionary, map_data: Dictionary, landscape_field
 	return {"reserved": reserved, "edges": edges}
 
 
+static func reserve_naval_access(definition: Dictionary, map_data: Dictionary, reserved: Dictionary) -> void:
+	# Protect the route before clusters and forests are placed. Reserving only
+	# the beach endpoint can leave an empty staging tile enclosed by resources.
+	var zones: Array = map_data.get("naval_start_zones", [])
+	if zones.is_empty(): return
+	var size: Vector2i = map_data["size"]
+	var walkable := mask(map_data, definition, false)
+	var dock_radius := maxi(0, int(definition.get("map", {}).get("generator", {}).get("naval_start", {}).get("dock_footprint_radius_cells", 1)))
+	# A future dock must not sever the route that was reserved for its builders.
+	for zone in zones:
+		var dock := Vector2i(zone["dock_position"])
+		for y in range(dock.y-dock_radius, dock.y+dock_radius+1):
+			for x in range(dock.x-dock_radius, dock.x+dock_radius+1):
+				_block(walkable, size, Vector2i(x,y))
+	for player in definition.get("players", []):
+		var field := flood(size, walkable, Vector2i(player["start"]))
+		for zone in zones:
+			if int(zone.get("team", -1)) != int(player["team"]): continue
+			var beach := Vector2i(zone["land_staging"])
+			if not inside(beach, size): continue
+			var target := beach.y * size.x + beach.x
+			if int(field["distances"][target]) >= 0:
+				reserve_path(reserved, trace(field, target), size, walkable, 1)
+
+
 static func protect_economy(definition: Dictionary, map_data: Dictionary, reserved: Dictionary) -> void:
 	var size: Vector2i = map_data["size"]
 	var walkable := mask(map_data, definition)
@@ -263,6 +288,11 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 			route_costs[kind] = mini(int(route_costs.get(kind, 1000000)), distances[access])
 		for kind in required:
 			if int(counts.get(kind, 0)) < int(required[kind]): errors.append("random_map_final_resource_unreachable:%d:%s" % [team, kind])
+		for zone in map_data.get("naval_start_zones", []):
+			if int(zone.get("team", -1)) != team: continue
+			var beach := Vector2i(zone["land_staging"])
+			if not inside(beach, size) or int(distances[beach.y * size.x + beach.x]) < 0:
+				errors.append("random_map_final_naval_land_unreachable:%d" % team)
 		if reachable_starts.is_empty():
 			for other in definition.get("players", []):
 				var target := nearest_open(size, walkable, Vector2i(other["start"]))

@@ -8,21 +8,34 @@ const Queue := preload("res://scripts/ai_decision_queue.gd")
 const Coordinator := preload("res://scripts/isolated_task_coordinator.gd")
 const Queries := preload("res://scripts/simulation_observation_queries.gd")
 var failures: Array[String] = []
+class CountingWorld:
+	extends "res://scripts/simulation_world.gd"
+	var build_option_reads := 0
+	func get_build_options_for_kinds(team: int, kinds: Array) -> Array:
+		build_option_reads += 1
+		return super.get_build_options_for_kinds(team, kinds)
 func _initialize() -> void:
-	var world := World.new(Vector2i(24, 24))
+	var world := CountingWorld.new(Vector2i(24, 24))
 	world.navigation_grid.configure_terrain(func(_cell): return "grass")
 	world.add_unit(1, "villager", Vector2(8, 8), false)
 	var store := Store.new()
 	var preparation := Preparation.new()
-	var ai := Ai.new({"team": 1, "ai": {"enabled": true}})
+	var ai := Ai.new({"team": 1, "ai": {"enabled": true, "construction_priorities": ["house"]}})
 	var first: Dictionary = preparation.capture(world, store, ai, 0, 8, null, 1_000_000)
 	check(not first.is_empty() and not first.get("pending", false), "short stages finish without holding another frame")
 	check(world.read_generation_pins == 0 and preparation.captures.is_empty(), "completed capture releases its generation")
+	check(world.build_option_reads == 1, "all actor and spatial portions share one source-boundary build-option query")
 	var facts: Dictionary = first["snapshot"]
+	var finishing := facts.duplicate()
+	finishing["_pending_build_site_kinds"] = []
+	preparation.captures[1] = {"world":weakref(world),"token":world.pin_read_generation(),"source_tick":0,"apply_tick":8,"options":{},"phase":"sites","snapshot":finishing,"owner_us":0,"prepare_us":0,"snapshot_us":0}
+	var finalized: Dictionary = preparation.capture(world,store,ai,0,8,null,1)
+	check(not finalized.get("pending",false) and world.read_generation_pins == 0 and preparation.captures.is_empty(),"completed source reads publish immediately even after the preparation budget")
 	var spatial_only := Queries.enrich(world, facts, {"command_option_entity_ids": [], "include_navigation": false, "include_build_sites": false})
 	check(is_same(spatial_only["units"], facts["units"]) and is_same(spatial_only["buildings"], facts["buildings"]), "spatial-only enrichment retains already frozen actor arrays")
 	var second: Dictionary = preparation.capture(world, store, ai, 0, 8, null, 1_000_000)
 	check(not second.get("pending", false), "warm capture has no mandatory frame gaps")
+	check(world.build_option_reads == 2, "a new decision refreshes affordability and technology instead of reusing stale options")
 	check(int(second.get("tick", -1)) == 8 and int(second.get("snapshot", {}).get("tick", -1)) == 0, "source and predetermined apply tick stay distinct")
 	check(Task.run(first) == Task.run(second), "coalescing stages preserves planner commands and state")
 	var coordinator := Coordinator.new()

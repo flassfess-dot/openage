@@ -11,6 +11,7 @@ static func wait_for_ready(tree: SceneTree, game: Node, timeout_msec: int = 3000
 			push_error("Match navigation did not become ready before input assertions")
 			return false
 		await tree.process_frame
+	if game.has_method("join_simulation_owner"): game.join_simulation_owner()
 	return true
 
 # Background preparation can yield without advancing a fixed tick. Tests must

@@ -12,10 +12,9 @@ static func constrain(unit: Dictionary, velocity: Vector2, neighbors: Array, del
 	if delta <= 0.0:
 		return velocity
 	var origin := Vector2(unit["pos"])
-	var solid_self := is_solid_animal(unit)
 	var original_velocity := velocity
 	for other in neighbors:
-		if float(other.get("hp", 0.0)) <= 0.0 or not (solid_self or is_solid_animal(other)):
+		if float(other.get("hp", 0.0)) <= 0.0:
 			continue
 		var center := Vector2(other.get("previous_pos", other["pos"]))
 		var gap := origin - center
@@ -32,7 +31,7 @@ static func constrain(unit: Dictionary, velocity: Vector2, neighbors: Array, del
 		return velocity
 	# The tangent of a later neighbor must not violate an earlier neighbor.
 	for other in neighbors:
-		if float(other.get("hp", 0.0)) > 0.0 and (solid_self or is_solid_animal(other)):
+		if float(other.get("hp", 0.0)) > 0.0:
 			var gap := origin - Vector2(other.get("previous_pos", other["pos"]))
 			var radius := float(unit["footprint_radius"]) + float(other["footprint_radius"]) + 0.03
 			if _crosses(gap, velocity * delta, radius):

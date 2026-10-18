@@ -256,6 +256,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				continue
 			var reason := disabled_reason if not disabled_reason.is_empty() else String(option.get("reason", ""))
 			var unit_kind := String(option.get("kind", ""))
+			var unit_context := _production_unit_context(unit_kind, building, option)
 			var queued_count: int = production_queue.filter(func(order): return String(order.get("order_type", "unit")) == "unit" and String(order.get("kind", "")) == unit_kind).size()
 			var last_matching_index := -1
 			for queue_index in range(production_queue.size() - 1, -1, -1):
@@ -267,9 +268,9 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"type": "train",
 				"id": unit_kind,
 				"building_id": int(building.get("id", -1)),
-				"label": _name_for_kind(String(option.get("kind", "")), building, locale),
+				"label": _name_for_kind(unit_kind, unit_context, locale),
 				"icon_kind": "unit",
-				"icon_id": _icon_id_for_kind(String(option.get("kind", "")), building),
+				"icon_id": int(option.get("icon_id", _icon_id_for_kind(unit_kind, unit_context))),
 				"cost": option.get("cost", {}).duplicate(true),
 				"cost_text": _cost_text(option.get("cost", {})),
 				"population_cost": int(option.get("population_cost", 0)),
@@ -580,22 +581,32 @@ func _queue_model(queue: Array, context_entity: Dictionary, locale: String) -> A
 		var technology_id := int(order.get("technology_id", -1))
 		var duration := maxf(0.05, float(order.get("duration", 0.05)))
 		var technology: Dictionary = object_catalog.get("technologies", {}).get(String.num_int64(technology_id), {})
+		var unit_context := _production_unit_context(kind, context_entity, order)
 		result.append({
 			"index": index,
 			"id": int(order.get("id", -1)),
 			"type": order_type,
 			"kind": kind,
 			"technology_id": technology_id,
-			"label": _name_for_kind(kind, context_entity, locale) if order_type == "unit" else _technology_name(technology_id, locale),
+			"label": _name_for_kind(kind, unit_context, locale) if order_type == "unit" else _technology_name(technology_id, locale),
 			"icon_team": int(context_entity.get("team", 1)),
 			"icon_kind": "unit" if order_type == "unit" else "technology",
-			"icon_id": _icon_id_for_kind(kind, context_entity) if order_type == "unit" else int(technology.get("icon_id", -1)),
+			"icon_id": _icon_id_for_kind(kind, unit_context) if order_type == "unit" else int(technology.get("icon_id", -1)),
 			"status": String(order.get("status", "queued")),
 			"duration": duration,
 			"remaining_seconds": maxf(0, duration - float(order.get("progress", 0))),
 			"progress": clampf(float(order.get("progress", 0.0)) / duration, 0.0, 1.0),
 		})
 	return result
+
+func _production_unit_context(kind: String, building: Dictionary, metadata: Dictionary) -> Dictionary:
+	var source_id := int(metadata.get("source_unit_id", -1))
+	if source_id < 0:
+		for option in building.get("command_options", {}).get("train", []):
+			if String(option.get("kind", "")) == kind:
+				source_id = int(option.get("source_unit_id", -1))
+				break
+	return {"kind": kind, "source_unit_id": source_id, "team": int(building.get("team", 1)), "components": building.get("components", {})}
 
 func _name_for_kind(kind: String, entity: Dictionary, locale: String) -> String:
 	var archetype: Dictionary = runtime_catalog.get("archetypes", {}).get(kind, {})
@@ -607,6 +618,9 @@ func _name_for_kind(kind: String, entity: Dictionary, locale: String) -> String:
 	var presentation: Dictionary = record.get("presentation", {})
 	var fallback := String(presentation.get("fallback_name", kind))
 	var name_id := int(presentation.get("name_id", -1))
+	if String(entity.get("kind", "")) == kind:
+		var source: Dictionary = object_catalog.get("objects", {}).get("%d:%d" % [civilization_id, int(entity.get("source_unit_id", -1))], {})
+		name_id = int(source.get("language", {}).get("name_id", name_id))
 	if localization == null or name_id < 0:
 		return fallback
 	var translated := String(localization.text(name_id, locale))
@@ -706,7 +720,7 @@ static func global_input_signature(snapshot: Dictionary) -> int:
 		var orders: Array = building.get("production_queue", [])
 		if not orders.is_empty():
 			var order: Dictionary = orders[0]
-			values.append([building.get("id"), order.get("id"), order.get("status")])
+			values.append([building.get("id"), order.get("id"), order.get("status"), order.get("source_unit_id")])
 	return hash(values)
 
 

@@ -3,6 +3,8 @@ class_name RoRNavigationGrid
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const ChangeJournal := preload("res://scripts/cell_change_journal.gd")
 const Footprint := preload("res://scripts/footprint.gd")
+static var native_masks_enabled := true
+static var mask_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 
 var cache_epoch := 0
 var size: Vector2i
@@ -455,6 +457,9 @@ func can_place(cells: Array, movement_domain: String, restriction_id: int = -1) 
 
 
 func native_walkability_mask(domain: String, restriction_id: int, probe: Variant = null) -> PackedByteArray:
+	if native_masks_enabled and mask_kernel != null and mask_kernel.has_method("walkability_mask"):
+		if probe != null: probe.increment("navigation.native_mask_evaluated_cells", size.x*size.y)
+		return mask_kernel.walkability_mask(size,terrain_cells,terrain_ids,occupied_cells,terrain_restrictions,PackedByteArray(),false,domain,restriction_id)
 	var mask := PackedByteArray()
 	mask.resize(size.x * size.y)
 	for y in range(size.y):

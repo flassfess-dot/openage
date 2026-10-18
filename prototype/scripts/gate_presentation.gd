@@ -89,8 +89,11 @@ func frame_info(registry, building: Dictionary, player: int) -> Dictionary:
 		if not textures.has(group):
 			textures[group] = load("res://assets/gates/%s-leaves.png" % GROUPS[group])
 		var texture: Texture2D = textures[group]
-		var left := unproject(profile["left"])
-		var right := unproject(profile["right"])
+		# Texture crop coordinates describe artwork, not masonry attachment
+		# points. Seat both hinges inside the inner faces of the 1x1 piers;
+		# swapping axes must keep the same physical overlap with the stone.
+		var left := Vector2(-1.25, 0.25)
+		var right := Vector2(1.25, 0.25)
 		var length: float = right.x-left.x
 		var angle := float(pose)/7.0*PI*0.5
 		for side in [0,1]:

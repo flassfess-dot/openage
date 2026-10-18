@@ -5,6 +5,18 @@ const SimulationWorld := preload("res://scripts/simulation_world.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 const GameController := preload("res://scripts/game_controller.gd")
+const SimulationOwner := preload("res://scripts/simulation_owner.gd")
+const RenderTerrainView := preload("res://scripts/render_terrain_view.gd")
+var simulation_owner := SimulationOwner.new()
+var simulation_owner_enabled := DisplayServer.get_name() != "headless" and not OS.get_cmdline_user_args().has("--no-simulation-owner")
+var render_terrain_view
+var owner_delta := 0.0
+var owner_state: Dictionary = {}
+var owner_message := ""
+var owner_alpha_started := 0
+var owner_speed := 1.0
+var owner_formation_groups: Dictionary = {}
+
 const RoRCommands = preload("res://scripts/commands.gd")
 const RenderWorld := preload("res://scripts/render_world.gd")
 const RenderItem := preload("res://scripts/render_item.gd")
@@ -254,6 +266,76 @@ var cached_world_drawables_control_signature: int = 0
 var cached_projection_offset := Vector2(INF, INF)
 var cached_projection_zoom := -1.0
 
+func join_simulation_owner() -> void:
+	if not simulation_owner.pending: return
+	owner_state = simulation_owner.take()
+	owner_message = String(owner_state.get("message", ""))
+	if bool(owner_state.get("failed", false)):
+		simulation_owner_enabled = false
+		game_controller.set_paused(true)
+	if not String(owner_state.get("error", "")).is_empty():
+		game_message = owner_state["error"]
+		message_time = 8.0
+
+func simulation_frame_state() -> Dictionary:
+	if simulation_owner.pending: return owner_state.duplicate()
+	return {"tick":game_controller.tick_index,"waiting":game_controller.preparation_waiting,"ai_capture":ai_decision_queue.active and not ai_decision_queue.is_prepared(),"ai_active":ai_decision_queue.active,"apply_tick":ai_decision_queue.apply_tick,"source_tick":ai_decision_queue.source_tick,"capture_phase":ai_runtime.preparation.captures.values()[0]["phase"] if not ai_runtime.preparation.captures.is_empty() else "","debt":game_controller.accumulator_seconds}
+
+func _render_terrain():
+	return render_terrain_view if render_terrain_view != null else simulation_world
+
+func _presentation_probe():
+	return null if simulation_owner.pending else game_controller.performance_probe if game_controller != null else null
+
+func _can_use_simulation_owner() -> bool:
+	if not simulation_owner_enabled or not network_role.is_empty() or network_session != null:
+		return false
+	if game_controller == null or game_controller.performance_probe != null or diagnostics_enabled:
+		return false
+	if navigation_loading.is_loading() or not pending_build_kind.is_empty():
+		return false
+	return not (scenario_overlay != null and scenario_overlay.is_blocking()) and not (hud_modal_overlay != null and hud_modal_overlay.is_blocking())
+
+func _prepare_owner_presentation() -> void:
+	_refresh_render_terrain()
+	_sync_terrain_canvas()
+	_sync_fog_geometry_revision()
+	_sync_world_fog_texture(presentation_snapshot.get("fog", {}).get("cells", []), int(presentation_snapshot.get("fog_revision", -1)))
+	var geometry := minimap_geometry()
+	_minimap_resource_pixels(geometry["center"], geometry["scale"], geometry["rectangle"])
+	owner_state = simulation_frame_state()
+	owner_state["alpha"] = game_controller.get_interpolation_alpha()
+	owner_alpha_started = Time.get_ticks_usec()
+	owner_speed = game_controller.get_speed_multiplier()
+	owner_formation_groups = {}
+	for group_id in game_controller.formation_groups:
+		owner_formation_groups[group_id] = {"preferred_formation_type":game_controller.formation_groups[group_id].preferred_formation_type}
+
+func _refresh_render_terrain() -> void:
+	if not simulation_owner_enabled: return
+	if not network_role.is_empty() or network_session != null:
+		render_terrain_view = null
+		if terrain_canvas != null: terrain_canvas.simulation_world = simulation_world
+		return
+	if render_terrain_view == null: render_terrain_view = RenderTerrainView.new()
+	render_terrain_view.synchronize(simulation_world)
+	if terrain_canvas != null: terrain_canvas.simulation_world = render_terrain_view
+
+func _owner_interpolation_alpha() -> float:
+	return clampf(float(owner_state.get("alpha", 1.0)) + float(Time.get_ticks_usec() - owner_alpha_started) * 0.000001 * owner_speed / GameController.FIXED_STEP_SECONDS, 0.0, 1.0)
+
+func _process_owner_presentation(delta: float) -> void:
+	if resource_catalog != null: resource_catalog.unit_presentations.poll_background_loading()
+	presentation_audio_router.advance(delta)
+	presentation_effect_timeline.advance(delta)
+	_sync_effect_snapshot()
+	update_camera(delta)
+	_sync_terrain_canvas()
+	message_time = maxf(0.0, message_time - delta)
+	command_marker_presentation.advance(delta)
+	resource_feedback_time = maxf(0.0, resource_feedback_time - delta)
+	queue_redraw()
+
 func _ready() -> void:
 	match_preferences.load_settings()
 	get_tree().auto_accept_quit = false
@@ -385,12 +467,14 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(func(): center_initial_view(false))
 	center_initial_view()
 func unit_stats(kind: String) -> Dictionary:
+	join_simulation_owner()
 	if simulation_world == null:
 		return gamespec_data.get("units", {}).get(kind, {})
 	return simulation_world.unit_stats(kind)
 
 
 func _new_simulation_world(size_override: Vector2i = Vector2i.ZERO):
+	join_simulation_owner()
 	var world = SimulationWorld.new(size_override if size_override != Vector2i.ZERO else map_size)
 	world.set_gamespec(gamespec_data)
 	world.set_terrain_catalog(resource_catalog.terrain_catalog_data)
@@ -476,6 +560,10 @@ func center_initial_view(recenter: bool = true) -> void:
 	queue_redraw()
 
 func reset_game() -> void:
+	join_simulation_owner()
+	render_terrain_view = null
+	owner_delta = 0.0
+	owner_message = ""
 	autosave.shutdown()
 	PickingService.SelectionResolver.clear_hit_images()
 	navigation_loading.shutdown()
@@ -558,6 +646,7 @@ func reset_game() -> void:
 	pending_target_command = ""
 	player_control_state.replace_or_add(bootstrap.get("selected_ids", []), false)
 
+	_refresh_render_terrain()
 	sync_world_state()
 	# The initial fog mask scans the whole map; prepare it while the match is
 	# loading, so the first visible frame only submits cached presentation.
@@ -574,6 +663,7 @@ func reset_game() -> void:
 	queue_redraw()
 
 func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dictionary:
+	join_simulation_owner()
 	if simulation_world == null:
 		return {"id": -1}
 	var unit: Dictionary = simulation_world.add_unit(team, kind, position, false)
@@ -582,16 +672,24 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	return unit
 
 func add_resource(kind: String, position: Vector2, amount: int) -> void:
+	join_simulation_owner()
 	if simulation_world == null:
 		return
 	simulation_world.add_resource(kind, position, amount)
 func _process(delta: float) -> void:
-	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	owner_delta += delta
+	if simulation_owner.pending:
+		if not simulation_owner.ready():
+			_process_owner_presentation(delta)
+			return
+		join_simulation_owner()
+	var probe: Variant = _presentation_probe()
 	var frame_started := Time.get_ticks_usec() if probe != null else 0
 	if navigation_loading.is_loading():
 		if navigation_loading_label != null:
 			navigation_loading_label.show()
 		if not navigation_loading.poll(simulation_world):
+			owner_delta = 0.0
 			queue_redraw()
 			return
 
@@ -599,7 +697,7 @@ func _process(delta: float) -> void:
 			navigation_loading_label.hide()
 	task_coordinator.reap_abandoned()
 	_poll_save_jobs()
-	_poll_autosave(delta)
+	_poll_autosave(owner_delta)
 	if resource_catalog != null:
 		resource_catalog.unit_presentations.poll_background_loading()
 	if probe != null: probe.observe_microseconds("presentation.process.background_loading", Time.get_ticks_usec() - frame_started)
@@ -612,10 +710,12 @@ func _process(delta: float) -> void:
 	if probe != null:
 		probe.observe_microseconds("presentation.process.audio_effects", Time.get_ticks_usec() - stage_started)
 	if scenario_overlay != null and scenario_overlay.is_blocking():
+		owner_delta = 0.0
 		return
 	if hud_modal_overlay != null and hud_modal_overlay.is_blocking():
 		if network_session != null and hud_modal_overlay.active_section in ["achievements", "timeline", "instructions"] and game_controller.tick_index % 20 == 0 and menu_details_tick != game_controller.tick_index:
 			_refresh_menu_details()
+		owner_delta = 0.0
 		return
 	stage_started = Time.get_ticks_usec() if probe != null else 0
 	update_camera(delta)
@@ -624,7 +724,7 @@ func _process(delta: float) -> void:
 		probe.observe_microseconds("presentation.process.camera_terrain", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
 	if network_session == null:
-		update_units(delta)
+		update_units(owner_delta)
 	if probe != null:
 		probe.observe_microseconds("presentation.process.update_units", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -636,6 +736,14 @@ func _process(delta: float) -> void:
 	if probe != null:
 		probe.observe_microseconds("presentation.process.feedback", Time.get_ticks_usec() - stage_started)
 		probe.observe_microseconds("presentation.process.total", Time.get_ticks_usec() - frame_started)
+	if _can_use_simulation_owner() and not game_controller.paused:
+		_prepare_owner_presentation()
+		_configure_ai_runtime()
+		game_controller.set_before_fixed_tick(Callable(ai_runtime, "queue_commands"))
+		if not simulation_owner.submit(game_controller, ai_runtime, owner_delta, local_player_team, ENEMY_TEAM, Engine.get_process_frames()):
+			simulation_owner_enabled = false
+			game_controller.advance_frame(owner_delta, local_player_team, ENEMY_TEAM)
+	owner_delta = 0.0
 
 func update_camera(delta: float) -> void:
 	var direction := Vector2.ZERO
@@ -654,7 +762,12 @@ func update_units(delta: float) -> void:
 		return
 	var probe: Variant = game_controller.performance_probe
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
-	var battle_text := game_controller.advance_frame(delta, local_player_team, ENEMY_TEAM)
+	var battle_text := owner_message
+	owner_message = ""
+	if not _can_use_simulation_owner():
+		game_controller.set_before_fixed_tick(Callable(self, "queue_ai_commands"))
+		battle_text = game_controller.advance_frame(delta, local_player_team, ENEMY_TEAM)
+	if render_terrain_view != null: render_terrain_view.synchronize(simulation_world)
 	if probe != null:
 		probe.observe_microseconds("presentation.update.controller", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -671,6 +784,7 @@ func update_units(delta: float) -> void:
 
 
 func _start_network_match() -> void:
+	join_simulation_owner()
 	var participants: Array[int] = []
 	for player_value in match_definition.get("players", []):
 		var player: Dictionary = player_value
@@ -706,6 +820,7 @@ func _start_network_match() -> void:
 
 
 func _queue_local_command(command) -> void:
+	join_simulation_owner()
 	InputCommandRouter.route(command, game_controller, local_player_team, network_session, pending_network_commands, network_frame_submitted_tick)
 
 
@@ -717,6 +832,7 @@ func _register_local_feedback(command, accepted_message: String, sound_name: Str
 
 
 func _network_update(delta: float) -> void:
+	join_simulation_owner()
 	if network_relay == null or network_session.phase == "aborted":
 		return
 	for event in network_relay.poll_events():
@@ -812,6 +928,7 @@ func _network_chat_gui_input(event: InputEvent) -> void:
 
 
 func _submit_network_chat(raw_text: String) -> void:
+	join_simulation_owner()
 	if network_chat_input != null:
 		network_chat_input.clear()
 		network_chat_input.hide()
@@ -843,6 +960,7 @@ func _submit_network_chat(raw_text: String) -> void:
 
 
 func configure_ai_players() -> void:
+	join_simulation_owner()
 	ai_runtime.shutdown()
 	ai_observation_store.clear()
 	ai_players = _new_ai_players()
@@ -875,18 +993,22 @@ func _new_ai_players(definition: Dictionary = {}) -> Array:
 
 
 func _configure_ai_runtime() -> void:
+	join_simulation_owner()
 	ai_runtime.configure(simulation_world, game_controller, ai_players, ai_decision_queue, ai_observation_store, task_coordinator)
 
 func _capture_ai_decision(ai, next_tick: int) -> Dictionary:
+	join_simulation_owner()
 	_configure_ai_runtime()
 	return ai_runtime.capture_ai(ai, next_tick)
 
 func _next_ai_decision_tick(ai, next_tick: int) -> int:
+	join_simulation_owner()
 	_configure_ai_runtime()
 	return ai_runtime.next_decision_tick(ai, next_tick)
 
 
 func queue_ai_commands(next_tick: int = -1) -> Variant:
+	join_simulation_owner()
 	_configure_ai_runtime()
 	var status: Variant = ai_runtime.queue_commands(next_tick)
 	if not ai_runtime.error.is_empty():
@@ -896,6 +1018,7 @@ func queue_ai_commands(next_tick: int = -1) -> Variant:
 
 
 func _poll_ai_decisions(next_tick: int) -> Dictionary:
+	join_simulation_owner()
 	_configure_ai_runtime()
 	return ai_runtime._poll(next_tick)
 
@@ -908,6 +1031,7 @@ func enqueue_with_feedback(command: Variant, accepted_message: String, sound_nam
 
 
 func process_presentation_events() -> void:
+	join_simulation_owner()
 	var new_events := game_controller.events_after(command_feedback_router.event_cursor)
 	for feedback in command_feedback_router.consume(new_events, local_player_team):
 		var quiet_order := bool(feedback["accepted"]) and String(feedback.get("command_type", "")) in ["train", "research", "cancel_production"]
@@ -972,6 +1096,7 @@ func presentation_entity_by_id(entity_id: int) -> Dictionary:
 	return {}
 
 func find_unit(id: int):
+	join_simulation_owner()
 	if simulation_world == null:
 		for unit in units:
 			if unit["id"] == id:
@@ -980,6 +1105,7 @@ func find_unit(id: int):
 	return simulation_world.find_unit(id)
 
 func find_resource(id: int):
+	join_simulation_owner()
 	if simulation_world == null:
 		for resource in resource_nodes:
 			if resource["id"] == id:
@@ -997,9 +1123,9 @@ var projected_heights: Dictionary = {}
 const MAX_PROJECTED_HEIGHTS := 4096
 
 func world_to_screen(world: Vector2) -> Vector2:
-	if simulation_world == null:
+	if _render_terrain() == null:
 		return Coordinates.world_to_screen(world, view_zoom, view_offset)
-	var elevation = simulation_world.terrain_elevation
+	var elevation = _render_terrain().terrain_elevation
 	if projected_height_source != elevation or projected_height_revision != elevation.revision or projected_height_epoch != elevation.cache_epoch:
 		projected_heights.clear()
 		projected_height_source = elevation
@@ -1016,8 +1142,8 @@ func world_to_screen(world: Vector2) -> Vector2:
 	return Coordinates.world_to_screen(world, view_zoom, view_offset) + elevation.screen_offset(height, view_zoom)
 
 func screen_to_world(screen: Vector2) -> Vector2:
-	if simulation_world != null:
-		return simulation_world.terrain_elevation.screen_to_world(screen, view_zoom, view_offset)
+	if _render_terrain() != null:
+		return _render_terrain().terrain_elevation.screen_to_world(screen, view_zoom, view_offset)
 	return Coordinates.screen_to_world(screen, view_zoom, view_offset)
 
 func _input(event: InputEvent) -> void:
@@ -1160,6 +1286,7 @@ func handle_input_action(action: Dictionary) -> void:
 			for player in sfx_players:
 				player.stream_paused = audio_player.stream_paused
 		"toggle_pause":
+			join_simulation_owner()
 			if network_session != null:
 				game_message = "Пауза в сетевом матче недоступна"
 				return
@@ -1167,6 +1294,7 @@ func handle_input_action(action: Dictionary) -> void:
 			game_message = "Пауза" if is_paused else "Игра продолжена"
 			message_time = 1.5
 		"change_speed":
+			join_simulation_owner()
 			if network_session != null:
 				game_message = "Скорость сетевого матча фиксирована"
 				return
@@ -1206,6 +1334,7 @@ func _show_diplomacy_summary() -> void:
 
 
 func _change_diplomacy_from_hud(target_team: int, relation: String) -> void:
+	join_simulation_owner()
 	if game_controller == null or local_spectator or battle_over or not RoRCommands.is_valid_diplomacy_relation(relation):
 		return
 	var command = RoRCommands.DiplomacyCommand.new(game_controller.tick_index + 1, target_team, relation)
@@ -1214,6 +1343,7 @@ func _change_diplomacy_from_hud(target_team: int, relation: String) -> void:
 
 
 func _pay_tribute_from_hud(target_team: int, resource_type_id: int, amount: int) -> void:
+	join_simulation_owner()
 	if game_controller == null or local_spectator or battle_over:
 		return
 	var command = RoRCommands.TributeCommand.new(game_controller.tick_index + 1, target_team, resource_type_id, amount)
@@ -1229,6 +1359,7 @@ func _toggle_game_menu() -> void:
 
 
 func _open_hud_modal(mode: String) -> void:
+	join_simulation_owner()
 	if hud_modal_overlay == null or game_controller == null:
 		return
 	if not hud_modal_overlay.is_blocking():
@@ -1247,6 +1378,7 @@ func _open_hud_modal(mode: String) -> void:
 
 
 func _close_hud_modal() -> void:
+	join_simulation_owner()
 	if hud_modal_overlay == null or not hud_modal_overlay.is_blocking():
 		return
 	hud_modal_overlay.close()
@@ -1257,6 +1389,7 @@ func _close_hud_modal() -> void:
 
 
 func _resign_from_hud_modal() -> void:
+	join_simulation_owner()
 	if hud_modal_overlay != null:
 		hud_modal_overlay.close()
 	if game_controller == null or local_spectator or battle_over:
@@ -1267,6 +1400,7 @@ func _resign_from_hud_modal() -> void:
 	_register_local_feedback(command, "Вы сдались", "", null)
 
 func _restart_from_menu() -> void:
+	join_simulation_owner()
 	if network_session != null: return
 	_close_hud_modal()
 	game_controller.set_paused(false)
@@ -1300,6 +1434,7 @@ func _apply_audio_preferences() -> void:
 		if is_instance_valid(player): player.volume_db = linear_to_db(maxf(0.00001, float(match_preferences.values["sound"]))) - 3.0
 
 func _apply_menu_preferences(values: Dictionary) -> void:
+	join_simulation_owner()
 	var error := match_preferences.save_settings(values)
 	_apply_audio_preferences()
 	if network_session == null and values.has("speed"): game_controller.set_speed_multiplier(float(values["speed"]))
@@ -1314,6 +1449,7 @@ func _on_window_mode_changed(fullscreen: bool) -> void:
 		hud_modal_overlay.preference_controls["fullscreen"].set_pressed_no_signal(fullscreen)
 
 func _refresh_menu_details() -> void:
+	join_simulation_owner()
 	if simulation_world == null or game_controller == null: return
 	var recorder = simulation_world.match_statistics
 	var tick := mini(game_controller.tick_index, recorder.finished_tick) if recorder.finished_tick >= 0 else game_controller.tick_index
@@ -1396,6 +1532,7 @@ func _load_named_game(path: String) -> void:
 
 
 func _capture_save_input(path: String, slot_name: String = "Быстрое сохранение", metadata_only: bool = false) -> Dictionary:
+	join_simulation_owner()
 	last_save_error = ""
 	if network_session != null:
 		last_save_error = "network_save_unsupported"
@@ -1430,10 +1567,12 @@ func _capture_save_input(path: String, slot_name: String = "Быстрое со�
 	return input
 
 func _seed_autosave() -> void:
+	join_simulation_owner()
 	if not autosave.enabled or network_session != null or not network_role.is_empty(): return
 	autosave.seed_from(simulation_world, game_controller, match_definition, map_definition, {"gamespec": gamespec_data, "terrain": resource_catalog.terrain_catalog_data, "objects": resource_catalog.object_catalog_data, "graphics": resource_catalog.graphics_catalog_data, "runtime": resource_catalog.runtime_catalog_data})
 
 func _poll_autosave(delta: float) -> bool:
+	join_simulation_owner()
 	var result := autosave.poll()
 	if not result.is_empty() and int(result["error"]) == OK and hud_modal_overlay != null:
 		hud_modal_overlay.set_named_saves(GameSaveArchive.with_autosave_result(hud_modal_overlay.named_saves, result))
@@ -1490,6 +1629,7 @@ func _poll_save_jobs() -> void:
 			hud_modal_overlay.set_menu_status("Игра сохранена" if String(result["path"]) == GameSaveArchive.SAVE_PATH else "Именованное сохранение создано")
 
 func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
+	join_simulation_owner()
 	background_saves.drain()
 	last_save_error = ""
 	if network_session != null:
@@ -1545,6 +1685,9 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	if simulation_world != null:
 		simulation_world.shutdown_derived_state()
 	navigation_loading.shutdown()
+	render_terrain_view = null
+	owner_delta = 0.0
+	owner_message = ""
 	simulation_world = restored_world
 	game_controller = restored_controller
 	game_controller.set_command_result_limit(1024)
@@ -1601,7 +1744,8 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	pending_build_kind = ""
 	pending_target_command = ""
 	local_spectator = false
-	terrain_canvas.configure(map_size, map_seed, resource_catalog, simulation_world, Callable(self, "terrain_id_at_cell"), Callable(self, "visible_tile_bounds"))
+	_refresh_render_terrain()
+	terrain_canvas.configure(map_size, map_seed, resource_catalog, _render_terrain(), Callable(self, "terrain_id_at_cell"), Callable(self, "visible_tile_bounds"))
 	_sync_terrain_canvas()
 	sync_world_state()
 	# The initial fog mask scans the whole map; prepare it while the match is
@@ -1638,6 +1782,7 @@ func assign_control_group(group_number: int) -> void:
 	message_time = 1.5
 
 func recall_control_group(group_number: int, additive: bool) -> void:
+	join_simulation_owner()
 	var available_ids: Array[int] = []
 	# The overview is sampled every four ticks. A key press must validate the
 	# current owned units, including deaths and newly trained units between samples.
@@ -1660,6 +1805,7 @@ func recall_control_group(group_number: int, additive: bool) -> void:
 	message_time = 1.5
 
 func center_view_on_units(entity_ids: Array[int]) -> void:
+	join_simulation_owner()
 	var center := Vector2.ZERO
 	var count := 0
 	for entity_id in entity_ids:
@@ -1726,7 +1872,8 @@ func selection_hits_in_rectangle(rectangle: Rect2) -> Array:
 func current_world_drawables() -> Array:
 	if render_world == null or presentation_snapshot.is_empty():
 		return []
-	var interpolation_alpha := game_controller.get_interpolation_alpha() if game_controller != null else 1.0
+	var viewport := get_viewport_rect() if is_inside_tree() else Rect2()
+	var interpolation_alpha := _owner_interpolation_alpha() if simulation_owner.pending else game_controller.get_interpolation_alpha() if game_controller != null else 1.0
 	var highlighted_ids: Array[int] = selection_preview_ids.duplicate()
 	if interaction_highlight_id >= 0 and not highlighted_ids.has(interaction_highlight_id):
 		highlighted_ids.append(interaction_highlight_id)
@@ -1738,15 +1885,15 @@ func current_world_drawables() -> Array:
 	if cached_world_drawables_revision != presentation_revision or cached_world_drawables_control_signature != control_signature or not render_world.camera_cache_ready or ((cached_projection_offset != view_offset or cached_projection_zoom != view_zoom) and not render_world.can_refresh_camera()):
 		var retained_snapshot := presentation_snapshot.duplicate()
 		retained_snapshot["effects"] = []
-		render_world.performance_probe = game_controller.performance_probe if game_controller != null else null
-		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, local_player_team, selected_ids, view_zoom, get_viewport_rect())
+		render_world.performance_probe = _presentation_probe()
+		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, local_player_team, selected_ids, view_zoom, viewport)
 		# The new queue already contains interpolated positions and current depth.
 		# Refresh it only on later frames that reuse this publication.
 		cached_rally_drawables = render_world.rally_drawables
 		cached_world_drawables_revision = presentation_revision
 		cached_world_drawables_control_signature = control_signature
 	elif (cached_projection_offset != view_offset or cached_projection_zoom != view_zoom) and render_world.can_refresh_camera():
-		cached_world_drawables = render_world.refresh_camera_drawables(Callable(self, "world_to_screen"), interpolation_alpha, view_zoom, get_viewport_rect())
+		cached_world_drawables = render_world.refresh_camera_drawables(Callable(self, "world_to_screen"), interpolation_alpha, view_zoom, viewport)
 	else:
 		# Static drawables only need a fresh projection when the camera moved;
 		# the affine pan/zoom preserves their relative depth order.
@@ -1832,14 +1979,16 @@ func unit_frame_info(unit: Dictionary) -> Dictionary:
 	if String(unit.get("death_phase", "alive")) == "corpse":
 		animation_state = "corpse"
 	animation_state = resource_catalog.unit_presentation_state(unit, animation_state)
+	var ambient_time := float(presentation_snapshot.get("tick", 0)) * GameController.FIXED_STEP_SECONDS
 	if animation_state == "idle" and String(unit.get("death_phase", "alive")) == "alive":
 		var entity_id := int(unit.get("id", 0))
 		var period := 7.0 + float(posmod(entity_id * 17, 61)) * 0.1
-		var phase := fposmod(float(presentation_snapshot.get("tick", 0)) * GameController.FIXED_STEP_SECONDS + float(posmod(entity_id * 37, 100)) * 0.13, period)
-		return resource_catalog.unit_frame_info(unit, animation_state, phase if phase < 0.8 else 0.0)
-	return resource_catalog.unit_frame_info(unit, animation_state)
+		var phase := fposmod(ambient_time + float(posmod(entity_id * 37, 100)) * 0.13, period)
+		return resource_catalog.unit_frame_info(unit, animation_state, phase if phase < 0.8 else 0.0, ambient_time)
+	return resource_catalog.unit_frame_info(unit, animation_state, -1.0, ambient_time)
 
 func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: bool = false) -> void:
+	join_simulation_owner()
 	var selected := selected_units()
 	if selected.is_empty():
 		selected = selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team)
@@ -1907,6 +2056,7 @@ func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: boo
 
 
 func issue_ground_order(target: Vector2, queue_order: bool = false) -> void:
+	join_simulation_owner()
 	var selected := selected_units()
 	if selected.is_empty():
 		selected = selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team)
@@ -1926,6 +2076,7 @@ func issue_ground_order(target: Vector2, queue_order: bool = false) -> void:
 
 
 func issue_martyrdom() -> void:
+	join_simulation_owner()
 	var selected := selected_units()
 	if selected.is_empty():
 		return
@@ -1934,6 +2085,7 @@ func issue_martyrdom() -> void:
 
 
 func issue_delete_context() -> void:
+	join_simulation_owner()
 	var selected := selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team and String(entity.get("entity_type", "")) != "resource")
 	var martyr_ids: Array[int] = []
 	var delete_ids: Array[int] = []
@@ -1973,6 +2125,7 @@ func issue_unload_at_pointer(queue_order: bool = false) -> void:
 
 
 func issue_unit_action(action_name: String) -> void:
+	join_simulation_owner()
 	if action_name.begins_with("gate_"):
 		var gates := selected_entities().filter(func(entity): return String(entity.get("kind", "")) == "gate" and int(entity.get("team", 0)) == local_player_team)
 		if not gates.is_empty() and not battle_over:
@@ -2021,6 +2174,7 @@ func issue_unit_action(action_name: String) -> void:
 
 
 func repair_workers() -> Array:
+	join_simulation_owner()
 	if simulation_world == null:
 		return []
 	return selected_units().filter(func(unit): return simulation_world.entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land")
@@ -2056,6 +2210,7 @@ func cancel_pending_targeting() -> bool:
 
 
 func repair_target_at(screen_position: Vector2, workers: Array) -> Dictionary:
+	join_simulation_owner()
 	for hit in pick_stack_at(screen_position):
 		var target: Variant = simulation_world.find_building(int(hit.get("id", -1)))
 		if target == null:
@@ -2066,6 +2221,7 @@ func repair_target_at(screen_position: Vector2, workers: Array) -> Dictionary:
 
 
 func commit_repair_target(screen_position: Vector2) -> void:
+	join_simulation_owner()
 	var workers := repair_workers()
 	if workers.is_empty() or battle_over:
 		cancel_pending_targeting()
@@ -2095,6 +2251,7 @@ func begin_attack_move() -> void:
 
 
 func begin_attack_ground() -> void:
+	join_simulation_owner()
 	if battle_over or game_controller == null:
 		return
 	var attackers: Array = selected_units().filter(func(unit): return simulation_world.can_attack_ground(unit))
@@ -2110,6 +2267,7 @@ func begin_attack_ground() -> void:
 
 
 func commit_pending_target(screen_position: Vector2, queue_order: bool = false) -> void:
+	join_simulation_owner()
 	var target_command := pending_target_command
 	if target_command == "repair":
 		commit_repair_target(screen_position)
@@ -2224,6 +2382,7 @@ func resource_at_screen(mouse: Vector2):
 
 
 func set_formation(value: String) -> void:
+	join_simulation_owner()
 	if selected_units().is_empty():
 		return
 	formation = value
@@ -2287,6 +2446,7 @@ func begin_build_placement(building_kind: String) -> void:
 
 
 func commit_build_placement(screen_position: Vector2, queue_order: bool = false, start_screen_position: Vector2 = Vector2.INF) -> void:
+	join_simulation_owner()
 	if pending_build_kind.is_empty() or simulation_world == null or battle_over:
 		return
 	var workers: Array = selected_units().filter(func(unit): return simulation_world.entity_is_worker(unit))
@@ -2327,6 +2487,7 @@ func commit_build_placement(screen_position: Vector2, queue_order: bool = false,
 
 
 func queue_wall_line(workers: Array, cells: Array[Vector2i], queue_order: bool = false) -> void:
+	join_simulation_owner()
 	if cells.is_empty():
 		return
 	var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, _selection_ids(workers), "wall", Vector2(cells[0]))
@@ -2336,6 +2497,7 @@ func queue_wall_line(workers: Array, cells: Array[Vector2i], queue_order: bool =
 
 
 func train_unit_from_hud(unit_kind: String, building_id: int) -> void:
+	join_simulation_owner()
 	if simulation_world == null or battle_over or building_id < 0 or unit_kind.is_empty():
 		return
 	var building: Variant = simulation_world.find_building(building_id)
@@ -2348,6 +2510,7 @@ func train_unit_from_hud(unit_kind: String, building_id: int) -> void:
 
 
 func research_from_hud(technology_id: int, building_id: int) -> void:
+	join_simulation_owner()
 	if simulation_world == null or battle_over or building_id < 0 or technology_id < 0:
 		return
 	var building: Variant = simulation_world.find_building(building_id)
@@ -2360,6 +2523,7 @@ func research_from_hud(technology_id: int, building_id: int) -> void:
 
 
 func cancel_production_from_hud(building_id: int, queue_index: int) -> void:
+	join_simulation_owner()
 	if simulation_world == null or building_id < 0:
 		return
 	var building: Variant = simulation_world.find_building(building_id)
@@ -2372,6 +2536,7 @@ func cancel_production_from_hud(building_id: int, queue_index: int) -> void:
 
 
 func set_trade_resource_from_hud(resource_type_id: int) -> void:
+	join_simulation_owner()
 	if simulation_world == null or battle_over or resource_type_id not in [0, 1, 2]:
 		return
 	var traders: Array = selected_units().filter(func(unit): return bool(unit.get("components", {}).get("trade", {}).get("enabled", false)))
@@ -2385,6 +2550,7 @@ func set_trade_resource_from_hud(resource_type_id: int) -> void:
 
 
 func refresh_hud_model() -> void:
+	join_simulation_owner()
 	formation = FormationSelection.selected_type(selected_units(), game_controller.formation_groups if game_controller != null else {})
 	if hud_view_model == null or presentation_snapshot.is_empty():
 		return
@@ -2399,7 +2565,7 @@ func refresh_hud_model() -> void:
 			hud_controls.update_dynamic_model(hud_model)
 		if top_bar_controls != null:
 			top_bar_controls.queue_redraw()
-		var probe: Variant = game_controller.performance_probe if game_controller != null else null
+		var probe: Variant = _presentation_probe()
 		if probe != null:
 			probe.increment("presentation.hud.skipped")
 		return
@@ -2411,9 +2577,10 @@ func refresh_hud_model() -> void:
 
 
 func sync_world_state(force: bool = true) -> void:
+	join_simulation_owner()
 	if simulation_world == null:
 		return
-	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var probe: Variant = _presentation_probe()
 	var current_tick := game_controller.tick_index if game_controller != null else 0
 	var selected_ids := player_control_state.selected_ids()
 	var selection_signature := hash(selected_ids)
@@ -2501,6 +2668,7 @@ func _restart_from_scenario_overlay() -> void:
 
 
 func _return_to_launcher() -> void:
+	join_simulation_owner()
 	if launcher_suspended:
 		return
 	if network_session != null or not network_role.is_empty():
@@ -2534,6 +2702,7 @@ func _return_to_launcher() -> void:
 
 
 func resume_from_launcher() -> void:
+	join_simulation_owner()
 	get_tree().auto_accept_quit = false
 	if launcher_suspended:
 		game_controller.set_paused(launcher_restore_paused)
@@ -2551,12 +2720,14 @@ func resume_from_launcher() -> void:
 	queue_redraw()
 
 func _exit_tree() -> void:
+	join_simulation_owner()
 	autosave.shutdown()
 	PickingService.SelectionResolver.clear_hit_images()
 	navigation_loading.shutdown()
 	background_saves.shutdown()
 	if resource_catalog != null:
 		resource_catalog.unit_presentations.shutdown_loading()
+	simulation_owner.shutdown()
 	ai_runtime.shutdown()
 	render_snapshot_source.clear()
 	ai_decision_queue.cancel(task_coordinator)
@@ -2592,7 +2763,7 @@ func selection_rectangle(first: Vector2, second: Vector2) -> Rect2:
 	return Rect2(top_left, bottom_right - top_left)
 
 func _draw() -> void:
-	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var probe: Variant = _presentation_probe()
 	var draw_started := Time.get_ticks_usec() if probe != null else 0
 	var stage_started := draw_started
 	# The terrain seam belongs below sprites, including crowns beyond the map.
@@ -2632,8 +2803,8 @@ func _draw() -> void:
 
 
 func _sync_terrain_canvas() -> void:
-	if terrain_canvas != null and simulation_world != null:
-		terrain_canvas.set_view_state(view_zoom, view_offset, get_viewport_rect().size, int(simulation_world.terrain_revision))
+	if terrain_canvas != null and _render_terrain() != null:
+		terrain_canvas.set_view_state(view_zoom, view_offset, get_viewport_rect().size, int(_render_terrain().terrain_revision))
 
 func draw_formation_ghost() -> void:
 	var gesture := input_adapter.formation_gesture()
@@ -2644,7 +2815,8 @@ func draw_formation_ghost() -> void:
 		return
 	var destination := screen_to_world(gesture["position"])
 	var direction_end := screen_to_world(gesture["direction_end"])
-	var preview := FormationPreview.build_selection(selected, game_controller.formation_groups, destination, direction_end - destination)
+	var groups: Dictionary = owner_formation_groups if simulation_owner.pending else game_controller.formation_groups
+	var preview := FormationPreview.build_selection(selected, groups, destination, direction_end - destination)
 	if preview.is_empty():
 		return
 	for slot in preview["slots"]:
@@ -2676,7 +2848,7 @@ func draw_terrain() -> void:
 		for x in range(bounds.position.x, bounds.end.x):
 			var cell := Vector2i(x, y)
 			var terrain_id := terrain_id_at_cell(cell)
-			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_provider, resource_catalog, simulation_world.terrain_elevation, view_zoom, view_offset, map_seed)
+			var drawable := TerrainRenderer.tile_drawable(cell, terrain_id, terrain_provider, resource_catalog, _render_terrain().terrain_elevation, view_zoom, view_offset, map_seed)
 			if drawable.is_empty():
 				continue
 			for underlay in drawable.get("underlays", []):
@@ -2696,8 +2868,8 @@ func terrain_at(x: int, y: int) -> String:
 func terrain_id_at_cell(cell: Vector2i) -> int:
 	# The world maintains an O(1) forest-cell index; the previous linear scan
 	# over every resource per cell multiplied pan-time terrain rebuilds.
-	if simulation_world != null:
-		return simulation_world.terrain_id_at_cell(cell)
+	if _render_terrain() != null:
+		return _render_terrain().terrain_id_at_cell(cell)
 	return TerrainRules.terrain_id_for_logical(TerrainRules.terrain_at(cell))
 
 
@@ -2718,7 +2890,7 @@ var native_sprite_submission := true
 
 func draw_world_objects() -> void:
 	if render_world != null:
-		var probe: Variant = game_controller.performance_probe if game_controller != null else null
+		var probe: Variant = _presentation_probe()
 		var stage_started := Time.get_ticks_usec() if probe != null else 0
 		var drawables := current_world_drawables()
 		if probe != null:
@@ -2776,6 +2948,7 @@ func draw_command_marker() -> void:
 func draw_build_placement_preview() -> void:
 	if pending_build_kind.is_empty() or simulation_world == null or not is_world_interaction_area(input_adapter.pointer_position):
 		return
+	join_simulation_owner()
 	var center := Coordinates.clamp_world(screen_to_world(input_adapter.pointer_position).round(), map_size)
 	if pending_build_kind == "wall":
 		var start := Coordinates.clamp_world(screen_to_world(input_adapter.pointer.anchor).round(), map_size) if input_adapter.pointer.is_selecting() else center
@@ -2799,6 +2972,7 @@ func draw_build_placement_preview() -> void:
 
 
 func draw_foundation_preview_at(kind: String, center: Vector2, wall_entry: Dictionary = {}, draw_sprite: bool = true) -> void:
+	join_simulation_owner()
 	var key := "%s:%d:%d:%d:%d" % [kind, roundi(center.x), roundi(center.y), game_controller.tick_index, simulation_world.navigation_grid.revision]
 	if wall_entry.is_empty() and key != placement_preview_key:
 		placement_preview_key = key
@@ -2837,9 +3011,9 @@ func draw_foundation_preview_at(kind: String, center: Vector2, wall_entry: Dicti
 
 
 func _terrain_geometry_revision() -> int:
-	if simulation_world == null:
+	if _render_terrain() == null:
 		return -1
-	var elevation = simulation_world.terrain_elevation
+	var elevation = _render_terrain().terrain_elevation
 	return CacheDependency.geometry_key(map_size, elevation)
 
 
@@ -2859,7 +3033,7 @@ func _sync_fog_geometry_revision() -> void:
 func draw_fog_overlay() -> void:
 	if presentation_snapshot.is_empty():
 		return
-	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var probe: Variant = _presentation_probe()
 	var cells: Variant = presentation_snapshot.get("fog", {}).get("cells", [])
 	if cells.size() < map_size.x * map_size.y:
 		return
@@ -2938,7 +3112,7 @@ func _build_world_fog_mesh(bounds: Rect2i) -> ArrayMesh:
 	# Geometry never depends on fog state. Chunks are created only as the camera
 	# reaches them and retained for the current viewport plus one surrounding
 	# ring, so exploration cannot grow a history of GPU objects.
-	if simulation_world == null or bounds.size.x <= 0 or bounds.size.y <= 0:
+	if _render_terrain() == null or bounds.size.x <= 0 or bounds.size.y <= 0:
 		return null
 	var lattice_width := bounds.size.x + 1
 	var lattice_height := bounds.size.y + 1
@@ -2950,7 +3124,7 @@ func _build_world_fog_mesh(bounds: Rect2i) -> ArrayMesh:
 		for x in range(lattice_width):
 			var vertex_index := y * lattice_width + x
 			var world := Vector2(bounds.position + Vector2i(x, y))
-			var projected: Vector2 = simulation_world.terrain_elevation.world_to_screen(world, 1.0, Vector2.ZERO)
+			var projected: Vector2 = _render_terrain().terrain_elevation.world_to_screen(world, 1.0, Vector2.ZERO)
 			projected = PixelScaling.snap_screen(projected)
 			vertices[vertex_index] = Vector3(projected.x, projected.y, 0.0)
 			uvs[vertex_index] = Vector2(clampf(world.x / float(map_size.x), 0.5 / map_size.x, 1.0 - 0.5 / map_size.x), clampf(world.y / float(map_size.y), 0.5 / map_size.y, 1.0 - 0.5 / map_size.y))
@@ -2981,6 +3155,7 @@ func _build_world_fog_mesh(bounds: Rect2i) -> ArrayMesh:
 
 
 func _sync_world_fog_texture(cells: Variant, fog_revision: int, probe: Variant = null) -> void:
+	if simulation_owner.pending: return
 	var expected_cells := map_size.x * map_size.y
 	if cells.size() < expected_cells:
 		return
@@ -3036,8 +3211,8 @@ func _write_world_fog_pixel(index: int, cells: Variant) -> void:
 
 
 func _world_to_fog_mesh(world: Vector2) -> Vector2:
-	if simulation_world != null:
-		return simulation_world.terrain_elevation.world_to_screen(world, view_zoom, Vector2.ZERO)
+	if _render_terrain() != null:
+		return _render_terrain().terrain_elevation.world_to_screen(world, view_zoom, Vector2.ZERO)
 	return Coordinates.world_to_screen(world, view_zoom, Vector2.ZERO)
 
 
@@ -3074,13 +3249,13 @@ func _fog_state_at_cell(cells: Variant, cell: Vector2i) -> int:
 
 func _ensure_fog_slope_neighbor_cache() -> void:
 	var expected_size := map_size.x * map_size.y
-	if simulation_world == null or cached_fog_slope_neighbor_cells.size() == expected_size:
+	if _render_terrain() == null or cached_fog_slope_neighbor_cells.size() == expected_size:
 		return
 	cached_fog_slope_neighbor_cells.resize(expected_size)
 	for y in range(map_size.y):
 		for x in range(map_size.x):
 			var cell := Vector2i(x, y)
-			var profile: Dictionary = simulation_world.terrain_elevation.cell_profile(cell)
+			var profile: Dictionary = _render_terrain().terrain_elevation.cell_profile(cell)
 			var uses_slope_art := int(profile.get("slope_index", 0)) > 0 or not bool(profile.get("is_valid", true))
 			if uses_slope_art:
 				for y_offset in range(-1, 2):
@@ -3131,7 +3306,7 @@ func render_item_frame_info(kind: String, data: Variant) -> Dictionary:
 			return resource_catalog.objective_frame_info(data, animation_time)
 		"building":
 			var animation_time := float(presentation_snapshot.get("tick", 0)) * GameController.FIXED_STEP_SECONDS
-			return resource_catalog.building_frame_info(data, animation_time)
+			return resource_catalog.building_frame_info(data, animation_time, true)
 		"projectile":
 			return resource_catalog.projectile_frame_info(data)
 		"effect":
@@ -3429,7 +3604,7 @@ func draw_minimap(rectangle: Rect2) -> void:
 	var map_points := MinimapProjection.map_polygon(map_size, center, scale)
 	# Tree depletion changes terrain artwork but not land/water geography. Rebuild
 	# the small minimap raster only when navigable surface topology changes.
-	var terrain_revision := int(simulation_world.navigation_grid.surface_revision) if simulation_world != null else -1
+	var terrain_revision := int(render_terrain_view.surface_revision) if render_terrain_view != null else int(simulation_world.navigation_grid.surface_revision) if simulation_world != null else -1
 	if cached_minimap_terrain_texture == null or cached_minimap_terrain_revision != terrain_revision or cached_minimap_terrain_rectangle != rectangle:
 		var terrain_image := MinimapTerrainRaster.build(map_size, rectangle, center, scale, Callable(self, "terrain_id_at_cell"))
 		cached_minimap_terrain_texture = ImageTexture.create_from_image(terrain_image)
@@ -3483,7 +3658,7 @@ func draw_minimap(rectangle: Rect2) -> void:
 
 
 func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
-	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var probe: Variant = _presentation_probe()
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	var vertices := PackedVector3Array()
 	var colors := PackedColorArray()
@@ -3524,8 +3699,9 @@ func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
 
 
 func _minimap_resource_pixels(center: Vector2, scale: float, rectangle: Rect2) -> Array[Vector2]:
+	if simulation_owner.pending: return minimap_resource_index.pixels
 	var changes: Variant = simulation_world.consume_known_resource_marker_changes(local_player_team) if simulation_world != null else null
-	var probe: Variant = game_controller.performance_probe if game_controller != null else null
+	var probe: Variant = _presentation_probe()
 	return minimap_resource_index.synchronize(overview_resource_nodes, changes, center, scale, rectangle,
 		func(position: Vector2): return presentation_fog_state_at(position) != FogOfWar.UNKNOWN, probe)
 
@@ -3566,7 +3742,7 @@ var visible_world_corners: Array[Vector2] = []
 
 func visible_tile_bounds(margin: int = 4) -> Rect2i:
 	var viewport_size := get_viewport_rect().size
-	var elevation: Variant = simulation_world.terrain_elevation if simulation_world != null else null
+	var elevation: Variant = _render_terrain().terrain_elevation if _render_terrain() != null else null
 	var key := [elevation, elevation.revision if elevation != null else -1, elevation.cache_epoch if elevation != null else -1, map_size, view_offset, view_zoom, viewport_size]
 	if visible_corner_key != key:
 		visible_corner_key = key
@@ -3604,6 +3780,7 @@ func hud_bottom_height() -> float:
 
 
 func select_hud_building(building_id: int) -> void:
+	join_simulation_owner()
 	if simulation_world == null:
 		return
 	var building: Variant = simulation_world.find_building(building_id)
@@ -3620,7 +3797,7 @@ func select_hud_building(building_id: int) -> void:
 func draw_map_edge_fog_overlay() -> void:
 	# Crowns can project outside the finite terrain mesh. Continue the boundary
 	# cell's fog there, without tinting the black void or drawing across sprites.
-	if simulation_world == null or cached_world_fog_texture == null:
+	if _render_terrain() == null or cached_world_fog_texture == null:
 		return
 	if cached_map_edge_fog_revision != _terrain_geometry_revision():
 		cached_map_edge_fog_meshes.clear()

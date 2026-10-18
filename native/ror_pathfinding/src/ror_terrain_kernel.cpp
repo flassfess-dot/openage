@@ -13,6 +13,9 @@
 namespace godot {
 namespace {
 constexpr int MATERIAL_STRIDE = 7; // priority, water, imported, atlas x/y/width/height
+// Mesh.ArrayType from the pinned 4.7 API. Mesh is deliberately absent from
+// this CPU-only extension's generated class profile.
+enum MeshArray { ARRAY_VERTEX = 0, ARRAY_COLOR = 3, ARRAY_TEX_UV = 4, ARRAY_INDEX = 12, ARRAY_MAX = 13 };
 struct Weights {
     std::array<int, 4> ids{};
     std::array<double, 4> values{};
@@ -47,6 +50,65 @@ Packed pack(const std::vector<Value> &values) {
 
 void RoRTerrainKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("build_mesh", "bounds", "cells", "heights", "frames", "materials", "seed", "maximum_subdivisions"), &RoRTerrainKernel::build_mesh, DEFVAL(16));
+    ClassDB::bind_method(D_METHOD("split_mesh_arrays", "arrays", "maximum_vertices"), &RoRTerrainKernel::split_mesh_arrays, DEFVAL(16384));
+}
+
+Array RoRTerrainKernel::split_mesh_arrays(const Array &arrays, int32_t maximum_vertices) const {
+    Array result;
+    if (arrays.size() != ARRAY_MAX || arrays[ARRAY_VERTEX].get_type() != Variant::PACKED_VECTOR3_ARRAY ||
+        arrays[ARRAY_TEX_UV].get_type() != Variant::PACKED_VECTOR2_ARRAY ||
+        arrays[ARRAY_COLOR].get_type() != Variant::PACKED_COLOR_ARRAY ||
+        arrays[ARRAY_INDEX].get_type() != Variant::PACKED_INT32_ARRAY) return result;
+    const PackedVector3Array source_vertices = arrays[ARRAY_VERTEX];
+    const PackedVector2Array source_uvs = arrays[ARRAY_TEX_UV];
+    const PackedColorArray source_colors = arrays[ARRAY_COLOR];
+    const PackedInt32Array source_indices = arrays[ARRAY_INDEX];
+    if (source_vertices.is_empty() || source_indices.is_empty() || source_indices.size() % 3 ||
+        source_uvs.size() != source_vertices.size() || source_colors.size() != source_vertices.size()) return result;
+    const int limit = std::clamp(maximum_vertices, 3, 65536);
+    const auto *positions = source_vertices.ptr();
+    const auto *uvs = source_uvs.ptr();
+    const auto *colors = source_colors.ptr();
+    const auto *indices = source_indices.ptr();
+    for (int64_t i = 0; i < source_indices.size(); ++i) {
+        if (indices[i] < 0 || indices[i] >= source_vertices.size()) return Array();
+    }
+    if (source_vertices.size() <= limit) { result.append(arrays); return result; }
+    std::vector<int32_t> remap(source_vertices.size(), -1), originals, local_indices;
+    std::vector<Vector3> local_vertices;
+    std::vector<Vector2> local_uvs;
+    std::vector<Color> local_colors;
+    originals.reserve(limit); local_vertices.reserve(limit); local_uvs.reserve(limit); local_colors.reserve(limit);
+    auto flush = [&]() {
+        if (local_indices.empty()) return;
+        Array chunk;
+        chunk.resize(ARRAY_MAX);
+        chunk[ARRAY_VERTEX] = pack<PackedVector3Array>(local_vertices);
+        chunk[ARRAY_TEX_UV] = pack<PackedVector2Array>(local_uvs);
+        chunk[ARRAY_COLOR] = pack<PackedColorArray>(local_colors);
+        chunk[ARRAY_INDEX] = pack<PackedInt32Array>(local_indices);
+        result.append(chunk);
+        for (auto original : originals) remap[original] = -1;
+        originals.clear(); local_vertices.clear(); local_uvs.clear(); local_colors.clear(); local_indices.clear();
+    };
+    // Keep triangle order and exact attribute values, duplicating only vertices
+    // shared by neighbouring chunks. No GPU or scene object is touched here.
+    for (int64_t i = 0; i < source_indices.size(); i += 3) {
+        int needed = 0;
+        for (int corner = 0; corner < 3; ++corner) needed += remap[indices[i + corner]] < 0;
+        if (local_vertices.size() + needed > size_t(limit)) flush();
+        for (int corner = 0; corner < 3; ++corner) {
+            const int original = indices[i + corner];
+            if (remap[original] < 0) {
+                remap[original] = int32_t(local_vertices.size());
+                originals.push_back(original);
+                local_vertices.push_back(positions[original]); local_uvs.push_back(uvs[original]); local_colors.push_back(colors[original]);
+            }
+            local_indices.push_back(remap[original]);
+        }
+    }
+    flush();
+    return result;
 }
 
 Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32Array &cells,

@@ -10,6 +10,7 @@ func _initialize() -> void:
 	test_identifier_domains_and_civilization_resolution()
 	test_economic_relationships_are_normalized()
 	test_data_only_scout_archetype_enters_simulation()
+	test_single_runtime_fields_are_detached()
 
 	if failures.is_empty():
 		print("I2 normalized runtime data tests passed")
@@ -60,6 +61,19 @@ func test_economic_relationships_are_normalized() -> void:
 	var accepted_resource_ids: Array = repository.runtime_metadata("granary").get("accepted_resource_type_ids", [])
 	assert_equal(accepted_resource_ids.size(), 1, "Granary has one accepted resource class")
 	assert_equal(int(accepted_resource_ids[0]), 0, "drop-site policy remains data-driven")
+
+
+func test_single_runtime_fields_are_detached() -> void:
+	var repository: Variant = configured_repository()
+	var accepted: Array = repository.runtime_field("granary","accepted_resource_type_ids",[])
+	assert_equal(accepted,repository.runtime_metadata("granary")["accepted_resource_type_ids"],"field projection matches full metadata")
+	accepted.append(999)
+	assert_true(not repository.runtime_metadata("granary")["accepted_resource_type_ids"].has(999),"field arrays remain detached")
+	repository.runtime_catalog["archetypes"]["granary"]["runtime"]["qa_nested"] = {"rows":[{"value":7}]}
+	var nested: Dictionary = repository.runtime_field("granary","qa_nested")
+	nested["rows"][0]["value"] = 99
+	assert_equal(repository.runtime_field("granary","qa_nested")["rows"][0]["value"],7,"nested fields remain detached")
+	assert_equal(repository.runtime_field("absent","missing",42),42,"missing fields preserve defaults")
 
 
 func configured_repository():

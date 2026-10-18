@@ -14,7 +14,7 @@ Current engine profiles are `inland_v1`, `highlands_v1`, `coastal_v1` and `islan
 - inland/coastal starts share the required land component, while island starts each own a minimum viable land component;
 - water ratio stays inside the profile's declared interval;
 - every player receives nearby food, wood, stone and gold clusters;
-- every coastal/island player receives a deterministic legal dock footprint plus land/water staging cells;
+- every coastal/island player receives a deterministic legal dock footprint plus land/water staging cells, with a protected land approach from the settlement;
 - identical match definition and seed produce an equal terrain/resource/naval-zone dictionary.
 
 Map sizes declare player capacity, preventing eight players from being forced onto the compact profile. These are stable engine guarantees, not a claim that current preset labels/dimensions or topology distributions already reproduce classic RoR. Their source status remains pending executable calibration.
@@ -54,6 +54,13 @@ E5-006C2b closes autonomous generated-island transport landing. The AI uses only
 E5-006C2c proves naval combat can close a generated-map match without a special victory path. Both AI sides discover and attack through the normal presentation/command boundary; source projectile impacts, death removal, participant defeat and the common conquest rule produce the terminal result.
 
 E5-006C3 extends the generated naval contract to four and eight participants on both coastal and islands profiles. A naval start is accepted only when its Dock/staging pair has enough clearance-valid open water inside the resource guarantee radius. Naval resource clusters are allocated round-robin across teams and use bounded placement, preventing early starts from exhausting later starts or moving their guaranteed fish outside the audited radius. Clearance capacity is precomputed and cached during generation.
+
+Land access to each naval staging point is reserved before resource clusters,
+forests and solid scenery are placed. The deterministic route avoids existing
+starting buildings, cliffs and future dock footprints. The final navigation
+audit rejects a staging tile that resources or scenery have isolated from its
+settlement. This closes the `small_islands` seed 41721 boarding failure, where
+the beach tile was empty but resources blocked both land approaches.
 
 ## Match controls
 

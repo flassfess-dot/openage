@@ -10,6 +10,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_stack_uses_render_order_and_deduplicates_composites()
 	test_mobile_composite_sail_is_pickable()
+	test_mobile_sprite_bounds_ignore_alpha()
 	test_transparent_sprite_falls_back_to_footprint()
 	test_zero_health_berry_is_pickable()
 	test_box_prioritizes_mobile_units()
@@ -74,6 +75,25 @@ func test_transparent_sprite_falls_back_to_footprint() -> void:
 	)
 	assert_equal(hits.size(), 1, "selection footprint keeps transparent frame clickable")
 	assert_equal(hits[0].get("hit_method"), "footprint", "fallback method is observable")
+
+
+func test_mobile_sprite_bounds_ignore_alpha() -> void:
+	var service := PickingService.new()
+	var image := Image.create(30, 40, false, Image.FORMAT_RGBA8)
+	image.fill(Color.TRANSPARENT)
+	image.set_pixel(15, 20, Color.WHITE)
+	var texture := ImageTexture.create_from_image(image)
+	var target := entity(71, 2, "archer", Vector2(80, 80))
+	for mirrored in [false, true]:
+		for zoom in [0.75, 2.0]:
+			var body := drawable("unit", target, texture, 1)
+			body["hotspot"] = Vector2(8, 37)
+			body["frame_info"]["mirrored"] = mirrored
+			var point: Vector2 = Vector2(80, 80) + Vector2((-1 if mirrored else 1) * 12, -27) * zoom
+			var hits := service.hit_stack(point, [body], identity_projection, zoom)
+			assert_equal(hits.size(), 1, "transparent space inside a moving target's sprite is clickable at either scale and reflection")
+			if not hits.is_empty(): assert_equal(hits[0]["hit_method"], "sprite_bounds", "mobile hit uses the asset bounds")
+			assert_equal(service.hit_stack(Vector2(80, 80) + Vector2(60, -27) * zoom, [body], identity_projection, zoom).size(), 0, "space outside the asset does not pick a distant target")
 
 
 func test_zero_health_berry_is_pickable() -> void:

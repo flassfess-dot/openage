@@ -62,9 +62,27 @@ func _initialize() -> void:
 	world.commit_ai_build_site_queries(empty_output["build_site_cache_updates"], 20)
 	var cached_empty: Array = world.capture_ai_build_site_queries(1, ["dock"], 21, 1200, 4, 12, {}, ["dock"], 0.0)
 	check(cached_empty[0].has("cached_sites") and cached_empty[0]["cached_sites"].is_empty(), "failed searches are cached and do not recur every decision")
+	_check_demand_transfer(world, store)
 	world.task_coordinator.shutdown()
 	for failure in failures: push_error(failure)
 	quit(0 if failures.is_empty() else 1)
 
+func _check_demand_transfer(world, store) -> void:
+	for adaptive in [false, true]:
+		var ai := Ai.new({"team": 1, "ai": {"profile": "skirmish_policy_v1", "adaptive_strategy": adaptive, "construction_priorities": ["house", "dock", "barracks"], "building_limits": {"house": 4, "dock": 1, "barracks": 1}}})
+		var options: Dictionary = ai.presentation_options()
+		options["defer_build_sites"] = true
+		var reference: Dictionary = store.observe_with_queries(world, 30, 1, options)
+		var before: Dictionary = ai.canonical_state()
+		var output := Task.run(Data.seal(Task.capture(ai, reference, 38)))
+		options["build_site_filter_in_worker"] = true
+		var deferred: Dictionary = store.observe_with_queries(world, 30, 1, options)
+		check(bool(deferred.get("build_site_filter_in_worker", false)), "owner explicitly transfers demand to the worker")
+		check(deferred["build_site_queries"].size() >= reference["build_site_queries"].size(), "capture carries available kinds without running speculative placement")
+		var input := Data.seal(Task.capture(ai, deferred, 38))
+		var actual := Task.run(input)
+		check(actual == output, "worker demand preserves every command, AI state and cache update for adaptive=" + str(adaptive))
+		check(ai.canonical_state() == before, "worker demand cannot mutate the live AI state")
+		check(Task.Executor.new().run(input) == output, "retained executor applies the same source-boundary demand")
 func check(value: bool, message: String) -> void:
 	if not value: failures.append(message)

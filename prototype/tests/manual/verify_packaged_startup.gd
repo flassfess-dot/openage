@@ -72,6 +72,7 @@ func run() -> void:
 	launcher._load_selected_save()
 	game = await wait_for_match("load_save")
 	if game == null: return
+	game.join_simulation_owner()
 	game.game_controller.set_paused(false)
 	if not await check_running(game, "load_save"): return
 	tree.current_scene = null
@@ -107,19 +108,21 @@ func wait_for_match(stage: String):
 			return null
 		if is_instance_valid(tree.current_scene) and tree.current_scene.has_method("load_game_from_path"):
 			if tree.current_scene.game_controller != null and not tree.current_scene.navigation_loading.is_loading():
+				tree.current_scene.join_simulation_owner()
 				return tree.current_scene
 	fail("Match never became ready: " + stage)
 	return null
 
 
 func check_running(game, stage: String) -> bool:
-	var initial_tick: int = game.game_controller.tick_index
+	var initial_tick := int(game.simulation_frame_state()["tick"])
 	var deadline := Time.get_ticks_msec() + 30000
 	while Time.get_ticks_msec() < deadline:
 		await tree.process_frame
-		if game.game_controller.tick_index >= initial_tick + 10:
+		var current_tick := int(game.simulation_frame_state()["tick"])
+		if current_tick >= initial_tick + 10:
 			game.current_world_drawables()
-			var stage_report := {"stage":stage,"initial_tick":initial_tick,"final_tick":game.game_controller.tick_index,"map_size":[game.map_size.x,game.map_size.y]}
+			var stage_report := {"stage":stage,"initial_tick":initial_tick,"final_tick":current_tick,"map_size":[game.map_size.x,game.map_size.y],"simulation_owner_started":game.simulation_owner.thread.is_started()}
 			if "--capture-rendered-startup" in OS.get_cmdline_user_args() and DisplayServer.get_name() != "headless":
 				DirAccess.make_dir_recursive_absolute(output_path.get_base_dir())
 				game.queue_redraw()
@@ -132,7 +135,7 @@ func check_running(game, stage: String) -> bool:
 					return false
 				stage_report["screenshot"] = screenshot
 			report["stages"].append(stage_report)
-			print("PACKAGED_STARTUP %s running: tick %d -> %d" % [stage, initial_tick, game.game_controller.tick_index])
+			print("PACKAGED_STARTUP %s running: tick %d -> %d" % [stage, initial_tick, current_tick])
 			return true
 	fail("Simulation did not advance after loading: " + stage)
 	return false

@@ -1,6 +1,8 @@
 class_name RoRAiObservationProfile
 extends RefCounted
 const Rules := preload("res://scripts/combat_rules.gd")
+static var native_actor_enabled := true
+static var actor_kernel: Variant = null
 
 
 static func from_record(source: Dictionary, entity: Dictionary = {}) -> Dictionary:
@@ -21,15 +23,21 @@ static func from_record(source: Dictionary, entity: Dictionary = {}) -> Dictiona
 
 
 static func actor(world, row: Dictionary, team: int) -> Dictionary:
-	var source: Dictionary = world.object_record_by_id(int(row.get("source_unit_id", -1)), int(row.get("team", 0)))
 	# Enemy definitions are public estimates. Never look up a live foreign actor.
 	if int(row.get("team", 0)) != team:
+		var source: Dictionary = world.object_record_by_id(int(row.get("source_unit_id", -1)), int(row.get("team", 0)))
 		return from_record(source, row)
 	var live: Variant = (
 		world.find_building(int(row.get("id", -1)))
 		if String(row.get("entity_type", "")) == "building"
 		else world.find_unit(int(row.get("id", -1)))
 	)
+	if live is Dictionary and native_actor_enabled and ClassDB.class_exists("RoRReadModelKernel"):
+		if actor_kernel == null: actor_kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if actor_kernel.has_method("owned_ai_actor_profile"):
+			var prepared: Dictionary = actor_kernel.owned_ai_actor_profile(live)
+			if not prepared.is_empty(): return prepared
+	var source: Dictionary = world.object_record_by_id(int(row.get("source_unit_id", -1)), int(row.get("team", 0)))
 	var data := from_record(source, live if live is Dictionary else row)
 	if live is Dictionary:
 		data["carried_amount"] = float(live.get("carried_amount", 0.0))

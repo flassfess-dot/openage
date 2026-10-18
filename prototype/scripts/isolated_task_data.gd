@@ -156,13 +156,22 @@ static func capture(value: Variant, depth: int = 0) -> Variant:
 # Validate, detach and freeze an observation in one traversal.
 # Trust is still held only by our bounded identity registries.
 static func capture_frozen(value: Dictionary) -> Dictionary:
+	return _capture_frozen(value, false)
+
+# Internal producer handoff: every mutable descendant reached through a mutable
+# parent must belong to the producer. The input is consumed, including on error.
+# Readonly borrowed parents still require detached mutable descendants/buffers.
+static func freeze_owned(value: Dictionary) -> Dictionary:
+	return _capture_frozen(value, true)
+
+static func _capture_frozen(value: Dictionary, take_ownership: bool) -> Dictionary:
 	if native_capture_enabled and ClassDB.class_exists("RoRReadModelKernel"):
 		seal_mutex.lock()
 		var trusted: Array = immutable_roots.duplicate()
 		trusted.append_array(sealed_roots.values())
 		seal_mutex.unlock()
 		var kernel = ClassDB.instantiate("RoRReadModelKernel")
-		var captured: Dictionary = kernel.capture_frozen(value, trusted)
+		var captured: Dictionary = kernel.capture_owned_frozen(value, trusted) if take_ownership and kernel.has_method("capture_owned_frozen") else kernel.capture_frozen(value, trusted)
 		if not bool(captured.get("valid", false)):
 			return {}
 		# Preserve the reference implementation's LRU promotion: a hot map must

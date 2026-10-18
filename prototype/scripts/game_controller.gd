@@ -53,6 +53,8 @@ var replay_source: Variant = null
 var record_replay_state_hashes := true
 var last_replay_mismatch: String = ""
 var performance_probe: Variant = null
+var frame_simulation_budget_usec := FRAME_SIMULATION_BUDGET_USEC
+var yield_ready_tick_for_presentation := true
 var before_fixed_tick: Callable = Callable()
 var queued_order_codec := ReplaySystem.new()
 var queued_unit_ids: Dictionary = {}
@@ -1464,7 +1466,7 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 		accumulator_seconds = minf(MAX_ACCUMULATED_SECONDS, accumulator_seconds + elapsed * get_speed_multiplier())
 
 	var frame_started := Time.get_ticks_usec()
-	var frame_budget := FRAME_SIMULATION_BUDGET_USEC
+	var frame_budget := frame_simulation_budget_usec
 	_render_deadline_usec = frame_started + frame_budget
 	var steps := 0
 	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
@@ -1499,7 +1501,7 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 		# commits AI state/commands must proceed to its target tick exactly once.
 		# Allow the same ready boundary through on its next attempt, so an
 		# unusually expensive readiness callback cannot starve simulation.
-		if preparation is Dictionary and bool(preparation.get("can_defer", false)) and _render_deadline_usec > 0 and Time.get_ticks_usec() >= _render_deadline_usec and _deferred_ready_tick != tick_index + 1:
+		if yield_ready_tick_for_presentation and preparation is Dictionary and bool(preparation.get("can_defer", false)) and _render_deadline_usec > 0 and Time.get_ticks_usec() >= _render_deadline_usec and _deferred_ready_tick != tick_index + 1:
 			_deferred_ready_tick = tick_index + 1
 			return false
 	_deferred_ready_tick = -1

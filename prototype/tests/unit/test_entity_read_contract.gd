@@ -10,6 +10,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	var world := World.new(Vector2i(20, 20))
 	var worker: Dictionary = world.add_unit(1, "villager", Vector2(5.5, 5.5), false)
+	_check_selected_control(worker)
 	check(not worker["components"]["health"].has("current") and not worker["components"]["transform"].has("position"), "live entities have no second mutable owner for health/position")
 	var view := Components.view(worker)
 	world.set_entity_field(worker, "hp", 17.0)
@@ -61,10 +62,39 @@ func _initialize() -> void:
 	var hash_before := codec.world_state_hash(world, 4)
 	worker["components"]["health"]["current"] = -123.0
 	Components.sync_dynamic(worker)
+	_check_selected_control(worker)
+	var selected_options := {"compact_render_entities":true,"borrow_visible_render_entities":true,"include_overview":true,"always_include_entity_ids":[int(worker.id)],"entity_bounds":Rect2(Vector2(0,0),Vector2(24,24))}
+	Snapshot.native_selected_batch_enabled = false
+	var selected_reference := Snapshot.presentation(world,4,1,selected_options)
+	Snapshot.native_selected_batch_enabled = true
+	check(Snapshot.presentation(world,4,1,selected_options) == selected_reference,"batched selected units preserve the complete presentation and control snapshot")
 	check(not worker["components"]["health"].has("current") and codec.world_state_hash(world, 4) == hash_before, "legacy mirror migration preserves canonical simulation state")
 	for failure in failures:
 		push_error(failure)
 	quit(0 if failures.is_empty() else 1)
 
+func _check_selected_control(worker: Dictionary) -> void:
+	var kernel = ClassDB.instantiate("RoRReadModelKernel")
+	check(kernel.has_method("project_control"), "native control projection is available")
+	var fixture := worker.duplicate(true)
+	fixture["production_queue"] = [{"kind": "scout", "remaining": 4.25}]
+	fixture["cooldown"] = 0.75
+	fixture["carried_amount"] = 7.0
+	fixture["carried_resource_type_id"] = 1
+	fixture["components"]["cargo"]["passenger_ids"] = [99, 100]
+	fixture["components"]["trade"]["target_dock_id"] = 200
+	fixture["components"]["trade"]["cargo_gold"] = 12.0
+	for observer in [0, 1, 2]:
+		Contract.native_enabled = false
+		var reference := Snapshot._compact_control_entity(fixture, observer)
+		Contract.native_enabled = true
+		var actual := Snapshot._compact_control_entity(fixture, observer)
+		check(actual == reference, "native selected-object data preserves all fields for observer=" + str(observer))
+		if observer != 2:
+			actual["components"]["cargo"]["passenger_ids"].append(101)
+			check(fixture["components"]["cargo"]["passenger_ids"].size() == 2, "selected cargo lists remain detached from the live actor")
+		else:
+			check(not actual["components"]["cargo"].has("passenger_ids") and not actual["components"]["trade"].has("cargo_gold") and not actual.has("production_queue"), "native foreign inspection keeps production and cargo private")
+	Contract.native_enabled = true
 func check(value: bool, message: String) -> void:
 	if not value: failures.append(message)

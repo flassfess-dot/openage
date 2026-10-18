@@ -113,6 +113,7 @@ const MAX_LOCAL_BUILD_SITE_CACHE_BYTES := 4 * 1024 * 1024
 const MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES := 64
 var build_option_catalog_cache: Dictionary = {}
 var render_entity_projection_cache := RenderEntityProjectionCache.new()
+var native_render_resource_queries_enabled := true
 var static_obstructions: Array = []
 var buildings: Array = []
 var buildings_by_id: Dictionary = {}
@@ -1518,6 +1519,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		# fields, so rewriting the same nested Dictionaries for every entity on
 		# every tick only duplicates state and dominates large moving groups.
 	pathfinder.finish_native_movement_batch()
+	movement_system.settle_mobile_overlaps(active_units, delta)
 	if probe != null:
 		presentation_microseconds = animation_microseconds + component_sync_microseconds
 		probe.observe_microseconds("simulation.unit_orders.preparation", preparation_microseconds)
@@ -1950,9 +1952,10 @@ func finish_gather_order(worker: Dictionary, reason: String) -> void:
 
 func building_cost(kind: String, team: int) -> Dictionary:
 	var source := object_record_for(kind, team)
-	var stats := unit_stats(kind)
+	var source_resources: Dictionary = source.get("resources", {})
+	var stats: Dictionary = {} if source_resources.has("cost") and source.has("unit_id") else unit_stats(kind)
 	var result: Dictionary = {}
-	for cost_value in source.get("resources", {}).get("cost", stats.get("resource_cost", [])):
+	for cost_value in source_resources.get("cost", stats.get("resource_cost", [])):
 		var cost: Dictionary = cost_value
 		if not bool(cost.get("enabled", false)) or int(cost.get("type_id", -1)) < 0:
 			continue
@@ -3814,6 +3817,11 @@ func get_known_resources_in_bounds(observer_team: int, bounds: Rect2) -> Array:
 	if end_x <= start_x or end_y <= start_y:
 		result.make_read_only()
 		cached["render_view"] = {"bounds": view_bounds, "records": result, "dirty": {}}
+		return result
+	var kernel: Variant = render_entity_projection_cache.native_kernel
+	if native_render_resource_queries_enabled and kernel != null and kernel.has_method("known_resources_in_bounds"):
+		result = kernel.known_resources_in_bounds(known_ids,known_by_chunk,view_bounds,RESOURCE_MEMORY_CHUNK_SIZE)
+		cached["render_view"] = {"bounds":view_bounds,"records":result,"dirty":{}}
 		return result
 	var first_chunk_x := floori(float(start_x) / float(RESOURCE_MEMORY_CHUNK_SIZE))
 	var first_chunk_y := floori(float(start_y) / float(RESOURCE_MEMORY_CHUNK_SIZE))

@@ -103,7 +103,10 @@ static func capture_chunked(grid, previous: Dictionary = {}, source_generation: 
 	Data._retain_immutable(pages)
 	var history: Array = Data.capture_frozen({"history": grid._change_log})["history"]
 	Data._retain_immutable(history)
-	var result := {"source_generation": source_generation, "size": grid.size, "epoch": grid.cache_epoch, "revision": grid.revision, "previous_revision": previous.get("revision", -1), "surface_revision": grid.surface_revision, "cell_pages": pages, "changed_pages": changed_pages, "changed_cells": null, "change_log": history, "terrain_restrictions": previous["terrain_restrictions"] if changed_pages != null else Data.copy(grid.terrain_restrictions)}
+	var page_versions: Dictionary[Vector2i,int] = {}
+	page_versions.assign(grid.task_page_revisions)
+	page_versions.make_read_only()
+	var result := {"task_page_revisions":page_versions, "task_full_revision":grid.task_full_revision, "source_generation": source_generation, "size": grid.size, "epoch": grid.cache_epoch, "revision": grid.revision, "previous_revision": previous.get("revision", -1), "surface_revision": grid.surface_revision, "cell_pages": pages, "changed_pages": changed_pages, "changed_cells": null, "change_log": history, "terrain_restrictions": previous["terrain_restrictions"] if changed_pages != null else Data.copy(grid.terrain_restrictions)}
 	if grid is KnowledgeGrid: result["learned"] = grid.learned.duplicate()
 	return Data.seal(result)
 

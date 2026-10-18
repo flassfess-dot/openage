@@ -52,6 +52,7 @@ static func with_queries(world, tick: int, observer_team: int = 0, options: Dict
 	return ObservationQueries.enrich(world, presentation(world, tick, observer_team, options), options)
 
 
+static var native_selected_batch_enabled := true
 static func presentation(world, tick: int, observer_team: int = 0, options: Dictionary = {}) -> Dictionary:
 	var snapshot_probe: Variant = options.get("performance_probe")
 	var snapshot_prefix := String(options.get("performance_prefix", "presentation.snapshot"))
@@ -133,11 +134,18 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	if snapshot_probe != null:
 		unit_overview_microseconds = Time.get_ticks_usec() - unit_substage_started
 		unit_substage_started = Time.get_ticks_usec()
-	if compact_render_entities and borrow_visible_render_entities and not compact_entities and always_include_entity_lookup.is_empty():
+	if compact_render_entities and borrow_visible_render_entities and not compact_entities and (always_include_entity_lookup.is_empty() or native_selected_batch_enabled):
 		var kernel: Variant = world.render_entity_projection_cache.native_kernel
 		if kernel != null and kernel.has_method("filter_visible_entities"):
 			var visible: Array = kernel.filter_visible_entities(detail_units, observer_team, observer_states, fog_map_size)
 			units = world.render_entity_projection_cache.project_many(visible, world.entity_changes)
+			for index in range(visible.size()):
+				if not always_include_entity_lookup.has(int(visible[index].get("id",-1))): continue
+				var projection_started := Time.get_ticks_usec() if snapshot_probe != null else 0
+				var control := _compact_control_entity(visible[index], observer_team, Callable(), units[index])
+				units[index] = control
+				control_units.append(control)
+				if snapshot_probe != null: unit_control_projection_microseconds += Time.get_ticks_usec()-projection_started
 			detail_units = []
 	for unit in detail_units:
 		if has_entity_bounds and not use_bounded_unit_query and not _entity_in_bounds(unit, entity_bounds) and not always_include_entity_lookup.has(int(unit.get("id", -1))):
@@ -547,6 +555,10 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 	# Keeping this explicit contract avoids two deep copies of large unit records
 	# every presentation tick while preserving every player-facing control field.
 	var base: Dictionary = rendered if not rendered.is_empty() else (compact_render_projector.call(entity) if compact_render_projector.is_valid() else _compact_render_entity(entity))
+	if ReadContract.native_enabled and ClassDB.class_exists("RoRReadModelKernel"):
+		if ReadContract.native_kernel == null: ReadContract.native_kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if ReadContract.native_kernel.has_method("project_control"):
+			return ReadContract.native_kernel.project_control(entity, base, observer_team, ReadContract.CONTROL_FIELDS, ReadContract.PRIVATE_TRADE_FIELDS)
 	var result: Dictionary = base.duplicate(true)
 	for key in ReadContract.CONTROL_FIELDS:
 		if entity.has(key):
@@ -779,12 +791,17 @@ static func _production_overview(world, observer_team: int) -> Array:
 		if queue.is_empty():
 			continue
 		var order: Dictionary = queue[0]
+		var kind := String(order.get("kind", ""))
+		var source_id := -1
+		if String(order.get("order_type", "unit")) == "unit":
+			var base_id := int(world.data_repository.identifiers(kind).get("source_unit_id", -1))
+			source_id = int(world.technology_system.resolved_unit_id(observer_team, base_id))
 		result.append({
 			"id": int(building["id"]),
 			"team": observer_team,
 			"kind": String(building.get("kind", "")),
 			"components": {"ownership": {"civilization_id": int(world.civilization_by_team.get(observer_team, 13))}},
-			"production_queue": [{"id": int(order.get("id", -1)), "order_type": String(order.get("order_type", "unit")), "kind": String(order.get("kind", "")), "technology_id": int(order.get("technology_id", -1)), "status": String(order.get("status", "queued")), "duration": float(order.get("duration", 0.05)), "progress": float(order.get("progress", 0))}],
+			"production_queue": [{"id": int(order.get("id", -1)), "order_type": String(order.get("order_type", "unit")), "kind": kind, "source_unit_id": source_id, "technology_id": int(order.get("technology_id", -1)), "status": String(order.get("status", "queued")), "duration": float(order.get("duration", 0.05)), "progress": float(order.get("progress", 0))}],
 		})
 	return result
 

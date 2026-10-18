@@ -307,7 +307,7 @@ func _ensure_loaded_synchronous(texture_key: String, requested_state: String = "
 	)
 
 
-func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -> Dictionary:
+func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0, ambient_time: float = -1.0) -> Dictionary:
 	var alias := String(unit.get("kind", ""))
 	var source_id := int(unit.get("source_unit_id", -1))
 	var texture_key := texture_key_for_unit(unit)
@@ -344,7 +344,10 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0) -
 		var source := _source_record(archetype_for_unit(alias), source_id, unit)
 		damage_graphic_id = DamageSelector.select_graphic_id(unit, source)
 		if damage_graphic_id >= 0:
-			var damage_part: Dictionary = effect_presentations.frame_info_for(damage_graphic_id, int(unit.get("team", 1)), time)
+			# Persistent fire has its own clock: sparse idle poses and action clip
+			# changes must not pause or restart the damage effect.
+			var damage_time := time if ambient_time < 0.0 else ambient_time
+			var damage_part: Dictionary = effect_presentations.frame_info_for(damage_graphic_id, int(unit.get("team", 1)), damage_time)
 			if not damage_part.is_empty():
 				damage_part["effect_kind"] = "damage"
 				resolved_parts.append(damage_part)

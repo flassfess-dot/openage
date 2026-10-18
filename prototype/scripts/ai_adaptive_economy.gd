@@ -5,6 +5,26 @@ const Legacy := preload("res://scripts/ai_economic_planner.gd")
 const Combat := preload("res://scripts/ai_combat_model.gd")
 const Resources := preload("res://scripts/ai_resource_spatial_index.gd")
 const RESOURCE_NAMES := ["food", "wood", "stone", "gold"]
+static var memoized_production_enabled := true
+static var memoized_site_checks_enabled := true
+static var native_resource_views_enabled := true
+
+
+static func _economy_resources(resources: Array, buildings: Array, team: int, native: bool = true) -> Dictionary:
+	if native and ClassDB.class_exists("RoRReadModelKernel"):
+		var kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if kernel.has_method("economy_resource_view"):
+			return kernel.economy_resource_view(resources, buildings, team)
+	var active: Array = resources.filter(func(r): return int(r.get("amount", 0)) > 0)
+	for building in buildings:
+		if int(building.get("team", 0)) == team and bool(building.get("harvestable", false)) and int(building.get("amount", 0)) > 0:
+			active.append(building)
+	var by_id: Dictionary = {}
+	var types: Dictionary = {}
+	for row in active:
+		by_id[int(row.get("id", -1))] = row
+		types[int(row.get("resource_type_id", -1))] = true
+	return {"resources":active,"by_id":by_id,"types":types}
 
 
 static func own(rows: Array, team: int) -> Array:
@@ -167,9 +187,12 @@ static func site_kinds(kinds: Array, snapshot: Dictionary, team: int, base: Dict
 
 
 static func plan(
-	snapshot: Dictionary, tick: int, team: int, base: Dictionary, state, budget, reserved: Dictionary
+	snapshot: Dictionary, tick: int, team: int, base: Dictionary, state, budget, reserved: Dictionary, timings: Dictionary = {}, resource_index: Variant = null
 ) -> Array:
+	var started := Time.get_ticks_usec()
 	var policy := policy_for(snapshot, team, base, state)
+	timings["policy"] = Time.get_ticks_usec() - started
+	started = Time.get_ticks_usec()
 	var units := own(snapshot.get("units", []), team)
 	var structures := own(snapshot.get("buildings", []), team)
 	var buildings: Array = structures.filter(func(b): return String(b.get("state", "complete")) == "complete")
@@ -237,6 +260,8 @@ static func plan(
 		)
 	)
 	var effective_units: Array = units.duplicate()
+	var production_choices: Dictionary = {}
+	var effective_version := 0
 	for building in buildings:
 		for order in building.get("production_queue", []):
 			if String(order.get("order_type", "unit")) == "unit":
@@ -252,14 +277,17 @@ static func plan(
 		if budget.producer_orders.has(id):
 			continue
 		var options: Dictionary = building.get("command_options", {})
-		var selected := _preferred_train(
-			options.get("train", []).filter(func(o): return bool(o.get("accepted", false))),
-			effective_units,
-			snapshot,
-			policy,
-			state,
-			String(building.get("kind", ""))
-		)
+		var train_options: Array = options.get("train", []).filter(func(o): return bool(o.get("accepted", false)))
+		var producer_kind := String(building.get("kind", ""))
+		# A plan sees one fixed enemy sample and policy. Unit counts change only
+		# when an accepted offer extends effective_units below.
+		var choice_key := [producer_kind, effective_version, train_options]
+		var selected: Dictionary
+		if memoized_production_enabled and production_choices.has(choice_key):
+			selected = production_choices[choice_key]
+		else:
+			selected = _preferred_train(train_options, effective_units, snapshot, policy, state, producer_kind)
+			if memoized_production_enabled: production_choices[choice_key] = selected
 		var technology := _preferred_research(options.get("research", []), units, policy, state)
 		var worker_option: bool = "worker" in selected.get("behavior_tags", [])
 		if (
@@ -311,6 +339,7 @@ static func plan(
 				reserved
 			):
 				effective_units.append({"kind": selected["kind"], "behavior_tags": selected.get("behavior_tags", [])})
+				effective_version += 1
 	_construct(
 		snapshot,
 		tick,
@@ -323,7 +352,8 @@ static func plan(
 		policy.get("construction_priorities", []).filter(func(k): return k != "house")
 	)
 	result.append_array(Legacy._plan_idle_trade(snapshot, tick, team, units, buildings))
-	result.append_array(_gather(snapshot, tick, team, policy, state, reserved))
+	timings["production"] = Time.get_ticks_usec() - started
+	result.append_array(_gather(snapshot, tick, team, policy, state, reserved, timings, resource_index))
 	state.metrics["budget_rejections"] += budget.rejected
 	state.metrics["economy_plan"] = {
 		"worker_target": int(policy["land_worker_target"]),
@@ -405,46 +435,37 @@ static func _construct(
 		var best: Dictionary = {}
 		var best_score := INF
 		var site_values: Dictionary = {}
+		var site_risks: Dictionary = {}
+		var site_gaps: Dictionary = {}
 		for worker in workers.slice(0, int(policy.get("worker_search_budget", 32))):
 			var option: Dictionary = {}
+			var gap_radius := 1.0
+			var radius_ready := false
 			for entry in worker.get("command_options", {}).get("build", []):
+				if not radius_ready and String(entry.get("kind", "")) == kind:
+					gap_radius = maxf(0.5, float(entry.get("footprint_radius", 1.0)))
+					radius_ready = true
 				if String(entry.get("kind", "")) == kind and bool(entry.get("accepted", false)):
 					option = entry
 			if option.is_empty():
 				continue
 			for site_value in snapshot.get("build_sites", {}).get(kind, []):
 				var site := Vector2(site_value)
-				var risk: float = state.danger(site, int(snapshot.get("tick", 0)), policy)
+				if not memoized_site_checks_enabled or not site_risks.has(site):
+					site_risks[site] = state.danger(site, int(snapshot.get("tick", 0)), policy)
+				var risk: float = site_risks[site]
 				if risk > float(policy.get("maximum_economic_danger", 8.0)):
 					continue
-				if (
-					not Legacy._site_preserves_structure_gap(
-						site, kind, worker, structures, float(policy.get("minimum_structure_gap", 1.0))
-					)
-					and kind not in policy.get("structure_gap_fallback_kinds", [])
-				):
-					continue
+				if kind not in policy.get("structure_gap_fallback_kinds", []):
+					var gap_key := [site, gap_radius]
+					if not memoized_site_checks_enabled or not site_gaps.has(gap_key):
+						site_gaps[gap_key] = Legacy._site_preserves_structure_gap(site, kind, worker, structures, float(policy.get("minimum_structure_gap", 1.0)))
+					if not bool(site_gaps[gap_key]): continue
 				var score := Vector2(worker.get("pos", Vector2.ZERO)).distance_to(site) + risk * 4.0
 				if not site_values.has(site):
-					var bonus := 0.0
 					if kind in ["granary", "storage_pit", "town_center"]:
-						var resource_distance := INF
-						for resource in snapshot.get("resources", []):
-							if (
-								int(resource.get("amount", 0)) <= 0
-								or not Legacy._resource_allows_worker(resource, {"movement_domain": "land"})
-							):
-								continue
-							if kind == "granary" and int(resource.get("resource_type_id", -1)) != 0:
-								continue
-							if kind == "storage_pit" and int(resource.get("resource_type_id", -1)) == 0:
-								continue
-							resource_distance = minf(
-								resource_distance, site.distance_to(Vector2(resource.get("pos", Vector2.ZERO)))
-							)
-						if is_finite(resource_distance):
-							bonus = resource_distance * 2.0
-					site_values[site] = bonus
+						site_values = _site_resource_bonuses(snapshot.get("resources",[]),snapshot.get("build_sites",{}).get(kind,[]),kind)
+					else: site_values[site] = 0.0
 				score += float(site_values[site])
 				if score < best_score:
 					best_score = score
@@ -561,31 +582,24 @@ static func _preferred_research(options: Array, units: Array, policy: Dictionary
 
 
 static func _gather(
-	snapshot: Dictionary, tick: int, team: int, policy: Dictionary, state, reserved: Dictionary
+	snapshot: Dictionary, tick: int, team: int, policy: Dictionary, state, reserved: Dictionary, timings: Dictionary = {}, resource_index: Variant = null
 ) -> Array:
+	var started := Time.get_ticks_usec()
 	var units := own(snapshot.get("units", []), team)
 	var workers: Array = units.filter(
 		func(w): return ( bool(w.get("components", {}).get("worker", {}).get("enabled", false)) and String(w.get("task", "idle")) in ["idle", "gather"] and not reserved.has(int(w.get("id", -1))) and float(w.get("ai_profile", {}).get("carried_amount", 0.0)) <= 0.0 and String(w.get("ai_profile", {}).get("gather_stage", "")) != "returning" )
 	)
-	var resources: Array = snapshot.get("resources", []).filter(func(r): return int(r.get("amount", 0)) > 0)
-	for building in snapshot.get("buildings", []):
-		if (
-			int(building.get("team", 0)) == team
-			and bool(building.get("harvestable", false))
-			and int(building.get("amount", 0)) > 0
-		):
-			resources.append(building)
-	var index := Resources.new()
+	var resource_view := _economy_resources(snapshot.get("resources", []), snapshot.get("buildings", []), team, native_resource_views_enabled)
+	var resources: Array = resource_view["resources"]
+	var index: Resources = resource_index if resource_index != null else Resources.new()
 	index.rebuild(resources, ["land", "water"], false, true)
-	var by_id: Dictionary = {}
+	var by_id: Dictionary = resource_view["by_id"]
 	var saturation: Dictionary = {}
-	for resource in resources:
-		by_id[int(resource.get("id", -1))] = resource
 	for worker in units:
 		if String(worker.get("task", "")) == "gather":
 			var id := int(worker.get("resource_id", -1))
 			saturation[id] = int(saturation.get(id, 0)) + 1
-	var reachable := Legacy._reachable_cells_by_domain(snapshot.get("navigation", {}))
+	var reachable: Dictionary = snapshot["_economy_reachable_cells"] if snapshot.has("_economy_reachable_cells") else Legacy._reachable_cells_by_domain(snapshot.get("navigation", {}))
 	var drops: Array = own(snapshot.get("buildings", []), team).filter(
 		func(b): return bool(b.get("ai_drop_site", false)) and String(b.get("state", "complete")) == "complete"
 	)
@@ -605,13 +619,15 @@ static func _gather(
 		if String(unit.get("task", "")) == "gather" and type_id >= 0: type_load[type_id] = int(type_load.get(type_id, 0)) + 1
 	var total_weight := 0.0
 	for type_id in range(RESOURCE_NAMES.size()):
-		if not resources.any(func(r): return int(r.get("resource_type_id", -1)) == type_id): continue
+		if not resource_view["types"].has(type_id): continue
 		if float(policy.get("desired_stock", {}).get(type_id, 0.0)) <= 0.0: continue
 		var shortage := maxf(0.0, float(policy.get("desired_stock", {}).get(type_id, 0.0)) - float(player.get(RESOURCE_NAMES[type_id], 0)))
 		weights[type_id] = sqrt(maxf(25.0 if type_id in [0, 1] else 1.0, shortage))
 		total_weight += float(weights[type_id])
 	for type_id in weights: quotas[type_id] = float(total_workers) * float(weights[type_id]) / maxf(1.0, total_weight)
 	var count := mini(workers.size(), int(policy.get("worker_search_budget", 32)))
+	timings["gather_prepare"] = Time.get_ticks_usec() - started
+	started = Time.get_ticks_usec()
 	for offset in range(count):
 		var worker: Dictionary = workers[posmod(state.gather_cursor + offset, workers.size())]
 		var worker_id := int(worker.get("id", -1))
@@ -695,6 +711,7 @@ static func _gather(
 		if result.size() >= int(policy.get("gather_command_budget", 8)):
 			break
 	state.gather_cursor += maxi(1, count)
+	timings["gather_choices"] = Time.get_ticks_usec() - started
 	return result
 
 
@@ -731,3 +748,20 @@ static func _age_intent(
 					"cost": option.get("cost", {}).duplicate(true)
 				}
 	return {}
+
+static var native_site_scores_enabled := true
+static var native_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
+static func _site_resource_bonuses(resources: Array, sites: Array, kind: String, use_native: bool = true) -> Dictionary:
+	if use_native and native_site_scores_enabled and native_kernel != null and native_kernel.has_method("infrastructure_site_bonuses"):
+		return native_kernel.infrastructure_site_bonuses(resources,sites,kind)
+	var result: Dictionary = {}
+	for value in sites:
+		var site := Vector2(value)
+		var distance := INF
+		for resource in resources:
+			if int(resource.get("amount",0)) <= 0 or not Legacy._resource_allows_worker(resource,{"movement_domain":"land"}): continue
+			if kind == "granary" and int(resource.get("resource_type_id",-1)) != 0: continue
+			if kind == "storage_pit" and int(resource.get("resource_type_id",-1)) == 0: continue
+			distance = minf(distance,site.distance_to(Vector2(resource.get("pos",Vector2.ZERO))))
+		result[site] = distance*2.0 if is_finite(distance) else 0.0
+	return result

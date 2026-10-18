@@ -363,7 +363,6 @@ Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target
         }
     }
     const Vector2 pre_collision_velocity = velocity;
-    const bool solid_self = movement_->solid_animals[static_cast<size_t>(own_index)] != 0;
     const auto crosses = [](const Vector2 &gap, const Vector2 &step, double radius) {
         const double length = step.length_squared();
         if (length <= 0.000001) return false;
@@ -373,7 +372,7 @@ Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target
     };
     for (const int32_t candidate_index : movement_candidates_) {
         const size_t candidate = static_cast<size_t>(candidate_index);
-        if (movement_->health[candidate] <= 0.0f || !(solid_self || movement_->solid_animals[candidate])) continue;
+        if (movement_->health[candidate] <= 0.0f) continue;
         const Vector2 gap = position - movement_->positions[candidate];
         const double radius = own_radius + movement_->radii[candidate] + 0.03;
         if (!crosses(gap, velocity * delta, radius)) continue;
@@ -384,7 +383,7 @@ Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target
     if (!velocity.is_equal_approx(pre_collision_velocity)) {
         for (const int32_t candidate_index : movement_candidates_) {
             const size_t candidate = static_cast<size_t>(candidate_index);
-            if (movement_->health[candidate] <= 0.0f || !(solid_self || movement_->solid_animals[candidate])) continue;
+            if (movement_->health[candidate] <= 0.0f) continue;
             if (crosses(position - movement_->positions[candidate], velocity * delta, own_radius + movement_->radii[candidate] + 0.03)) velocity = Vector2();
         }
         // A tangent chosen to avoid a body still obeys the physical terrain mask.

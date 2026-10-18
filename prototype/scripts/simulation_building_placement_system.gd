@@ -5,6 +5,9 @@ const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const Footprint := preload("res://scripts/footprint.gd")
 const WallPlacement := preload("res://scripts/wall_placement.gd")
 
+var page_cache: Variant = null
+var structure_audit: Dictionary = {}
+var structure_audit_kernel: Variant = null
 var site_map_cache: Dictionary = {}
 var site_footprint_profiles: Dictionary = {}
 var site_map_revision := -1
@@ -59,7 +62,11 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 	if not foundation_has_required_domain_access(footprint, placement):
 		world.last_build_failure = "missing_domain_access"
 		return false
-	for building_value in world.get_buildings():
+	var has_native_structure_audit: bool = structure_audit_kernel != null and not structure_audit.is_empty()
+	if has_native_structure_audit and structure_audit_kernel.foundation_intersects_structures(footprint,candidate_center,structure_audit,replaced_walls):
+		world.last_build_failure = "blocked_or_sloped"
+		return false
+	for building_value in ([] if has_native_structure_audit else world.get_buildings()):
 		var building: Dictionary = building_value
 		if float(building.get("hp", 0.0)) <= 0.0:
 			continue
@@ -263,6 +270,14 @@ func cached_map_supports_foundation(kind: String, position: Vector2) -> bool:
 			"placement": world.data_repository.runtime_metadata(kind).get("placement", {}),
 		}
 		site_map_cache[kind] = {}
+		if page_cache != null and page_cache.active:
+			page_cache.prepare_kind(kind, site_footprint_profiles[kind])
+	if page_cache != null and page_cache.active and not page_cache.profiles.has(kind):
+		page_cache.prepare_kind(kind, site_footprint_profiles[kind])
+	var use_pages: bool = page_cache != null and page_cache.active and position == Vector2(position.floor())+Vector2(0.5,0.5)
+	if use_pages:
+		var flag: int = page_cache.lookup(kind,position)
+		if flag != 0: return flag == 1
 	var cached: Dictionary = site_map_cache[kind]
 	if cached.has(position):
 		return bool(cached[position])
@@ -280,7 +295,8 @@ func cached_map_supports_foundation(kind: String, position: Vector2) -> bool:
 			occupied.append(cell + Vector2i(offset))
 		var placement: Dictionary = profile["placement"]
 		supported = world.navigation_grid.can_build_for(occupied, String(placement.get("domain", "land")), int(placement.get("terrain_restriction_id", -1))) and foundation_has_required_domain_access({"occupied_cells": occupied}, placement)
-	cached[position] = supported
+	if use_pages: page_cache.store(kind,position,supported)
+	else: cached[position] = supported
 	if world.tick_pipeline.performance_probe != null:
 		world.tick_pipeline.performance_probe.increment("ai.build_site_static_evaluations")
 	return supported

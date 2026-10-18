@@ -67,6 +67,11 @@ func test_junction(civilization: int, level: int, axis: int, walls_first: bool) 
 		gate["gate_open_fraction"] = pose
 		for projection in [gate,Contract.render(gate),Contract.render_reference(gate)]:
 			var info: Dictionary = catalog.building_frame_info(projection,0)
+			var hinges: Array = info.get("gate_occluders", [])
+			for side in range(hinges.size()):
+				var mount := Vector2(gate["pos"]) + Vector2(hinges[side]["start"])
+				var pier := Vector2(expected[side])
+				check(absf(mount.x-pier.x) <= 0.5 and absf(mount.y-pier.y) <= 0.5,"wooden hinge remains seated inside its masonry pier: "+label)
 			var found: Array = []
 			for part in info.get("composite_parts",[]):
 				if part.has("gate_polygon"):
