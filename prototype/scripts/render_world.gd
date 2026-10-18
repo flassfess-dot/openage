@@ -514,7 +514,7 @@ func _cache_resource_sprite(item: Dictionary) -> void:
 
 static func _append_resource_shadow(drawables: Array, resource: Dictionary, frame_info: Dictionary, position: Vector2, screen: Vector2) -> void:
 	var shadow: Dictionary = frame_info.get("shadow", {})
-	if shadow.is_empty() or int(resource.get("amount", 0)) <= 0 or String(resource.get("tree_phase", "standing")) != "standing":
+	if shadow.is_empty() or not ResourcePresentationRegistry.tree_canopy_visible(resource):
 		return
 	# A separate ground layer cannot cover nearby units or enlarge picking bounds.
 	drawables.append(RenderItem.create("resource_shadow", RenderItem.Layer.SHADOW, position, screen, int(resource["id"]), resource, shadow, float(resource.get("elevation", 0.0))))

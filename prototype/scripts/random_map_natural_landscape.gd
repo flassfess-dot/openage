@@ -99,7 +99,7 @@ static func paint_ground(data: Dictionary, landscape: Dictionary) -> void:
 		elif moisture < 0.43 and rock > 0.57: terrain[i] = 1001
 		else: terrain[i] = 0
 
-static func forests(data: Dictionary, landscape: Dictionary, exclusions: Dictionary, seed: int) -> void:
+static func forests(data: Dictionary, landscape: Dictionary, exclusions: Dictionary, seed: int, allow_slopes: bool = false) -> void:
 	var size: Vector2i = data["size"]
 	var terrain: Array[int] = data["terrain_ids"]
 	var levels: Array[int] = data["vertex_levels"]
@@ -127,7 +127,7 @@ static func forests(data: Dictionary, landscape: Dictionary, exclusions: Diction
 	for i in range(terrain.size()):
 		if int(landscape["forest_potential"][i]) == 0: continue
 		var cell := Vector2i(i % size.x, i / size.x)
-		if occupied.has(cell) or not Base.flat_cell(cell, size, levels): continue
+		if occupied.has(cell) or (not allow_slopes and not Base.flat_cell(cell, size, levels)): continue
 		var edge := depth[i] <= 2
 		var density := lerpf(0.34, 0.90, smoothstep(0.0, 4.0, float(depth[i])))
 		if Base.random_at(cell, seed ^ 0x737AE) > density: continue

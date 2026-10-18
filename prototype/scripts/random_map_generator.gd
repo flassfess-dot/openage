@@ -6,6 +6,10 @@ const LandscapeNavigation := preload("res://scripts/random_map_navigation.gd")
 const Topology := preload("res://scripts/random_map_topology.gd")
 const NaturalLandscape := preload("res://scripts/random_map_natural_landscape.gd")
 const NaturalTopology := preload("res://scripts/random_map_natural_topology.gd")
+const Geography := preload("res://scripts/random_map_geography.gd")
+const WildIslands := preload("res://scripts/random_map_wild_islands.gd")
+const Rivers := preload("res://scripts/random_map_rivers.gd")
+const WatershedWorld := preload("res://scripts/random_map_watershed_world.gd")
 
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const RandomMapZones := preload("res://scripts/random_map_zones.gd")
@@ -15,7 +19,7 @@ const PALM_TREES := [113, 114, 121, 129, 150, 152, 153]
 const TREE_GRAPHICS := {113: 648, 114: 649, 121: 650, 129: 651, 134: 601, 136: 603, 140: 607, 141: 608, 142: 609, 143: 610, 144: 611, 146: 613, 147: 614, 150: 617, 152: 619, 153: 620, 161: 653, 194: 623, 195: 627, 198: 654, 203: 655, 226: 656, 365: 628, 367: 631}
 
 
-static func generate(match_definition: Dictionary, progress_callback: Callable = Callable(), diagnostics: Dictionary = {}) -> Dictionary:
+static func generate(match_definition: Dictionary, progress_callback: Callable = Callable(), diagnostics: Dictionary = {}, prepared_geography: Dictionary = {}) -> Dictionary:
 	var map: Dictionary = match_definition.get("map", {})
 	var size: Vector2i = map.get("size", Vector2i(24, 24))
 	var seed := int(map.get("seed", 1))
@@ -26,7 +30,7 @@ static func generate(match_definition: Dictionary, progress_callback: Callable =
 		_report_progress(progress_callback, 1.0, "Карта готова")
 		return fixed_map
 	if String(generator.get("type", "")) == Landscape.TYPE:
-		return _landscape_skirmish_map(match_definition, size, seed, generator, progress_callback, diagnostics)
+		return _landscape_skirmish_map(match_definition, size, seed, generator, progress_callback, diagnostics, prepared_geography)
 	if String(generator.get("type", "coastal_land")) not in ["", "coastal_land"]:
 		return {"generation_error": "random_map_generator_type_unsupported"}
 	var water_border: Dictionary = generator.get("water_border", {})
@@ -412,21 +416,7 @@ static func _smooth_water_mask(terrain_ids: Array[int], size: Vector2i) -> void:
 	# Remove isolated one-cell water spikes and land pinholes before assigning
 	# the beach band. This keeps wide source islands/channels intact while giving
 	# the transition sprites coherent coast corners to join.
-	var original := terrain_ids.duplicate()
-	for y in range(1, size.y - 1):
-		for x in range(1, size.x - 1):
-			var index := y * size.x + x
-			var water_neighbors := 0
-			for offset_y in range(-1, 2):
-				for offset_x in range(-1, 2):
-					if offset_x == 0 and offset_y == 0:
-						continue
-					if int(original[(y + offset_y) * size.x + x + offset_x]) in TerrainRules.WATER_TERRAIN_IDS:
-						water_neighbors += 1
-			if int(original[index]) in TerrainRules.WATER_TERRAIN_IDS and water_neighbors <= 2:
-				terrain_ids[index] = 0
-			elif int(original[index]) not in TerrainRules.WATER_TERRAIN_IDS and water_neighbors >= 6:
-				terrain_ids[index] = 1
+	RandomMapWater.smooth_coast(terrain_ids, size)
 
 
 static func _smooth_noise(point: Vector2, scale: float, seed: int) -> float:
@@ -973,9 +963,9 @@ static func _cell_matches_domain(cell: Vector2i, size: Vector2i, terrain_ids: Ar
 		return false
 	var is_water := int(terrain_ids[cell.y * size.x + cell.x]) in TerrainRules.WATER_TERRAIN_IDS
 	if placement_domain == "water":
-		return is_water
+		return is_water and int(terrain_ids[cell.y * size.x + cell.x]) != Rivers.SHOAL
 	if placement_domain == "shore_water":
-		if not is_water:
+		if not is_water or int(terrain_ids[cell.y * size.x + cell.x]) == Rivers.SHOAL:
 			return false
 		for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
 			var neighbor: Vector2i = cell + offset
@@ -999,10 +989,28 @@ static func _vector2(value: Variant) -> Vector2:
 	return Vector2.ZERO
 
 
-static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary) -> Dictionary:
+static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary, prepared_geography: Dictionary = {}) -> Dictionary:
 	var version := int(generator.get("version", -1))
-	if version not in [Landscape.VERSION, NaturalLandscape.VERSION]:
+	if version not in [Landscape.VERSION, NaturalLandscape.VERSION, Geography.VERSION, WildIslands.VERSION, WatershedWorld.VERSION]:
 		return {"generation_error": "random_map_generator_version_unsupported"}
+	if version in [Geography.VERSION, WildIslands.VERSION, WatershedWorld.VERSION]:
+		if String(generator.get("map_type_id", "")) not in (WatershedWorld.PROFILES if version == WatershedWorld.VERSION else Geography.PROFILES):
+			return {"generation_error": "skirmish_geography_profile_not_available"}
+		if version == WildIslands.VERSION and String(generator.get("map_type_id", "")) != "islands":
+			return {"generation_error": "skirmish_wild_islands_profile_required"}
+		var geography_started := Time.get_ticks_usec()
+		var data := _landscape_candidate_map(definition, size, seed, generator, progress, diagnostics, 0, prepared_geography)
+		var fields: Dictionary = data["_fields"]
+		var reserved: Dictionary = data["_reserved"]
+		data.erase("_fields")
+		data.erase("_reserved")
+		data["scenery"] = Landscape.scenery(data, fields, reserved, seed ^ 0x665ACA, float(generator.get("decoration_density", 1.0)), _starting_entity_exclusion_cells(definition, size))
+		if version == WatershedWorld.VERSION: WatershedWorld.Hydrology.decorate_fords(data, seed)
+		data["ecology"]["composition"] = NaturalLandscape.composition(data)
+		data["content_hash"] = (("watershed_world_v6:" if version == WatershedWorld.VERSION else "wild_islands_v5:" if version == WildIslands.VERSION else "geography_first_v4:") + Landscape.fingerprint(data)).sha256_text()
+		diagnostics["candidate_count"] = 1
+		diagnostics["total_ms"] = float(Time.get_ticks_usec() - geography_started) / 1000.0
+		return data
 	if version == Landscape.VERSION:
 		return _landscape_candidate_map(definition, size, seed, generator, progress, diagnostics)
 	var started := Time.get_ticks_usec()
@@ -1042,31 +1050,52 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 	return selected
 
 
-static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary, candidate: int = 0) -> Dictionary:
-	var natural := int(generator.get("version", -1)) == NaturalLandscape.VERSION
+static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary, candidate: int = 0, prepared_geography: Dictionary = {}) -> Dictionary:
+	var watershed := int(generator.get("version", -1)) == WatershedWorld.VERSION
+	var wild := watershed or int(generator.get("version", -1)) == WildIslands.VERSION
+	var river_network := wild and bool(generator.get("river_network", false))
+	var macro := wild or int(generator.get("version", -1)) == Geography.VERSION
+	var natural := macro or int(generator.get("version", -1)) == NaturalLandscape.VERSION
 	var started := Time.get_ticks_usec()
 	var checkpoint := started
 	var starts: Array[Vector2] = []
 	for player in definition.get("players", []): starts.append(Vector2(player["start"]))
+	var geography: Dictionary = {}
+	if watershed and prepared_geography.get("size") == size and int(prepared_geography.get("seed", -1)) == seed and prepared_geography.get("profile") == generator.get("map_type_id"):
+		geography = prepared_geography.duplicate(true)
+	else:
+		geography = WatershedWorld.geography(size, String(generator.get("map_type_id", "continental")), seed) if watershed else WildIslands.geography(size, seed, river_network) if wild else Geography.geography(size, String(generator.get("map_type_id", "grasslands")), seed, starts.size()) if macro else {}
 	var topology := String(generator.get("topology", "inland"))
-	var layout := NaturalTopology.prepare(size, starts, topology, generator, seed) if natural else Topology.prepare(size, starts, topology, generator, seed)
+	var layout := {} if macro else NaturalTopology.prepare(size, starts, topology, generator, seed) if natural else Topology.prepare(size, starts, topology, generator, seed)
 	var terrain: Array[int] = []
 	terrain.resize(size.x * size.y)
 	for y in range(size.y):
 		for x in range(size.x):
 			var point := Vector2(x + 0.5, y + 0.5)
-			var water := NaturalTopology.water_at(point, layout) if natural else Topology.water_at(point, layout)
+			var water: bool = int(geography["terrain"][y * size.x + x]) == 1 if macro else NaturalTopology.water_at(point, layout) if natural else Topology.water_at(point, layout)
 			terrain[y * size.x + x] = 1 if water else 0
+			if river_network: terrain[y * size.x + x] = int(geography["terrain"][y * size.x + x])
 		_report_row_progress(progress, y, size.y, 0.02, 0.15, "Создание суши и морей")
-	_smooth_water_mask(terrain, size)
-	var water_features := RandomMapWater.apply(terrain, size, seed, topology)
+	if not macro: _smooth_water_mask(terrain, size)
+	var water_features := RandomMapWater.apply(terrain, size, seed, "" if river_network else topology)
+	if river_network: Rivers.apply(terrain, geography["rivers"])
 	_apply_shore_band(terrain, size)
 	var cliffs := _profile_cliff_cells(size, String(generator.get("cliff_profile", "")), seed)
 	checkpoint = _landscape_checkpoint(diagnostics, "coast", checkpoint)
 	_report_progress(progress, 0.18, "Выбор рельефа и природных областей")
-	var fields := NaturalLandscape.fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed ^ (0x2A63B91 + candidate * 104729)) if natural else Landscape.select_fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed)
+	var fields: Dictionary = geography["fields"] if macro else NaturalLandscape.fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed ^ (0x2A63B91 + candidate * 104729)) if natural else Landscape.select_fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed)
+	if macro:
+		fields = geography["fields"]
+		Geography.settle(fields, size, starts)
 	var levels: Array[int] = fields["vertex_levels"]
-	var rock_ridges := Landscape.rock_ridges(size, terrain, starts, fields, cliffs, seed ^ 0xCF67)
+	var rock_ridges: Dictionary = {"cells": geography["ridge_cells"], "scenery": geography["ridge_scenery"]} if macro else Landscape.rock_ridges(size, terrain, starts, fields, cliffs, seed ^ 0xCF67)
+	# Geometry preparation happens before shoreline classification. Remove any
+	# edge footprint consumed by coast smoothing before publishing obstructions.
+	if macro:
+		var ridge_cells: Array[Vector2i] = []
+		for cell in rock_ridges["cells"]:
+			if int(terrain[cell.y * size.x + cell.x]) not in Landscape.WATER: ridge_cells.append(cell)
+		rock_ridges["cells"] = ridge_cells
 	cliffs = rock_ridges["cells"]
 	_apply_cliff_elevation(levels, size, cliffs)
 	var cliff_flat: Dictionary = {}
@@ -1086,15 +1115,31 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 		"terrain_ids": terrain, "vertex_levels": levels, "cliff_cells": cliffs, "cliff_obstructions": rock_ridges["scenery"], "strategic_zones": zones, "water_features": water_features,
 		"naval_start_zones": naval_zones, "reserved_foundation_cells": reserved_foundations, "resources": [], "scenery": [],
 		"generation_candidates": fields.get("generation_candidates", {})}
+	if macro:
+		result["generator_version"] = WatershedWorld.VERSION if watershed else WildIslands.VERSION if wild else Geography.VERSION
+		result["theme"] = "watershed_world_v6" if watershed else "wild_islands_v5" if wild else "geography_first_v4"
+		result["geography"] = {"order": ["land_and_sea", "relief_and_woodland", "settlements", "routes", "resources"], "woodland_regions": geography["woodland_regions"], "landmass_seeds": geography["landmass_seeds"]}
+	if river_network:
+		result["rivers"] = geography["rivers"]
+		result["geography"]["order"] = ["islands", "watersheds_and_rivers", "settlements", "resources"]
+		water_features["rivers"] = Rivers.inspect(result["rivers"])
+	if watershed:
+		result["lakes"] = geography["lakes"]
+		result["fords"] = geography["fords"]
+		result["geography"]["shape_kind"] = geography["shape_kind"]
+		result["geography"]["order"] = ["landforms", "relief", "watersheds_lakes_rivers_fords", "settlements", "resources"]
 	if natural: NaturalLandscape.paint_ground(result, fields)
 	else: Landscape.paint_ground(result, fields)
 	checkpoint = _landscape_checkpoint(diagnostics, "fields_and_relief", checkpoint)
 	_report_progress(progress, 0.43, "Резервирование проходов и расширений")
-	var graph := LandscapeNavigation.routes(definition, result, fields if natural else {})
+	var graph := {"reserved": {}, "edges": []} if wild else LandscapeNavigation.routes(definition, result, fields if natural else {})
 	var reserved: Dictionary = graph["reserved"]
 	reserved.merge(naval_reserved, true)
 	reserved.merge(_starting_entity_exclusion_cells(definition, size), true)
-	reserved.merge(_clear_start_corridors(terrain, size, starts, {}, topology), true)
+	if river_network:
+		for i in range(terrain.size()):
+			if geography["rivers"]["mask"][i] != 0: reserved[Vector2i(i % size.x, i / size.x)] = true
+	if not macro: reserved.merge(_clear_start_corridors(terrain, size, starts, {}, topology), true)
 	LandscapeNavigation.reserve_naval_access(definition, result, reserved)
 	for cell in cliffs:
 		for y in range(maxi(0, cell.y - 1), mini(size.y, cell.y + 2)):
@@ -1106,8 +1151,15 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 	clusters.append_array(_neutral_source_resource_clusters(size, terrain, starts, generator.get("source_profile", {}), zones, seed ^ 0x673CA))
 	clusters.append_array(_naval_resource_clusters(naval_zones, generator.get("naval_resource_clusters", [])))
 	var components := _land_component_lookup(size, terrain, cliffs)
-	result["resources"] = _generate_resource_clusters(clusters, size, seed ^ 0x53AB19, terrain, reserved, components)
-	_complete_mineral_expansions(result, starts, reserved, components, seed ^ 0x346C9)
+	var economic_reserved := reserved.duplicate() if macro else reserved
+	if macro:
+		# Preserve the planned woodland interior while distributing economy.
+		# Paths and local settlement terraces already have their own reservations.
+		for i in range(terrain.size()):
+			if int(fields["forest_potential"][i]) != 0 and float(fields["forest_strength"][i]) > 0.72:
+				economic_reserved[Vector2i(i % size.x, i / size.x)] = true
+	result["resources"] = _generate_resource_clusters(clusters, size, seed ^ 0x53AB19, terrain, economic_reserved, components)
+	if not wild: _complete_mineral_expansions(result, starts, economic_reserved, components, seed ^ 0x346C9)
 	# Marine ecology depends on available water, not on the starting-dock flag.
 	# Use a separate random stream so changes at sea do not reroll land resources.
 	var marine_clusters := _neutral_fish_clusters(size, terrain, seed ^ 0x26731, reserved, result["resources"])
@@ -1119,12 +1171,18 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 		if resource["kind"] != "shore_fish": continue
 		var approach: Variant = _shore_fish_approach(Vector2i(resource["position"]), size, terrain, occupied)
 		if approach is Vector2i: reserved[approach] = true
-	LandscapeNavigation.protect_economy(definition, result, reserved)
+	LandscapeNavigation.protect_economy(definition, result, reserved, fields if macro else {})
 	var grove_cells: Dictionary = {}
 	for resource in result["resources"]:
 		if String(resource.get("kind", "")) == "tree": grove_cells[Vector2i(resource["position"])] = true
 	grove_cells.merge(cliff_flat, true)
+	if watershed:
+		for lake in result["lakes"]:
+			for i in lake["cells"]: grove_cells[Vector2i(i % size.x, i / size.x)] = true
+		for ford in result["fords"]:
+			for cell in ford["cells"]: grove_cells[cell] = true
 	Landscape.relax_heights(levels, size, grove_cells)
+	if watershed: WatershedWorld.Hydrology.refresh_lake_levels(size, levels, result["lakes"])
 	for item in rock_ridges["scenery"]:
 		var center := Vector2i(item["position"])
 		item["source_elevation"] = float(levels[center.y * (size.x + 1) + center.x])
@@ -1132,10 +1190,11 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 	else: Landscape.paint_ground(result, fields)
 	checkpoint = _landscape_checkpoint(diagnostics, "economy", checkpoint)
 	_report_progress(progress, 0.77, "Создание лесных массивов и опушек")
-	if natural: NaturalLandscape.forests(result, fields, reserved, seed ^ 0x561332)
+	if natural: NaturalLandscape.forests(result, fields, reserved, seed ^ 0x561332, macro)
 	else: Landscape.forests(result, fields, reserved, seed ^ 0x561332)
 	Landscape.paint_resource_grounds(result)
 	Landscape.paint_cliff_grounds(result)
+	if river_network: Rivers.apply(terrain, geography["rivers"])
 	checkpoint = _landscape_checkpoint(diagnostics, "forests", checkpoint)
 	_report_progress(progress, 0.91, "Размещение камней и лесных деталей")
 	if not natural: result["scenery"] = Landscape.scenery(result, fields, reserved, seed ^ 0x665ACA, float(generator.get("decoration_density", 1.0)), _starting_entity_exclusion_cells(definition, size))
@@ -1144,7 +1203,7 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 		if resource.get("kind", "") != "tree": continue
 		var source := "aoe2" if resource.has("environment_asset") else "ror"
 		tree_sources[source] += 1
-	result["ecology"] = {"forest_cells": result["forest_mask"].count(1), "tree_sources": tree_sources, "reserved_route_cells": reserved.size(), "material_policy": "temperate_natural_v3" if natural else "temperate_connected_v2"}
+	result["ecology"] = {"forest_cells": result["forest_mask"].count(1), "tree_sources": tree_sources, "reserved_route_cells": reserved.size(), "material_policy": "watershed_world_v6" if watershed else "wild_islands_v5" if wild else "geography_first_v4" if macro else "temperate_natural_v3" if natural else "temperate_connected_v2"}
 	var marine_counts := {"shore_fish": 0, "deep_fish": 0, "whale": 0}
 	for resource in result["resources"]:
 		var kind := String(resource.get("kind", ""))

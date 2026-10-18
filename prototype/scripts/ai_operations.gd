@@ -81,21 +81,36 @@ func plan(
 	for component in component_keys:
 		var domain := String(available_components[component]["domain"])
 		var region := String(available_components[component]["region"])
-		var existing := groups.values().any(
-			func(o): return ( String(o["group"].movement_domain) == domain and String(o.get("region", domain)) == region and o["group"].state != Group.COMPLETE )
-		)
-		if existing:
-			for operation in groups.values():
+		if domain == "land" and String(goal.get("type", "")) != "defend" and region == String(regions.get(int(own[0]["id"]), "land")):
+			var local_fighters: Array = own.filter(func(u): return String(u.get("movement_domain", "land")) == domain and String(regions.get(int(u["id"]), domain)) == region and bool(u.get("combat_enabled", false)) and not bool(u.get("components", {}).get("worker", {}).get("enabled", false)))
+			if local_fighters.size() >= 8:
+				var guards: Array = local_fighters.filter(func(u): return not claimed.has(int(u["id"])) and String(u.get("task", "")) in ["idle", "hold"])
+				guards.reverse()
+				for guard in guards.slice(0, int(policy.get("home_guard_count", 2))):
+					claimed[int(guard["id"])] = true
+					reserved[int(guard["id"])] = true
+		# Nearby replacements join a marching force. Distant replacements form
+		# their own wave instead of waiting for the first operation to disappear.
+		if not groups.is_empty():
+			var ordered_ids: Array = groups.keys()
+			ordered_ids.sort()
+			for operation_id in ordered_ids:
+				var operation: Dictionary = groups[operation_id]
 				var group = operation["group"]
 				if (
 					group.movement_domain != domain
 					or String(operation.get("region", domain)) != region
-					or group.state not in [Group.ASSEMBLING, Group.READY, Group.RECENTERING]
+					or group.state not in [Group.ASSEMBLING, Group.READY, Group.RECENTERING, Group.ATTACKING]
 				):
 					continue
 				var recruits: Array = own.filter(
 					func(u): return ( not claimed.has(int(u.get("id", -1))) and not bool(u.get("components", {}).get("worker", {}).get("enabled", false)) and not bool(u.get("components", {}).get("cargo", {}).get("enabled", false)) and bool(u.get("combat_enabled", false)) and String(u.get("movement_domain", "land")) == domain and String(regions.get(int(u.get("id", -1)), domain)) == region and String(u.get("task", "idle")) in ["idle", "hold"] )
 				)
+				if group.state == Group.ATTACKING:
+					var center := Vector2.ZERO
+					for member_id in group.living_ids(): center += Vector2(by_id[member_id].get("pos", Vector2.ZERO))
+					center /= float(maxi(1, group.current_living_count))
+					recruits = recruits.filter(func(u): return Vector2(u.get("pos", Vector2.ZERO)).distance_to(center) <= 8.0)
 				for recruit in recruits.slice(
 					0, maxi(0, int(policy.get("maximum_attack_group_size", 20)) - group.current_living_count)
 				):
@@ -105,10 +120,13 @@ func plan(
 					group.initial_hp_by_member[recruit_id] = float(recruit.get("hp", 0.0))
 					group.initial_total_hp += float(recruit.get("hp", 0.0))
 					claimed[recruit_id] = true
+					if group.state == Group.READY and Vector2(recruit.get("pos", Vector2.ZERO)).distance_to(group.rally_position) > 5.0:
+						group.transition(Group.ASSEMBLING, "reinforcements_assembling", tick)
+						operation["phase_tick"] = tick
+						operation["last_order_tick"] = -1
 				group.member_ids.sort()
 				group.active_member_ids.sort()
 				group.sync_members(by_id, tick)
-			continue
 		if groups.size() >= int(policy.get("maximum_operations", 8)):
 			continue
 		var fighters: Array = own.filter(
@@ -214,7 +232,7 @@ func plan(
 			var assembled := members.all(
 				func(u): return Vector2(u.get("pos", Vector2.ZERO)).distance_to(group.rally_position) <= 5.0
 			)
-			if assembled or tick - int(operation["phase_tick"]) >= int(policy.get("assembly_timeout_ticks", 240)):
+			if (assembled or tick - int(operation["phase_tick"]) >= int(policy.get("assembly_timeout_ticks", 240))) and (members.size() >= int(policy.get("minimum_attack_group_size", 3)) or String(operation_goal.get("type", "")) == "defend"):
 				group.transition(Group.READY, "assembled" if assembled else "assembly_timeout", tick)
 		if (
 			String(operation_goal.get("type", "")) == "defend"
@@ -228,7 +246,7 @@ func plan(
 		if (
 			group.state == Group.READY
 			and attack_allowed
-			and not (group.movement_domain == "land" and bool(goal.get("needs_transport", false)))
+			and not (group.movement_domain == "land" and bool(operation_goal.get("needs_transport", false)))
 			and String(operation_goal.get("type", "")) == "attack"
 			and String(operation_goal.get("target_domain", "land")) == group.movement_domain
 		):
@@ -253,6 +271,9 @@ func plan(
 				operation["phase"] = "march"
 				operation["last_order_tick"] = -1
 		if group.state == Group.ATTACKING:
+			if int(operation_goal.get("target_id", -2)) != group.target_id and String(operation_goal.get("type", "")) == "attack" and not members.any(func(u): return String(u.get("task", "")) == "attack"):
+				group.transition(Group.READY, "better_objective_available", tick)
+				operation["last_order_tick"] = -1
 			if int(operation_goal.get("target_id", -2)) == group.target_id:
 				group.objective_position = Vector2(operation_goal.get("position", group.objective_position))
 				group.target_observed = bool(operation_goal.get("observed", false))
@@ -268,15 +289,16 @@ func plan(
 			continue
 		var command = null
 		if group.state == Group.ATTACKING:
-			if (
-				String(operation["phase"]) == "combat"
-				and int(operation["last_order_tick"]) >= 0
-				and members.any(func(u): return String(u.get("task", "")) == "attack")
-			):
-				continue
+			var order_ids: Array[int] = []
+			for member in members:
+				if String(member.get("task", "")) == "attack" and not _stalled(member): continue
+				var order: Dictionary = member.get("components", {}).get("order", {})
+				if String(member.get("task", "")) == "attack_move" and not bool(order.get("completed", false)) and Vector2(order.get("target_position", member.get("destination", Vector2.INF))).distance_to(group.objective_position) <= 2.0 and not _stalled(member): continue
+				order_ids.append(int(member["id"]))
+			if order_ids.is_empty(): continue
 			# Attack-move can investigate a remembered position without issuing an
 			# illegal entity attack into fog; common combat awareness picks targets.
-			command = Commands.AttackMoveCommand.new(tick, member_ids, group.objective_position)
+			command = Commands.AttackMoveCommand.new(tick, order_ids, group.objective_position)
 		elif group.state in [Group.ASSEMBLING, Group.RETREATING, Group.RECENTERING]:
 			command = Commands.FormationMoveCommand.new(tick, member_ids, group.rally_position, formation)
 		if command != null:
@@ -287,6 +309,11 @@ func plan(
 				result.append(command)
 				operation["last_order_tick"] = tick
 	return result
+
+
+static func _stalled(member: Dictionary) -> bool:
+	var reason := String(member.get("diagnostic_reason", ""))
+	return reason in ["no_path", "local_obstacle", "no_group_route", "target_unreachable", "no_approach_slot"] or reason.begins_with("stuck_")
 
 
 func _scout(
@@ -315,21 +342,22 @@ func _scout(
 			if (
 				candidates.is_empty()
 				or (
-					not state.memory.is_empty() and candidates.size() <= int(policy.get("minimum_attack_group_size", 3))
+					not state.memory.is_empty() and candidates.size() <= int(policy.get("minimum_attack_group_size", 3)) + (int(policy.get("home_guard_count", 2)) if domain == "land" and own.size() >= 8 else 0)
 				)
 			):
 				continue
 			actor = candidates[0]
 			assignment = {"id": int(actor["id"]), "target": Vector2(actor.get("pos", Vector2.ZERO)), "order_tick": -1}
 			scouts[domain] = assignment
-		claimed[int(actor["id"])] = true
 		var navigation: Dictionary = snapshot.get("navigation", {})
 		var region := String(navigation.get("unit_regions", {}).get(int(actor["id"]), domain))
 		var frontier: Array = navigation.get("frontier_by_region", {}).get(
 			region, navigation.get("reachable_frontier", {}).get(domain, [])
 		)
 		if frontier.is_empty():
+			scouts.erase(domain)
 			continue
+		claimed[int(actor["id"])] = true
 		if int(assignment["order_tick"]) >= 0 and Vector2(actor.get("pos", Vector2.ZERO)).distance_to(Vector2(assignment["target"])) > 2.0:
 			var deadline := int(assignment.get("deadline_tick", int(assignment["order_tick"]) + int(policy.get("scout_interval_ticks", 160)) * 3))
 			# Keep a moving scout on its information goal for the estimated trip,

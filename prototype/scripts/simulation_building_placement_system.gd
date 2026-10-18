@@ -38,6 +38,16 @@ func foundation_preserves_structure_gap(team: int, kind: String, position: Vecto
 	return true
 
 
+func known_foundation(team: int, kind: String, position: Vector2) -> bool:
+	# Advisory AI searches must not treat unknown parts of a footprint as empty.
+	# Check the observer's fog, never the hidden authoritative obstruction map.
+	var footprint := Footprint.building(world.unit_stats(kind), position)
+	for cell in footprint.get("occupied_cells", []):
+		if world.visibility_system.state_at_world(team, Vector2(cell) + Vector2(0.5, 0.5)) == FogOfWar.UNKNOWN:
+			return false
+	return true
+
+
 func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occupied_cells: Variant = null, placement_options: Dictionary = {}) -> bool:
 	world.last_build_failure = ""
 	if kind == "gate" and int(placement_options.get("gate_axis", 0)) not in [0, 1]:

@@ -17,6 +17,7 @@ func _initialize() -> void:
 	test_large_exploration_updates_native_mask_incrementally()
 	test_surface_components_survive_equivalent_discovery()
 	test_surface_components_survive_occupant_changes()
+	test_observed_elevation_and_slopes()
 	for failure in failures:
 		push_error(failure)
 	print("Fog-aware navigation: %d failures" % failures.size())
@@ -28,6 +29,23 @@ func fixture(native: bool):
 	world.navigation_grid.configure_terrain(func(_cell): return "grass")
 	world.pathfinder.set_native_enabled(native)
 	return world
+
+
+func test_observed_elevation_and_slopes() -> void:
+	var world = fixture(false)
+	var cell := Vector2i(8, 8)
+	world.navigation_grid.set_elevation(cell, 2, true)
+	world.fog_of_war.reveal_explored_cell(1, cell)
+	var planner = world.movement_system.knowledge.planner(world, 1)
+	check(planner.grid.elevation(cell) == 2 and planner.grid.is_slope(cell), "newly explored terrain retains elevation and slope for AI construction")
+	world.fog_of_war.states_by_player[1][cell.y * world.map_size.x + cell.x] = Fog.VISIBLE
+	world.navigation_grid.set_elevation(cell, 3, false)
+	planner = world.movement_system.knowledge.planner(world, 1)
+	check(planner.grid.elevation(cell) == 3 and not planner.grid.is_slope(cell), "visible geometry changes update without a terrain or occupant change")
+	world.fog_of_war.states_by_player[1][cell.y * world.map_size.x + cell.x] = Fog.EXPLORED
+	world.navigation_grid.set_elevation(cell, 4, true)
+	planner = world.movement_system.knowledge.planner(world, 1)
+	check(planner.grid.elevation(cell) == 3 and not planner.grid.is_slope(cell), "hidden geometry changes do not leak into retained knowledge")
 
 
 func test_discover_and_remember_obstacles(native: bool) -> void:

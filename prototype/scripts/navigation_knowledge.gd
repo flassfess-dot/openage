@@ -90,7 +90,8 @@ func _refresh(world, entry: Dictionary, indices: Array, initial: bool, team: int
 		var terrain_id: int = source.terrain_id(cell)
 		var terrain: String = source.terrain(cell)
 		var terrain_changed: bool = grid.learned[index] == 0 or grid.terrain_id(cell) != terrain_id or grid.terrain(cell) != terrain
-		if terrain_changed or grid.occupied_cells.get(cell, []) != occupants:
+		var geometry_changed: bool = grid.elevation(cell) != source.elevation(cell) or grid.is_slope(cell) != source.is_slope(cell)
+		if terrain_changed or geometry_changed or grid.occupied_cells.get(cell, []) != occupants:
 			var previous_access: Array[bool] = []
 			if terrain_changed:
 				for configuration in surface_configurations:
@@ -99,6 +100,7 @@ func _refresh(world, entry: Dictionary, indices: Array, initial: bool, team: int
 			grid.terrain_ids[cell] = terrain_id
 			grid.terrain_cells[cell] = terrain
 			grid.elevation_cells[cell] = source.elevation(cell)
+			grid.slope_cells[cell] = source.is_slope(cell)
 			if terrain_changed:
 				surface_changed = true
 				for configuration_index in range(surface_configurations.size()):

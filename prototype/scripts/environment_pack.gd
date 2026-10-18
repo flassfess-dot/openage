@@ -4,6 +4,7 @@ extends RefCounted
 const DEFINITION_PATH := "res://data/environment/aoe2_temperate.json"
 const ASSET_ROOT := "res://assets/generated/environment/aoe2_temperate/"
 const PREFIX := "aoe2_temperate:"
+const ResourcePresentation := preload("res://scripts/resource_presentation_registry.gd")
 
 var enabled := false
 var definition: Dictionary = {}
@@ -129,7 +130,7 @@ func frame_info(item: Dictionary, resource: bool = false) -> Dictionary:
 		"mirrored": false,
 		"graphic_layer": 0 if objects_by_key[key].get("role", "") == "decal" else 20,
 	}
-	if record.has("shadow") and String(item.get("tree_phase", "standing")) == "standing":
+	if record.has("shadow") and ResourcePresentation.tree_canopy_visible(item):
 		var shadow: Dictionary = record["shadow"]
 		result["shadow"] = {"texture": _texture(String(shadow["file"])),
 			"hotspot": Vector2(shadow["hotspot"][0], shadow["hotspot"][1]),
@@ -189,4 +190,7 @@ func prepare_legacy_terrain(frames_by_kind: Dictionary) -> void:
 			bed.r *= 0.48
 			bed.g *= 0.93
 			shallows.set_pixel(x, y, shallows.get_pixel(x, y).lerp(bed, 0.42))
-	legacy_textures[4] = ImageTexture.create_from_image(shallows)
+	legacy_textures[15] = ImageTexture.create_from_image(shallows)
+	# A ford uses the source water with its separate sandy Shallows sprites.
+	# The tinted submerged bed belongs exclusively to impassable shoals.
+	legacy_textures[4] = legacy_textures[1]

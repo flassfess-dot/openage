@@ -15,12 +15,12 @@ static func affects(cell: Vector2i, provider: Callable, pack) -> bool:
 static func _material_id(id: int, pack) -> int:
 	if pack.has_material(id):
 		return id
-	if id in [1, 4, 22]: return id
+	if id in [1, 4, 15, 22]: return id
 	return 6 if id in [2, 6, 13] else 0
 
 
 static func _priority(id: int, pack) -> int:
-	if id in [1, 4, 22]: return -5 if id == 22 else -4 if id == 1 else -3
+	if id in [1, 4, 15, 22]: return -5 if id == 22 else -4 if id == 1 else -3
 	return int(pack.materials_by_id[id]["priority"]) if pack.has_material(id) else (-1 if id == 0 else 0)
 
 
@@ -46,7 +46,7 @@ static func weights(point: Vector2, provider: Callable, pack, fallback: int) -> 
 			var weight := (fraction.x if x == 1 else 1.0 - fraction.x) * (fraction.y if y == 1 else 1.0 - fraction.y)
 			var linear_weight := (linear.x if x == 1 else 1.0 - linear.x) * (linear.y if y == 1 else 1.0 - linear.y)
 			linear_total += linear_weight
-			if id in [1, 4, 22]:
+			if id in [1, 4, 15, 22]:
 				water += weight
 			else:
 				land += weight
@@ -57,7 +57,7 @@ static func weights(point: Vector2, provider: Callable, pack, fallback: int) -> 
 	# cell boundaries. Separately smoothing each cell edge makes a staircase.
 	var coverage := smoothstep(0.495, 0.535, linear_land / maxf(linear_total, 0.000001)) if land > 0.0 and water > 0.0 else (1.0 if land > 0.0 else 0.0)
 	for id in result:
-		result[id] *= ((1.0 - coverage) / water if water > 0.0 else 0.0) if id in [1, 4, 22] else (coverage / land if land > 0.0 else 0.0)
+		result[id] *= ((1.0 - coverage) / water if water > 0.0 else 0.0) if id in [1, 4, 15, 22] else (coverage / land if land > 0.0 else 0.0)
 	return result
 
 
@@ -78,7 +78,7 @@ static func tile_drawable(cell: Vector2i, id: int, provider: Callable, catalog, 
 			var neighbor := int(provider.call(cell + Vector2i(dx, dy)))
 			if neighbor >= 0 and _material_id(neighbor, pack) != center_id:
 				uniform = false
-				if (neighbor in [1, 4, 22]) != (center_id in [1, 4, 22]): coastal = true
+				if (neighbor in TerrainRules.WATER_TERRAIN_IDS) != (center_id in [1, 4, 15, 22]): coastal = true
 	var subdivisions := 1 if uniform else 16 if coastal else SUBDIVISIONS
 	for y in range(subdivisions + 1):
 		for x in range(subdivisions + 1):

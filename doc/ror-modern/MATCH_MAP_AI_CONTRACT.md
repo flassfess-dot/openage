@@ -1,5 +1,10 @@
 # I11 — Match, map and AI contract
 
+Current map generation (2026-10-18): ordinary new games use shared watershed
+revision 6 across all nine profiles, with unequal geography and starting wealth.
+See [RANDOM_MAP_WORLD_V6.md](RANDOM_MAP_WORLD_V6.md). The E5 equal-resource
+guarantees below belong to the earlier implementation.
+
 ## Match and map boundary
 
 `RoRMatchDefinition` is the validated external description of a match. It owns map size/seed/generator settings, players, controllers, civilizations, starting resources and housing, static entities, diplomacy, victory rules and the start message. Invalid sizes, teams, controllers, civilizations or entity positions fail with stable reasons before a world is created.
@@ -153,3 +158,21 @@ AI preparation shares a 7 ms owner budget across observers; small portions retai
 Food-coverage forecasts test resource type and land-worker eligibility before measuring proximity to drop sites. Trees and minerals still enter the gathering/delivery lookup; they do not incur food-coverage distance searches. `test_ai_food_coverage_policy.gd` checks nearby/distant food, water-only fish and non-food delivery distances.
 
 AI actor portions use the existing `capture_frozen` native validation/detachment kernel before joining the pinned publication. The GDScript fallback remains available; object/callable rejection, immutable previous inputs and exact numeric/container types remain unchanged. Actor portions and producer quotas still bound the work; this removes repeated per-field GDScript registry probes rather than weakening isolation.
+
+### Economy, army reinforcement and shared work — 2026-10-18
+
+Adaptive construction now requires knowledge of every occupied foundation cell. Observed navigation learns slope flags and changes to elevation or slope independently of terrain IDs. Failed building positions receive a bounded cooldown shared by builders, and a legal tight site remains a fallback when preferred spacing cannot fit. An economic scout can reveal room for essential infrastructure.
+
+Age saving leaves food for the next worker and a minimum fighting force, using available training prices, including civilization-specific worker costs. Active defence takes precedence over age spending. Worker and army targets grow with population, age and existing production capacity; primary military infrastructure precedes optional buildings. Production counts queued units, limits prepaid queues, and selects an affordable alternative after shared-budget spending. Idle cargo receives a public return-resources order. Danger handling precedes gathering quotas and allows threatened workers to retreat and resume work.
+
+Nearby reinforcements can join an active operation; distant reinforcements form another wave while a local reserve remains. A member already fighting no longer suppresses orders to idle members. Retreated survivors reassemble to minimum strength. Domain-specific objectives retain naval access to coastal structures and score alternative exposed targets against known defences. A scout with no frontier releases its assignment.
+
+Shared gathering replaces old resource and drop-site reservations for the entire selected group before assigning new positions. Work positions use the outer part of legal harvesting reach; clear positions reached through collision avoidance can replace the original slot. Boats cannot reserve the centre of a shoal as a perimeter berth. Temporary capacity shortages retain the order with half-second slot retries; explicit source limits such as one farmer remain intact. A delivery can use any clear point within the existing drop-site perimeter and arrival allowance. Shared-work traffic has a bounded waiting window, bounded local detours around nearby bodies, and an alternative work approach on global replanning. Manual Stop remains terminal and releases all slots.
+
+`test_ai_economy_army_behaviour.gd` covers spending, worker prices, queue limits, cargo, failed sites, reinforcement waves, coastal targets, danger and target alternatives. `test_ai_economic_recovery_and_reinforcements.gd` executes public commands through real construction, cargo recovery, another delivery, reinforcement movement and damage to an enemy building. `test_group_resource_orders.gd` checks eight villagers and four fishing boats across seven resource kinds, an actual coastal shoal, a repeated group command, two deliveries by every participant, simultaneous work, resource conservation and Stop in both native-recovery and reference modes. Its land and naval cases also compare exact state hashes after an active-work checkpoint and recorded-command playback.
+
+The existing cooperative-worker scenario additionally checks shared work in the current generated landscape. Navigation, build-site caches, detached planning, pending plans, ordinary-resource age progression, native recovery parity, worker/farm/tree regressions, fishing continuation, failed movement, public AI commands, source-campaign construction, naval combat and adaptive save/resume received targeted runs. The build-site cache fixture now reveals the complete house footprint. The replay fixture compares the same fixed tick, since the rendered frame budget can complete different numbers of ticks on cold and warm runs. Per-run evidence is retained under `prototype/qa/` with `ai-fixes-20261018-`, `group-`, `ai-final-` and `complete-` prefixes.
+
+Verification remains functional, not a benchmark win-rate measurement or Release-package check. The old generated-naval-economy fixture cannot run against the current independent map-generator changes: it indexes a second `naval_start_zones` entry that the generated map does not provide. Controlled coastal fishing and naval combat are checked separately; the full generated naval benchmark matrix remains unverified.
+
+The final ordinary-resource grasslands/compact case (seed 41721) reached Tool Age at tick 16,280 with completed barracks, granary, housing and storage infrastructure. This is one progression regression, not a balance or win-rate estimate. Exact active-group checkpoint continuation and command replay passed for both eight berry gatherers and four deep-fish boats (`group-orders-persistence.log`, `group-boats-persistence.log`).

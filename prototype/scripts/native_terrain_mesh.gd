@@ -11,7 +11,7 @@ static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pa
 	if bounds.size.x <= 0 or bounds.size.y <= 0:
 		return {}
 	var started := Time.get_ticks_usec()
-	var ids: Array = [0, 1, 4, 6, 22]
+	var ids: Array = [0, 1, 4, 6, 15, 22]
 	for material_id in pack.materials_by_id:
 		if material_id not in ids: ids.append(material_id)
 	ids.sort()
@@ -28,7 +28,7 @@ static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pa
 		var uv_origin := Vector2(region.position) / atlas_size
 		var uv_size := Vector2(region.size) / atlas_size
 		materials.append_array(PackedFloat32Array([
-			Terrain._priority(int(id), pack), 1.0 if id in [1, 4, 22] else 0.0,
+			Terrain._priority(int(id), pack), 1.0 if id in [1, 4, 15, 22] else 0.0,
 			1.0 if imported else 0.0, uv_origin.x, uv_origin.y, uv_size.x, uv_size.y,
 		]))
 	var samples: Dictionary = sample_cache if sample_cache is Dictionary else {}

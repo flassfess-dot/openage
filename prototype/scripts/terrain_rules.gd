@@ -10,7 +10,7 @@ const TERRAIN_FRAME_COUNTS := {
 }
 
 const TERRAIN_IDS := {"grass": 0, "water": 1, "water_dark": 22, "sand": 6, "forest_floor": 10}
-const WATER_TERRAIN_IDS := [1, 4, 22]
+const WATER_TERRAIN_IDS := [1, 4, 15, 22]
 const OPEN_WATER_TERRAIN_IDS := [1, 22]
 const SOURCE_FOREST_TERRAIN_IDS := [10, 13, 19, 20]
 
@@ -94,6 +94,8 @@ static func tile_variant(cell: Vector2i, terrain_kind: String, map_seed: int, av
 
 static func terrain_id_for_logical(terrain_kind: String) -> int:
 	match terrain_kind:
+		"shallows": return 4
+		"river_shoal": return 15
 		"water": return 1
 		"shore": return 2
 		"forest", "forest_floor": return 10
@@ -103,6 +105,7 @@ static func terrain_id_for_logical(terrain_kind: String) -> int:
 
 static func logical_for_terrain_id(terrain_id: int) -> String:
 	match terrain_id:
+		15: return "river_shoal"
 		1, 22: return "water"
 		4: return "shallows"
 		2: return "shore"

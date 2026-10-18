@@ -40,9 +40,14 @@ func _initialize() -> void:
 	var ai := Ai.new(built["definition"]["players"][1])
 	while controller.tick_index < MAX_TICKS and world.get_current_age(2) < 101:
 		var tick: int = controller.tick_index+1
+		ai.collect_feedback(controller, controller.tick_index)
 		if ai.needs_decision(tick):
 			var knowledge := Snapshot.with_queries(world,controller.tick_index,2,ai.presentation_options())
-			for command in ai.collect_commands(knowledge,tick): controller.enqueue_command(command,true,2)
+			for command in ai.collect_commands(knowledge,tick):
+				var metadata: Dictionary = command.params.get("_ai_feedback", {})
+				command.params.erase("_ai_feedback")
+				controller.enqueue_command(command,true,2)
+				ai.register_proposal(command, metadata)
 		controller.advance_frame(.05,1,2)
 	var complete_kinds: Array = world.get_buildings().filter(func(b):return b["team"] == 2 and b["state"] == "complete").map(func(b):return b["kind"])
 	check(world.get_current_age(2) >= 101, "AI completes Tool Age without free resources or prebuilt prerequisites")
@@ -57,6 +62,7 @@ func _initialize() -> void:
 	check(wood_after_saving, "wood income continues after AI begins reserving food for its age advance")
 	check(age_researched, "age research uses the public command pipeline")
 	print("Normal-resource AI progression: tick=",controller.tick_index," age=",world.get_current_age(2)," buildings=",complete_kinds)
+	print("Normal-resource economy: food=", world.get_resource_amount(2, 0), " wood=", world.get_resource_amount(2, 1), " goal=", ai.strategy.goal, " plan=", ai.strategy.metrics.get("economy_plan", {}))
 	finish()
 
 func check(value: bool, message: String) -> void:

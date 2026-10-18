@@ -8,7 +8,7 @@ const Navigation := preload("res://scripts/random_map_navigation.gd")
 const THEME_PATH := "res://data/random_maps/temperate_v2.json"
 const VERSION := 2
 const TYPE := "landscape_skirmish_v2"
-const WATER := [1, 2, 4, 22]
+const WATER := [1, 2, 4, 15, 22]
 # Green families and rare autumn/dry accents are selected separately.
 static var _theme_cache: Dictionary = {}
 

@@ -185,7 +185,14 @@ func choose_goal(snapshot: Dictionary, team: int, policy: Dictionary, decision: 
 	var best_score := -INF
 	var domain_goals: Dictionary = {}
 	var domain_scores: Dictionary = {}
-	for actor in enemies(tick, policy):
+	var known_enemies := enemies(tick, policy)
+	var forces: Dictionary = {"land": [], "water": []}
+	for unit in snapshot.get("units", []):
+		var domain := String(unit.get("movement_domain", "land"))
+		if int(unit.get("team", 0)) == team and domain in forces and bool(unit.get("combat_enabled", false)) and not bool(unit.get("components", {}).get("worker", {}).get("enabled", false)):
+			forces[domain].append(unit)
+	var strengths := {"land": Combat.strength(forces["land"]), "water": Combat.strength(forces["water"])}
+	for actor in known_enemies:
 		var position := Vector2(actor.get("pos", Vector2.ZERO))
 		var distance := home.distance_to(position)
 		for base in homes:
@@ -193,7 +200,7 @@ func choose_goal(snapshot: Dictionary, team: int, policy: Dictionary, decision: 
 		var defence := (
 			bool(actor.get("observed", false))
 			and bool(Combat.profile(actor).get("enabled", actor.get("combat_enabled", false)))
-			and distance <= float(policy.get("enemy_response_distance", 22.0))
+			and distance <= minf(float(policy.get("enemy_response_distance", 22.0)), maxf(6.0, float(Combat.profile(actor).get("range", 0.0)) + (4.0 if bool(actor.get("components", {}).get("worker", {}).get("enabled", false)) else 8.0)))
 		)
 		var value := 20.0
 		if String(actor.get("kind", "")) == "town_center":
@@ -202,46 +209,54 @@ func choose_goal(snapshot: Dictionary, team: int, policy: Dictionary, decision: 
 			value = 40.0
 		elif bool(actor.get("components", {}).get("worker", {}).get("enabled", false)):
 			value = 35.0
-		var score := (
-			(value + (120.0 if defence else 0.0)) * float(actor["confidence"])
-			- home.distance_to(position) * 0.45
-			- danger(position, tick, policy) * 0.3
-		)
-		if int(actor.get("id", -1)) == int(goal.get("target_id", -2)):
-			score += float(policy.get("goal_inertia", 18.0))
-		var domain := String(actor.get("movement_domain", "land"))
-		if domain == "static":
-			domain = "land"
-		var candidate := {
-			"type": "defend" if defence else "attack",
-			"target_id": int(actor["id"]),
-			"position": position,
-			"target_domain": domain,
-			"target_radius": float(actor.get("footprint_radius", 1.0)),
-			"observed": bool(actor["observed"]),
-			"home": home,
-			"adaptive_strategy": true
-		}
-		if score > float(domain_scores.get(domain, -INF)):
-			domain_scores[domain] = score
-			domain_goals[domain] = candidate
-		if score > best_score:
-			# The primary goal must not alias a value stored in its domain map.
-			best = candidate.duplicate()
-			best_score = score
+		var movement := String(actor.get("movement_domain", "land"))
+		var domains: Array = actor.get("target_domains", ["land" if movement == "static" else movement])
+		for domain_value in domains:
+			var domain := String(domain_value)
+			if domain not in forces: continue
+			var radius := float(actor.get("footprint_radius", 1.0))
+			var firing_range := 0.0
+			for unit in forces[domain]: firing_range = maxf(firing_range, float(Combat.profile(unit).get("range", 0.0)))
+			var approach: Variant = _approach(snapshot, domain, position, radius + maxf(2.0, firing_range))
+			if domain == "water" and movement == "static" and approach == null: continue
+			var guard_strength := 0.0
+			for guard in known_enemies.slice(0, int(policy.get("combat_sample_budget", 32))):
+				if Vector2(guard.get("pos", Vector2.ZERO)).distance_to(position) <= 10.0:
+					guard_strength += Combat.strength([guard]) * float(guard.get("confidence", 1.0))
+			var score := (value + (120.0 if defence else 0.0)) * float(actor["confidence"]) - home.distance_to(position) * 0.45 - danger(position, tick, policy, domain) * 0.3
+			if not forces[domain].is_empty():
+				score += 8.0
+				if not defence: score -= maxf(0.0, guard_strength * float(policy.get("attack_ratio", 1.15)) - float(strengths[domain])) * 1.5
+			if int(actor.get("id", -1)) == int(goal.get("target_id", -2)): score += float(policy.get("goal_inertia", 18.0))
+			var candidate := {"type": "defend" if defence else "attack", "target_id": int(actor["id"]), "position": Vector2(approach) if domain == "water" and movement == "static" else position, "target_position": position, "target_domain": domain, "target_domains": domains.duplicate(), "target_radius": radius, "observed": bool(actor["observed"]), "home": home, "adaptive_strategy": true, "needs_transport": domain == "land" and approach == null}
+			if score > float(domain_scores.get(domain, -INF)):
+				domain_scores[domain] = score
+				domain_goals[domain] = candidate
+			if score > best_score:
+				# Keep the primary goal detached from its domain map.
+				best = candidate.duplicate()
+				best_score = score
 	if best.is_empty():
 		best = Strategic.choose_goal(snapshot, team, decision)
 		best["home"] = home
 		best["adaptive_strategy"] = true
 	best["goals_by_domain"] = domain_goals
-	if String(best.get("target_domain", "land")) == "land" and String(best.get("type", "")) == "attack":
-		var position := Vector2(best.get("position", home))
-		var reachable: Array = snapshot.get("navigation", {}).get("reachable", {}).get("land", [])
-		best["needs_transport"] = not reachable.any(
-			func(p): return Vector2(p).distance_to(position) <= 2.0 + float(best.get("target_radius", 1.0))
-		)
 	goal = best
 	return goal.duplicate(true)
+
+
+static func _approach(snapshot: Dictionary, domain: String, target: Vector2, maximum_distance: float) -> Variant:
+	var points: Array = snapshot.get("navigation", {}).get("reachable", {}).get(domain, snapshot.get("navigation", {}).get(domain, []))
+	var best: Variant = null
+	var distance := maximum_distance * maximum_distance
+	for value in points:
+		var point := Vector2(value)
+		var candidate := point.distance_squared_to(target)
+		if candidate <= distance:
+			if best == null or candidate < distance or (candidate == distance and (point.y < Vector2(best).y or (point.y == Vector2(best).y and point.x < Vector2(best).x))):
+				best = point
+				distance = candidate
+	return best
 
 
 func register(command, metadata: Dictionary) -> void:
@@ -283,6 +298,12 @@ func feedback(controller, team: int, tick: int, policy: Dictionary) -> void:
 			cooldowns[String(entry["metadata"].get("key", ""))] = (
 				tick + maxi(1, int(policy.get("command_retry_ticks", 60)))
 			)
+			if entry["metadata"].has("site_key") and reason in ["blocked_or_sloped", "occupied_by_unit", "missing_domain_access", "no_approach_slot", "no_path"]:
+				cooldowns[String(entry["metadata"]["site_key"])] = tick + maxi(20, int(policy.get("build_site_retry_ticks", 600)))
+	while cooldowns.size() > 1024:
+		var keys: Array = cooldowns.keys()
+		keys.sort_custom(func(a, b): return int(cooldowns[a]) < int(cooldowns[b]) if int(cooldowns[a]) != int(cooldowns[b]) else String(a) < String(b))
+		cooldowns.erase(keys[0])
 	pending = retained
 
 

@@ -44,17 +44,19 @@ static func policy_for(snapshot: Dictionary, team: int, base: Dictionary, state)
 	var cap := maxi(1, int(player.get("population_limit", 50)))
 	var age := int(player.get("age", 100))
 	var target := mini(
-		int(base.get("maximum_workers", 40)),
+		int(base.get("maximum_workers", 90)),
 		maxi(
 			int(base.get("land_worker_target", 8)),
 			roundi(float(cap) * float(base.get("worker_population_ratio", 0.45)))
 		)
 	)
-	# Growth is staged so an opening economy does not consume the whole army cap.
-	policy["land_worker_target"] = mini(
-		target,
-		int(base.get("land_worker_target", 8)) + maxi(0, age - 100) * 8 + mini(8, int(snapshot.get("tick", 0)) / 1200)
-	)
+	var army_count := _army_count(units)
+	var producers := buildings.filter(func(b): return String(b.get("kind", "")) in ["barracks", "archery_range", "stable", "siege_workshop"]).size()
+	# Grow towards the production capacity we actually need to feed. Large
+	# population limits may support more than forty workers in later economies.
+	policy["land_worker_target"] = mini(target, maxi(int(base.get("land_worker_target", 8)), 12 + maxi(0, age - 100) * 8 + producers * 4))
+	policy["minimum_workers_before_age_up"] = maxi(int(base.get("minimum_workers_before_age_up", 6)), mini(int(policy["land_worker_target"]), int(base.get("land_worker_target", 8)) + 4 + maxi(0, age - 100) * 4))
+	policy["army_target"] = mini(maxi(3, cap - int(policy["land_worker_target"]) - 2), maxi(6 + maxi(0, age - 100) * 8, ceili(float(state.enemies(int(snapshot.get("tick", 0)), base).filter(func(e): return bool(e.get("combat_enabled", false)) and not bool(e.get("components", {}).get("worker", {}).get("enabled", false))).size()) * 1.5)))
 	policy["water_worker_target"] = mini(8, maxi(int(base.get("water_worker_target", 2)), workers.size() / 6))
 	var limits: Dictionary = policy.get("building_limits", {}).duplicate()
 	limits["house"] = maxi(int(limits.get("house", 4)), ceili(float(cap) / 4.0))
@@ -107,8 +109,27 @@ static func policy_for(snapshot: Dictionary, team: int, base: Dictionary, state)
 			and int(player.get("wood", 0)) >= 250
 		):
 			limits[kind] = mini(3, maxi(int(limits.get(kind, 1)), matching.size() + 1))
+	var primary := "barracks" if age <= 100 else "archery_range"
+	var enemies: Array = state.enemies(int(snapshot.get("tick", 0)), base)
+	var ranged := enemies.filter(func(e): return float(Combat.profile(e).get("range", 0.0)) > 2.0).size()
+	if age >= 101 and ranged > enemies.size() / 2: primary = "stable"
+	var buildable: Dictionary = {}
+	for worker in workers.slice(0, 1):
+		for option in worker.get("command_options", {}).get("build", []):
+			if String(option.get("reason", "")) != "building_unavailable": buildable[String(option.get("kind", ""))] = true
+	if not buildable.is_empty() and not buildable.has(primary):
+		primary = "archery_range" if buildable.has("archery_range") else "barracks"
+	policy["primary_producer"] = primary
+	for kind in ["archery_range", "stable"]:
+		if kind != primary and army_count < 12: limits[kind] = 0
+	limits["siege_workshop"] = int(limits.get("siege_workshop", 1)) if age >= 102 and army_count >= 6 and enemies.any(func(e): return String(e.get("entity_type", "")) == "building") else 0
+	limits["temple"] = int(limits.get("temple", 1)) if army_count >= 10 else 0
+	var naval_demand: bool = bool(state.goal.get("needs_transport", false)) or String(state.goal.get("target_domain", "")) == "water" or snapshot.get("resources", []).any(func(r): return int(r.get("resource_type_id", -1)) == 0 and "water" in r.get("allowed_gatherer_domains", []))
+	if not naval_demand: limits["dock"] = 0
 	policy["building_limits"] = limits
 	var priorities: Array = policy.get("construction_priorities", []).duplicate()
+	priorities.erase(primary)
+	priorities.insert(mini(1, priorities.size()), primary)
 	if limits["farm"] > 0:
 		priorities.erase("farm")
 		priorities.insert(mini(3, priorities.size()), "farm")
@@ -118,6 +139,22 @@ static func policy_for(snapshot: Dictionary, team: int, base: Dictionary, state)
 	policy["construction_priorities"] = priorities
 	policy["desired_stock"] = forecast(snapshot, units, buildings, policy, state)
 	return policy
+
+
+static func _army_count(units: Array) -> int:
+	return units.filter(func(u): return (bool(u.get("combat_enabled", false)) or "combatant" in u.get("behavior_tags", [])) and not bool(u.get("components", {}).get("worker", {}).get("enabled", false)) and "worker" not in u.get("behavior_tags", []) and not bool(u.get("ai_profile", {}).get("transport", false))).size()
+
+
+static func _next_training_food(buildings: Array, worker: bool) -> int:
+	var minimum := 2147483647
+	for building in buildings:
+		if worker and String(building.get("kind", "")) != "town_center": continue
+		for option in building.get("command_options", {}).get("train", []):
+			var tags: Array = option.get("behavior_tags", [])
+			if ("worker" in tags) != worker or (not worker and "combatant" not in tags): continue
+			var cost: Dictionary = option.get("cost", {})
+			minimum = mini(minimum, int(cost.get(0, cost.get("0", 0))))
+	return 50 if minimum == 2147483647 else minimum
 
 
 static func forecast(snapshot: Dictionary, units: Array, buildings: Array, policy: Dictionary, state) -> Dictionary:
@@ -174,6 +211,9 @@ static func site_kinds(kinds: Array, snapshot: Dictionary, team: int, base: Dict
 	for foundation in foundations:
 		var kind := String(foundation.get("kind", ""))
 		policy["building_limits"][kind] = maxi(0, int(policy["building_limits"].get(kind, 1)) - 1)
+	# The adaptive budget decides age spending. The legacy site filter must not
+	# suppress emergency housing or producers just because an age is affordable.
+	policy["minimum_workers_before_age_up"] = 0
 	var demanded: Array = Legacy.construction_site_kinds(
 		kinds,
 		snapshot.get("units", []),
@@ -200,8 +240,25 @@ static func plan(
 		func(u): return ( bool(u.get("components", {}).get("worker", {}).get("enabled", false)) and String(u.get("movement_domain", "land")) == "land" )
 	)
 	var result: Array = []
+	result.append_array(_worker_safety(snapshot, tick, team, policy, state, reserved))
+	# A completed build/move can leave a villager idle with its previous cargo.
+	# Active returns keep their route; idle cargo uses the public deposit order.
+	for worker in units:
+		var worker_id := int(worker.get("id", -1))
+		if reserved.has(worker_id) or not bool(worker.get("components", {}).get("worker", {}).get("enabled", false)):
+			continue
+		if String(worker.get("task", "")) in ["idle", "hold"] and float(worker.get("ai_profile", {}).get("carried_amount", 0.0)) > 0.0:
+			_offer(result, Commands.ReturnResourcesCommand.new(tick, [worker_id]), {}, 0, -1, true, state, budget, reserved)
 	var age := _age_intent(buildings, snapshot.get("player_state", {}), policy, workers.size(), tick)
-	if age.has("command"):
+	var defending := String(state.goal.get("type", "")) == "defend"
+	var minimum_army := int(policy.get("minimum_attack_group_size", 3))
+	var army_count := _army_count(units)
+	var operating_food := (_next_training_food(buildings, true) if workers.size() < int(policy["land_worker_target"]) else 0) + (_next_training_food(buildings, false) if army_count < minimum_army else 0)
+	var age_affordable := age.has("command") and not defending and army_count >= minimum_army
+	for resource in age.get("cost", {}):
+		var floor_stock := operating_food if int(resource) == 0 else 0
+		if int(budget.remaining.get(int(resource), 0)) < int(age["cost"][resource]) + floor_stock: age_affordable = false
+	if age_affordable:
 		var command = age["command"]
 		var producer_id := int(command.unit_ids[0])
 		for building in buildings:
@@ -213,8 +270,15 @@ static func plan(
 					== String(command.params.get("technology", ""))
 				):
 					_offer(result, command, option.get("cost", {}), 0, producer_id, true, state, budget, reserved)
-	elif bool(age.get("block_construction", false)) and String(state.goal.get("type", "")) != "defend":
-		budget.protect(age.get("cost", {}))
+	elif not defending and (bool(age.get("block_construction", false)) or age.has("command")):
+		var reserve: Dictionary = {}
+		for resource in age.get("cost", {}):
+			var floor_stock := operating_food if int(resource) == 0 else 0
+			reserve[int(resource)] = maxi(0, mini(int(age["cost"][resource]), int(budget.remaining.get(int(resource), 0)) - floor_stock))
+		budget.protect(reserve)
+	policy["saving_age"] = not budget.protected.is_empty()
+	policy["defending"] = defending
+	policy["army_priority"] = workers.size() >= 8 and army_count < minimum_army
 	var foundations: Array = structures.filter(func(b): return String(b.get("state", "complete")) == "foundation")
 	for foundation in foundations.slice(0, int(policy.get("maximum_foundations", 2))):
 		if (
@@ -265,19 +329,22 @@ static func plan(
 	for building in buildings:
 		for order in building.get("production_queue", []):
 			if String(order.get("order_type", "unit")) == "unit":
-				effective_units.append(
-					{
-						"kind": order.get("kind", ""),
-						"behavior_tags":
-						["worker"] if String(order.get("kind", "")) in ["villager", "fishing_boat"] else []
-					}
-				)
+				var option: Dictionary = {}
+				for candidate in building.get("command_options", {}).get("train", []):
+					if candidate.get("kind") == order.get("kind"): option = candidate
+				effective_units.append({"kind": order.get("kind", ""), "behavior_tags": option.get("behavior_tags", ["worker"] if String(order.get("kind", "")) in ["villager", "fishing_boat"] else ["combatant"]), "ai_profile": option.get("ai_profile", {})})
+	buildings.sort_custom(func(a, b):
+		var a_rank := _producer_rank(String(a.get("kind", "")), policy, workers.size())
+		var b_rank := _producer_rank(String(b.get("kind", "")), policy, workers.size())
+		return a_rank < b_rank if a_rank != b_rank else int(a["id"]) < int(b["id"]))
 	for building in buildings:
 		var id := int(building.get("id", -1))
-		if budget.producer_orders.has(id):
+		var queue: Array = building.get("production_queue", [])
+		if budget.producer_orders.has(id) or queue.size() >= int(policy.get("maximum_production_queue", 2)) or queue.any(func(o): return String(o.get("order_type", "unit")) != "unit" or String(o.get("status", "")) == "blocked_population"):
 			continue
 		var options: Dictionary = building.get("command_options", {})
-		var train_options: Array = options.get("train", []).filter(func(o): return bool(o.get("accepted", false)))
+		var essential_worker := workers.size() < int(policy["minimum_workers_before_age_up"])
+		var train_options: Array = options.get("train", []).filter(func(o): return bool(o.get("accepted", false)) and budget.can_reserve(o.get("cost", {}), int(o.get("population_points_cost", int(o.get("population_cost", 1)) * 2)), id, essential_worker and "worker" in o.get("behavior_tags", [])))
 		var producer_kind := String(building.get("kind", ""))
 		# A plan sees one fixed enemy sample and policy. Unit counts change only
 		# when an accepted offer extends effective_units below.
@@ -288,7 +355,7 @@ static func plan(
 		else:
 			selected = _preferred_train(train_options, effective_units, snapshot, policy, state, producer_kind)
 			if memoized_production_enabled: production_choices[choice_key] = selected
-		var technology := _preferred_research(options.get("research", []), units, policy, state)
+		var technology := _preferred_research(options.get("research", []).filter(func(o): return budget.can_reserve(o.get("cost", {}), 0, id)), units, policy, state)
 		var worker_option: bool = "worker" in selected.get("behavior_tags", [])
 		if (
 			not technology.is_empty()
@@ -317,7 +384,7 @@ static func plan(
 			var essential: bool = (
 				worker_option
 				and (
-					workers.size() < int(policy.get("minimum_workers_before_age_up", 6))
+					essential_worker
 					or workers.size() < int(policy["land_worker_target"]) / 2
 				)
 			)
@@ -353,14 +420,103 @@ static func plan(
 	)
 	result.append_array(Legacy._plan_idle_trade(snapshot, tick, team, units, buildings))
 	timings["production"] = Time.get_ticks_usec() - started
+	result.append_array(_economic_scout(snapshot, tick, team, policy, state, reserved))
 	result.append_array(_gather(snapshot, tick, team, policy, state, reserved, timings, resource_index))
 	state.metrics["budget_rejections"] += budget.rejected
 	state.metrics["economy_plan"] = {
 		"worker_target": int(policy["land_worker_target"]),
+		"army_target": int(policy["army_target"]),
+		"primary_producer": String(policy["primary_producer"]),
 		"desired_stock": policy["desired_stock"].duplicate(true),
 		"remaining_budget": budget.remaining.duplicate(true)
 	}
 	return result
+
+
+static func _producer_rank(kind: String, policy: Dictionary, workers: int) -> int:
+	if kind == "town_center": return 0 if (not bool(policy.get("defending", false)) and not bool(policy.get("army_priority", false))) or workers < 6 else 2
+	return 1 if kind == String(policy.get("primary_producer", "barracks")) else 3
+
+
+static func _worker_safety(snapshot: Dictionary, tick: int, team: int, policy: Dictionary, state, reserved: Dictionary) -> Array:
+	var result: Array = []
+	var retreating: Dictionary = state.metrics.get("worker_retreats", {})
+	var units := own(snapshot.get("units", []), team)
+	var live: Dictionary = {}
+	var navigation: Dictionary = snapshot.get("navigation", {})
+	var risks: Dictionary = {}
+	for worker in units:
+		var id := int(worker["id"])
+		live[id] = true
+		if reserved.has(id) or not bool(worker.get("components", {}).get("worker", {}).get("enabled", false)) or String(worker.get("task", "")) in ["board", "embarked"]: continue
+		var domain := String(worker.get("movement_domain", "land"))
+		var position := Vector2(worker.get("pos", Vector2.ZERO))
+		var danger: float = state.danger(position, int(snapshot.get("tick", 0)), policy, domain)
+		if danger <= float(policy.get("maximum_economic_danger", 8.0)):
+			if retreating.has(id) and tick < int(retreating[id]["until"]): reserved[id] = true
+			else: retreating.erase(id)
+			continue
+		var points: Array = navigation.get("reachable", {}).get(domain, navigation.get(domain, []))
+		var best := position
+		var score := INF
+		var stride := maxi(1, ceili(float(points.size()) / 128.0))
+		for index in range(0, points.size(), stride):
+			var point := Vector2(points[index])
+			var distance := position.distance_to(point)
+			if distance < 3.0 or distance > 24.0: continue
+			var risk_key := [domain, point]
+			if not risks.has(risk_key): risks[risk_key] = state.danger(point, int(snapshot.get("tick", 0)), policy, domain)
+			var risk: float = risks[risk_key]
+			if risk >= danger * 0.5: continue
+			var value := distance + risk * 12.0
+			for building in snapshot.get("buildings", []):
+				if int(building.get("team", 0)) == team and bool(building.get("ai_drop_site", false)):
+					value += minf(12.0, point.distance_to(Vector2(building.get("pos", point)))) * 0.2
+			if value < score:
+				best = point
+				score = value
+		if best == position: continue
+		reserved[id] = true
+		if not retreating.has(id) or Vector2(retreating[id]["destination"]).distance_to(best) > 3.0 or String(worker.get("task", "")) != "move":
+			result.append(Commands.MoveCommand.new(tick, [id], best))
+		retreating[id] = {"until": tick + 120, "destination": best}
+	for id in retreating.keys():
+		if not live.has(id): retreating.erase(id)
+	state.metrics["worker_retreats"] = retreating
+	return result
+
+
+static func _economic_scout(snapshot: Dictionary, tick: int, team: int, policy: Dictionary, state, reserved: Dictionary) -> Array:
+	if String(state.goal.get("type", "")) == "defend" or not snapshot.get("build_sites", {}).is_empty(): return []
+	var buildings := own(snapshot.get("buildings", []), team)
+	if buildings.any(func(b): return String(b.get("state", "complete")) == "foundation"): return []
+	var priorities: Array = policy.get("construction_priorities", [])
+	var essential_missing := ("barracks" in priorities and not buildings.any(func(b): return String(b.get("kind", "")) == "barracks")) or ("granary" in priorities and not buildings.any(func(b): return String(b.get("kind", "")) == "granary")) or ("house" in priorities and Legacy._needs_housing(snapshot.get("player_state", {}), int(policy.get("housing_buffer", 2)), false, Legacy._active_order_population_points(buildings)))
+	if not essential_missing: return []
+	var last: Dictionary = state.metrics.get("economic_scout", {})
+	if tick < int(last.get("deadline", -1)): return []
+	var navigation: Dictionary = snapshot.get("navigation", {})
+	var workers: Array = own(snapshot.get("units", []), team).filter(func(w): return bool(w.get("components", {}).get("worker", {}).get("enabled", false)) and String(w.get("movement_domain", "land")) == "land" and String(w.get("task", "")) in ["idle", "gather"] and not reserved.has(int(w["id"])) and float(w.get("ai_profile", {}).get("carried_amount", 0.0)) <= 0.0)
+	for worker in workers:
+		var id := int(worker["id"])
+		var region := String(navigation.get("unit_regions", {}).get(id, "land"))
+		var frontier: Array = navigation.get("frontier_by_region", {}).get(region, navigation.get("reachable_frontier", {}).get("land", []))
+		var best := Vector2(worker.get("pos", Vector2.ZERO))
+		var score := INF
+		for index in range(0, frontier.size(), maxi(1, ceili(float(frontier.size()) / 64.0))):
+			var point := Vector2(frontier[index])
+			var distance := Vector2(worker.get("pos", Vector2.ZERO)).distance_to(point)
+			if distance < 2.0 or distance > 18.0: continue
+			if state.danger(point, int(snapshot.get("tick", 0)), policy) > 0.0: continue
+			var value := distance + (20.0 if point.distance_to(Vector2(last.get("target", Vector2.INF))) < 4.0 else 0.0)
+			if value < score:
+				best = point
+				score = value
+		if is_finite(score):
+			reserved[id] = true
+			state.metrics["economic_scout"] = {"target": best, "deadline": tick + ceili(score * 20.0 / maxf(0.2, float(worker.get("ai_profile", {}).get("speed", 0.8)))) + 80}
+			return [Commands.MoveCommand.new(tick, [id], best)]
+	return []
 
 
 static func _offer(
@@ -380,6 +536,8 @@ static func _offer(
 	if not budget.reserve(cost, points, producer, essential):
 		return false
 	command.params["_ai_feedback"] = {"key": key, "cost": cost.duplicate(true)}
+	if String(command.command_type()) == "build" and not cost.is_empty():
+		command.params["_ai_feedback"]["site_key"] = _site_key(String(command.params.get("building_type", "")), Vector2(command.params.get("target", Vector2.ZERO)))
 	result.append(command)
 	for id in command.unit_ids:
 		reserved[int(id)] = true
@@ -451,6 +609,12 @@ static func _construct(
 				continue
 			for site_value in snapshot.get("build_sites", {}).get(kind, []):
 				var site := Vector2(site_value)
+				var gap_penalty := 0.0
+				if state.cooldowns.has(_site_key(kind, site)):
+					continue
+				var candidate_key := "build:" + str([int(worker["id"])]) + ":" + str(Commands.BuildCommand.new(tick, [int(worker["id"])], kind, site).params)
+				if state.cooldowns.has(candidate_key):
+					continue
 				if not memoized_site_checks_enabled or not site_risks.has(site):
 					site_risks[site] = state.danger(site, int(snapshot.get("tick", 0)), policy)
 				var risk: float = site_risks[site]
@@ -460,8 +624,10 @@ static func _construct(
 					var gap_key := [site, gap_radius]
 					if not memoized_site_checks_enabled or not site_gaps.has(gap_key):
 						site_gaps[gap_key] = Legacy._site_preserves_structure_gap(site, kind, worker, structures, float(policy.get("minimum_structure_gap", 1.0)))
-					if not bool(site_gaps[gap_key]): continue
-				var score := Vector2(worker.get("pos", Vector2.ZERO)).distance_to(site) + risk * 4.0
+					# Search appends legal tight sites after the spacious candidates.
+					# Prefer the requested gap, but do not deadlock a crowded town.
+					if not bool(site_gaps[gap_key]): gap_penalty = 1000.0
+				var score := Vector2(worker.get("pos", Vector2.ZERO)).distance_to(site) + risk * 4.0 + gap_penalty
 				if not site_values.has(site):
 					if kind in ["granary", "storage_pit", "town_center"]:
 						site_values = _site_resource_bonuses(snapshot.get("resources",[]),snapshot.get("build_sites",{}).get(kind,[]),kind)
@@ -487,6 +653,10 @@ static func _construct(
 			return
 
 
+static func _site_key(kind: String, site: Vector2) -> String:
+	return "build-site:%s:%s" % [kind, str(site)]
+
+
 static func _preferred_train(
 	options: Array, units: Array, snapshot: Dictionary, policy: Dictionary, state, producer_kind: String
 ) -> Dictionary:
@@ -503,6 +673,8 @@ static func _preferred_train(
 		if "worker" in tags:
 			var water := kind == "fishing_boat"
 			var target := int(policy.get("water_worker_target" if water else "land_worker_target", 8))
+			if bool(policy.get("defending", false)) and _army_count(units) < int(policy.get("minimum_attack_group_size", 3)) and not water:
+				target = mini(target, int(policy.get("minimum_workers_before_age_up", 6)))
 			if count < target:
 				score = 100.0 + float(target - count) * 2.0
 		elif "transport" in tags or bool(option.get("ai_profile", {}).get("transport", false)):
@@ -531,6 +703,9 @@ static func _preferred_train(
 			if count < mini(5, maxi(1, army_size / 10)):
 				score = 45.0 + float(army_size) * 0.5
 		elif "combatant" in tags or bool(option.get("ai_profile", {}).get("enabled", false)):
+			var army_target := int(policy.get("army_target", 9999))
+			if bool(policy.get("saving_age", false)): army_target = mini(army_target, int(policy.get("minimum_attack_group_size", 3)))
+			if _army_count(units) >= army_target: continue
 			var candidate := {
 				"kind": kind,
 				"hp": option.get("ai_profile", {}).get("max_hp", 1.0),
@@ -623,6 +798,12 @@ static func _gather(
 		if float(policy.get("desired_stock", {}).get(type_id, 0.0)) <= 0.0: continue
 		var shortage := maxf(0.0, float(policy.get("desired_stock", {}).get(type_id, 0.0)) - float(player.get(RESOURCE_NAMES[type_id], 0)))
 		weights[type_id] = sqrt(maxf(25.0 if type_id in [0, 1] else 1.0, shortage))
+		if type_id == 0:
+			# A worker-producing town consumes food continuously. Stock-only quotas
+			# split a small opening workforce evenly with construction wood and
+			# cannot sustain the next worker, even while the town sits idle.
+			var land_workers := units.filter(func(u): return bool(u.get("components", {}).get("worker", {}).get("enabled", false)) and String(u.get("movement_domain", "land")) == "land").size()
+			weights[type_id] = float(weights[type_id]) + float(maxi(0, int(policy.get("land_worker_target", land_workers)) - land_workers)) * 3.0
 		total_weight += float(weights[type_id])
 	for type_id in weights: quotas[type_id] = float(total_workers) * float(weights[type_id]) / maxf(1.0, total_weight)
 	var count := mini(workers.size(), int(policy.get("worker_search_budget", 32)))
@@ -634,7 +815,7 @@ static func _gather(
 		var current: Dictionary = by_id.get(int(worker.get("resource_id", -1)), {})
 		var domain := String(worker.get("movement_domain", "land"))
 		var current_type := int(current.get("resource_type_id", -1))
-		if not current.is_empty() and int(type_load.get(current_type, 0)) <= float(quotas.get(current_type, 0.0)) + 0.5: continue
+		if not current.is_empty() and int(type_load.get(current_type, 0)) <= float(quotas.get(current_type, 0.0)) + 0.5 and state.danger(Vector2(current.get("pos", Vector2.ZERO)), int(snapshot.get("tick", 0)), policy, domain) <= float(policy.get("maximum_economic_danger", 8.0)): continue
 		var best: Dictionary = {}
 		var score := -INF
 		var current_score := -INF

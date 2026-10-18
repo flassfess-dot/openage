@@ -6,14 +6,25 @@ var profile_choice: OptionButton
 var size_choice: OptionButton
 var seed_input: SpinBox
 var profiles: Array = []
+var geography_first := false
+var wild_islands := false
+var river_islands := false
+var watershed_world := false
+var preview_fixture := ""
 
 func _ready() -> void:
 	get_window().title = "Rise of Rome — новые случайные карты"
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	catalog.load()
 	catalog.enable_environment_pack()
+	watershed_world = "--watershed-world" in OS.get_cmdline_user_args()
+	river_islands = "--river-islands" in OS.get_cmdline_user_args()
+	wild_islands = river_islands or "--wild-islands" in OS.get_cmdline_user_args()
+	geography_first = watershed_world or wild_islands or "--geography-first" in OS.get_cmdline_user_args()
 	_build_map_ui()
 	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--preview-fixture="): preview_fixture = argument.trim_prefix("--preview-fixture=")
+		if argument == "--geography-first": geography_first = true
 		if argument.begins_with("--map-size="):
 			for index in range(Settings.catalog()["map_sizes"].size()):
 				if Settings.catalog()["map_sizes"][index]["id"] == argument.trim_prefix("--map-size="): size_choice.select(index)
@@ -41,11 +52,14 @@ func _build_map_ui() -> void:
 	panel.add_child(row)
 	var title := Label.new()
 	title.text = "НОВЫЕ СЛУЧАЙНЫЕ КАРТЫ"
+	if wild_islands: title.text = "ДИКИЕ ОСТРОВА"
+	if river_islands: title.text = "ОСТРОВА И РЕКИ"
+	if watershed_world: title.text = "МАТЕРИКИ, РЕКИ И ОЗЁРА"
 	row.add_child(title)
 	profile_choice = OptionButton.new()
-	profiles = Settings.catalog()["map_types"]
+	profiles = Settings.catalog()["map_types"].filter(func(profile): return String(profile["id"]) in Settings.WatershedWorld.PROFILES if watershed_world else String(profile["id"]) == "islands" if wild_islands else not geography_first or String(profile["id"]) in Settings.Geography.PROFILES)
 	for profile in profiles: profile_choice.add_item(String(profile.get("name", profile["id"])))
-	profile_choice.select(3)
+	profile_choice.select(0 if geography_first else 3)
 	row.add_child(profile_choice)
 	size_choice = OptionButton.new()
 	for entry in Settings.catalog()["map_sizes"]: size_choice.add_item(String(entry["name"]))
@@ -74,15 +88,48 @@ func _build_map_ui() -> void:
 	subtitle = Label.new()
 	subtitle.position = Vector2(20, 80)
 	subtitle.text = "Колесо — масштаб · Средняя кнопка — перемещение · Карты доступны в обычной случайной игре"
+	var geography_button := CheckButton.new()
+	geography_button.text = "Крупная география"
+	geography_button.button_pressed = geography_first
+	geography_button.disabled = wild_islands or watershed_world or not geography_first
+	if wild_islands or watershed_world: geography_button.text = "Неравные условия"
+	if not geography_first: geography_button.text = "Реки, озёра и броды"
+	geography_button.position = Vector2(1060, 72)
+	geography_button.toggled.connect(_set_geography_first)
+	panel.add_child(geography_button)
 	panel.add_child(subtitle)
+
+func _set_geography_first(enabled: bool) -> void:
+	var selected_id := String(profiles[profile_choice.selected]["id"])
+	geography_first = enabled
+	profiles = Settings.catalog()["map_types"].filter(func(profile): return not geography_first or String(profile["id"]) in Settings.Geography.PROFILES)
+	profile_choice.clear()
+	for i in range(profiles.size()):
+		profile_choice.add_item(String(profiles[i].get("name", profiles[i]["id"])))
+		if String(profiles[i]["id"]) == selected_id: profile_choice.select(i)
+	generate_map()
 
 func generate_map() -> void:
 	var settings := Settings.default_settings()
 	settings["map_type_id"] = profiles[profile_choice.selected]["id"]
 	settings["map_size_id"] = Settings.catalog()["map_sizes"][size_choice.selected]["id"]
 	settings["seed"] = int(seed_input.value)
+	if geography_first: settings["landscape_version"] = 4
+	if wild_islands: settings["landscape_version"] = 5
+	if river_islands: settings["river_network"] = true
+	if watershed_world: settings["landscape_version"] = Settings.WatershedWorld.VERSION
+	subtitle.text = "Колесо — масштаб · Средняя кнопка — перемещение · " + ("Пилот: география → поселения → ресурсы" if geography_first else "Карты доступны в обычной случайной игре")
+	if wild_islands: subtitle.text = "Колесо — масштаб · Средняя кнопка — перемещение · Случайные земли и старты, без выравнивания богатства"
+	if river_islands: subtitle.text = "Колесо — масштаб · Средняя кнопка — перемещение · Светлые речные отмели непроходимы для кораблей"
+	if watershed_world: subtitle.text = "Колесо — масштаб · Средняя кнопка — перемещение · Броды проходимы для пехоты и кораблей"
+	if not geography_first: subtitle.text = "Колесо — масштаб · Средняя кнопка — перемещение · Броды проходимы для пехоты и кораблей"
 	for i in range(8): settings["players"][i]["enabled"] = i < 4
-	generated = Settings.build(settings)
+	if preview_fixture.is_empty():
+		generated = Settings.build(settings)
+	else:
+		var saved := FileAccess.open(preview_fixture, FileAccess.READ)
+		generated = saved.get_var() if saved != null else {"valid": false, "errors": ["preview_fixture_missing"]}
+		preview_fixture = ""
 	if not bool(generated.get("valid", false)):
 		status.text = "Не удалось создать карту: " + str(generated.get("errors", []))
 		return
@@ -129,6 +176,11 @@ func generate_map() -> void:
 		for part in info.get("composite_parts", []):
 			if part.get("texture") != null: objects.append({"position": at, "reference": true, "frame_info": part})
 		markers.append({"position": at + Vector2(0, 3), "text": "ИГРОК %d" % int(player["team"])})
+	if int(data.get("generator_version", 0)) == Settings.WatershedWorld.VERSION:
+		for i in range(data.get("fords", []).size()):
+			markers.append({"position": Vector2(data["fords"][i]["center"]) + Vector2.ONE * 0.5, "text": "БРОД %d" % (i + 1)})
+		for i in range(data.get("lakes", []).size()):
+			markers.append({"position": Vector2(data["lakes"][i]["center"]), "text": "ОЗЕРО %d" % (i + 1)})
 	_fit_view()
 	print("Generated landscape preview ready: %s seed %d" % [settings["map_type_id"], settings["seed"]])
 
@@ -156,12 +208,12 @@ func _refresh(reconfigure: bool = true) -> void:
 	object_layer.queue_redraw()
 	var sources: Dictionary = generated["map_data"]["ecology"]["tree_sources"]
 	var marine: Dictionary = generated["map_data"].get("marine_resources", {})
-	status.text = "%d × %d · 4 игрока · Деревья RoR/AoE2: %d/%d · Рыба у берега/в море: %d/%d · Киты: %d · Декали %d · Масштаб %d%%" % [map_size.x, map_size.y, sources["ror"], sources["aoe2"], marine.get("shore_fish", 0), marine.get("deep_fish", 0), marine.get("whale", 0), data_decals(), roundi(zoom * 100)]
+	status.text = "%d × %d · Игроков: %d · Деревья RoR/AoE2: %d/%d · Рыба у берега/в море: %d/%d · Киты: %d · Декали %d · Масштаб %d%%" % [map_size.x, map_size.y, generated["definition"]["players"].size(), sources["ror"], sources["aoe2"], marine.get("shore_fish", 0), marine.get("deep_fish", 0), marine.get("whale", 0), data_decals(), roundi(zoom * 100)]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 		var previous := zoom
-		zoom = clampf(zoom * (1.15 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15), 0.18, 3.0)
+		zoom = clampf(zoom * (1.15 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15), 0.035, 3.0)
 		view_offset = event.position - (event.position - view_offset) * zoom / previous
 		_refresh(false)
 	elif event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_MIDDLE:

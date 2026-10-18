@@ -7,6 +7,9 @@ const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 const RandomMapContract := preload("res://scripts/random_map_contract.gd")
 const RandomMapGenerator := preload("res://scripts/random_map_generator.gd")
 const NaturalTopology := preload("res://scripts/random_map_natural_topology.gd")
+const Geography := preload("res://scripts/random_map_geography.gd")
+const WildIslands := preload("res://scripts/random_map_wild_islands.gd")
+const WatershedWorld := preload("res://scripts/random_map_watershed_world.gd")
 const RandomMapQuality := preload("res://scripts/random_map_quality.gd")
 const SkirmishAiPolicy := preload("res://scripts/skirmish_ai_policy.gd")
 
@@ -37,6 +40,7 @@ static func default_settings() -> Dictionary:
 		})
 	return {
 		"schema_version": 1,
+		"landscape_version": WatershedWorld.VERSION,
 		"map_size_id": "standard",
 		"map_type_id": "grasslands",
 		"seed": 41721,
@@ -78,6 +82,14 @@ static func normalize(source: Dictionary) -> Dictionary:
 		errors.append("skirmish_population_limit_invalid")
 	settings["population_limit"] = int(settings.get("population_limit", 0))
 	settings["seed"] = int(settings.get("seed", 1))
+	if int(settings.get("landscape_version", 3)) not in [3, Geography.VERSION, WildIslands.VERSION, WatershedWorld.VERSION]:
+		errors.append("skirmish_landscape_version_unsupported")
+	if int(settings.get("landscape_version", 3)) == Geography.VERSION and String(settings.get("map_type_id", "")) not in Geography.PROFILES:
+		errors.append("skirmish_geography_profile_not_available")
+	if int(settings.get("landscape_version", 3)) == WildIslands.VERSION and String(settings.get("map_type_id", "")) != "islands":
+		errors.append("skirmish_wild_islands_profile_required")
+	if int(settings.get("landscape_version", 3)) == WatershedWorld.VERSION and String(settings.get("map_type_id", "")) not in WatershedWorld.PROFILES:
+		errors.append("skirmish_watershed_profile_not_available")
 	if int(settings["seed"]) <= 0:
 		errors.append("skirmish_seed_invalid")
 
@@ -158,7 +170,19 @@ static func build_with_progress(source: Dictionary, progress_callback: Callable 
 	_report_progress(progress_callback, 0.07, "Подготовка игроков")
 	var size_values: Array = size_entry.get("size", [72, 72])
 	var size := Vector2i(int(size_values[0]), int(size_values[1]))
-	var starts := _start_positions(settings["players"].size(), size, String(settings["map_type_id"]), int(settings["seed"]), map_type_entry)
+	var starts: Array[Vector2] = []
+	var geography: Dictionary = {}
+	if int(settings.get("landscape_version", 3)) in [Geography.VERSION, WildIslands.VERSION, WatershedWorld.VERSION]:
+		_report_progress(progress_callback, 0.09, "Создание крупных природных областей")
+		if int(settings.get("landscape_version", 3)) == WatershedWorld.VERSION:
+			geography = WatershedWorld.geography(size, String(settings["map_type_id"]), int(settings["seed"]))
+		else:
+			geography = WildIslands.geography(size, int(settings["seed"]), bool(settings.get("river_network", false))) if int(settings.get("landscape_version", 3)) == WildIslands.VERSION else Geography.geography(size, String(settings["map_type_id"]), int(settings["seed"]), settings["players"].size())
+		starts = Geography.settlement_sites(geography, settings["players"].size(), int(settings["seed"]))
+		if starts.size() != settings["players"].size():
+			return {"valid": false, "errors": ["random_map_geography_settlement_capacity"], "settings": settings}
+	else:
+		starts = _start_positions(settings["players"].size(), size, String(settings["map_type_id"]), int(settings["seed"]), map_type_entry)
 	var civilization_rng := RandomNumberGenerator.new()
 	civilization_rng.seed = int(settings["seed"]) ^ 0x52C7A8D1
 	var definition_players: Array = []
@@ -210,6 +234,13 @@ static func build_with_progress(source: Dictionary, progress_callback: Callable 
 	}
 	if bool(settings.get("networked", false)):
 		raw_definition["networked"] = true
+	if int(settings.get("landscape_version", 3)) == Geography.VERSION:
+		raw_definition["map"]["generator"]["version"] = Geography.VERSION
+		raw_definition["map"]["generator"]["theme"] = "geography_first_v4"
+	if int(settings.get("landscape_version", 3)) == WildIslands.VERSION:
+		raw_definition["map"]["generator"] = WildIslands.contract(raw_definition["map"]["generator"], geography, starts, int(settings["seed"]))
+	if int(settings.get("landscape_version", 3)) == WatershedWorld.VERSION:
+		raw_definition["map"]["generator"] = WatershedWorld.contract(raw_definition["map"]["generator"], geography, starts, int(settings["seed"]))
 	_report_progress(progress_callback, 0.13, "Создание правил матча")
 	var definition := MatchDefinition.normalize(raw_definition)
 	if not bool(definition.get("valid", false)):
@@ -217,7 +248,7 @@ static func build_with_progress(source: Dictionary, progress_callback: Callable 
 	var map_progress := func(value: float, stage: String) -> void:
 		_report_progress(progress_callback, lerpf(0.15, 0.78, value), stage)
 	var generation_diagnostics: Dictionary = {}
-	var map_data := RandomMapGenerator.generate(definition, map_progress, generation_diagnostics)
+	var map_data := RandomMapGenerator.generate(definition, map_progress, generation_diagnostics, geography if int(settings.get("landscape_version", 3)) == WatershedWorld.VERSION else {})
 	if map_data.has("generation_error"):
 		return {"valid": false, "errors": [map_data["generation_error"]], "settings": settings}
 	raw_definition["map"]["content_hash"] = map_data.get("content_hash", "")
@@ -399,7 +430,7 @@ static func _generated_victory_objectives(definition: Dictionary, map_data: Dict
 	var total_cells := size.x * size.y
 	var accessible := PackedByteArray()
 	accessible.resize(total_cells)
-	if int(map_data.get("generator_version", 0)) in [2, 3]:
+	if int(map_data.get("generator_version", 0)) in [2, 3, Geography.VERSION, WildIslands.VERSION, WatershedWorld.VERSION]:
 		var navigation := RandomMapGenerator.LandscapeNavigation.mask(map_data, definition)
 		for start in starts:
 			var distances: PackedInt32Array = RandomMapGenerator.LandscapeNavigation.flood(size, navigation, Vector2i(start))["distances"]

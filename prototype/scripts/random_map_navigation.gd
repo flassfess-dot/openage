@@ -143,16 +143,24 @@ static func reserve_naval_access(definition: Dictionary, map_data: Dictionary, r
 				reserve_path(reserved, trace(field, target), size, walkable, 1)
 
 
-static func protect_economy(definition: Dictionary, map_data: Dictionary, reserved: Dictionary) -> void:
+static func protect_economy(definition: Dictionary, map_data: Dictionary, reserved: Dictionary, landscape_fields: Dictionary = {}) -> void:
 	var size: Vector2i = map_data["size"]
 	var walkable := mask(map_data, definition)
+	var costs := PackedInt32Array()
+	if not landscape_fields.is_empty():
+		# Prefer shared routes and forest margins, while retaining a route across
+		# woodland whenever that is necessary to reach a legal opening resource.
+		costs.resize(walkable.size())
+		for i in range(walkable.size()):
+			var cell := Vector2i(i % size.x, i / size.x)
+			costs[i] = 1 if reserved.has(cell) else 1 + roundi(smoothstep(0.50, 0.77, float(landscape_fields["forest_strength"][i])) * 24.0)
 	var repairs: Array = []
 	var required: Dictionary = definition.get("map", {}).get("generator", {}).get("quality_contract", {}).get("resource_counts", {})
 	var occupied: Dictionary = {}
 	for resource in map_data.get("resources", []): occupied[Vector2i(resource["position"])] = true
 	for player in definition.get("players", []):
 		var start := Vector2(player["start"])
-		var field := flood(size, walkable, Vector2i(start))
+		var field := _economic_flood(size, walkable, Vector2i(start), costs)
 		var accessible_counts: Dictionary = {}
 		# Preserve existing useful paths first; repair only a missing opening quota.
 		for resource in map_data.get("resources", []):
@@ -189,7 +197,7 @@ static func protect_economy(definition: Dictionary, map_data: Dictionary, reserv
 				occupied[Vector2i(resource["position"])] = true
 				walkable[original.y * size.x + original.x] = 1
 				walkable[replacement] = 0
-				field = flood(size, walkable, Vector2i(start))
+				field = _economic_flood(size, walkable, Vector2i(start), costs)
 				var access := adjacent_reachable(size, field["distances"], Vector2i(resource["position"]))
 				if access >= 0: reserve_path(reserved, trace(field, access), size, walkable, 0)
 				repairs.append({"kind": resource["kind"], "team": int(player["team"]), "from": original, "to": Vector2i(resource["position"]), "reason": "blocked_gather_approach"})
@@ -202,7 +210,8 @@ static func protect_economy(definition: Dictionary, map_data: Dictionary, reserv
 			var access := adjacent_reachable(size, field["distances"], Vector2i(resource["position"]))
 			if access >= 0: reserve_path(reserved, trace(field, access), size, walkable, 0)
 		# Keep routes to the closest expansion mines open when the forest is planted.
-		var expansions: Array = map_data.get("resources", []).filter(func(resource): return resource.get("owner_start", []).is_empty() and String(resource.get("kind", "")) in ["gold_mine", "stone_mine"])
+		var wild := bool(definition.get("map", {}).get("generator", {}).get("wild_geography", false))
+		var expansions: Array = [] if wild else map_data.get("resources", []).filter(func(resource): return resource.get("owner_start", []).is_empty() and String(resource.get("kind", "")) in ["gold_mine", "stone_mine"])
 		expansions.sort_custom(func(left, right): return start.distance_squared_to(Vector2(left["position"])) < start.distance_squared_to(Vector2(right["position"])))
 		var expansion_counts := {"gold_mine": 0, "stone_mine": 0}
 		for resource in expansions:
@@ -220,6 +229,55 @@ static func protect_economy(definition: Dictionary, map_data: Dictionary, reserv
 				reserve_path(reserved, trace(field, index), size, walkable, 1)
 
 	map_data["generation_repairs"] = repairs
+
+
+static func _economic_flood(size: Vector2i, walkable: PackedByteArray, origin: Vector2i, costs: PackedInt32Array) -> Dictionary:
+	if costs.is_empty(): return flood(size, walkable, origin)
+	var distances := PackedInt32Array()
+	var parents := PackedInt32Array()
+	distances.resize(walkable.size())
+	parents.resize(walkable.size())
+	distances.fill(-1)
+	parents.fill(-1)
+	var start := nearest_open(size, walkable, origin)
+	if start < 0: return {"distances": distances, "parents": parents, "start": -1}
+	var heap: Array[Vector2i] = [Vector2i(0, start)]
+	distances[start] = 0
+	while not heap.is_empty():
+		var entry := heap[0]
+		var last: Vector2i = heap.pop_back()
+		if not heap.is_empty():
+			heap[0] = last
+			var position := 0
+			while position * 2 + 1 < heap.size():
+				var child := position * 2 + 1
+				if child + 1 < heap.size() and _heap_before(heap[child + 1], heap[child]): child += 1
+				if not _heap_before(heap[child], heap[position]): break
+				var swap := heap[position]
+				heap[position] = heap[child]
+				heap[child] = swap
+				position = child
+		if distances[entry.y] != entry.x: continue
+		for next in neighbors(entry.y, size):
+			if walkable[next] == 0: continue
+			var cost := entry.x + costs[next]
+			if distances[next] >= 0 and distances[next] <= cost: continue
+			distances[next] = cost
+			parents[next] = entry.y
+			heap.append(Vector2i(cost, next))
+			var position := heap.size() - 1
+			while position > 0:
+				var parent := (position - 1) / 2
+				if not _heap_before(heap[position], heap[parent]): break
+				var swap := heap[parent]
+				heap[parent] = heap[position]
+				heap[position] = swap
+				position = parent
+	return {"distances": distances, "parents": parents, "start": start}
+
+
+static func _heap_before(left: Vector2i, right: Vector2i) -> bool:
+	return left.x < right.x or (left.x == right.x and left.y < right.y)
 
 
 static func _repair_cell(size: Vector2i, terrain: Array, walkable: PackedByteArray, distances: PackedInt32Array, origin: Vector2i, start: Vector2, reserved: Dictionary, occupied: Dictionary) -> int:

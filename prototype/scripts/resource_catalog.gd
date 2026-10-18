@@ -331,7 +331,13 @@ func _standing_resource_frame_info(resource: Dictionary, animation_time: float) 
 	var source_frame := source_resource_frame_info(resource, animation_time)
 	if not source_frame.is_empty():
 		return source_frame
-	return resource_presentations.frame_info(resource, animation_time)
+	var result := resource_presentations.frame_info(resource, animation_time)
+	# Legacy/default resources resolve through an alias rather than an explicit
+	# source_graphic_id; their DAT shadow is required by the same contract.
+	if not result.is_empty() and String(resource.get("kind", "")) == "tree" and ResourcePresentationRegistry.tree_canopy_visible(resource):
+		var shadow := _source_tree_shadow(resource_presentations.graphic_for_resource(resource), int(result.get("frame_index", 0)))
+		if not shadow.is_empty(): result["shadow"] = shadow
+	return result
 
 
 func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
@@ -368,7 +374,7 @@ func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.
 	var hotspot := Vector2(texture.get_width() * 0.5, texture.get_height())
 	if metadata.has("hotspot"):
 		hotspot = Vector2(float(metadata["hotspot"][0]), float(metadata["hotspot"][1]))
-	return {
+	var result := {
 		"texture": texture,
 		"asset_name": asset_name,
 		"graphic_id": graphic_id,
@@ -377,6 +383,32 @@ func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.
 		"mirrored": mirrored,
 		"graphic_layer": int(spec.get("layer", 20)),
 	}
+	if String(resource.get("kind", "")) == "tree" and ResourcePresentationRegistry.tree_canopy_visible(resource):
+		var shadow := _source_tree_shadow(spec, frame_index)
+		if not shadow.is_empty(): result["shadow"] = shadow
+	return result
+
+
+func _source_tree_shadow(spec: Dictionary, source_frame: int) -> Dictionary:
+	# Several RoR trees store the canopy and ground shadow in separate DAT
+	# graphics. Resolve the original layer and its own hotspot, as for AoE2.
+	for delta in spec.get("deltas", []):
+		var graphic_id := int(delta.get("graphic_id", -1))
+		var part: Dictionary = graphics_catalog_data.get("graphics", {}).get(String.num_int64(graphic_id), {})
+		if part.is_empty() or int(part.get("layer", -1)) != 0: continue
+		if not CompositeGraphic.delta_visible(int(delta.get("display_angle", -1)), 0, int(spec.get("angle_count", 1))): continue
+		var asset_name := "graphic_%d" % graphic_id
+		if not source_resource_textures.has(asset_name): _cache_source_resource_frames(asset_name)
+		var frames: Array = source_resource_textures.get(asset_name, [])
+		if frames.is_empty(): continue
+		var index := posmod(source_frame, frames.size())
+		var texture: Texture2D = frames[index]
+		var metadata: Dictionary = source_resource_frame_metadata[asset_name][index]
+		var hotspot: Array = metadata.get("hotspot", [texture.get_width() * 0.5, texture.get_height()])
+		return {"texture": texture, "asset_name": asset_name, "graphic_id": graphic_id, "frame_index": index,
+			"hotspot": Vector2(hotspot[0], hotspot[1]) - Vector2(float(delta.get("offset_x", 0)), float(delta.get("offset_y", 0))),
+			"mirrored": false}
+	return {}
 
 
 func _cache_source_resource_frames(asset_name: String) -> void:

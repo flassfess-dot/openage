@@ -9,6 +9,23 @@ const DEEP_WATER_TERRAIN_ID := 22
 const ORTHOGONAL_DIRECTIONS := [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
 
 
+static func smooth_coast(terrain_ids: Array[int], size: Vector2i) -> void:
+	var original := terrain_ids.duplicate()
+	for y in range(1, size.y - 1):
+		for x in range(1, size.x - 1):
+			var index := y * size.x + x
+			var water_neighbors := 0
+			for offset_y in range(-1, 2):
+				for offset_x in range(-1, 2):
+					if offset_x == 0 and offset_y == 0: continue
+					if int(original[(y + offset_y) * size.x + x + offset_x]) in TerrainRules.WATER_TERRAIN_IDS:
+						water_neighbors += 1
+			if int(original[index]) in TerrainRules.WATER_TERRAIN_IDS and water_neighbors <= 2:
+				terrain_ids[index] = 0
+			elif int(original[index]) not in TerrainRules.WATER_TERRAIN_IDS and water_neighbors >= 6:
+				terrain_ids[index] = 1
+
+
 static func apply(terrain_ids: Array[int], size: Vector2i, seed: int, topology: String = "") -> Dictionary:
 	if size.x <= 0 or size.y <= 0 or terrain_ids.size() != size.x * size.y:
 		return {}

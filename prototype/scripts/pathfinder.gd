@@ -859,7 +859,17 @@ func _search_native_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement
 	for packed_index in range(0, packed.size(), 2):
 		result[result_index] = Vector2i(packed[packed_index], packed[packed_index + 1])
 		result_index += 1
-	return {"path": result, "direct": bool(kernel.get_last_path_was_direct())}
+	var direct := bool(kernel.get_last_path_was_direct())
+	if movement_domain == "water" and clearance_radius > 0.0:
+		# Sampled cell visibility can cut a ship's hull across a shoal corner.
+		# Re-smooth only unsafe water routes using the swept-circle geometry
+		# also used by actual movement. Detached batch planners share this path.
+		for index in range(1, result.size()):
+			if not is_segment_walkable(Vector2(result[index - 1]) + Vector2.ONE * 0.5, Vector2(result[index]) + Vector2.ONE * 0.5, clearance_radius, movement_domain, restriction_id):
+				result = smooth_cells(_find_native_cell_path(start, goal, movement_domain, restriction_id, clearance_radius), movement_domain, restriction_id, clearance_radius)
+				direct = false
+				break
+	return {"path": result, "direct": direct}
 
 
 func _native_kernel_for(movement_domain: String, restriction_id: int):
@@ -990,6 +1000,8 @@ func line_walkable(start: Vector2i, goal: Vector2i, movement_domain: String = "l
 
 func direct_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
 	if grid == null or not grid.contains(start) or not grid.contains(goal):
+		return []
+	if movement_domain == "water" and clearance_radius > 0.0 and not is_segment_walkable(Vector2(start) + Vector2.ONE * 0.5, Vector2(goal) + Vector2.ONE * 0.5, clearance_radius, movement_domain, restriction_id):
 		return []
 	if uses_native_kernel():
 		var kernel = _native_kernel_for(movement_domain, restriction_id)

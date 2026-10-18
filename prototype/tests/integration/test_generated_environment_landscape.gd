@@ -48,6 +48,7 @@ func _initialize() -> void:
 			if tree.has("environment_asset"):
 				check(compact.get("environment_asset") == tree["environment_asset"] and compact.get("environment_variant") == tree["environment_variant"], "render snapshot retains imported species and variant")
 				check(String(info.get("asset_name", "")).begins_with("aoe2_temperate:"), "imported tree art resolves through real rendering")
+				check(info.has("shadow"), "every generated imported tree retains its original shadow")
 				check(catalog.resource_frame_info(depleted).get("asset_name", "") == "aoe2_temperate:stump", "imported trees use imported stumps")
 			else:
 				check(info.get("asset_name", "") == tree["source_graphic_asset_name"], "enabled pack preserves native tree art")
@@ -83,6 +84,7 @@ func _initialize() -> void:
 				var expected := catalog.resource_frame_info(original)
 				var actual := catalog.resource_frame_info(tree)
 				check(actual.get("asset_name") == expected.get("asset_name") and actual.get("frame_index") == expected.get("frame_index"), "every published tree uses the exact generated artwork")
+				check(actual.has("shadow") == expected.has("shadow"), "fog memory and presentation publication preserve native and imported tree shadows")
 	coordinator.shutdown()
 	world.task_coordinator.shutdown()
 	finish()

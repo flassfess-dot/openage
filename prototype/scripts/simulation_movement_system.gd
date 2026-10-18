@@ -223,6 +223,15 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	else:
 		_integrate_unit_motion(unit, delta, movement_reason, simulation_world)
 	var stop_tick := StuckRecovery.STOP_TICK
+	if String(unit["task"]) == "gather" and int(unit["stuck_ticks"]) >= StuckRecovery.STOP_TICK - 1:
+		# Harvesting takes longer than the ordinary 1.5-second stall window.
+		# Give traffic at a shared resource/drop site time to clear, retaining
+		# the same bounded local/global replans and a terminal deadlock limit.
+		for neighbor in simulation_world.query_units_near(unit["pos"], float(unit["footprint_radius"]) + 2.0):
+			if int(neighbor["id"]) == int(unit["id"]): continue
+			if String(neighbor.get("task", "")) == "gather" and int(neighbor.get("team", 0)) == int(unit["team"]):
+				stop_tick = 600
+				break
 	var group = simulation_world.formation_groups_view.get(int(unit["formation_group_id"]))
 	if group != null and group.has_compression:
 		# Waiting in a convoy can outlast the ordinary 1.5-second stall window.
@@ -232,10 +241,13 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 	var recovery_action := StuckRecovery.update_route_progress(unit, stop_tick)
 	match recovery_action:
 		"local_repath":
-			assign_unit_destination(unit, unit["destination"], false)
+			if not _try_work_traffic_detour(unit, planner):
+				assign_unit_destination(unit, unit["destination"], false)
 		"global_repath":
 			planner.clear_route_cache()
-			assign_unit_destination(unit, unit["destination"], false)
+			if not _try_work_traffic_detour(unit, planner):
+				if String(unit["task"]) != "gather" or not simulation_world.gathering_system.replan_work_approach(unit):
+					assign_unit_destination(unit, unit["destination"], false)
 		"stop":
 			# Release work and formation reservations as well as movement slots;
 			# an abandoned approach must not block every following worker.
@@ -255,6 +267,56 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			return false
 	if probe != null:
 		simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
+	return true
+
+
+func _try_work_traffic_detour(unit: Dictionary, planner) -> bool:
+	if String(unit["task"]) != "gather": return false
+	var simulation_world = world
+	var origin := Vector2(unit["pos"])
+	var destination := Vector2(unit["destination"])
+	var radius := float(unit["footprint_radius"])
+	var domain := String(unit["movement_domain"])
+	var restriction := int(unit["terrain_restriction"])
+	var neighbors: Array = simulation_world.query_units_near(origin, maxf(4.0, radius * 6.0)).filter(func(other): return int(other["id"]) != int(unit["id"]) and String(other.get("movement_domain", "land")) == domain and float(other.get("hp", 0.0)) > 0.0)
+	if neighbors.is_empty(): return false
+	# Static A* cannot see working units. Repeating the same route through them
+	# strands loaded boats and workers. Try a bounded local detour whose whole
+	# route clears the nearby bodies, without changing the gather/deposit goal.
+	var candidates: Array[Vector2] = []
+	var forward := (destination - origin).normalized()
+	for distance in [1.0, 2.0, 3.0]:
+		for angle in range(8):
+			candidates.append(origin + forward.rotated(TAU * float(angle) / 8.0) * float(distance) * maxf(1.0, radius * 2.0))
+	candidates.sort_custom(func(a, b): return origin.distance_to(a) + a.distance_to(destination) < origin.distance_to(b) + b.distance_to(destination))
+	for point in candidates:
+		if not planner.is_segment_walkable(origin, point, radius, domain, restriction) or not _work_segment_clear(unit, origin, point, neighbors): continue
+		var route: Array[Vector2] = planner.find_path(point, destination, domain, restriction, radius)
+		if route.is_empty() or route.back().distance_squared_to(destination) > 0.0144: continue
+		var cursor := point
+		var clear := true
+		for waypoint in route:
+			if not _work_segment_clear(unit, cursor, waypoint, neighbors):
+				clear = false
+				break
+			cursor = waypoint
+		if not clear: continue
+		route.push_front(point)
+		var prepared: Dictionary = simulation_world.navigation_service.register_resolved_path(int(unit["id"]), origin, destination, route, domain, restriction, "work_traffic_detour", radius)
+		if assign_unit_destination(unit, destination, false, false, prepared):
+			StuckRecovery.reset(unit)
+			simulation_world.set_entity_field(unit, "diagnostic_reason", "work_traffic_detour")
+			return true
+	return false
+
+
+func _work_segment_clear(unit: Dictionary, start: Vector2, finish: Vector2, neighbors: Array) -> bool:
+	for other in neighbors:
+		var center := Vector2(other["pos"])
+		var separation := float(unit["footprint_radius"]) + float(other["footprint_radius"]) + 0.03
+		# A previously touching body may retreat, but must not penetrate farther.
+		var minimum := minf(separation * separation, start.distance_squared_to(center))
+		if center.distance_squared_to(Geometry2D.get_closest_point_to_segment(center, start, finish)) < minimum - 0.0001: return false
 	return true
 
 

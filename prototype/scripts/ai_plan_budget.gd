@@ -36,16 +36,21 @@ func protect(cost: Dictionary) -> void:
 		protected[int(key)] = mini(int(remaining.get(int(key), 0)), maxi(0, int(cost[key])))
 
 
-func reserve(cost: Dictionary, points: int = 0, producer_id: int = -1, essential: bool = false) -> bool:
+func can_reserve(cost: Dictionary, points: int = 0, producer_id: int = -1, essential: bool = false) -> bool:
 	if points > population_points or (producer_id >= 0 and producer_orders.has(producer_id)):
-		rejected += 1
 		return false
 	for key in cost:
 		var type_id := int(key)
 		var available := int(remaining.get(type_id, 0)) - (0 if essential else int(protected.get(type_id, 0)))
 		if maxi(0, int(cost[key])) > available:
-			rejected += 1
 			return false
+	return true
+
+
+func reserve(cost: Dictionary, points: int = 0, producer_id: int = -1, essential: bool = false) -> bool:
+	if not can_reserve(cost, points, producer_id, essential):
+		rejected += 1
+		return false
 	for key in cost:
 		var type_id := int(key)
 		remaining[type_id] = int(remaining.get(type_id, 0)) - maxi(0, int(cost[key]))

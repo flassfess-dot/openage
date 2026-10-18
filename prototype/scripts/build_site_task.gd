@@ -304,7 +304,7 @@ func _mobile_foundation_obstructions() -> Dictionary:
 
 func _can_place_foundation(team: int, kind: String, position: Vector2, occupied: Dictionary) -> bool:
 	var started := Time.get_ticks_usec() if tick_pipeline.performance_probe != null else 0
-	var result: bool = building_placement_system.can_place_foundation(team, kind, position, occupied)
+	var result: bool = building_placement_system.known_foundation(team, kind, position) and building_placement_system.can_place_foundation(team, kind, position, occupied)
 	if tick_pipeline.performance_probe != null: tick_pipeline.performance_probe.observe_microseconds("placement.dynamic",Time.get_ticks_usec()-started)
 	return result
 

@@ -22,11 +22,11 @@ func _run() -> void:
 	canvas._build_terrain_atlas()
 	var kernel = ClassDB.instantiate("RoRTerrainKernel")
 	var elevation := Elevation.new(Vector2i(400, 400))
-	for material in [0, 1, 4, 6, 22, 1000, 1001]:
+	for material in [0, 1, 4, 6, 15, 22, 1000, 1001]:
 		compare_patch("uniform %d" % material, Rect2i(190, 190, 2, 2), func(_cell): return material, elevation, canvas, kernel, 41721)
 	var coast := func(cell):
 		if cell.x < 0 or cell.y < 0 or cell.x > 399 or cell.y > 399: return -1
-		return [1, 4, 22, 0, 6, 1000, 1001][posmod(cell.x * 7 + cell.y * 3, 7)]
+		return [1, 4, 15, 22, 0, 6, 1000, 1001][posmod(cell.x * 7 + cell.y * 3, 8)]
 	compare_patch("coast and junctions", Rect2i(190, 190, 4, 4), coast, elevation, canvas, kernel, 41689)
 	compare_patch("map boundary", Rect2i(0, 0, 3, 3), coast, elevation, canvas, kernel, 2147483647)
 	for y in range(190, 196):

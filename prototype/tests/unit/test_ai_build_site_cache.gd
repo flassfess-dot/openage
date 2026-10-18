@@ -4,6 +4,7 @@ const Catalog := preload("res://scripts/resource_catalog.gd")
 const Probe := preload("res://scripts/performance_probe.gd")
 const Snapshot := preload("res://scripts/simulation_snapshot.gd")
 const Ai := preload("res://scripts/ai_player.gd")
+const Footprint := preload("res://scripts/footprint.gd")
 
 class CountingWorld:
 	extends "res://scripts/simulation_world.gd"
@@ -88,7 +89,10 @@ func test_mobile_affordability_and_exploration() -> void:
 	check(world.queries.size() == queries_before + 1, "technology changes invalidate cached results")
 	world.fog_of_war.reset()
 	check(world.get_cached_local_build_sites(1, ["house"], 180, 1200, 1, 12, preferred, ["house"]).is_empty(), "unexplored sites cannot be exposed from a cache")
-	world.fog_of_war.reveal_explored_cell(1, Vector2i(target))
+	# A house occupies several cells. Reveal the entire foundation, as the
+	# advisory search must no longer assume unseen footprint cells are empty.
+	for cell in Footprint.building(world.unit_stats("house"), target)["occupied_cells"]:
+		world.fog_of_war.reveal_explored_cell(1, cell)
 	check(not world.get_cached_local_build_sites(1, ["house"], 200, 1200, 1, 12, preferred, ["house"]).is_empty(), "new exploration immediately invalidates a failed search")
 	world.get_cached_local_build_sites(1, ["house"], 1401, 1200, 1, 12, preferred, ["house"])
 	check(world.local_build_site_cache.size() <= world.MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES, "query retention stays bounded")

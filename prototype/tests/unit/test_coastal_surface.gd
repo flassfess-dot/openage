@@ -34,7 +34,7 @@ func _finish() -> void:
 
 func _test_native_materials(catalog) -> void:
 	var elevation := Elevation.new(Vector2i(4, 4))
-	for id in [0, 1, 2, 4, 22, 1000, 1001, 1002, 1003]:
+	for id in [0, 1, 2, 4, 15, 22, 1000, 1001, 1002, 1003]:
 		var provider := func(_cell): return id
 		var tile: Dictionary = Renderer.tile_drawable(Vector2i.ONE, id, provider, catalog, elevation, 1.0, Vector2.ZERO, 41689)
 		check(tile.has("mesh_layers"), "every coastal material uses the same geometric surface")
@@ -43,11 +43,12 @@ func _test_native_materials(catalog) -> void:
 		for layer in tile["mesh_layers"]:
 			for point in layer["points"]: check(point.is_finite(), "coastal mesh is finite")
 	var pack = catalog.environment_pack
-	for id in [0, 1, 4, 6, 22]: check(not pack.legacy_textures[id].get_image().detect_alpha(), "native bridge atlases are opaque")
+	for id in [0, 1, 4, 6, 15, 22]: check(not pack.legacy_textures[id].get_image().detect_alpha(), "native bridge atlases are opaque")
 	var water: Image = pack.legacy_textures[1].get_image()
-	var shallow: Image = pack.legacy_textures[4].get_image()
+	var shallow: Image = pack.legacy_textures[15].get_image()
 	var sand: Image = pack.legacy_textures[6].get_image()
-	check(shallow.get_data() != sand.get_data() and shallow.get_data() != water.get_data(), "shallows show submerged soil, distinguishable from both dry beach and open water")
+	check(shallow.get_data() != sand.get_data() and shallow.get_data() != water.get_data(), "impassable shoals show submerged soil, distinguishable from both dry beach and open water")
+	check(pack.legacy_textures[4].get_image().get_data() == water.get_data(), "ford water retains its source base beneath separate sandy-islet details")
 	for y in range(0, 96, 12):
 		for x in range(0, 96, 12):
 			var a := shallow.get_pixel(x, y)
@@ -58,7 +59,7 @@ func _test_native_materials(catalog) -> void:
 
 func _test_shared_edges(catalog) -> void:
 	for land in [0, 2, 1000, 1001, 1003]:
-		for water in [1, 4, 22]:
+		for water in [1, 4, 15, 22]:
 			for axis in [0, 1]:
 				var provider := func(cell): return land if cell[axis] >= 2 else water
 				for i in range(33):

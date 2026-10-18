@@ -2145,7 +2145,7 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 			seen_cells[preferred_cell] = true
 			if visibility_system.state_at_world(team, preferred_position) == FogOfWar.UNKNOWN:
 				continue
-			if building_placement_system.cached_map_supports_foundation(kind, preferred_position) and _can_place_foundation(team, kind, preferred_position, mobile_occupied_cells) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
+			if building_placement_system.cached_map_supports_foundation(kind, preferred_position) and building_placement_system.known_foundation(team, kind, preferred_position) and _can_place_foundation(team, kind, preferred_position, mobile_occupied_cells) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
 				if foundation_preserves_structure_gap(team, kind, preferred_position, minimum_structure_gap):
 					sites.append(preferred_position)
 					if sites.size() >= maximum_per_kind:
@@ -2170,7 +2170,7 @@ func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, s
 							continue
 						seen_cells[cell] = true
 						var position := Vector2(cell) + Vector2(0.5, 0.5)
-						if building_placement_system.cached_map_supports_foundation(kind, position) and _can_place_foundation(team, kind, position, mobile_occupied_cells) and worker_can_reach_foundation(worker, kind, position):
+						if building_placement_system.cached_map_supports_foundation(kind, position) and building_placement_system.known_foundation(team, kind, position) and _can_place_foundation(team, kind, position, mobile_occupied_cells) and worker_can_reach_foundation(worker, kind, position):
 							if foundation_preserves_structure_gap(team, kind, position, minimum_structure_gap):
 								sites.append(position)
 								if sites.size() >= maximum_per_kind:

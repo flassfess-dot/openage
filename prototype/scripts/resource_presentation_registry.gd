@@ -103,7 +103,7 @@ func frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary
 	var frame_index := posmod(int(resource.get("id", 0)), frames.size())
 	var mirrored := false
 	if is_carcass(resource):
-		var resolved := corpse_frame(resource, frames.size(), _graphic_for_resource(resource))
+		var resolved := corpse_frame(resource, frames.size(), graphic_for_resource(resource))
 		frame_index = int(resolved["frame_index"])
 		mirrored = bool(resolved["mirrored"])
 	elif bool(metadata.get("animated", false)) or kind in ANIMATED_MARINE_KINDS:
@@ -126,12 +126,18 @@ static func is_carcass(resource: Dictionary) -> bool:
 	return "carcass" in resource.get("behavior_tags", []) or String(resource.get("kind", "")).ends_with("_carcass")
 
 
+static func tree_canopy_visible(resource: Dictionary) -> bool:
+	# Chopping changes the tree's HP while its crown remains upright. Older
+	# generated/retained records may omit the phase or store an empty string.
+	return int(resource.get("amount", 1)) > 0 and String(resource.get("tree_phase", "")) in ["", "standing", "chopping"]
+
+
 static func corpse_frame(resource: Dictionary, frame_count: int, graphic: Dictionary) -> Dictionary:
 	var descriptor := GraphicDescriptor.new("", graphic, frame_count, false)
 	return descriptor.resolve(int(resource.get("facing", 0)), float(resource.get("decay_elapsed", 0.0)), frame_count)
 
 
-func _graphic_for_resource(resource: Dictionary) -> Dictionary:
+func graphic_for_resource(resource: Dictionary) -> Dictionary:
 	var kind := String(resource.get("kind", ""))
 	var archetype: Dictionary = runtime_catalog.get("archetypes", {}).get(kind, {})
 	var source_unit_id := int(resource.get("source_unit_id", archetype.get("identifiers", {}).get("source_unit_id", -1)))

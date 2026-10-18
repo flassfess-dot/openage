@@ -68,6 +68,7 @@ func _initialize() -> void:
 	assert_true(bool(normalized.get("valid", false)), "launcher settings satisfy the skirmish contract")
 	assert_equal(normalized["settings"]["map_size_id"], "supergiant", "supergiant choice reaches generation settings")
 	assert_equal(normalized["settings"]["population_limit"], 500, "population 500 reaches generation settings")
+	assert_equal(normalized["settings"]["landscape_version"], SkirmishSettings.WatershedWorld.VERSION, "ordinary menu enables the shared watershed generator")
 	assert_equal(normalized["settings"]["players"][0]["civilization_id"], 0, "random civilization reaches generation settings")
 
 	launcher._show_loading_screen("СОЗДАНИЕ СЛУЧАЙНОЙ КАРТЫ", "Подготовка генератора")

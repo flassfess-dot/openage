@@ -119,6 +119,9 @@ func test_tree_shadow_layers() -> void:
 	check(not Picking.SELECTABLE_DRAWABLES.has("resource_shadow"), "shadow never enlarges pointer picking")
 	drawables = renderer.create_world_drawables(snapshot, projection, 1.0, provider)
 	check(drawables.filter(func(item): return item["kind"] == "resource_shadow").size() == 1, "resource cache reuses the shadow without duplicating it")
+	tree["tree_phase"] = "chopping"
+	drawables = renderer.create_world_drawables(snapshot, projection, 1.0, provider)
+	check(drawables.filter(func(item): return item["kind"] == "resource_shadow").size() == 1, "lumberjack strikes preserve the upright tree's shadow")
 	tree["tree_phase"] = "falling"
 	drawables = renderer.create_world_drawables(snapshot, projection, 1.0, provider)
 	check(drawables.all(func(item): return item["kind"] != "resource_shadow"), "standing canopy shadow disappears when the tree falls")

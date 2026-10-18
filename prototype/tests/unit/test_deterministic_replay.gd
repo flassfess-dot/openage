@@ -58,7 +58,9 @@ func test_round_trip_and_identical_state(catalog) -> void:
 	var second_world = second["world"]
 	var second_controller = second["controller"]
 	assert_true(second_controller.load_replay(serialized), "controller accepts serialized replay")
-	second_controller.advance_frame(0.5, 1, 2)
+	# Rendered frames have a wall-time budget and can finish different numbers
+	# of ticks on a cold/warm run. Determinism compares the same fixed tick.
+	assert_true(second_controller.replay_until_tick(first_controller.tick_index, 1, 2), "playback reaches the recorded comparison tick")
 	var second_hash: String = loaded.world_state_hash(second_world, second_controller.tick_index)
 	assert_equal(second_hash, first_hash, "same seed and commands produce identical state hash")
 	assert_equal(second_controller.last_replay_mismatch, "", "recorded per-tick hashes match playback")
