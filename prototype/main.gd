@@ -569,12 +569,7 @@ func reset_game() -> void:
 	navigation_loading.shutdown()
 	background_saves.drain()
 	presentation_publication.clear()
-	ai_runtime.shutdown()
-	render_snapshot_source.clear()
-	ai_decision_queue.cancel(task_coordinator)
-	task_coordinator.shutdown()
-	if simulation_world != null:
-		simulation_world.shutdown_derived_state()
+	match_lifecycle.retire_runtime(simulation_world, ai_runtime, render_snapshot_source, ai_decision_queue, task_coordinator)
 	if simulation_world == null:
 		return
 	var bootstrap: Dictionary = MatchBootstrap.apply(simulation_world, match_definition, map_definition)
@@ -593,18 +588,8 @@ func reset_game() -> void:
 	sound_cue_history.reset()
 	compact_status_visible = false
 	local_spectator = false
-	input_adapter.reset()
-	command_feedback_router.reset()
-	command_feedback_router.event_cursor = game_controller.event_stream.latest_sequence()
-	game_controller.event_stream.prune_through(command_feedback_router.event_cursor)
-	presentation_effect_timeline.reset()
-	cached_fog_revision = -1
-	cached_fog_runs.clear()
-	cached_world_fog_meshes.clear()
-	cached_world_fog_mesh_terrain_revision = -1
-	cached_world_fog_texture = null
-	cached_world_fog_texture_data.resize(0)
-	cached_world_fog_texture_revision = -1
+	_reset_command_feedback()
+	_reset_world_fog_cache()
 	cached_fog_slope_neighbor_cells.resize(0)
 	cached_fog_slope_neighbor_terrain_revision = -1
 	cached_map_edge_chains.clear()
@@ -616,16 +601,11 @@ func reset_game() -> void:
 	cached_minimap_terrain_texture = null
 	cached_minimap_terrain_revision = -1
 	cached_minimap_terrain_rectangle = Rect2()
-	cached_minimap_fog_texture = null
-	cached_minimap_fog_image = null
-	cached_minimap_exploration_revision = -1
-	cached_minimap_fog_rectangle = Rect2()
+	_reset_minimap_fog_cache()
 	cached_minimap_mesh_tick = -1
 	cached_minimap_mesh_rectangle = Rect2()
 	minimap_resource_index.clear()
-	cached_overview_tick = -1
-	cached_overview_resource_revision = -1
-	cached_hud_signature = null
+	_reset_overview_cache()
 	cached_environment_bounds = Rect2i()
 	cached_environment_items.clear()
 	if render_world != null:
@@ -1678,12 +1658,7 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	cached_environment_items.clear()
 	cached_environment_bounds = Rect2()
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
-	ai_runtime.shutdown()
-	render_snapshot_source.clear()
-	ai_decision_queue.cancel(task_coordinator)
-	task_coordinator.shutdown()
-	if simulation_world != null:
-		simulation_world.shutdown_derived_state()
+	match_lifecycle.retire_runtime(simulation_world, ai_runtime, render_snapshot_source, ai_decision_queue, task_coordinator)
 	navigation_loading.shutdown()
 	render_terrain_view = null
 	owner_delta = 0.0
@@ -1719,28 +1694,13 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	control_groups.last_recalled_group = int(saved_view.get("last_recalled_group", -1))
 	compact_status_visible = bool(saved_view.get("compact_status_visible", false))
 	sound_cue_history = restored_sound_history
-	input_adapter.reset()
-	command_feedback_router.reset()
-	command_feedback_router.event_cursor = game_controller.event_stream.latest_sequence()
-	game_controller.event_stream.prune_through(command_feedback_router.event_cursor)
-	presentation_effect_timeline.reset()
+	_reset_command_feedback()
 	command_marker_presentation.reset()
 	minimap_right_pressed = false
 	cached_rally_drawables.clear()
-	cached_fog_revision = -1
-	cached_fog_runs.clear()
-	cached_world_fog_meshes.clear()
-	cached_world_fog_mesh_terrain_revision = -1
-	cached_world_fog_texture = null
-	cached_world_fog_texture_data.resize(0)
-	cached_world_fog_texture_revision = -1
-	cached_minimap_fog_texture = null
-	cached_minimap_fog_image = null
-	cached_minimap_exploration_revision = -1
-	cached_minimap_fog_rectangle = Rect2()
-	cached_overview_tick = -1
-	cached_overview_resource_revision = -1
-	cached_hud_signature = null
+	_reset_world_fog_cache()
+	_reset_minimap_fog_cache()
+	_reset_overview_cache()
 	pending_build_kind = ""
 	pending_target_command = ""
 	local_spectator = false
@@ -2728,12 +2688,7 @@ func _exit_tree() -> void:
 	if resource_catalog != null:
 		resource_catalog.unit_presentations.shutdown_loading()
 	simulation_owner.shutdown()
-	ai_runtime.shutdown()
-	render_snapshot_source.clear()
-	ai_decision_queue.cancel(task_coordinator)
-	task_coordinator.shutdown()
-	if simulation_world != null:
-		simulation_world.task_coordinator.shutdown()
+	match_lifecycle.retire_runtime(simulation_world, ai_runtime, render_snapshot_source, ai_decision_queue, task_coordinator, false)
 	for shape in [Input.CURSOR_ARROW, Input.CURSOR_POINTING_HAND, Input.CURSOR_CAN_DROP, Input.CURSOR_MOVE, Input.CURSOR_CROSS, Input.CURSOR_FORBIDDEN]:
 		Input.set_custom_mouse_cursor(null, shape)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
@@ -3821,3 +3776,34 @@ func draw_map_edge_fog_overlay() -> void:
 			cached_map_edge_fog_meshes[edge] = _build_world_fog_mesh(regions[edge])
 		draw_mesh(cached_map_edge_fog_meshes[edge], cached_world_fog_texture, Transform2D.IDENTITY, Color.BLACK)
 	draw_set_transform(Vector2.ZERO)
+
+
+func _reset_command_feedback() -> void:
+	input_adapter.reset()
+	command_feedback_router.reset()
+	command_feedback_router.event_cursor = game_controller.event_stream.latest_sequence()
+	game_controller.event_stream.prune_through(command_feedback_router.event_cursor)
+	presentation_effect_timeline.reset()
+
+
+func _reset_world_fog_cache() -> void:
+	cached_fog_revision = -1
+	cached_fog_runs.clear()
+	cached_world_fog_meshes.clear()
+	cached_world_fog_mesh_terrain_revision = -1
+	cached_world_fog_texture = null
+	cached_world_fog_texture_data.resize(0)
+	cached_world_fog_texture_revision = -1
+
+
+func _reset_minimap_fog_cache() -> void:
+	cached_minimap_fog_texture = null
+	cached_minimap_fog_image = null
+	cached_minimap_exploration_revision = -1
+	cached_minimap_fog_rectangle = Rect2()
+
+
+func _reset_overview_cache() -> void:
+	cached_overview_tick = -1
+	cached_overview_resource_revision = -1
+	cached_hud_signature = null

@@ -1,7 +1,8 @@
 class_name RoRAiAdaptiveEconomy
 extends RefCounted
 const Commands := preload("res://scripts/commands.gd")
-const Legacy := preload("res://scripts/ai_economic_planner.gd")
+const EconomicPlanner := preload("res://scripts/ai_economic_planner.gd")
+const Rules := preload("res://scripts/ai_economy_rules.gd")
 const Combat := preload("res://scripts/ai_combat_model.gd")
 const Resources := preload("res://scripts/ai_resource_spatial_index.gd")
 const RESOURCE_NAMES := ["food", "wood", "stone", "gold"]
@@ -69,7 +70,7 @@ static func policy_for(snapshot: Dictionary, team: int, base: Dictionary, state)
 		by_id[int(resource.get("id", -1))] = resource
 		# Food coverage never needs distances to known trees, stone or gold.
 		# Keep every resource in the worker lookup, but score only usable food.
-		if int(resource.get("resource_type_id", -1)) != 0 or not Legacy._resource_allows_worker(resource, {"movement_domain": "land"}): continue
+		if int(resource.get("resource_type_id", -1)) != 0 or not Rules.resource_allows_worker(resource, {"movement_domain": "land"}): continue
 		var near_base := bases.is_empty()
 		for base_building in bases:
 			if Vector2(base_building.get("pos", Vector2.ZERO)).distance_to(Vector2(resource.get("pos", Vector2.ZERO))) <= 18.0:
@@ -214,7 +215,7 @@ static func site_kinds(kinds: Array, snapshot: Dictionary, team: int, base: Dict
 	# The adaptive budget decides age spending. The legacy site filter must not
 	# suppress emergency housing or producers just because an age is affordable.
 	policy["minimum_workers_before_age_up"] = 0
-	var demanded: Array = Legacy.construction_site_kinds(
+	var demanded: Array = EconomicPlanner.construction_site_kinds(
 		kinds,
 		snapshot.get("units", []),
 		complete,
@@ -291,7 +292,7 @@ static func plan(
 		var eligible: Array = workers.filter(
 			func(w): return ( not reserved.has(int(w.get("id", -1))) and String(w.get("task", "idle")) in ["idle", "gather"] and int(w.get("id", -1)) in foundation.get("reachable_builder_ids", []) )
 		)
-		eligible.sort_custom(func(a, b): return Legacy._foundation_builder_precedes(a, b, foundation))
+		eligible.sort_custom(func(a, b): return Rules.foundation_builder_precedes(a, b, foundation))
 		if not eligible.is_empty():
 			_offer(
 				result,
@@ -418,7 +419,7 @@ static func plan(
 		result,
 		policy.get("construction_priorities", []).filter(func(k): return k != "house")
 	)
-	result.append_array(Legacy._plan_idle_trade(snapshot, tick, team, units, buildings))
+	result.append_array(Rules.plan_idle_trade(snapshot, tick, team, units, buildings))
 	timings["production"] = Time.get_ticks_usec() - started
 	result.append_array(_economic_scout(snapshot, tick, team, policy, state, reserved))
 	result.append_array(_gather(snapshot, tick, team, policy, state, reserved, timings, resource_index))
@@ -491,7 +492,7 @@ static func _economic_scout(snapshot: Dictionary, tick: int, team: int, policy: 
 	var buildings := own(snapshot.get("buildings", []), team)
 	if buildings.any(func(b): return String(b.get("state", "complete")) == "foundation"): return []
 	var priorities: Array = policy.get("construction_priorities", [])
-	var essential_missing := ("barracks" in priorities and not buildings.any(func(b): return String(b.get("kind", "")) == "barracks")) or ("granary" in priorities and not buildings.any(func(b): return String(b.get("kind", "")) == "granary")) or ("house" in priorities and Legacy._needs_housing(snapshot.get("player_state", {}), int(policy.get("housing_buffer", 2)), false, Legacy._active_order_population_points(buildings)))
+	var essential_missing := ("barracks" in priorities and not buildings.any(func(b): return String(b.get("kind", "")) == "barracks")) or ("granary" in priorities and not buildings.any(func(b): return String(b.get("kind", "")) == "granary")) or ("house" in priorities and Rules.needs_housing(snapshot.get("player_state", {}), int(policy.get("housing_buffer", 2)), false, Rules.active_order_population_points(buildings)))
 	if not essential_missing: return []
 	var last: Dictionary = state.metrics.get("economic_scout", {})
 	if tick < int(last.get("deadline", -1)): return []
@@ -582,11 +583,11 @@ static func _construct(
 			continue
 		if (
 			kind == "house"
-			and not Legacy._needs_housing(
+			and not Rules.needs_housing(
 				snapshot.get("player_state", {}),
 				int(policy.get("housing_buffer", 2)),
 				int(snapshot.get("player_state", {}).get("blocked_population_queues", 0)) > 0,
-				Legacy._active_order_population_points(structures)
+				Rules.active_order_population_points(structures)
 			)
 		):
 			continue
@@ -623,7 +624,7 @@ static func _construct(
 				if kind not in policy.get("structure_gap_fallback_kinds", []):
 					var gap_key := [site, gap_radius]
 					if not memoized_site_checks_enabled or not site_gaps.has(gap_key):
-						site_gaps[gap_key] = Legacy._site_preserves_structure_gap(site, kind, worker, structures, float(policy.get("minimum_structure_gap", 1.0)))
+						site_gaps[gap_key] = Rules.site_preserves_structure_gap(site, kind, worker, structures, float(policy.get("minimum_structure_gap", 1.0)))
 					# Search appends legal tight sites after the spacious candidates.
 					# Prefer the requested gap, but do not deadlock a crowded town.
 					if not bool(site_gaps[gap_key]): gap_penalty = 1000.0
@@ -774,7 +775,7 @@ static func _gather(
 		if String(worker.get("task", "")) == "gather":
 			var id := int(worker.get("resource_id", -1))
 			saturation[id] = int(saturation.get(id, 0)) + 1
-	var reachable: Dictionary = snapshot["_economy_reachable_cells"] if snapshot.has("_economy_reachable_cells") else Legacy._reachable_cells_by_domain(snapshot.get("navigation", {}))
+	var reachable: Dictionary = snapshot["_economy_reachable_cells"] if snapshot.has("_economy_reachable_cells") else Rules.reachable_cells_by_domain(snapshot.get("navigation", {}), EconomicPlanner.native_reachable_lookup_enabled)
 	var drops: Array = own(snapshot.get("buildings", []), team).filter(
 		func(b): return bool(b.get("ai_drop_site", false)) and String(b.get("state", "complete")) == "complete"
 	)
@@ -843,7 +844,7 @@ static func _gather(
 			for resource in candidates:
 				# The adaptive blacklist owns retry lifetime. A completed order must
 				# not permanently veto the resource after its stored failure expires.
-				if policy.get("failed_gather_targets", {}).get(worker_id, {}).has(int(resource.get("id", -1))) or not Legacy._resource_has_reachable_approach(resource, worker, reachable):
+				if policy.get("failed_gather_targets", {}).get(worker_id, {}).has(int(resource.get("id", -1))) or not Rules.resource_has_reachable_approach(resource, worker, reachable):
 					continue
 				var position := Vector2(resource.get("pos", Vector2.ZERO))
 				var danger: float = state.danger(position, int(snapshot.get("tick", 0)), policy, domain)
@@ -940,7 +941,7 @@ static func _site_resource_bonuses(resources: Array, sites: Array, kind: String,
 		var site := Vector2(value)
 		var distance := INF
 		for resource in resources:
-			if int(resource.get("amount",0)) <= 0 or not Legacy._resource_allows_worker(resource,{"movement_domain":"land"}): continue
+			if int(resource.get("amount",0)) <= 0 or not Rules.resource_allows_worker(resource,{"movement_domain":"land"}): continue
 			if kind == "granary" and int(resource.get("resource_type_id",-1)) != 0: continue
 			if kind == "storage_pit" and int(resource.get("resource_type_id",-1)) == 0: continue
 			distance = minf(distance,site.distance_to(Vector2(resource.get("pos",Vector2.ZERO))))

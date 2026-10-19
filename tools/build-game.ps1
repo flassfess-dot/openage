@@ -1,10 +1,11 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$VerifyStartup
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "ror-build-common.ps1")
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $projectRoot = Join-Path $repositoryRoot "prototype"
@@ -19,75 +20,10 @@ $package = Join-Path $distributionRoot "Rise of Rome Prototype.pck"
 $nativeBuildScript = Join-Path $repositoryRoot "tools\build_native_pathfinding.ps1"
 $nativeLibrary = Join-Path $projectRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll"
 
-$requiredGeneratedFiles = @(
-    "assets.json",
-    "gamespec-prototype.json",
-    "graphics-catalog.json",
-    "objects-catalog.json",
-    "terrain-catalog.json",
-    "localization-catalog.json",
-    "sound-catalog.json",
-    "scenario-catalog.json",
-    "interface-source-inventory.json",
-    "interface_panel_0.png",
-    "interface_panel_1.png",
-    "interface_panel_2.png",
-    "interface_panel_3.png",
-    "interface\interface_50103.png",
-    "interface\interface_50109.png",
-    "interface\interface_50115.png",
-    "interface\interface_50145.png",
-    "hud_shell_640_4_00.png",
-    "hud_shell_640_4_01.png",
-    "hud_shell_800_4_00.png",
-    "hud_shell_800_4_01.png",
-    "hud_shell_1024_4_00.png",
-    "hud_shell_1024_4_01.png",
-    "hud_control_53007_00.png",
-    "hud_control_53007_01.png",
-    "hud_control_53008_00.png",
-    "hud_control_53008_01.png",
-    "hud_control_53009_00.png",
-    "hud_control_53009_01.png",
-    "hud_control_53009_02.png",
-    "hud_control_53009_03.png",
-    "hud_control_53304_00.png",
-    "hud_control_53304_01.png",
-    "hud_control_53304_02.png",
-    "hud_control_53304_03.png",
-    "matches\birth-of-rome.json",
-    "matches\pyrrhus-of-epirus.json",
-    "matches\syracuse.json",
-    "matches\metaurus.json",
-    "matches\zama.json",
-    "matches\mithridates.json",
-    "matches\struggle-for-sicily.json",
-    "matches\battle-of-mylae.json",
-    "matches\battle-of-tunes.json",
-    "validation-report.json"
-)
-foreach ($file in $requiredGeneratedFiles) {
-    $path = Join-Path $generatedRoot $file
-    if (-not (Test-Path -LiteralPath $path)) {
-        throw "Generated input is missing: $path. Run tools\import-assets.ps1 and tools\validate-cache.ps1 first."
-    }
-}
-if (-not (Test-Path -LiteralPath $godotApplication)) {
-    throw "Godot 4.7.2 was not found under $godotRoot"
-}
-
-if (-not (Test-Path -LiteralPath $releaseTemplate)) {
-    $templateArchive = Join-Path $godotRoot "Godot_v4.7.2-stable_export_templates.tpz"
-    if (-not (Test-Path -LiteralPath $templateArchive)) { throw "Godot Release export templates missing: $templateArchive" }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($templateArchive)
-    try {
-        $entry = $archive.GetEntry("templates/windows_release_x86_64.exe")
-        if ($null -eq $entry) { throw "Windows Release template missing from $templateArchive" }
-        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $releaseTemplate, $true)
-    } finally { $archive.Dispose() }
-}
+Assert-RoRGeneratedInputs -GeneratedRoot $generatedRoot -RecoveryHint "Run tools\import-assets.ps1 and tools\validate-cache.ps1 first."
+Initialize-RoRReleaseTemplate -GodotApplication $godotApplication -ReleaseTemplate $releaseTemplate
 & (Join-Path $PSScriptRoot "prepare-godot-project.ps1")
+Assert-ApplicationNotRunning
 New-Item -ItemType Directory -Force -Path $distributionRoot | Out-Null
 
 & $nativeBuildScript
@@ -96,35 +32,29 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $nativeLibrary)) {
 }
 
 function Invoke-GodotBuildStep {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Arguments,
-        [Parameter(Mandatory = $true)]
-        [string]$Description
-    )
-
-    $quotedArguments = $Arguments | ForEach-Object {
-        if ($_ -match '[\s"]') {
-            '"' + ($_ -replace '"', '\"') + '"'
-        }
-        else {
-            $_
-        }
+    param([string[]]$Arguments, [string]$Description, [string]$GodotLogPath)
+    if (Test-Path -LiteralPath $GodotLogPath) { Remove-Item -LiteralPath $GodotLogPath -Force }
+    $fullArguments = @("--log-file", $GodotLogPath) + $Arguments
+    $process = Start-Process -FilePath $godotHeadless -ArgumentList (Join-ProcessArguments $fullArguments) -PassThru -WindowStyle Hidden
+    # Retain the handle before waiting, including in Windows PowerShell 5.1.
+    $processHandle = $process.Handle
+    try {
+        $process.WaitForExit()
+        Assert-RoRGodotStep -Name $Description -ExitCode $process.ExitCode -LogPath $GodotLogPath
     }
-    $process = Start-Process -FilePath $godotHeadless -ArgumentList $quotedArguments -Wait -PassThru -WindowStyle Hidden
-    if ($process.ExitCode -ne 0) {
-        throw "$Description failed with exit code $($process.ExitCode)"
-    }
+    finally { $process.Dispose() }
 }
 
-Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--import") -Description "Godot resource import"
-Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--export-release", "Windows Desktop", $application) -Description "Godot package export"
+$qaRoot = Join-Path $projectRoot "qa\dev-scripts"
+New-Item -ItemType Directory -Force -Path $qaRoot | Out-Null
+$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
-New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "bin") | Out-Null
-Copy-Item -LiteralPath $nativeLibrary -Destination (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -Force
-New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "legal\MIT") | Out-Null
-Copy-Item -LiteralPath (Join-Path $repositoryRoot "legal\MIT\godot-cpp.md") -Destination (Join-Path $distributionRoot "legal\MIT\godot-cpp.md") -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $distributionRoot "README.md") -Force
+Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--import") -Description "Godot resource import" -GodotLogPath (Join-Path $qaRoot "build-godot-import-$timestamp.log")
+Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--export-release", "Windows Desktop", $application) -Description "Godot package export" -GodotLogPath (Join-Path $qaRoot "build-godot-export-$timestamp.log")
+
+Assert-ApplicationNotRunning
+Copy-RoRReleaseRuntime -RepositoryRoot $repositoryRoot -ProjectRoot $projectRoot -DistributionRoot $distributionRoot -NativeLibrary $nativeLibrary
+Get-RoRReleaseArtifacts -Application $application -Package $package -NativeLibrary (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -GodotApplication $godotApplication | Out-Null
 Write-Host "Release artifacts exported and copied: $application"
 if ($VerifyStartup) {
     try {

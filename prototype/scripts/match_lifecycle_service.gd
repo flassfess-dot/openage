@@ -45,6 +45,20 @@ func restore(path: String, new_world: Callable, new_players: Callable, configure
 	if not sound_history.restore_state(archive["view_state"]["sound_cue_history"], int(archive["tick"])): return _failed(world, "sound_cue_history_invalid")
 	return {"error": "", "archive": archive, "world": world, "controller": controller, "definition": definition, "map": map, "players": players, "decisions": decisions, "sound_history": sound_history}
 
+func retire_runtime(world, ai_runtime, render_snapshot_source, decisions, coordinator, release_derived_state: bool = true) -> void:
+	# Join/cancel producers before retiring the world they can still reference.
+	# Exiting only closes tasks; reset/load also discard derived world caches.
+	ai_runtime.shutdown()
+	render_snapshot_source.clear()
+	decisions.cancel(coordinator)
+	coordinator.shutdown()
+	if world != null:
+		if release_derived_state:
+			world.shutdown_derived_state()
+		else:
+			world.task_coordinator.shutdown()
+
+
 func _failed(world, error: String) -> Dictionary:
 	world.shutdown_derived_state()
 	return {"error": error}

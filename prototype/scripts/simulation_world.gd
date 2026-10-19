@@ -4,6 +4,7 @@ const TaskData := preload("res://scripts/isolated_task_data.gd")
 const TaskCoordinator := preload("res://scripts/isolated_task_coordinator.gd")
 var task_coordinator := TaskCoordinator.new()
 
+const ApproachGeometry := preload("res://scripts/building_approach_geometry.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
 const FacingConvention := preload("res://scripts/facing_convention.gd")
 const EntityIds := preload("res://scripts/entity_id.gd")
@@ -1928,22 +1929,7 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Vari
 
 
 func building_perimeter_candidates(worker: Dictionary, building: Dictionary) -> Array[Vector2]:
-	var half_size: Vector2 = building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))
-	# Keep all mobile-radius probes outside the whole navigation cell occupied by
-	# the building. Half-cell clearance is required even when the visual polygon
-	# itself ends earlier inside that cell.
-	var padding := float(worker.get("footprint_radius", 0.3)) + 0.55
-	var side_fractions := [-0.75, -0.25, 0.25, 0.75]
-	var offsets: Array[Vector2] = []
-	for fraction in side_fractions:
-		offsets.append(Vector2(float(fraction) * half_size.x, -half_size.y - padding))
-		offsets.append(Vector2(half_size.x + padding, float(fraction) * half_size.y))
-		offsets.append(Vector2(float(fraction) * half_size.x, half_size.y + padding))
-		offsets.append(Vector2(-half_size.x - padding, float(fraction) * half_size.y))
-	var result: Array[Vector2] = []
-	for offset in offsets:
-		result.append(Coordinates.clamp_world(Vector2(building["pos"]) + offset, map_size))
-	return result
+	return ApproachGeometry.perimeter_candidates(worker, building, map_size)
 
 
 func finish_gather_order(worker: Dictionary, reason: String) -> void:
@@ -4221,7 +4207,7 @@ func end_runtime_task_capture() -> Array:
 	runtime_actor_eligibility.clear()
 	return result
 
-func notify_entity_changed(entity: Dictionary, mask: int = 254) -> void:
+func notify_entity_changed(entity: Dictionary, mask: int = EntityChangeJournal.MUTABLE_GROUPS) -> void:
 	entity_changes.mark(int(entity.get("id", -1)), mask)
 	if mask & EntityChangeJournal.ACTIVITY: refresh_unit_activity(entity)
 

@@ -1,6 +1,9 @@
 class_name RoRRandomMapGenerator
 extends RefCounted
 
+const ProceduralNoise := preload("res://scripts/procedural_noise.gd")
+const Recipe := preload("res://scripts/random_map_recipe.gd")
+
 const Landscape := preload("res://scripts/random_map_landscape.gd")
 const LandscapeNavigation := preload("res://scripts/random_map_navigation.gd")
 const Topology := preload("res://scripts/random_map_topology.gd")
@@ -420,24 +423,11 @@ static func _smooth_water_mask(terrain_ids: Array[int], size: Vector2i) -> void:
 
 
 static func _smooth_noise(point: Vector2, scale: float, seed: int) -> float:
-	var sample := point / maxf(1.0, scale)
-	var origin := Vector2i(floori(sample.x), floori(sample.y))
-	var fraction := sample - Vector2(origin)
-	var smooth_x := fraction.x * fraction.x * (3.0 - 2.0 * fraction.x)
-	var smooth_y := fraction.y * fraction.y * (3.0 - 2.0 * fraction.y)
-	var top := lerpf(_hash_noise(origin, seed), _hash_noise(origin + Vector2i.RIGHT, seed), smooth_x)
-	var bottom := lerpf(_hash_noise(origin + Vector2i.DOWN, seed), _hash_noise(origin + Vector2i.ONE, seed), smooth_x)
-	return lerpf(top, bottom, smooth_y)
+	return ProceduralNoise.smooth(point, scale, seed)
 
 
 static func _hash_noise(cell: Vector2i, seed: int) -> float:
-	# The placement hash below deliberately preserves old resource seeds, but
-	# its neighboring values correlate too strongly for visible terrain noise.
-	var value := (int(cell.x) * 73856093) ^ (int(cell.y) * 19349663) ^ (seed * 83492791)
-	value = ((value ^ (value >> 16)) * 0x7feb352d) & 0xffffffff
-	value = ((value ^ (value >> 15)) * 0x846ca68b) & 0xffffffff
-	value = (value ^ (value >> 16)) & 0xffffffff
-	return float(value) / 4294967295.0 * 2.0 - 1.0
+	return ProceduralNoise.hash_cell(cell, seed)
 
 
 static func _profile_cliff_cells(size: Vector2i, cliff_profile: String, seed: int) -> Array[Vector2i]:
@@ -1051,11 +1041,12 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 
 
 static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary, candidate: int = 0, prepared_geography: Dictionary = {}) -> Dictionary:
-	var watershed := int(generator.get("version", -1)) == WatershedWorld.VERSION
-	var wild := watershed or int(generator.get("version", -1)) == WildIslands.VERSION
+	var version := int(generator.get("version", -1))
+	var watershed := version == WatershedWorld.VERSION
+	var wild := watershed or version == WildIslands.VERSION
 	var river_network := wild and bool(generator.get("river_network", false))
-	var macro := wild or int(generator.get("version", -1)) == Geography.VERSION
-	var natural := macro or int(generator.get("version", -1)) == NaturalLandscape.VERSION
+	var macro := wild or version == Geography.VERSION
+	var natural := macro or version == NaturalLandscape.VERSION
 	var started := Time.get_ticks_usec()
 	var checkpoint := started
 	var starts: Array[Vector2] = []
@@ -1064,9 +1055,9 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 	if watershed and prepared_geography.get("size") == size and int(prepared_geography.get("seed", -1)) == seed and prepared_geography.get("profile") == generator.get("map_type_id"):
 		geography = prepared_geography.duplicate(true)
 	else:
-		geography = WatershedWorld.geography(size, String(generator.get("map_type_id", "continental")), seed) if watershed else WildIslands.geography(size, seed, river_network) if wild else Geography.geography(size, String(generator.get("map_type_id", "grasslands")), seed, starts.size()) if macro else {}
+		geography = Recipe.geography(version, size, generator, seed, starts.size())
 	var topology := String(generator.get("topology", "inland"))
-	var layout := {} if macro else NaturalTopology.prepare(size, starts, topology, generator, seed) if natural else Topology.prepare(size, starts, topology, generator, seed)
+	var layout := Recipe.topology(version, size, starts, generator, seed)
 	var terrain: Array[int] = []
 	terrain.resize(size.x * size.y)
 	for y in range(size.y):
@@ -1083,7 +1074,7 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 	var cliffs := _profile_cliff_cells(size, String(generator.get("cliff_profile", "")), seed)
 	checkpoint = _landscape_checkpoint(diagnostics, "coast", checkpoint)
 	_report_progress(progress, 0.18, "Выбор рельефа и природных областей")
-	var fields: Dictionary = geography["fields"] if macro else NaturalLandscape.fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed ^ (0x2A63B91 + candidate * 104729)) if natural else Landscape.select_fields(size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed)
+	var fields: Dictionary = Recipe.fields(version, geography, size, terrain, starts, String(generator.get("map_type_id", "grasslands")), seed, candidate)
 	if macro:
 		fields = geography["fields"]
 		Geography.settle(fields, size, starts)

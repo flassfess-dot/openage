@@ -1,6 +1,8 @@
 class_name RoRRandomMapWater
 extends RefCounted
 
+const ProceduralNoise := preload("res://scripts/procedural_noise.gd")
+
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 
 const COASTAL_WATER_TERRAIN_ID := 1
@@ -173,22 +175,11 @@ static func _land_direction(cell: Vector2i, terrain_ids: Array[int], size: Vecto
 
 
 static func _smooth_noise(point: Vector2, scale: float, seed: int) -> float:
-	var sample := point / maxf(1.0, scale)
-	var origin := Vector2i(floori(sample.x), floori(sample.y))
-	var fraction := sample - Vector2(origin)
-	var smooth_x := fraction.x * fraction.x * (3.0 - 2.0 * fraction.x)
-	var smooth_y := fraction.y * fraction.y * (3.0 - 2.0 * fraction.y)
-	var top := lerpf(_hash_noise(origin, seed), _hash_noise(origin + Vector2i.RIGHT, seed), smooth_x)
-	var bottom := lerpf(_hash_noise(origin + Vector2i.DOWN, seed), _hash_noise(origin + Vector2i.ONE, seed), smooth_x)
-	return lerpf(top, bottom, smooth_y)
+	return ProceduralNoise.smooth(point, scale, seed)
 
 
 static func _hash_noise(cell: Vector2i, seed: int) -> float:
-	var value := (int(cell.x) * 73856093) ^ (int(cell.y) * 19349663) ^ (seed * 83492791)
-	value = ((value ^ (value >> 16)) * 0x7feb352d) & 0xffffffff
-	value = ((value ^ (value >> 15)) * 0x846ca68b) & 0xffffffff
-	value = (value ^ (value >> 16)) & 0xffffffff
-	return float(value) / 4294967295.0 * 2.0 - 1.0
+	return ProceduralNoise.hash_cell(cell, seed)
 
 
 static func _in_bounds(cell: Vector2i, size: Vector2i) -> bool:

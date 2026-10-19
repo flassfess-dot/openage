@@ -1,6 +1,6 @@
 extends SceneTree
-# Run through --main-pack as well as the source project: a source-only pass
-# does not prove that the user's exported game contains the current generator.
+# Legacy v3 maps remain supported in source and exported PCKs.
+# Current defaults and v6 geography are covered by test_world_generator.gd.
 const Settings := preload("res://scripts/skirmish_settings.gd")
 const Landscape := preload("res://scripts/random_map_landscape.gd")
 const NaturalLandscape := preload("res://scripts/random_map_natural_landscape.gd")
@@ -28,8 +28,11 @@ func run() -> void:
 		["supergiant", "mediterranean", 1790800800],
 		["supergiant", "coastal", 2147483647],
 	]
+	if "--smoke" in OS.get_cmdline_user_args():
+		fixtures = [["compact", "grasslands", 1], ["compact", "highlands", 7919]]
 	for fixture in fixtures:
 		var settings := Settings.default_settings()
+		settings["landscape_version"] = NaturalLandscape.VERSION
 		settings["map_size_id"] = fixture[0]
 		settings["map_type_id"] = fixture[1]
 		settings["seed"] = fixture[2]
@@ -39,7 +42,7 @@ func run() -> void:
 		check(built.get("valid", false), label + ": playable match " + str(built.get("errors", [])))
 		if not built.get("valid", false): continue
 		var data: Dictionary = built["map_data"]
-		check(data.get("generator_version", -1) == NaturalLandscape.VERSION, label + ": current generator")
+		check(data.get("generator_version", -1) == NaturalLandscape.VERSION, label + ": explicit legacy v3 generator")
 		check(data.get("ecology", {}).get("tree_sources", {}).get("ror", 0) > 0, label + ": native trees")
 		check(data.get("ecology", {}).get("tree_sources", {}).get("aoe2", 0) > 0, label + ": imported trees")
 		var coverage := measure_woodland(data)
@@ -58,7 +61,7 @@ func run() -> void:
 			var output := FileAccess.open(argument.trim_prefix("--report="), FileAccess.WRITE)
 			output.store_string(JSON.stringify({"maps": rows, "failures": failures}, "  "))
 	for failure in failures: push_error(failure)
-	if failures.is_empty(): print("Packaged map coverage passed: 8 maps, all six sizes, low/high/time-like seeds and mixed resources")
+	if failures.is_empty(): print("Legacy v3 packaged map coverage passed: %d maps" % fixtures.size())
 	quit(0 if failures.is_empty() else 1)
 
 func measure_woodland(data: Dictionary) -> Dictionary:

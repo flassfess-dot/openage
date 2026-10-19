@@ -1,10 +1,11 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$VerifyStartup
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "ror-build-common.ps1")
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $projectRoot = Join-Path $repositoryRoot "prototype"
@@ -37,48 +38,6 @@ function Write-Status {
     )
     Write-Progress -Activity "Rise of Rome build" -Status $Status -PercentComplete $Percent
     Write-LogLine ("PROGRESS {0,3}% | {1}" -f $Percent, $Status)
-}
-
-function Get-ArtifactSha256 {
-    param([string]$Path)
-    # Also works in child PowerShell sessions with restricted module discovery.
-    $stream = [System.IO.File]::OpenRead($Path)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { return [System.BitConverter]::ToString($sha.ComputeHash($stream)) }
-    finally { $sha.Dispose(); $stream.Dispose() }
-}
-
-function Assert-ApplicationNotRunning {
-    # WMI/CIM process inspection is denied in some managed Windows sessions.
-    # The packaged executable has a unique process name, so the ordinary
-    # process API provides the same overwrite guard without elevated access.
-    $running = @(Get-Process -Name "Rise of Rome Prototype" -ErrorAction SilentlyContinue)
-    if ($running.Count -eq 0) {
-        return
-    }
-    $processDetails = ($running | ForEach-Object {
-        $processPath = ""
-        try {
-            $processPath = [string]$_.Path
-        }
-        catch {
-            $processPath = "path unavailable"
-        }
-        "PID {0}: {1}" -f $_.Id, $processPath
-    }) -join "; "
-    throw "A process is using the packaged executable: $processDetails. Close the visible game or stop the headless test, then run the full build again."
-}
-
-function Join-ProcessArguments {
-    param([string[]]$ArgumentList)
-    return (($ArgumentList | ForEach-Object {
-        if ($_ -match '[\s"]') {
-            '"' + ($_ -replace '"', '\"') + '"'
-        }
-        else {
-            $_
-        }
-    }) -join " ")
 }
 
 function Invoke-LoggedCommand {
@@ -174,13 +133,7 @@ function Invoke-GodotLogged {
         if ($null -ne $reader) {
             Read-GodotLogUpdates -Reader $reader -Name $Name -StartPercent $StartPercent -EndPercent $EndPercent -ProgressState $progressState
         }
-        if ($null -eq $process.ExitCode) { throw "$Name did not expose an exit code; see $GodotLogPath" }
-        if ($process.ExitCode -ne 0) { throw "$Name failed with exit code $($process.ExitCode); see $GodotLogPath" }
-        # Import/export can return zero after a script fails to compile.
-        # Inspect the complete raw log, including compacted progress lines.
-        if ((Test-Path -LiteralPath $GodotLogPath) -and (Select-String -LiteralPath $GodotLogPath -Pattern 'SCRIPT ERROR:|Parse Error:|Failed to load script' -Quiet)) {
-            throw "$Name contains script compilation errors; see $GodotLogPath"
-        }
+        Assert-RoRGodotStep -Name $Name -ExitCode $process.ExitCode -LogPath $GodotLogPath
         Write-Status $EndPercent "$Name complete"
     }
     finally {
@@ -194,86 +147,8 @@ try {
     Write-LogLine "Repository: $repositoryRoot"
     Write-Status 0 "checking generated inputs"
 
-    $requiredGeneratedFiles = @(
-        "assets.json",
-        "gamespec-prototype.json",
-        "graphics-catalog.json",
-        "objects-catalog.json",
-        "terrain-catalog.json",
-        "localization-catalog.json",
-        "sound-catalog.json",
-        "scenario-catalog.json",
-        "interface-source-inventory.json",
-        "interface_panel_0.png",
-        "interface_panel_1.png",
-        "interface_panel_2.png",
-        "interface_panel_3.png",
-        "interface\interface_50103.png",
-        "interface\interface_50109.png",
-        "interface\interface_50115.png",
-        "interface\interface_50145.png",
-        "hud_shell_640_4_00.png",
-        "hud_shell_640_4_01.png",
-        "hud_shell_800_4_00.png",
-        "hud_shell_800_4_01.png",
-        "hud_shell_1024_4_00.png",
-        "hud_shell_1024_4_01.png",
-        "hud_control_53007_00.png",
-        "hud_control_53007_01.png",
-        "hud_control_53008_00.png",
-        "hud_control_53008_01.png",
-        "hud_control_53009_00.png",
-        "hud_control_53009_01.png",
-        "hud_control_53009_02.png",
-        "hud_control_53009_03.png",
-        "hud_control_53304_00.png",
-        "hud_control_53304_01.png",
-        "hud_control_53304_02.png",
-        "hud_control_53304_03.png",
-        "ror_cursor_00.png",
-        "ror_cursor_01.png",
-        "ror_cursor_02.png",
-        "ror_cursor_03.png",
-        "ror_cursor_04.png",
-        "ror_cursor_05.png",
-        "ror_cursor_06.png",
-        "ror_command_marker_01.png",
-        "ror_command_marker_02.png",
-        "ror_command_marker_03.png",
-        "ror_command_marker_04.png",
-        "ror_command_marker_05.png",
-        "ror_command_marker_06.png",
-        "matches\birth-of-rome.json",
-        "matches\pyrrhus-of-epirus.json",
-        "matches\syracuse.json",
-        "matches\metaurus.json",
-        "matches\zama.json",
-        "matches\mithridates.json",
-        "matches\struggle-for-sicily.json",
-        "matches\battle-of-mylae.json",
-        "matches\battle-of-tunes.json",
-        "validation-report.json"
-    )
-    foreach ($file in $requiredGeneratedFiles) {
-        $path = Join-Path $generatedRoot $file
-        if (-not (Test-Path -LiteralPath $path)) {
-            throw "Generated input is missing: $path. Run tools\ror-repack-resources.ps1 first."
-        }
-    }
-    if (-not (Test-Path -LiteralPath $godotApplication)) {
-        throw "Missing Godot executable: $godotApplication"
-    }
-    if (-not (Test-Path -LiteralPath $releaseTemplate)) {
-        $templateArchive = Join-Path (Split-Path -Parent $releaseTemplate) "Godot_v4.7.2-stable_export_templates.tpz"
-        if (-not (Test-Path -LiteralPath $templateArchive)) { throw "Missing Windows Release template: $releaseTemplate" }
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        $archive = [System.IO.Compression.ZipFile]::OpenRead($templateArchive)
-        try {
-            $entry = $archive.GetEntry("templates/windows_release_x86_64.exe")
-            if ($null -eq $entry) { throw "Windows Release template missing from $templateArchive" }
-            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $releaseTemplate, $true)
-        } finally { $archive.Dispose() }
-    }
+    Assert-RoRGeneratedInputs -GeneratedRoot $generatedRoot -IncludeInteractionAssets -RecoveryHint "Run tools\ror-repack-resources.ps1 first."
+    Initialize-RoRReleaseTemplate -GodotApplication $godotApplication -ReleaseTemplate $releaseTemplate
     & (Join-Path $PSScriptRoot "prepare-godot-project.ps1")
     Assert-ApplicationNotRunning
     New-Item -ItemType Directory -Force -Path $distributionRoot | Out-Null
@@ -308,19 +183,10 @@ try {
 
     Write-Status 93 "copying Release runtime files"
     Assert-ApplicationNotRunning
-    New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "bin") | Out-Null
-    Copy-Item -LiteralPath $nativeLibrary -Destination (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -Force
-    New-Item -ItemType Directory -Force -Path (Join-Path $distributionRoot "legal\MIT") | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot "legal\MIT\godot-cpp.md") -Destination (Join-Path $distributionRoot "legal\MIT\godot-cpp.md") -Force
-    Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination (Join-Path $distributionRoot "README.md") -Force
+    Copy-RoRReleaseRuntime -RepositoryRoot $repositoryRoot -ProjectRoot $projectRoot -DistributionRoot $distributionRoot -NativeLibrary $nativeLibrary
 
     Write-Status 98 "verifying Release build artifacts"
-    if ((Get-ArtifactSha256 $application) -eq (Get-ArtifactSha256 $godotApplication)) { throw "Release executable was replaced by the Godot editor" }
-    foreach ($artifact in @($application, $package, (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll"))) {
-        if (-not (Test-Path -LiteralPath $artifact)) {
-            throw "Build artifact is missing: $artifact"
-        }
-        $item = Get-Item -LiteralPath $artifact
+    foreach ($item in (Get-RoRReleaseArtifacts -Application $application -Package $package -NativeLibrary (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -GodotApplication $godotApplication)) {
         Write-LogLine ("ARTIFACT: {0} | {1} bytes | {2}" -f $item.FullName, $item.Length, $item.LastWriteTime)
     }
 

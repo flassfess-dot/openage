@@ -13,6 +13,7 @@ const APPEARANCE := 32
 const CONTROL := 64
 const OWNERSHIP := 128
 const ALL := 255
+const MUTABLE_GROUPS := ALL ^ LIFECYCLE
 const GROUP_COUNT := 8
 const MAX_BATCHES := 256
 const MAX_PENDING_IDS := 8192

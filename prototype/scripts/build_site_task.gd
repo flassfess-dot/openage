@@ -7,6 +7,7 @@ const Pathfinder := preload("res://scripts/pathfinder.gd")
 const StaticAuditCache := preload("res://scripts/build_site_static_cache.gd")
 const Placement := preload("res://scripts/simulation_building_placement_system.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
+const ApproachGeometry := preload("res://scripts/building_approach_geometry.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
 const GateSystem := preload("res://scripts/gate_system.gd")
 const WallPlacement := preload("res://scripts/wall_placement.gd")
@@ -384,22 +385,7 @@ func search(team: int, kinds: Array, maximum_per_kind: int = 4, search_radius: i
 
 
 func building_perimeter_candidates(worker: Dictionary, building: Dictionary) -> Array[Vector2]:
-	var half_size: Vector2 = building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))
-	# Keep all mobile-radius probes outside the whole navigation cell occupied by
-	# the building. Half-cell clearance is required even when the visual polygon
-	# itself ends earlier inside that cell.
-	var padding := float(worker.get("footprint_radius", 0.3)) + 0.55
-	var side_fractions := [-0.75, -0.25, 0.25, 0.75]
-	var offsets: Array[Vector2] = []
-	for fraction in side_fractions:
-		offsets.append(Vector2(float(fraction) * half_size.x, -half_size.y - padding))
-		offsets.append(Vector2(half_size.x + padding, float(fraction) * half_size.y))
-		offsets.append(Vector2(float(fraction) * half_size.x, half_size.y + padding))
-		offsets.append(Vector2(-half_size.x - padding, float(fraction) * half_size.y))
-	var result: Array[Vector2] = []
-	for offset in offsets:
-		result.append(Coordinates.clamp_world(Vector2(building["pos"]) + offset, map_size))
-	return result
+	return ApproachGeometry.perimeter_candidates(worker, building, map_size)
 
 
 func _append_bounded_sites(sites: Array, fallback_sites: Array, maximum: int) -> void:
