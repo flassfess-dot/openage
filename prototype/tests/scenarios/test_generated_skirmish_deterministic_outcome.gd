@@ -27,6 +27,7 @@ func _initialize() -> void:
 	var live := create_runtime(built)
 	var world = live["world"]
 	var controller = live["controller"]
+	controller.set_speed_multiplier(1.0)
 	var ai = AiPlayer.new(built["definition"]["players"][1])
 	var recorder = controller.start_recording(SEED, false)
 	var issued := 0
@@ -34,12 +35,17 @@ func _initialize() -> void:
 	var progress_town_center_hp := 600.0
 	while int(controller.tick_index) < MAX_TICKS and not world.is_battle_over():
 		var next_tick := int(controller.tick_index) + 1
+		ai.collect_feedback(controller, controller.tick_index)
 		if ai.needs_decision(next_tick):
 			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, int(ai.team), ai.presentation_options())
 			for command in ai.collect_commands(knowledge, next_tick):
+				var metadata: Dictionary = command.params.get("_ai_feedback", {})
+				command.params.erase("_ai_feedback")
 				controller.enqueue_command(command, true, int(ai.team))
+				ai.register_proposal(command, metadata)
 				issued += 1
-		controller.advance_frame(0.5, 1, 2)
+		# Keep AI observation ticks independent of the host's frame CPU budget.
+		controller.advance_frame(0.05, 1, 2)
 		if progress_tick < 0 and int(controller.tick_index) >= PROGRESS_TICK:
 			progress_tick = int(controller.tick_index)
 			progress_town_center_hp = _enemy_town_center_hp(world)
@@ -89,6 +95,8 @@ func _initialize() -> void:
 
 func generated_match() -> Dictionary:
 	var settings := SkirmishSettings.default_settings()
+	# The frozen victory checkpoint and seed refer to the original v3 map.
+	settings["landscape_version"] = 3
 	settings["map_size_id"] = "compact"
 	settings["map_type_id"] = "grasslands"
 	settings["seed"] = SEED

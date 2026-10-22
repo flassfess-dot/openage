@@ -1,5 +1,14 @@
 extends Node2D
 
+const MatchMinimapRenderer := preload("res://scripts/match_minimap_renderer.gd")
+var minimap_renderer := MatchMinimapRenderer.new()
+
+const MatchFogRenderer := preload("res://scripts/match_fog_renderer.gd")
+var fog_renderer := MatchFogRenderer.new()
+
+const MatchCommandActions := preload("res://scripts/match_command_actions.gd")
+var command_actions := MatchCommandActions.new()
+
 const Coordinates := preload("res://scripts/coordinates.gd")
 const SimulationWorld := preload("res://scripts/simulation_world.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
@@ -163,18 +172,66 @@ var overview_resource_nodes: Array = []
 var overview_buildings: Array = []
 var presentation_snapshot: Dictionary = {}
 var formation := "RECTANGLE"
-var pending_build_kind := ""
-var pending_gate_axis := 0
-var pending_build_started := false
-var resource_feedback_id := -1
-var resource_feedback_time := 0.0
-var placement_preview_key := ""
-var placement_preview_valid := false
-var wall_placement_preview_key := ""
-var wall_placement_preview: Dictionary = {}
-var wall_preview_renderer := RenderWorld.new()
-var pending_target_command := ""
-var pending_target_queue_order := false
+var pending_build_kind: String:
+	get:
+		return command_actions.pending_build_kind
+	set(value):
+		command_actions.pending_build_kind = value
+var pending_gate_axis: int:
+	get:
+		return command_actions.pending_gate_axis
+	set(value):
+		command_actions.pending_gate_axis = value
+var pending_build_started: bool:
+	get:
+		return command_actions.pending_build_started
+	set(value):
+		command_actions.pending_build_started = value
+var resource_feedback_id: int:
+	get:
+		return command_actions.resource_feedback_id
+	set(value):
+		command_actions.resource_feedback_id = value
+var resource_feedback_time: float:
+	get:
+		return command_actions.resource_feedback_time
+	set(value):
+		command_actions.resource_feedback_time = value
+var placement_preview_key: String:
+	get:
+		return command_actions.placement_preview_key
+	set(value):
+		command_actions.placement_preview_key = value
+var placement_preview_valid: bool:
+	get:
+		return command_actions.placement_preview_valid
+	set(value):
+		command_actions.placement_preview_valid = value
+var wall_placement_preview_key: String:
+	get:
+		return command_actions.wall_placement_preview_key
+	set(value):
+		command_actions.wall_placement_preview_key = value
+var wall_placement_preview: Dictionary:
+	get:
+		return command_actions.wall_placement_preview
+	set(value):
+		command_actions.wall_placement_preview = value
+var wall_preview_renderer: RenderWorld:
+	get:
+		return command_actions.wall_preview_renderer
+	set(value):
+		command_actions.wall_preview_renderer = value
+var pending_target_command: String:
+	get:
+		return command_actions.pending_target_command
+	set(value):
+		command_actions.pending_target_command = value
+var pending_target_queue_order: bool:
+	get:
+		return command_actions.pending_target_queue_order
+	set(value):
+		command_actions.pending_target_queue_order = value
 var game_message := "Выберите отряд и отдайте приказ правой кнопкой"
 var message_time := 5.0
 var battle_over := false
@@ -223,33 +280,141 @@ var hud_model: Dictionary = {}
 var cached_hud_signature: Variant = null
 var scenario_overlay: ScenarioOverlay
 var terrain_canvas: TerrainCanvas
-var cached_fog_revision: int = -1
-var cached_fog_runs: Array = []
-var cached_world_fog_meshes: Dictionary = {}
-var cached_world_fog_mesh_terrain_revision: int = -1
-var cached_world_fog_texture: ImageTexture
-var cached_world_fog_texture_data := PackedByteArray()
-var cached_world_fog_texture_revision: int = -1
-var cached_world_fog_stamp: Dictionary = {}
-var cached_fog_slope_neighbor_cells := PackedByteArray()
-var cached_fog_slope_neighbor_terrain_revision: int = -1
-var cached_map_edge_chains: Array[PackedVector2Array] = []
-var cached_map_edge_fog_meshes: Dictionary = {}
-var cached_map_edge_fog_revision := -1
-var cached_map_edge_zoom := -1.0
-var cached_map_edge_terrain_revision := -1
-var cached_minimap_mesh: ArrayMesh
-var cached_minimap_terrain_texture: ImageTexture
-var cached_minimap_terrain_revision: int = -1
-var cached_minimap_terrain_rectangle := Rect2()
-var cached_minimap_fog_texture: ImageTexture
-var cached_minimap_fog_image: Image
-var cached_minimap_exploration_revision: int = -1
-var cached_minimap_fog_tick := -1
-var cached_minimap_fog_rectangle := Rect2()
-var cached_minimap_mesh_tick: int = -1
-var cached_minimap_mesh_rectangle := Rect2()
-var minimap_resource_index := MinimapResourceIndex.new()
+var cached_fog_revision: int:
+	get:
+		return fog_renderer.cached_fog_revision
+	set(value):
+		fog_renderer.cached_fog_revision = value
+var cached_fog_runs: Array:
+	get:
+		return fog_renderer.cached_fog_runs
+	set(value):
+		fog_renderer.cached_fog_runs = value
+var cached_world_fog_meshes: Dictionary:
+	get:
+		return fog_renderer.cached_world_fog_meshes
+	set(value):
+		fog_renderer.cached_world_fog_meshes = value
+var cached_world_fog_mesh_terrain_revision: int:
+	get:
+		return fog_renderer.cached_world_fog_mesh_terrain_revision
+	set(value):
+		fog_renderer.cached_world_fog_mesh_terrain_revision = value
+var cached_world_fog_texture: ImageTexture:
+	get:
+		return fog_renderer.cached_world_fog_texture
+	set(value):
+		fog_renderer.cached_world_fog_texture = value
+var cached_world_fog_texture_data: PackedByteArray:
+	get:
+		return fog_renderer.cached_world_fog_texture_data
+	set(value):
+		fog_renderer.cached_world_fog_texture_data = value
+var cached_world_fog_texture_revision: int:
+	get:
+		return fog_renderer.cached_world_fog_texture_revision
+	set(value):
+		fog_renderer.cached_world_fog_texture_revision = value
+var cached_world_fog_stamp: Dictionary:
+	get:
+		return fog_renderer.cached_world_fog_stamp
+	set(value):
+		fog_renderer.cached_world_fog_stamp = value
+var cached_fog_slope_neighbor_cells: PackedByteArray:
+	get:
+		return fog_renderer.cached_fog_slope_neighbor_cells
+	set(value):
+		fog_renderer.cached_fog_slope_neighbor_cells = value
+var cached_fog_slope_neighbor_terrain_revision: int:
+	get:
+		return fog_renderer.cached_fog_slope_neighbor_terrain_revision
+	set(value):
+		fog_renderer.cached_fog_slope_neighbor_terrain_revision = value
+var cached_map_edge_chains: Array[PackedVector2Array]:
+	get:
+		return fog_renderer.cached_map_edge_chains
+	set(value):
+		fog_renderer.cached_map_edge_chains = value
+var cached_map_edge_fog_meshes: Dictionary:
+	get:
+		return fog_renderer.cached_map_edge_fog_meshes
+	set(value):
+		fog_renderer.cached_map_edge_fog_meshes = value
+var cached_map_edge_fog_revision: int:
+	get:
+		return fog_renderer.cached_map_edge_fog_revision
+	set(value):
+		fog_renderer.cached_map_edge_fog_revision = value
+var cached_map_edge_zoom: float:
+	get:
+		return fog_renderer.cached_map_edge_zoom
+	set(value):
+		fog_renderer.cached_map_edge_zoom = value
+var cached_map_edge_terrain_revision: int:
+	get:
+		return fog_renderer.cached_map_edge_terrain_revision
+	set(value):
+		fog_renderer.cached_map_edge_terrain_revision = value
+var cached_minimap_mesh: ArrayMesh:
+	get:
+		return minimap_renderer.cached_minimap_mesh
+	set(value):
+		minimap_renderer.cached_minimap_mesh = value
+var cached_minimap_terrain_texture: ImageTexture:
+	get:
+		return minimap_renderer.cached_minimap_terrain_texture
+	set(value):
+		minimap_renderer.cached_minimap_terrain_texture = value
+var cached_minimap_terrain_revision: int:
+	get:
+		return minimap_renderer.cached_minimap_terrain_revision
+	set(value):
+		minimap_renderer.cached_minimap_terrain_revision = value
+var cached_minimap_terrain_rectangle: Rect2:
+	get:
+		return minimap_renderer.cached_minimap_terrain_rectangle
+	set(value):
+		minimap_renderer.cached_minimap_terrain_rectangle = value
+var cached_minimap_fog_texture: ImageTexture:
+	get:
+		return minimap_renderer.cached_minimap_fog_texture
+	set(value):
+		minimap_renderer.cached_minimap_fog_texture = value
+var cached_minimap_fog_image: Image:
+	get:
+		return minimap_renderer.cached_minimap_fog_image
+	set(value):
+		minimap_renderer.cached_minimap_fog_image = value
+var cached_minimap_exploration_revision: int:
+	get:
+		return minimap_renderer.cached_minimap_exploration_revision
+	set(value):
+		minimap_renderer.cached_minimap_exploration_revision = value
+var cached_minimap_fog_tick: int:
+	get:
+		return minimap_renderer.cached_minimap_fog_tick
+	set(value):
+		minimap_renderer.cached_minimap_fog_tick = value
+var cached_minimap_fog_rectangle: Rect2:
+	get:
+		return minimap_renderer.cached_minimap_fog_rectangle
+	set(value):
+		minimap_renderer.cached_minimap_fog_rectangle = value
+var cached_minimap_mesh_tick: int:
+	get:
+		return minimap_renderer.cached_minimap_mesh_tick
+	set(value):
+		minimap_renderer.cached_minimap_mesh_tick = value
+var cached_minimap_mesh_rectangle: Rect2:
+	get:
+		return minimap_renderer.cached_minimap_mesh_rectangle
+	set(value):
+		minimap_renderer.cached_minimap_mesh_rectangle = value
+var minimap_resource_index: MinimapResourceIndex:
+	get:
+		return minimap_renderer.minimap_resource_index
+	set(value):
+		minimap_renderer.minimap_resource_index = value
 var presentation_revision: int = 0
 var cached_presentation_tick: int = -1
 var cached_presentation_bounds := Rect2i()
@@ -1170,143 +1335,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func handle_minimap_input(event: InputEvent) -> bool:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed and minimap_right_pressed:
-		minimap_right_pressed = false
-		return true
-	var screen_position: Variant = null
-	if event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
-		screen_position = event.position
-	elif event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT) != 0:
-		screen_position = event.position
-	if not screen_position is Vector2:
-		return false
-	var geometry := minimap_geometry()
-	if not MinimapAperture.contains(screen_position, geometry["rectangle"]) or not MinimapProjection.contains_world(screen_position, map_size, geometry["center"], geometry["scale"]):
-		return false
-	var target := Coordinates.clamp_world(MinimapProjection.minimap_to_world(screen_position, geometry["center"], geometry["scale"]), map_size)
-	if event is InputEventMouseButton:
-		if not event.pressed: return false
-		if event.button_index == MOUSE_BUTTON_RIGHT:
-			minimap_right_pressed = true
-			if not local_spectator and not battle_over and not navigation_loading.is_loading():
-				issue_ground_order(target, event.shift_pressed)
-			return true
-	center_view_on_world(target)
-	queue_redraw()
-	return true
+	return command_actions.handle_minimap_input(self, event)
 
 
 func handle_input_action(action: Dictionary) -> void:
-	if local_spectator and String(action.get("type", "")) not in ["consume_outside_world", "zoom", "pointer_moved", "toggle_audio", "toggle_pause", "change_speed", "toggle_diagnostics", "toggle_status_indicators", "next_sound_cue", "reset_game", "quit", "open_game_menu", "open_help"]:
-		return
-	match String(action.get("type", "")):
-		"consume_outside_world":
-			selection_preview_ids.clear()
-			get_viewport().set_input_as_handled()
-		"zoom":
-			zoom_at(action["position"], 1.12 if int(action["steps"]) > 0 else 1.0 / 1.12)
-		"selection_started":
-			selection_preview_ids.clear()
-		"selection_committed":
-			if not pending_target_command.is_empty():
-				commit_pending_target(action["to"], bool(action.get("queue_order", false)))
-			elif pending_build_kind.is_empty():
-				finish_selection(action["from"], action["to"], String(action.get("mode", "select_click")))
-			else:
-				commit_build_placement(action["to"], bool(action.get("queue_order", false)), action["from"])
-			selection_preview_ids.clear()
-		"context_committed":
-			if pending_target_command in ["repair", "unload"]:
-				cancel_pending_targeting()
-			elif not pending_target_command.is_empty():
-				commit_pending_target(action["position"], bool(action.get("queue_order", false)))
-			elif pending_build_kind.is_empty():
-				issue_order(action["position"], action.get("direction_end"), bool(action.get("queue_order", false)))
-			else:
-				pending_build_kind = ""
-				pending_build_started = false
-				update_interaction_cursor(input_adapter.pointer_position)
-				game_message = "Строительство отменено"
-				message_time = 1.5
-		"pointer_moved":
-			view_offset += Vector2(action.get("pan_delta", Vector2.ZERO))
-			update_selection_preview()
-			update_interaction_cursor(action.get("position", input_adapter.pointer_position))
-		"control_group":
-			if bool(action["assign"]):
-				assign_control_group(int(action["number"]))
-			else:
-				recall_control_group(int(action["number"]), bool(action["additive"]))
-		"set_formation":
-			set_formation(String(action["formation"]))
-		"attack_move_mode":
-			begin_attack_move()
-		"attack_ground_mode":
-			begin_attack_ground()
-		"stop":
-			issue_unit_action("stop")
-		"hold":
-			issue_unit_action("hold")
-		"cycle_stance":
-			issue_unit_action("stance")
-		"train":
-			request_primary_train_command()
-		"train_shortcut":
-			request_train_shortcut(String(action.get("archetype", "")))
-		"toggle_status_indicators":
-			compact_status_visible = not compact_status_visible
-			queue_redraw()
-		"next_sound_cue":
-			var cue := sound_cue_history.next_cue()
-			if not cue.is_empty():
-				center_view_on_world(cue["position"])
-				queue_redraw()
-		"toggle_audio":
-			audio_player.stream_paused = not audio_player.stream_paused
-			for player in sfx_players:
-				player.stream_paused = audio_player.stream_paused
-		"toggle_pause":
-			join_simulation_owner()
-			if network_session != null:
-				game_message = "Пауза в сетевом матче недоступна"
-				return
-			var is_paused := game_controller.toggle_paused()
-			game_message = "Пауза" if is_paused else "Игра продолжена"
-			message_time = 1.5
-		"change_speed":
-			join_simulation_owner()
-			if network_session != null:
-				game_message = "Скорость сетевого матча фиксирована"
-				return
-			var speed := game_controller.cycle_speed(int(action["direction"]))
-			game_message = "Скорость игры: %.1fx" % speed
-			message_time = 1.5
-		"toggle_diagnostics":
-			diagnostics_enabled = not diagnostics_enabled
-			game_message = "Диагностика включена" if diagnostics_enabled else "Диагностика выключена"
-			message_time = 1.5
-		"open_calibration":
-			get_tree().change_scene_to_file("res://calibration.tscn")
-		"delete_context":
-			issue_delete_context()
-		"unload":
-			issue_unload_at_pointer(bool(action.get("queue_order", false)))
-		"reset_game":
-			if network_session == null:
-				_open_hud_modal(HUDModalOverlay.MODE_MENU)
-				hud_modal_overlay.request_confirmation("restart")
-			else:
-				game_message = "Перезапуск сетевого матча требует нового лобби"
-		"resign":
-			_open_hud_modal(HUDModalOverlay.MODE_MENU)
-			hud_modal_overlay.request_confirmation("resign")
-		"open_game_menu":
-			_toggle_game_menu()
-		"open_help":
-			_open_hud_modal(HUDModalOverlay.MODE_MENU)
-			hud_modal_overlay.show_section("help")
-		"quit":
-			_request_window_quit()
+	command_actions.handle_input_action(self, action)
 
 
 func _show_diplomacy_summary() -> void:
@@ -1732,37 +1765,10 @@ func is_world_interaction_area(position: Vector2) -> bool:
 	return position.y > hud_top_height() and position.y < get_viewport_rect().size.y - hud_bottom_height()
 
 func assign_control_group(group_number: int) -> void:
-	var ids := _selection_ids(selected_units())
-	if ids.is_empty():
-		game_message = "Нельзя назначить пустую группу"
-		message_time = 1.5
-		return
-	control_groups.assign(group_number, ids)
-	game_message = "Группа %d назначена: %d юнитов" % [group_number, ids.size()]
-	message_time = 1.5
+	command_actions.assign_control_group(self, group_number)
 
 func recall_control_group(group_number: int, additive: bool) -> void:
-	join_simulation_owner()
-	var available_ids: Array[int] = []
-	# The overview is sampled every four ticks. A key press must validate the
-	# current owned units, including deaths and newly trained units between samples.
-	for unit in simulation_world.get_units():
-		if unit["team"] == local_player_team and unit["hp"] > 0.0:
-			available_ids.append(int(unit["id"]))
-	var result: Dictionary = control_groups.recall(group_number, available_ids, _selection_ids(selected_units()), additive)
-	if result["ids"].is_empty():
-		game_message = "Группа %d пуста" % group_number
-		message_time = 1.5
-		return
-	var recalled_ids: Array[int] = []
-	recalled_ids.assign(result["ids"])
-	player_control_state.replace_or_add(recalled_ids, additive)
-	if result["center"]:
-		center_view_on_units(recalled_ids)
-		game_message = "Камера: группа %d" % group_number
-	else:
-		game_message = "Выбрана группа %d: %d юнитов" % [group_number, recalled_ids.size()]
-	message_time = 1.5
+	command_actions.recall_control_group(self, group_number, additive)
 
 func center_view_on_units(entity_ids: Array[int]) -> void:
 	join_simulation_owner()
@@ -1948,323 +1954,63 @@ func unit_frame_info(unit: Dictionary) -> Dictionary:
 	return resource_catalog.unit_frame_info(unit, animation_state, -1.0, ambient_time)
 
 func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: bool = false) -> void:
-	join_simulation_owner()
-	var selected := selected_units()
-	if selected.is_empty():
-		selected = selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team)
-	if selected.is_empty():
-		game_message = "Для этого приказа выберите своих юнитов"
-		message_time = 1.5
-		return
-
-	var mouse_world := screen_to_world(mouse)
-	var formation_forward := Vector2.ZERO
-	if direction_end is Vector2:
-		formation_forward = screen_to_world(direction_end) - mouse_world
-	var clicked_entity: Variant = null
-	var hit_stack := pick_stack_at(mouse)
-	if not hit_stack.is_empty():
-		clicked_entity = picking_service.context_entity(hit_stack[0])
-
-	var resolution := ContextResolver.resolve(selected, clicked_entity, mouse_world, local_player_team, simulation_world.get_allied_teams(local_player_team))
-	var selected_ids := _selection_ids(selected)
-	var command: Variant = null
-	var accepted_message := ""
-	match resolution["type"]:
-		"set_rally_point":
-			command = RoRCommands.SetRallyPointCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target"])
-			accepted_message = "Точка сбора установлена"
-		"attack":
-			command = RoRCommands.AttackCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Атаковать цель"
-		"convert":
-			command = RoRCommands.ConvertCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Обратить цель"
-		"heal":
-			command = RoRCommands.HealCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Исцелить союзника"
-		"board":
-			command = RoRCommands.BoardCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Погрузиться в транспорт"
-		"trade":
-			command = RoRCommands.TradeCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Торговый маршрут назначен"
-		"gather":
-			command = RoRCommands.GatherCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Работники отправлены к ресурсу"
-		"return_resources":
-			command = RoRCommands.ReturnResourcesCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Сдать ресурсы"
-		"build":
-			command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, selected_ids, resolution["building_type"], resolution["target"])
-			accepted_message = "Продолжить строительство"
-		"repair":
-			command = RoRCommands.RepairCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Ремонтировать здание"
-		"move":
-			command = RoRCommands.MoveCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target"]) if queue_order else RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, selected_ids, resolution["target"], formation, formation_forward)
-			command.params["preserve_formations"] = true
-			accepted_message = "Движение: %s" % formation_name()
-		_:
-			game_message = String(resolution.get("message", "Команда для этой цели пока недоступна"))
-			message_time = 1.8
-			return
-	if queue_order and String(command.command_type()) in GameController.QUEUEABLE_ORDERS:
-		command.params["queue_order"] = true
-	var feedback_marker: Variant = ContextResolver.feedback_marker(resolution, clicked_entity, mouse_world)
-	enqueue_with_feedback(command, accepted_message, "command:%s" % String(selected[0].get("kind", "")), feedback_marker)
+	command_actions.issue_order(self, mouse, direction_end, queue_order)
 
 
 func issue_ground_order(target: Vector2, queue_order: bool = false) -> void:
-	join_simulation_owner()
-	var selected := selected_units()
-	if selected.is_empty():
-		selected = selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team)
-	if selected.is_empty(): return
-	var ids := _selection_ids(selected)
-	var resolution := ContextResolver.resolve(selected, null, target, local_player_team, simulation_world.get_allied_teams(local_player_team))
-	var command: Variant = null
-	if String(resolution.get("type", "")) == "set_rally_point":
-		command = RoRCommands.SetRallyPointCommand.new(game_controller.tick_index + 1, ids, target)
-	elif String(resolution.get("type", "")) == "move":
-		command = RoRCommands.MoveCommand.new(game_controller.tick_index + 1, ids, target) if queue_order else RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, ids, target, formation, Vector2.ZERO)
-		command.params["preserve_formations"] = true
-		if queue_order: command.params["queue_order"] = true
-	else:
-		return
-	enqueue_with_feedback(command, CommandFeedbackRouter.accepted_message(command.command_type()), "command:%s" % String(selected[0].get("kind", "")), target)
+	command_actions.issue_ground_order(self, target, queue_order)
 
 
 func issue_martyrdom() -> void:
-	join_simulation_owner()
-	var selected := selected_units()
-	if selected.is_empty():
-		return
-	var command = RoRCommands.MartyrdomCommand.new(game_controller.tick_index + 1, _selection_ids(selected))
-	enqueue_with_feedback(command, "Жертвоприношение", "", null)
+	command_actions.issue_martyrdom(self)
 
 
 func issue_delete_context() -> void:
-	join_simulation_owner()
-	var selected := selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team and String(entity.get("entity_type", "")) != "resource")
-	var martyr_ids: Array[int] = []
-	var delete_ids: Array[int] = []
-	for entity in selected:
-		var entity_id := int(entity.get("id", -1))
-		var live_unit = simulation_world.find_unit(entity_id)
-		if live_unit != null and simulation_world.conversion_system.validate_martyrdom(live_unit).is_empty():
-			martyr_ids.append(entity_id)
-		else:
-			delete_ids.append(entity_id)
-	if not martyr_ids.is_empty():
-		var martyrdom = RoRCommands.MartyrdomCommand.new(game_controller.tick_index + 1, martyr_ids)
-		enqueue_with_feedback(martyrdom, "Жертвоприношение", "", null)
-	if not delete_ids.is_empty():
-		var deletion = RoRCommands.DeleteEntityCommand.new(game_controller.tick_index + 1, delete_ids)
-		enqueue_with_feedback(deletion, "Удалить выбранные объекты", "", null)
+	command_actions.issue_delete_context(self)
 
 
 func issue_unload_at_pointer(queue_order: bool = false) -> void:
-	if battle_over or local_spectator:
-		return
-	var transports := selected_units().filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)) and not unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).is_empty())
-	if transports.is_empty():
-		game_message = "Для высадки выберите транспорт с пассажирами"
-		message_time = 1.5
-		return
-	pending_build_kind = ""
-	pending_build_started = false
-	pending_target_command = "unload"
-	pending_target_queue_order = queue_order
-	input_adapter.reset()
-	if hud_controls != null:
-		hud_controls.set_build_menu_open(false)
-	update_interaction_cursor(input_adapter.pointer_position)
-	game_message = "Укажите берег для высадки (ПКМ или Esc — отмена)"
-	message_time = 4.0
+	command_actions.issue_unload_at_pointer(self, queue_order)
 
 
 func issue_unit_action(action_name: String) -> void:
-	join_simulation_owner()
-	if action_name.begins_with("gate_"):
-		var gates := selected_entities().filter(func(entity): return String(entity.get("kind", "")) == "gate" and int(entity.get("team", 0)) == local_player_team)
-		if not gates.is_empty() and not battle_over:
-			var gate_command = RoRCommands.GateModeCommand.new(game_controller.tick_index + 1, _selection_ids(gates), action_name.trim_prefix("gate_"))
-			enqueue_with_feedback(gate_command, "Режим ворот", "")
-		return
-	if action_name == "unload":
-		issue_unload_at_pointer()
-		return
-	if action_name == "repair":
-		begin_repair()
-		return
-	if action_name == "delete":
-		issue_delete_context()
-		return
-	if action_name == "attack_move":
-		begin_attack_move()
-		return
-	if action_name == "attack_ground":
-		begin_attack_ground()
-		return
-	if battle_over:
-		return
-	var selected := selected_entities().filter(func(entity): return int(entity.get("team", 0)) == local_player_team and String(entity.get("entity_type", "")) != "resource") if action_name == "stop" else selected_units()
-	if selected.is_empty():
-		game_message = "Для приказа выберите свои объекты" if action_name == "stop" else "Для приказа выберите своих юнитов"
-		message_time = 1.5
-		return
-	var ids := _selection_ids(selected)
-	var command: Variant = null
-	var message := ""
-	match action_name:
-		"stop":
-			command = RoRCommands.StopCommand.new(game_controller.tick_index + 1, ids)
-			message = "Остановиться"
-		"hold":
-			command = RoRCommands.HoldCommand.new(game_controller.tick_index + 1, ids)
-			message = "Держать позицию"
-		"stance":
-			var stance := RoRCommands.next_stance(String(selected[0].get("stance", "aggressive")))
-			command = RoRCommands.StanceCommand.new(game_controller.tick_index + 1, ids, stance)
-			message = "Стойка: %s" % stance_name(stance)
-		_:
-			return
-	enqueue_with_feedback(command, message, "command:%s" % String(selected[0].get("kind", "")), null)
+	command_actions.issue_unit_action(self, action_name)
 
 
 func repair_workers() -> Array:
-	join_simulation_owner()
-	if simulation_world == null:
-		return []
-	return selected_units().filter(func(unit): return simulation_world.entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land")
+	return command_actions.repair_workers(self)
 
 
 func begin_repair() -> void:
-	if battle_over or local_spectator or repair_workers().is_empty():
-		return
-	if hud_controls != null and hud_controls.build_menu_open:
-		hud_controls.set_build_menu_open(false)
-	pending_build_kind = ""
-	pending_build_started = false
-	pending_target_command = "repair"
-	input_adapter.reset()
-	update_interaction_cursor(input_adapter.pointer_position)
-	game_message = "Укажите повреждённое своё или союзное здание/судно (ПКМ или Esc — отмена)"
-	message_time = 4.0
+	command_actions.begin_repair(self)
 
 
 func cancel_pending_targeting() -> bool:
-	if pending_build_kind.is_empty() and pending_target_command.is_empty():
-		return false
-	pending_build_kind = ""
-	pending_build_started = false
-	pending_target_command = ""
-	pending_target_queue_order = false
-	input_adapter.reset()
-	selection_preview_ids.clear()
-	update_interaction_cursor(input_adapter.pointer_position)
-	game_message = "Приказ отменён"
-	message_time = 1.5
-	return true
+	return command_actions.cancel_pending_targeting(self)
 
 
 func repair_target_at(screen_position: Vector2, workers: Array) -> Dictionary:
-	join_simulation_owner()
-	for hit in pick_stack_at(screen_position):
-		var target: Variant = simulation_world.find_building(int(hit.get("id", -1)))
-		if target == null:
-			target = simulation_world.find_unit(int(hit.get("id", -1)))
-		if target != null and workers.any(func(worker): return simulation_world.can_worker_repair(worker, target)):
-			return target
-	return {}
+	return command_actions.repair_target_at(self, screen_position, workers)
 
 
 func commit_repair_target(screen_position: Vector2) -> void:
-	join_simulation_owner()
-	var workers := repair_workers()
-	if workers.is_empty() or battle_over:
-		cancel_pending_targeting()
-		return
-	var target := repair_target_at(screen_position, workers)
-	if target.is_empty():
-		game_message = "Выберите повреждённое своё или союзное здание/судно"
-		message_time = 2.0
-		return
-	workers = workers.filter(func(worker): return simulation_world.can_worker_repair(worker, target))
-	var command = RoRCommands.RepairCommand.new(game_controller.tick_index + 1, _selection_ids(workers), int(target["id"]))
-	pending_target_command = ""
-	update_interaction_cursor(input_adapter.pointer_position)
-	enqueue_with_feedback(command, "Ремонтировать цель", "command:%s" % String(workers[0].get("kind", "villager")), Vector2(target.get("pos", Vector2.ZERO)))
+	command_actions.commit_repair_target(self, screen_position)
 
 
 func begin_attack_move() -> void:
-	if selected_units().is_empty() or battle_over:
-		game_message = "Для атаки выберите своих юнитов"
-		message_time = 1.5
-		return
-	pending_build_kind = ""
-	pending_target_command = "attack_move"
-	update_interaction_cursor(input_adapter.pointer_position)
-	game_message = "Укажите точку движения с атакой"
-	message_time = 4.0
+	command_actions.begin_attack_move(self)
 
 
 func begin_attack_ground() -> void:
-	join_simulation_owner()
-	if battle_over or game_controller == null:
-		return
-	var attackers: Array = selected_units().filter(func(unit): return simulation_world.can_attack_ground(unit))
-	if attackers.is_empty():
-		game_message = "Для атаки по земле выберите осадные орудия"
-		message_time = 1.5
-		return
-	pending_build_kind = ""
-	pending_target_command = "attack_ground"
-	update_interaction_cursor(input_adapter.pointer_position)
-	game_message = "Укажите точку обстрела"
-	message_time = 4.0
+	command_actions.begin_attack_ground(self)
 
 
 func commit_pending_target(screen_position: Vector2, queue_order: bool = false) -> void:
-	join_simulation_owner()
-	var target_command := pending_target_command
-	if target_command == "repair":
-		commit_repair_target(screen_position)
-		return
-	if target_command not in ["attack_move", "attack_ground", "unload"]:
-		return
-	pending_target_command = ""
-	update_interaction_cursor(input_adapter.pointer_position)
-	var selected := selected_units()
-	if selected.is_empty() or battle_over:
-		return
-	var target := screen_to_world(screen_position)
-	var command: Variant
-	var message: String
-	if target_command == "unload":
-		selected = selected.filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)) and not unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).is_empty())
-		if selected.is_empty():
-			return
-		command = RoRCommands.UnloadCommand.new(game_controller.tick_index + 1, _selection_ids(selected), target)
-		if pending_target_queue_order or queue_order:
-			command.params["queue_order"] = true
-		pending_target_queue_order = false
-		message = "Высадить пассажиров"
-	elif target_command == "attack_ground":
-		selected = selected.filter(func(unit): return simulation_world.can_attack_ground(unit))
-		if selected.is_empty():
-			return
-		command = RoRCommands.AttackGroundCommand.new(game_controller.tick_index + 1, _selection_ids(selected), target)
-		message = "Атаковать точку"
-	else:
-		command = RoRCommands.AttackMoveCommand.new(game_controller.tick_index + 1, _selection_ids(selected), target)
-		message = "Двигаться с атакой"
-	enqueue_with_feedback(command, message, "command:%s" % String(selected[0].get("kind", "")), target)
+	command_actions.commit_pending_target(self, screen_position, queue_order)
 
 
 func stance_name(value: String) -> String:
-	return {"aggressive": "агрессивная", "defensive": "оборонительная", "stand_ground": "держать позицию", "passive": "не атаковать"}.get(value, value)
+	return command_actions.stance_name(self, value)
 
 
 func selected_units() -> Array:
@@ -2342,171 +2088,44 @@ func resource_at_screen(mouse: Vector2):
 
 
 func set_formation(value: String) -> void:
-	join_simulation_owner()
-	if selected_units().is_empty():
-		return
-	formation = value
-	game_message = "Выбран строй: %s" % formation_name()
-	message_time = 1.5
-	if game_controller == null or simulation_world == null:
-		return
-	var selected = selected_units()
-	if selected.is_empty():
-		return
-	var center = Vector2.ZERO
-	for unit in selected:
-		center += unit["pos"]
-	center /= float(selected.size())
-	var existing_forward: Vector2 = selected[0].get("formation_forward", Vector2.ZERO)
-	var reform = RoRCommands.FormationMoveCommand.new(game_controller.tick_index + 1, _selection_ids(selected), center, value, existing_forward)
-	_queue_local_command(reform)
+	command_actions.set_formation(self, value)
 func formation_name() -> String:
-	return {"LINE": "линия", "RECTANGLE": "каре", "COLUMN": "колонна", "WEDGE": "клин", "STAGGERED": "рассредоточенный", "FLANK": "фланги"}.get(formation, "смешанный" if formation.is_empty() else formation)
+	return command_actions.formation_name(self)
 
 func request_primary_train_command() -> void:
-	for command_value in hud_model.get("commands", []):
-		var command: Dictionary = command_value
-		if String(command.get("type", "")) != "train":
-			continue
-		if not bool(command.get("enabled", false)):
-			game_message = HUDControls.reason_text(String(command.get("reason", "")))
-			message_time = 2.0
-			return
-		train_unit_from_hud(String(command.get("id", "")), int(command.get("building_id", -1)))
-		return
-	game_message = "Выберите производящее здание"
-	message_time = 2.0
+	command_actions.request_primary_train_command(self)
 
 
 func request_train_shortcut(unit_kind: String) -> void:
-	for command_value in hud_model.get("commands", []):
-		var command: Dictionary = command_value
-		if String(command.get("type", "")) != "train" or String(command.get("id", "")) != unit_kind:
-			continue
-		if bool(command.get("enabled", false)):
-			train_unit_from_hud(unit_kind, int(command.get("building_id", -1)))
-		else:
-			game_message = HUDControls.reason_text(String(command.get("reason", "")))
-			message_time = 2.0
-		return
-	game_message = "Выберите здание для обучения: %s" % unit_kind
-	message_time = 2.0
+	command_actions.request_train_shortcut(self, unit_kind)
 
 
 func begin_build_placement(building_kind: String) -> void:
-	wall_placement_preview_key = ""
-	if building_kind.is_empty() or selected_units().is_empty():
-		return
-	pending_target_command = ""
-	pending_build_kind = building_kind
-	pending_build_started = false
-	update_interaction_cursor(input_adapter.pointer_position)
-	game_message = "Укажите место строительства: %s (ПКМ — отмена)" % ("ворота; Tab — повернуть" if building_kind == "gate" else building_kind)
-	message_time = 4.0
+	command_actions.begin_build_placement(self, building_kind)
 
 
 func commit_build_placement(screen_position: Vector2, queue_order: bool = false, start_screen_position: Vector2 = Vector2.INF) -> void:
-	join_simulation_owner()
-	if pending_build_kind.is_empty() or simulation_world == null or battle_over:
-		return
-	var workers: Array = selected_units().filter(func(unit): return simulation_world.entity_is_worker(unit))
-	if workers.is_empty():
-		pending_build_kind = ""
-		update_interaction_cursor(input_adapter.pointer_position)
-		game_message = "Для строительства нужен рабочий"
-		message_time = 2.0
-		return
-	var target := Coordinates.clamp_world(screen_to_world(screen_position).round(), map_size)
-	var kind := pending_build_kind
-	if kind == "wall":
-		var start := Coordinates.clamp_world(screen_to_world(start_screen_position).round(), map_size) if start_screen_position != Vector2.INF else target
-		var cells := WallPlacement.cells(Vector2i(start), Vector2i(target))
-		if not queue_order:
-			pending_build_kind = ""
-			pending_build_started = false
-		else:
-			pending_build_started = true
-		update_interaction_cursor(input_adapter.pointer_position)
-		queue_wall_line(workers, cells, queue_order)
-		return
-	var defer_order := queue_order and pending_build_started
-	if not queue_order:
-		pending_build_kind = ""
-		pending_build_started = false
-	else:
-		pending_build_started = true
-	update_interaction_cursor(input_adapter.pointer_position)
-	var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, _selection_ids(workers), kind, target)
-	if kind == "gate":
-		command.params["gate_axis"] = pending_gate_axis
-	if defer_order:
-		# A queued building is still a real world object: reserve and render its
-		# foundation now, then queue only the workers' trip to that foundation.
-		command.params["plan_only"] = true
-	enqueue_with_feedback(command, "Строительство: %s" % ("ворота" if kind == "gate" else kind), "command:%s" % String(workers[0].get("kind", "villager")), null)
+	command_actions.commit_build_placement(self, screen_position, queue_order, start_screen_position)
 
 
 func queue_wall_line(workers: Array, cells: Array[Vector2i], queue_order: bool = false) -> void:
-	join_simulation_owner()
-	if cells.is_empty():
-		return
-	var command = RoRCommands.BuildCommand.new(game_controller.tick_index + 1, _selection_ids(workers), "wall", Vector2(cells[0]))
-	command.params["wall_cells"] = cells.duplicate()
-	command.params["queue_order"] = queue_order
-	enqueue_with_feedback(command, "Строительство стены", "command:%s" % String(workers[0].get("kind", "villager")), null)
+	command_actions.queue_wall_line(self, workers, cells, queue_order)
 
 
 func train_unit_from_hud(unit_kind: String, building_id: int) -> void:
-	join_simulation_owner()
-	if simulation_world == null or battle_over or building_id < 0 or unit_kind.is_empty():
-		return
-	var building: Variant = simulation_world.find_building(building_id)
-	if building == null:
-		game_message = "Здание больше недоступно"
-		message_time = 2.0
-		return
-	var command = RoRCommands.TrainCommand.new(game_controller.tick_index + 1, [building_id], unit_kind, local_player_team, Vector2.ZERO)
-	enqueue_with_feedback(command, "Добавлено в очередь: %s" % unit_kind, "", null)
+	command_actions.train_unit_from_hud(self, unit_kind, building_id)
 
 
 func research_from_hud(technology_id: int, building_id: int) -> void:
-	join_simulation_owner()
-	if simulation_world == null or battle_over or building_id < 0 or technology_id < 0:
-		return
-	var building: Variant = simulation_world.find_building(building_id)
-	if building == null:
-		game_message = "Здание больше недоступно"
-		message_time = 2.0
-		return
-	var command = RoRCommands.ResearchCommand.new(game_controller.tick_index + 1, [building_id], String.num_int64(technology_id))
-	enqueue_with_feedback(command, "Исследование добавлено в очередь", "", null)
+	command_actions.research_from_hud(self, technology_id, building_id)
 
 
 func cancel_production_from_hud(building_id: int, queue_index: int) -> void:
-	join_simulation_owner()
-	if simulation_world == null or building_id < 0:
-		return
-	var building: Variant = simulation_world.find_building(building_id)
-	if building == null:
-		game_message = "Здание больше недоступно"
-		message_time = 2.0
-		return
-	var command = RoRCommands.CancelProductionCommand.new(game_controller.tick_index + 1, [building_id], queue_index)
-	enqueue_with_feedback(command, "Элемент очереди отменён", "", null)
+	command_actions.cancel_production_from_hud(self, building_id, queue_index)
 
 
 func set_trade_resource_from_hud(resource_type_id: int) -> void:
-	join_simulation_owner()
-	if simulation_world == null or battle_over or resource_type_id not in [0, 1, 2]:
-		return
-	var traders: Array = selected_units().filter(func(unit): return bool(unit.get("components", {}).get("trade", {}).get("enabled", false)))
-	if traders.is_empty():
-		game_message = "Выберите торговое судно"
-		message_time = 2.0
-		return
-	var command = RoRCommands.SetTradeResourceCommand.new(game_controller.tick_index + 1, _selection_ids(traders), resource_type_id)
-	var label: String = String({0: "еда", 1: "дерево", 2: "камень"}.get(resource_type_id, "ресурс"))
-	enqueue_with_feedback(command, "Торговый ресурс: %s" % label, "", null)
+	command_actions.set_trade_resource_from_hud(self, resource_type_id)
 
 
 func refresh_hud_model() -> void:
@@ -2718,6 +2337,7 @@ func selection_rectangle(first: Vector2, second: Vector2) -> Rect2:
 	return Rect2(top_left, bottom_right - top_left)
 
 func _draw() -> void:
+	preload("res://scripts/shoreline_presentation.gd").begin_frame(self)
 	var probe: Variant = _presentation_probe()
 	var draw_started := Time.get_ticks_usec() if probe != null else 0
 	var stage_started := draw_started
@@ -2966,288 +2586,66 @@ func draw_foundation_preview_at(kind: String, center: Vector2, wall_entry: Dicti
 
 
 func _terrain_geometry_revision() -> int:
-	if _render_terrain() == null:
-		return -1
-	var elevation = _render_terrain().terrain_elevation
-	return CacheDependency.geometry_key(map_size, elevation)
+	return fog_renderer._terrain_geometry_revision(self)
 
 
 func _sync_fog_geometry_revision() -> void:
-	var geometry_revision := _terrain_geometry_revision()
-	if cached_fog_slope_neighbor_terrain_revision != geometry_revision:
-		cached_fog_slope_neighbor_cells.resize(0)
-		cached_fog_slope_neighbor_terrain_revision = geometry_revision
-		cached_world_fog_meshes.clear()
-		cached_world_fog_mesh_terrain_revision = -1
-		cached_world_fog_texture_revision = -1
-	if cached_world_fog_mesh_terrain_revision != geometry_revision:
-		cached_world_fog_meshes.clear()
-		cached_world_fog_mesh_terrain_revision = geometry_revision
+	fog_renderer._sync_fog_geometry_revision(self)
 
 
 func draw_fog_overlay() -> void:
-	if presentation_snapshot.is_empty():
-		return
-	var probe: Variant = _presentation_probe()
-	var cells: Variant = presentation_snapshot.get("fog", {}).get("cells", [])
-	if cells.size() < map_size.x * map_size.y:
-		return
-	var fog_revision := int(presentation_snapshot.get("fog_revision", -1))
-	var prepare_started := Time.get_ticks_usec() if probe != null else 0
-	_sync_fog_geometry_revision()
-	_sync_world_fog_texture(cells, fog_revision, probe)
-	var visible_meshes: Array[ArrayMesh] = []
-	var bounds := _expanded_tile_bounds(visible_tile_bounds(), 12)
-	var first_chunk := Vector2i(
-		floori(float(bounds.position.x) / float(WORLD_FOG_GEOMETRY_CHUNK_SIZE)),
-		floori(float(bounds.position.y) / float(WORLD_FOG_GEOMETRY_CHUNK_SIZE))
-	)
-	var last_chunk := Vector2i(
-		floori(float(maxi(bounds.position.x, bounds.end.x - 1)) / float(WORLD_FOG_GEOMETRY_CHUNK_SIZE)),
-		floori(float(maxi(bounds.position.y, bounds.end.y - 1)) / float(WORLD_FOG_GEOMETRY_CHUNK_SIZE))
-	)
-	var built_meshes := 0
-	for chunk_y in range(first_chunk.y, last_chunk.y + 1):
-		for chunk_x in range(first_chunk.x, last_chunk.x + 1):
-			var chunk_key := Vector2i(chunk_x, chunk_y)
-			var mesh: Variant = cached_world_fog_meshes.get(chunk_key)
-			if not mesh is ArrayMesh:
-				mesh = _build_world_fog_mesh(_world_fog_geometry_chunk_bounds(chunk_key))
-				if mesh is ArrayMesh:
-					cached_world_fog_meshes[chunk_key] = mesh
-					built_meshes += 1
-			if mesh is ArrayMesh:
-				visible_meshes.append(mesh)
-	var retained_bounds := Rect2i(
-		first_chunk - Vector2i.ONE * WORLD_FOG_GEOMETRY_RETAIN_MARGIN,
-		(last_chunk - first_chunk) + Vector2i.ONE * (WORLD_FOG_GEOMETRY_RETAIN_MARGIN * 2 + 1)
-	)
-	var evicted_meshes := _prune_world_fog_geometry_cache(retained_bounds)
-	if probe != null:
-		probe.observe_microseconds("presentation.fog.prepare", Time.get_ticks_usec() - prepare_started)
-		if built_meshes > 0:
-			probe.increment("presentation.fog.geometry_chunks_built", built_meshes)
-		if evicted_meshes > 0:
-			probe.increment("presentation.fog.geometry_chunks_evicted", evicted_meshes)
-	if visible_meshes.is_empty() or cached_world_fog_texture == null:
-		return
-	var submit_started := Time.get_ticks_usec() if probe != null else 0
-	draw_set_transform(PixelScaling.snap_screen(view_offset), 0.0, Vector2(view_zoom, view_zoom))
-	for mesh in visible_meshes:
-		draw_mesh(mesh, cached_world_fog_texture)
-	draw_set_transform(Vector2.ZERO)
-	draw_map_edge_fog_overlay()
-	if probe != null:
-		probe.observe_microseconds("presentation.fog.mesh_submit", Time.get_ticks_usec() - submit_started)
+	fog_renderer.draw_fog_overlay(self)
 
 
 func _world_fog_geometry_chunk_bounds(chunk_key: Vector2i) -> Rect2i:
-	var start := chunk_key * WORLD_FOG_GEOMETRY_CHUNK_SIZE
-	var finish := Vector2i(
-		mini(map_size.x, start.x + WORLD_FOG_GEOMETRY_CHUNK_SIZE),
-		mini(map_size.y, start.y + WORLD_FOG_GEOMETRY_CHUNK_SIZE)
-	)
-	start.x = maxi(0, start.x)
-	start.y = maxi(0, start.y)
-	return Rect2i(start, Vector2i(maxi(0, finish.x - start.x), maxi(0, finish.y - start.y)))
+	return fog_renderer._world_fog_geometry_chunk_bounds(self, chunk_key)
 
 
 func _prune_world_fog_geometry_cache(retained_bounds: Rect2i) -> int:
-	var removed := 0
-	for chunk_key_value in cached_world_fog_meshes.keys():
-		var chunk_key: Vector2i = chunk_key_value
-		if retained_bounds.has_point(chunk_key):
-			continue
-		cached_world_fog_meshes.erase(chunk_key)
-		removed += 1
-	return removed
+	return fog_renderer._prune_world_fog_geometry_cache(self, retained_bounds)
 
 
 func _build_world_fog_mesh(bounds: Rect2i) -> ArrayMesh:
-	# Geometry never depends on fog state. Chunks are created only as the camera
-	# reaches them and retained for the current viewport plus one surrounding
-	# ring, so exploration cannot grow a history of GPU objects.
-	if _render_terrain() == null or bounds.size.x <= 0 or bounds.size.y <= 0:
-		return null
-	var lattice_width := bounds.size.x + 1
-	var lattice_height := bounds.size.y + 1
-	var vertices := PackedVector3Array()
-	var uvs := PackedVector2Array()
-	vertices.resize(lattice_width * lattice_height)
-	uvs.resize(vertices.size())
-	for y in range(lattice_height):
-		for x in range(lattice_width):
-			var vertex_index := y * lattice_width + x
-			var world := Vector2(bounds.position + Vector2i(x, y))
-			var projected: Vector2 = _render_terrain().terrain_elevation.world_to_screen(world, 1.0, Vector2.ZERO)
-			projected = PixelScaling.snap_screen(projected)
-			vertices[vertex_index] = Vector3(projected.x, projected.y, 0.0)
-			uvs[vertex_index] = Vector2(clampf(world.x / float(map_size.x), 0.5 / map_size.x, 1.0 - 0.5 / map_size.x), clampf(world.y / float(map_size.y), 0.5 / map_size.y, 1.0 - 0.5 / map_size.y))
-	var indices := PackedInt32Array()
-	indices.resize(bounds.size.x * bounds.size.y * 6)
-	var index_offset := 0
-	for y in range(bounds.size.y):
-		for x in range(bounds.size.x):
-			var top_left := y * lattice_width + x
-			var top_right := top_left + 1
-			var bottom_left := top_left + lattice_width
-			var bottom_right := bottom_left + 1
-			indices[index_offset] = top_left
-			indices[index_offset + 1] = top_right
-			indices[index_offset + 2] = bottom_right
-			indices[index_offset + 3] = top_left
-			indices[index_offset + 4] = bottom_right
-			indices[index_offset + 5] = bottom_left
-			index_offset += 6
-	var arrays: Array = []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	return mesh
+	return fog_renderer._build_world_fog_mesh(self, bounds)
 
 
 func _sync_world_fog_texture(cells: Variant, fog_revision: int, probe: Variant = null) -> void:
-	if simulation_owner.pending: return
-	var expected_cells := map_size.x * map_size.y
-	if cells.size() < expected_cells:
-		return
-	var mask_started := Time.get_ticks_usec() if probe != null else 0
-	_ensure_fog_slope_neighbor_cache()
-	var change: Dictionary = {"full": true, "exact": false, "cells": [], "stamp": {}}
-	if simulation_world != null and simulation_world.has_method("cache_changes"):
-		change = CacheDependency.changes(simulation_world, CacheDependency.FOG_VISIBILITY, cached_world_fog_stamp, local_player_team)
-	var full_refresh: bool = cached_world_fog_texture == null or cached_world_fog_texture_data.size() != expected_cells * 4 or cached_world_fog_texture_revision < 0 or bool(change["full"]) or not bool(change["exact"])
-	var affected: Dictionary = {}
-	if full_refresh:
-		cached_world_fog_texture_data.resize(expected_cells * 4)
-		for index in range(expected_cells):
-			affected[index] = true
-	else:
-		for cell_value in change["cells"]:
-			var cell := Vector2i(cell_value)
-			for y_offset in range(-1, 2):
-				for x_offset in range(-1, 2):
-					var affected_cell := cell + Vector2i(x_offset, y_offset)
-					if affected_cell.x >= 0 and affected_cell.y >= 0 and affected_cell.x < map_size.x and affected_cell.y < map_size.y:
-						affected[affected_cell.y * map_size.x + affected_cell.x] = true
-	cached_world_fog_stamp = change["stamp"]
-	cached_world_fog_texture_revision = fog_revision
-	# Keep the compatibility queue bounded. Independent caches use journals,
-	# so consuming this queue no longer steals their invalidations.
-	if simulation_world != null and simulation_world.has_method("consume_fog_presentation_dirty_cells"):
-		simulation_world.consume_fog_presentation_dirty_cells(local_player_team)
-	if affected.is_empty():
-		return
-	for cell_index_value in affected.keys():
-		_write_world_fog_pixel(int(cell_index_value), cells)
-	var image := Image.create_from_data(map_size.x, map_size.y, false, Image.FORMAT_RGBA8, cached_world_fog_texture_data)
-	if cached_world_fog_texture == null:
-		cached_world_fog_texture = ImageTexture.create_from_image(image)
-	else:
-		cached_world_fog_texture.update(image)
-	if probe != null:
-		probe.observe_microseconds("presentation.fog.mask_update", Time.get_ticks_usec() - mask_started)
-		probe.increment("presentation.fog.mask_cells_updated", affected.size())
+	fog_renderer._sync_world_fog_texture(self, cells, fog_revision, probe)
 
 func _write_world_fog_pixel(index: int, cells: Variant) -> void:
-	var cell := Vector2i(index % map_size.x, index / map_size.x)
-	var state := int(cells[index])
-	var color := Color.TRANSPARENT
-	if state != FogOfWar.VISIBLE and _fog_cell_should_cover(cell, cells):
-		color = FogPresentation.color_for_state(state)
-	var byte_offset := index * 4
-	cached_world_fog_texture_data[byte_offset] = clampi(roundi(color.r * 255.0), 0, 255)
-	cached_world_fog_texture_data[byte_offset + 1] = clampi(roundi(color.g * 255.0), 0, 255)
-	cached_world_fog_texture_data[byte_offset + 2] = clampi(roundi(color.b * 255.0), 0, 255)
-	cached_world_fog_texture_data[byte_offset + 3] = clampi(roundi(color.a * 255.0), 0, 255)
+	fog_renderer._write_world_fog_pixel(self, index, cells)
 
 
 func _world_to_fog_mesh(world: Vector2) -> Vector2:
-	if _render_terrain() != null:
-		return _render_terrain().terrain_elevation.world_to_screen(world, view_zoom, Vector2.ZERO)
-	return Coordinates.world_to_screen(world, view_zoom, Vector2.ZERO)
+	return fog_renderer._world_to_fog_mesh(self, world)
 
 
 func _fog_cell_should_cover(cell: Vector2i, cells: Variant) -> bool:
-	var index := cell.y * map_size.x + cell.x
-	if index < 0 or index >= cells.size() or int(cells[index]) == FogOfWar.VISIBLE:
-		return false
-	_ensure_fog_slope_neighbor_cache()
-	if index >= cached_fog_slope_neighbor_cells.size() or int(cached_fog_slope_neighbor_cells[index]) == 0:
-		return true
-	if _fog_cell_touches_visible(cell, cells):
-		return false
-	return true
+	return fog_renderer._fog_cell_should_cover(self, cell, cells)
 
 
 func _fog_cell_touches_visible(cell: Vector2i, cells: Variant) -> bool:
-	for y_offset in range(-1, 2):
-		for x_offset in range(-1, 2):
-			if x_offset == 0 and y_offset == 0:
-				continue
-			if _fog_state_at_cell(cells, cell + Vector2i(x_offset, y_offset)) == FogOfWar.VISIBLE:
-				return true
-	return false
+	return fog_renderer._fog_cell_touches_visible(self, cell, cells)
 
 
 func _fog_state_at_cell(cells: Variant, cell: Vector2i) -> int:
-	if cell.x < 0 or cell.y < 0 or cell.x >= map_size.x or cell.y >= map_size.y:
-		return FogOfWar.UNKNOWN
-	var index := cell.y * map_size.x + cell.x
-	if index < 0 or index >= cells.size():
-		return FogOfWar.UNKNOWN
-	return int(cells[index])
+	return fog_renderer._fog_state_at_cell(self, cells, cell)
 
 
 func _ensure_fog_slope_neighbor_cache() -> void:
-	var expected_size := map_size.x * map_size.y
-	if _render_terrain() == null or cached_fog_slope_neighbor_cells.size() == expected_size:
-		return
-	cached_fog_slope_neighbor_cells.resize(expected_size)
-	for y in range(map_size.y):
-		for x in range(map_size.x):
-			var cell := Vector2i(x, y)
-			var profile: Dictionary = _render_terrain().terrain_elevation.cell_profile(cell)
-			var uses_slope_art := int(profile.get("slope_index", 0)) > 0 or not bool(profile.get("is_valid", true))
-			if uses_slope_art:
-				for y_offset in range(-1, 2):
-					for x_offset in range(-1, 2):
-						var neighbor := cell + Vector2i(x_offset, y_offset)
-						if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < map_size.x and neighbor.y < map_size.y:
-							cached_fog_slope_neighbor_cells[neighbor.y * map_size.x + neighbor.x] = 1
+	fog_renderer._ensure_fog_slope_neighbor_cache(self)
 
 
 func _expanded_tile_bounds(bounds: Rect2i, margin: int) -> Rect2i:
-	var start := Vector2i(maxi(0, bounds.position.x - margin), maxi(0, bounds.position.y - margin))
-	var finish := Vector2i(mini(map_size.x, bounds.end.x + margin), mini(map_size.y, bounds.end.y + margin))
-	return Rect2i(start, finish - start)
+	return fog_renderer._expanded_tile_bounds(self, bounds, margin)
 
 
 func _tile_bounds_contains(outer: Rect2i, inner: Rect2i) -> bool:
-	return (
-		inner.position.x >= outer.position.x
-		and inner.position.y >= outer.position.y
-		and inner.end.x <= outer.end.x
-		and inner.end.y <= outer.end.y
-	)
+	return fog_renderer._tile_bounds_contains(self, outer, inner)
 
 
 func draw_map_edge_guard() -> void:
-	var terrain_revision := _terrain_geometry_revision()
-	if cached_map_edge_chains.is_empty() or not is_equal_approx(cached_map_edge_zoom, view_zoom) or cached_map_edge_terrain_revision != terrain_revision:
-		cached_map_edge_chains = FogPresentation.map_edge_guard_chains(map_size, Callable(self, "_world_to_fog_mesh"))
-		cached_map_edge_zoom = view_zoom
-		cached_map_edge_terrain_revision = terrain_revision
-	draw_set_transform(PixelScaling.snap_screen(view_offset))
-	for chain in cached_map_edge_chains:
-		if chain.size() >= 2:
-			# A two-pixel centered stroke covers the one shared texel outside either
-			# rasterized edge orientation while consuming at most one pixel inside.
-			draw_polyline(chain, Color.BLACK, maxf(2.0, view_zoom * 2.0), false)
-	draw_set_transform(Vector2.ZERO)
+	fog_renderer.draw_map_edge_guard(self)
 
 func render_item_frame_info(kind: String, data: Variant) -> Dictionary:
 	match kind:
@@ -3286,6 +2684,12 @@ func static_frame_info(texture: Texture2D, asset_name: String, frame_index: int 
 
 func draw_render_body(item: Dictionary) -> void:
 	var frame_info: Dictionary = item["frame_info"]
+	if frame_info.has("shore_geometry"):
+		preload("res://scripts/shoreline_presentation.gd").draw(self,frame_info,item["screen_position"],view_zoom,float(item.get("opacity",1.0)))
+		return
+	if frame_info.has("river_geometry"):
+		preload("res://scripts/river_feature_presentation.gd").draw(self,frame_info,item["screen_position"],view_zoom,float(item.get("opacity",1.0)))
+		return
 	if frame_info.has("gate_polygon"):
 		var gate_screen := PixelScaling.snap_screen(item["screen_position"])
 		draw_set_transform(gate_screen, 0, Vector2.ONE * view_zoom)
@@ -3546,150 +2950,30 @@ func unit_display_name(unit: Dictionary) -> String:
 	return {"villager": "Villager", "clubman": "Clubman", "archer": "Bowman"}.get(unit["kind"], unit["kind"])
 
 func draw_minimap(rectangle: Rect2) -> void:
-	var geometry := minimap_geometry(rectangle)
-	var center: Vector2 = geometry["center"]
-	var scale: float = geometry["scale"]
-	var aperture := PackedVector2Array([
-		Vector2(rectangle.get_center().x, rectangle.position.y),
-		Vector2(rectangle.end.x, rectangle.get_center().y),
-		Vector2(rectangle.get_center().x, rectangle.end.y),
-		Vector2(rectangle.position.x, rectangle.get_center().y),
-	])
-	draw_colored_polygon(aperture, Color.BLACK)
-	var map_points := MinimapProjection.map_polygon(map_size, center, scale)
-	# Tree depletion changes terrain artwork but not land/water geography. Rebuild
-	# the small minimap raster only when navigable surface topology changes.
-	var terrain_revision := int(render_terrain_view.surface_revision) if render_terrain_view != null else int(simulation_world.navigation_grid.surface_revision) if simulation_world != null else -1
-	if cached_minimap_terrain_texture == null or cached_minimap_terrain_revision != terrain_revision or cached_minimap_terrain_rectangle != rectangle:
-		var terrain_image := MinimapTerrainRaster.build(map_size, rectangle, center, scale, Callable(self, "terrain_id_at_cell"))
-		cached_minimap_terrain_texture = ImageTexture.create_from_image(terrain_image)
-		cached_minimap_terrain_revision = terrain_revision
-		cached_minimap_terrain_rectangle = rectangle
-	if cached_minimap_terrain_texture != null:
-		draw_texture(cached_minimap_terrain_texture, rectangle.position)
-	var snapshot_tick := int(presentation_snapshot.get("overview_tick", presentation_snapshot.get("tick", -1)))
-	var exploration_revision := int(presentation_snapshot.get("fog_exploration_revision", presentation_snapshot.get("fog_revision", -1)))
-	if cached_minimap_fog_texture == null or cached_minimap_fog_rectangle != rectangle or (cached_minimap_exploration_revision != exploration_revision and cached_minimap_fog_tick != snapshot_tick):
-		var fog_image := MinimapTerrainRaster.build_fog(map_size, rectangle, center, scale, presentation_snapshot.get("fog", {}).get("cells", []))
-		# Retain the bounded CPU raster as the authoritative upload payload. This
-		# also makes headless verification independent of renderer-specific texture
-		# readback behavior while the live view continues reusing one GPU texture.
-		cached_minimap_fog_image = fog_image
-		if cached_minimap_fog_texture == null or cached_minimap_fog_rectangle != rectangle:
-			cached_minimap_fog_texture = ImageTexture.create_from_image(fog_image)
-		else:
-			cached_minimap_fog_texture.update(fog_image)
-		cached_minimap_exploration_revision = exploration_revision
-		cached_minimap_fog_tick = snapshot_tick
-		cached_minimap_fog_rectangle = rectangle
-	if cached_minimap_fog_texture != null:
-		draw_texture(cached_minimap_fog_texture, rectangle.position)
-	# Fog and markers share the overview cadence; world fog still updates each
-	# frame. Rebuilding the entire minimap raster on every newly explored cell
-	# otherwise adds a forest/map-size-dependent CPU spike while units move.
-	# Keep resource and unit markers independent of changing visibility.
-	if cached_minimap_mesh == null or cached_minimap_mesh_tick != snapshot_tick or cached_minimap_mesh_rectangle != rectangle:
-		cached_minimap_mesh_rectangle = rectangle
-		cached_minimap_mesh = _build_minimap_mesh(center, scale)
-		cached_minimap_mesh_tick = snapshot_tick
-	if cached_minimap_mesh != null:
-		draw_mesh(cached_minimap_mesh, null)
-	draw_polyline(PackedVector2Array([map_points[0], map_points[1], map_points[2], map_points[3], map_points[0]]), Color("d2bd7d"), 1.0)
-	# The visible-bounds query already resolved these exact terrain intersections.
-	# Reuse them for the minimap instead of repeating 96 height-search iterations.
-	visible_tile_bounds()
-	var camera_world := PackedVector2Array([
-		Coordinates.clamp_world(visible_world_corners[0], map_size),
-		Coordinates.clamp_world(visible_world_corners[1], map_size),
-		Coordinates.clamp_world(visible_world_corners[2], map_size),
-		Coordinates.clamp_world(visible_world_corners[3], map_size),
-	])
-	var camera_points := PackedVector2Array()
-	for world_point in camera_world:
-		camera_points.append(MinimapProjection.world_to_minimap(world_point, center, scale))
-	if camera_points.size() >= 3:
-		camera_points.append(camera_points[0])
-		draw_polyline(camera_points, Color("f5e28d"), 1.0, true)
+	minimap_renderer.draw_minimap(self, rectangle)
 
 
 func _build_minimap_mesh(center: Vector2, scale: float) -> ArrayMesh:
-	var probe: Variant = _presentation_probe()
-	var stage_started := Time.get_ticks_usec() if probe != null else 0
-	var vertices := PackedVector3Array()
-	var colors := PackedColorArray()
-	# Imported campaigns may contain ten thousand individual trees. At minimap
-	# scale many of them land on the same two-pixel cell, so drawing a circle for
-	# every source entity only creates hundreds of thousands of overlapping
-	# vertices. Collapse them into deterministic screen-space resource pixels.
-	for pixel_center in _minimap_resource_pixels(center, scale, cached_minimap_mesh_rectangle):
-		_append_colored_quad(vertices, colors, PackedVector2Array([
-			pixel_center + Vector2(-1.0, -1.0),
-			pixel_center + Vector2(1.0, -1.0),
-			pixel_center + Vector2(1.0, 1.0),
-			pixel_center + Vector2(-1.0, 1.0),
-		]), Color("18591d"))
-	if probe != null:
-		probe.observe_microseconds("presentation.minimap.resources", Time.get_ticks_usec() - stage_started)
-		stage_started = Time.get_ticks_usec()
-	for unit in overview_units:
-		if unit["hp"] > 0.0:
-			_append_colored_circle(vertices, colors, minimap_position(unit["pos"], center, scale), 2.0, resource_catalog.player_palette.color_for_team(int(unit["team"])))
-	for building in overview_buildings:
-		if building["hp"] > 0.0:
-			_append_colored_circle(vertices, colors, minimap_position(building["pos"], center, scale), 3.0, resource_catalog.player_palette.color_for_team(int(building["team"])))
-	if probe != null:
-		probe.observe_microseconds("presentation.minimap.entities", Time.get_ticks_usec() - stage_started)
-		stage_started = Time.get_ticks_usec()
-	if vertices.is_empty():
-		return null
-	var arrays: Array = []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_COLOR] = colors
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	if probe != null:
-		probe.observe_microseconds("presentation.minimap.surface", Time.get_ticks_usec() - stage_started)
-	return mesh
+	return minimap_renderer._build_minimap_mesh(self, center, scale)
 
 
 func _minimap_resource_pixels(center: Vector2, scale: float, rectangle: Rect2) -> Array[Vector2]:
-	if simulation_owner.pending: return minimap_resource_index.pixels
-	var changes: Variant = simulation_world.consume_known_resource_marker_changes(local_player_team) if simulation_world != null else null
-	var probe: Variant = _presentation_probe()
-	return minimap_resource_index.synchronize(overview_resource_nodes, changes, center, scale, rectangle,
-		func(position: Vector2): return presentation_fog_state_at(position) != FogOfWar.UNKNOWN, probe)
+	return minimap_renderer._minimap_resource_pixels(self, center, scale, rectangle)
 
 
 func _append_colored_quad(vertices: PackedVector3Array, colors: PackedColorArray, points: PackedVector2Array, color: Color) -> void:
-	if points.size() < 4:
-		return
-	for index in [0, 1, 2, 0, 2, 3]:
-		var point := points[index]
-		vertices.append(Vector3(point.x, point.y, 0.0))
-		colors.append(color)
+	minimap_renderer._append_colored_quad(self, vertices, colors, points, color)
 
 
 func _append_colored_circle(vertices: PackedVector3Array, colors: PackedColorArray, center: Vector2, radius: float, color: Color) -> void:
-	const SEGMENTS := 8
-	for index in range(SEGMENTS):
-		var first_angle := TAU * float(index) / float(SEGMENTS)
-		var second_angle := TAU * float(index + 1) / float(SEGMENTS)
-		for point in [center, center + Vector2(cos(first_angle), sin(first_angle)) * radius, center + Vector2(cos(second_angle), sin(second_angle)) * radius]:
-			vertices.append(Vector3(point.x, point.y, 0.0))
-			colors.append(color)
+	minimap_renderer._append_colored_circle(self, vertices, colors, center, radius, color)
 
 func minimap_position(world: Vector2, center: Vector2, scale: float) -> Vector2:
-	return MinimapProjection.world_to_minimap(world, center, scale)
+	return minimap_renderer.minimap_position(self, world, center, scale)
 
 
 func fog_runs() -> Array:
-	var revision := int(presentation_snapshot.get("fog_revision", -1))
-	if revision != cached_fog_revision:
-		var fog_cells: Variant = presentation_snapshot.get("fog", {}).get("cells", [])
-		cached_fog_runs = ViewportCulling.fog_runs(fog_cells, map_size, FogOfWar.VISIBLE)
-		cached_fog_revision = revision
-	return cached_fog_runs
+	return fog_renderer.fog_runs(self)
 
 
 var visible_corner_key: Array = []
@@ -3711,19 +2995,11 @@ func visible_tile_bounds(margin: int = 4) -> Rect2i:
 
 
 func minimap_rectangle() -> Rect2:
-	return InterfaceLayout.for_viewport(get_viewport_rect().size)["minimap"]
+	return minimap_renderer.minimap_rectangle(self)
 
 
 func minimap_geometry(rectangle: Rect2 = Rect2()) -> Dictionary:
-	var resolved := rectangle if rectangle.size != Vector2.ZERO else minimap_rectangle()
-	var horizontal_padding := 8.0
-	var vertical_padding := 6.0
-	var span := maxf(1.0, float(map_size.x + map_size.y))
-	return {
-		"rectangle": resolved,
-		"center": resolved.position + Vector2(resolved.size.x * 0.5, vertical_padding),
-		"scale": minf((resolved.size.x - horizontal_padding * 2.0) / span, (resolved.size.y - vertical_padding * 2.0) * 2.0 / span),
-	}
+	return minimap_renderer.minimap_geometry(self, rectangle)
 
 
 func hud_top_height() -> float:
@@ -3735,47 +3011,11 @@ func hud_bottom_height() -> float:
 
 
 func select_hud_building(building_id: int) -> void:
-	join_simulation_owner()
-	if simulation_world == null:
-		return
-	var building: Variant = simulation_world.find_building(building_id)
-	if building == null or int(building.get("team", 0)) != local_player_team or float(building.get("hp", 0)) <= 0:
-		return
-	var ids: Array[int] = [building_id]
-	player_control_state.replace_or_add(ids, false)
-	center_view_on_world(Vector2(building.get("pos", Vector2.ZERO)))
-	sync_world_state()
-	refresh_hud_model()
-	queue_redraw()
+	command_actions.select_hud_building(self, building_id)
 
 
 func draw_map_edge_fog_overlay() -> void:
-	# Crowns can project outside the finite terrain mesh. Continue the boundary
-	# cell's fog there, without tinting the black void or drawing across sprites.
-	if _render_terrain() == null or cached_world_fog_texture == null:
-		return
-	if cached_map_edge_fog_revision != _terrain_geometry_revision():
-		cached_map_edge_fog_meshes.clear()
-		cached_map_edge_fog_revision = _terrain_geometry_revision()
-	var visible := visible_tile_bounds()
-	var skirt := 6
-	var regions := {
-		"top": Rect2i(-skirt, -skirt, map_size.x + skirt * 2, skirt),
-		"bottom": Rect2i(-skirt, map_size.y, map_size.x + skirt * 2, skirt),
-		"left": Rect2i(-skirt, 0, skirt, map_size.y),
-		"right": Rect2i(map_size.x, 0, skirt, map_size.y),
-	}
-	var needed := []
-	if visible.position.y < skirt: needed.append("top")
-	if visible.end.y > map_size.y - skirt: needed.append("bottom")
-	if visible.position.x < skirt: needed.append("left")
-	if visible.end.x > map_size.x - skirt: needed.append("right")
-	draw_set_transform(PixelScaling.snap_screen(view_offset), 0.0, Vector2(view_zoom, view_zoom))
-	for edge in needed:
-		if not cached_map_edge_fog_meshes.has(edge):
-			cached_map_edge_fog_meshes[edge] = _build_world_fog_mesh(regions[edge])
-		draw_mesh(cached_map_edge_fog_meshes[edge], cached_world_fog_texture, Transform2D.IDENTITY, Color.BLACK)
-	draw_set_transform(Vector2.ZERO)
+	fog_renderer.draw_map_edge_fog_overlay(self)
 
 
 func _reset_command_feedback() -> void:
@@ -3787,20 +3027,11 @@ func _reset_command_feedback() -> void:
 
 
 func _reset_world_fog_cache() -> void:
-	cached_fog_revision = -1
-	cached_fog_runs.clear()
-	cached_world_fog_meshes.clear()
-	cached_world_fog_mesh_terrain_revision = -1
-	cached_world_fog_texture = null
-	cached_world_fog_texture_data.resize(0)
-	cached_world_fog_texture_revision = -1
+	fog_renderer._reset_world_fog_cache(self)
 
 
 func _reset_minimap_fog_cache() -> void:
-	cached_minimap_fog_texture = null
-	cached_minimap_fog_image = null
-	cached_minimap_exploration_revision = -1
-	cached_minimap_fog_rectangle = Rect2()
+	minimap_renderer._reset_minimap_fog_cache(self)
 
 
 func _reset_overview_cache() -> void:

@@ -18,11 +18,18 @@ func _initialize() -> void:
 	check(Settings.default_settings()["landscape_version"] == WorldGeography.VERSION, "Normal new-game settings enable the shared world generator")
 	check(Settings.catalog()["map_types"].size() == WorldGeography.PROFILES.size(), "All nine menu profiles have geographic recipes")
 	var fixtures: Array = []
+	var selected_profiles := PackedStringArray()
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--profiles="): selected_profiles = argument.trim_prefix("--profiles=").split(",",false)
 	for profile in WorldGeography.PROFILES:
+		if not selected_profiles.is_empty() and profile not in selected_profiles: continue
 		if mode == "boundaries":
 			for item in [["compact", 7919, 4], ["large", 41721, 8], ["standard", 104729, 6]]: fixtures.append([profile] + item)
 		else: fixtures.append([profile, "supergiant" if mode == "supergiant" else "standard", 41721, 4])
-	var output := FileAccess.open(DIRECTORY.path_join(mode + ".jsonl"), FileAccess.WRITE)
+	if mode == "smoke" and (selected_profiles.is_empty() or "highlands" in selected_profiles): fixtures.append(["highlands", "standard", 41689, 4])
+	check(not fixtures.is_empty(),"profile filter selects at least one fixture")
+	var report_name := mode if selected_profiles.is_empty() else mode+"-"+"_".join(selected_profiles)
+	var output := FileAccess.open(DIRECTORY.path_join(report_name + ".jsonl"), FileAccess.WRITE)
 	for fixture in fixtures:
 		var settings := Settings.default_settings()
 		settings["map_type_id"] = fixture[0]
@@ -35,7 +42,9 @@ func _initialize() -> void:
 		check(bool(row["valid"]), "%s builds: %s" % [fixture, row["errors"]])
 		if bool(row["valid"]):
 			var data: Dictionary = built["map_data"]
+			row["clearings"] = data.get("building_clearings",[]).size()
 			check(data["generator_version"] == WorldGeography.VERSION, "%s uses shared hydrology in ordinary settings" % [fixture])
+			check(data.get("building_clearings", []).size() == built["definition"]["players"].size(), "%s preserves an accessible expansion clearing for every settlement" % [fixture])
 			check(built["definition"]["map"]["generator"]["wild_geography"], "%s retains unequal geography and economy" % [fixture])
 			check(Rivers.inspect(data["rivers"])["valid"], "%s has a connected, non-uphill drainage graph" % [fixture])
 			check(not data.has("_fields") and not data.has("_reserved") and not data["rivers"].has("drainage"), "%s leaves no generation scratch in saved map data" % [fixture])
@@ -45,7 +54,11 @@ func _initialize() -> void:
 				if mouth_mask[i] != 0 and data["rivers"]["terrain_types"][i] >= 0:
 					check(int(data["terrain_ids"][i]) in [1, 22], "%s keeps river mouths free of fords, shoals and dry bars" % [fixture])
 			for ford in data["fords"]:
-				check(data["scenery"].any(func(item): return bool(item.get("ford_detail", false)) and Vector2i(Vector2(item["position"]).floor()) in ford["cells"]), "%s shows source sandy islets on every ford" % [fixture])
+				if data["rivers"]["surface"].get("model_version", 0) >= 1:
+					var field := preload("res://scripts/random_map_river_surface.gd").sample(data["rivers"]["surface"],(ford["bank_a"]+ford["bank_b"])*0.5)
+					check(field.z <= 0.25,"%s shows a continuous shallow gravel ridge on every ford" % [fixture])
+				else:
+					check(data["scenery"].any(func(item): return bool(item.get("ford_detail", false)) and Vector2i(Vector2(item["position"]).floor()) in ford["cells"]), "%s shows source sandy islets on every ford" % [fixture])
 				for cell in ford["cells"]:
 					check(int(data["terrain_ids"][cell.y * size.x + cell.x]) == 4, "%s preserves shared infantry/ship ford terrain" % [fixture])
 					check(mouth_mask[cell.y * size.x + cell.x] == 0, "%s excludes every crossing cell from estuaries" % [fixture])
@@ -69,7 +82,8 @@ func _initialize() -> void:
 				check(data["lakes"].any(func(lake): return int(lake["surface_level"]) > 0), "Highland 400 fixture retains elevated lakes instead of sea-level trenches")
 			for resource in data["resources"]:
 				var cell := Vector2i(resource["position"])
-				check(data["rivers"]["mask"][cell.y * size.x + cell.x] == 0, "%s leaves rivers, lakes and crossing approaches clear" % [fixture])
+				if resource.get("placement_domain", "land") == "land":
+					check(data["rivers"]["mask"][cell.y * size.x + cell.x] == 0, "%s leaves rivers, lakes and crossing approaches clear of land resources" % [fixture])
 			row.merge({"water_ratio": built["map_quality"]["metrics"]["water_ratio"], "lakes": data["lakes"].size(), "fords": data["fords"].size(),
 				"rivers": Rivers.inspect(data["rivers"]), "composition": data["ecology"]["composition"], "shape_kind": data["geography"]["shape_kind"], "hash": data["content_hash"]})
 			if mode == "smoke":
@@ -83,7 +97,7 @@ func _initialize() -> void:
 		output.store_line(JSON.stringify(row))
 		output.flush()
 		print(JSON.stringify({"fixture": fixture, "valid": row["valid"], "errors": row["errors"], "elapsed_ms": row["elapsed_ms"], "lakes": row.get("lakes", 0), "fords": row.get("fords", 0)}))
-	FileAccess.open(DIRECTORY.path_join(mode + ".json"), FileAccess.WRITE).store_string(JSON.stringify({"valid": failures.is_empty(), "rows": rows, "failures": failures}, "\t"))
+	FileAccess.open(DIRECTORY.path_join(report_name + ".json"), FileAccess.WRITE).store_string(JSON.stringify({"valid": failures.is_empty(), "rows": rows, "failures": failures}, "\t"))
 	for failure in failures: push_error(failure)
 	quit(0 if failures.is_empty() else 1)
 

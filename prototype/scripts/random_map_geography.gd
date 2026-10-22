@@ -144,7 +144,8 @@ static func settlement_sites(geography_data: Dictionary, count: int, seed: int) 
 	for i in range(open.size()):
 		var x := i % size.x
 		var y := i / size.x
-		if open[i] == 0 or x == 0 or y == 0 or x == size.x - 1 or y == size.y - 1:
+		# Fords join land components, but are water rather than town sites.
+		if open[i] == 0 or geography_data["terrain"][i] in Base.WATER or x == 0 or y == 0 or x == size.x - 1 or y == size.y - 1:
 			clearance[i] = 0
 			queue.append(i)
 	var cursor := 0
@@ -188,6 +189,16 @@ static func settlement_sites(geography_data: Dictionary, count: int, seed: int) 
 			if not wild and insular and occupied_components.has(component): continue
 			if not wild and not insular and int(areas[component]) != largest: continue
 			var point := Vector2(i % size.x + 0.5, i / size.x + 0.5)
+			# Manhattan clearance around the town centre can still admit a
+			# diagonal starting villager exactly on its boundary. Validate the
+			# actual, shared starting layout rather than enlarging every site.
+			var units_fit := true
+			for position in starting_villager_positions(point, size):
+				var cell := Vector2i(position.floor())
+				if not Navigation.inside(cell, size) or open[cell.y * size.x + cell.x] == 0 or geography_data["terrain"][cell.y * size.x + cell.x] in Base.WATER:
+					units_fit = false
+					break
+			if not units_fit: continue
 			var separation := float(mini(size.x, size.y)) * 0.55
 			for start in result: separation = minf(separation, point.distance_to(start))
 			if separation < ((8.0 if mini(size.x, size.y) <= 128 else maxf(12.0, mini(size.x, size.y) * 0.025)) if wild else maxf(12.0, mini(size.x, size.y) * 0.16)): continue
@@ -201,6 +212,12 @@ static func settlement_sites(geography_data: Dictionary, count: int, seed: int) 
 		result.append(Vector2(chosen % size.x + 0.5, chosen / size.x + 0.5))
 		occupied_components[components[chosen]] = true
 	return result
+
+static func starting_villager_positions(start: Vector2, size: Vector2i) -> Array[Vector2]:
+	var inward := (Vector2(size) * 0.5 - start).normalized()
+	if inward.length_squared() <= 0.000001: inward = Vector2.DOWN
+	var side := Vector2(-inward.y, inward.x)
+	return [start + inward * 3.25 - side * 1.1, start + inward * 3.55, start + inward * 3.25 + side * 1.1]
 
 static func settle(fields: Dictionary, size: Vector2i, starts: Array[Vector2]) -> void:
 	var levels: Array[int] = fields["vertex_levels"]

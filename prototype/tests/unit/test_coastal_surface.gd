@@ -48,7 +48,7 @@ func _test_native_materials(catalog) -> void:
 	var shallow: Image = pack.legacy_textures[15].get_image()
 	var sand: Image = pack.legacy_textures[6].get_image()
 	check(shallow.get_data() != sand.get_data() and shallow.get_data() != water.get_data(), "impassable shoals show submerged soil, distinguishable from both dry beach and open water")
-	check(pack.legacy_textures[4].get_image().get_data() == water.get_data(), "ford water retains its source base beneath separate sandy-islet details")
+	check(pack.legacy_textures[4].get_image().get_data() == pack.material_texture(4).get_image().get_data(), "ford water uses the native submerged material beneath sandy-islet details")
 	for y in range(0, 96, 12):
 		for x in range(0, 96, 12):
 			var a := shallow.get_pixel(x, y)

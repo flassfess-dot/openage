@@ -425,6 +425,7 @@ static func _is_ambient_actor(item: Dictionary) -> bool:
 
 
 static func environment_layer(item: Dictionary) -> int:
+	if item.get("shoreline_detail",false): return RenderItem.Layer.TERRAIN
 	# Compatibility for generated or saved shoals carrying the old scenery role.
 	if item.get("decoration_key", "") == "ror_shallows" or item.get("asset_name", "") == "aoe2_temperate:ror_shallows" or int(item.get("graphic_id", -1)) == 503:
 		return RenderItem.Layer.DECAL
@@ -770,7 +771,7 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 			animated.append(item)
 			continue
 		var item_id := int(item.get("id", -1))
-		var item_signature := hash([item_id, item.get("graphic_id", -1), item.get("asset_name", ""), item.get("position", Vector2.ZERO), item.get("source_frame", 0), item.get("presentation_layer", "scenery"), item.get("source_elevation", 0.0), item.get("source_unit_id", -1), item.get("cliff_screen_offset", Vector2.ZERO)])
+		var item_signature := hash([item_id, item.get("graphic_id", -1), item.get("asset_name", ""), item.get("position", Vector2.ZERO), item.get("source_frame", 0), item.get("presentation_layer", "scenery"), item.get("source_elevation", 0.0), item.get("source_unit_id", -1), item.get("cliff_screen_offset", Vector2.ZERO),item.get("mirrored",false),item.get("waterfall_screen_offset",Vector2.ZERO)])
 		wanted[item_id] = {"signature": item_signature, "item": item}
 		signature = signature * 31 + item_signature
 	cached_environment_revision = revision

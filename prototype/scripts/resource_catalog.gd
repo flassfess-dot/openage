@@ -444,6 +444,11 @@ func enable_environment_pack() -> bool:
 
 
 func environment_frame_info(item: Dictionary, animation_time: float = 0.0) -> Dictionary:
+	if item.get("shoreline_detail",false):
+		return preload("res://scripts/shoreline_presentation.gd").frame_info(item,[environment_pack.shoreline_texture(false),environment_pack.shoreline_texture(true)])
+	if item.get("river_feature","") == "ledge":
+		if not source_resource_textures.has("cliff_grounded"): _cache_source_resource_frames("cliff_grounded")
+		return preload("res://scripts/river_feature_presentation.gd").frame_info(item,source_resource_textures.get("cliff_grounded",[]),animation_time,environment_pack.river_presentation_materials() if environment_pack.enabled else {})
 	if environment_pack.owns_asset(String(item.get("asset_name", ""))):
 		return environment_pack.frame_info(item)
 	var graphic_id := int(item.get("graphic_id", -1))

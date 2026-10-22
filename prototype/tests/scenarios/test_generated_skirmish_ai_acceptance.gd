@@ -37,17 +37,24 @@ func _initialize() -> void:
 	world.set_runtime_catalog(catalog.runtime_catalog_data)
 	MatchBootstrap.apply(world, definition, built["map_data"])
 	var controller = GameController.new(world)
+	controller.set_speed_multiplier(1.0)
 	var ai = AiPlayer.new(definition["players"][1])
 	var issued := 0
 	var scout_move_sequences: Dictionary = {}
 	var scout_ids: Dictionary = {}
+	var scout_explored := false
+	var scout_home := Vector2(definition["players"][1]["start"])
 
 	while int(controller.tick_index) < MAX_TICKS:
 		var next_tick := int(controller.tick_index) + 1
+		ai.collect_feedback(controller, controller.tick_index)
 		if ai.needs_decision(next_tick):
 			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, int(ai.team), ai.presentation_options())
 			for command in ai.collect_commands(knowledge, next_tick):
+				var metadata: Dictionary = command.params.get("_ai_feedback", {})
+				command.params.erase("_ai_feedback")
 				controller.enqueue_command(command, true, int(ai.team))
+				ai.register_proposal(command, metadata)
 				if String(command.command_type()) == "move":
 					for id in command.unit_ids:
 						var unit: Variant = world.find_unit(int(id))
@@ -55,7 +62,12 @@ func _initialize() -> void:
 							scout_move_sequences[int(command.sequence_id)] = true
 							scout_ids[int(id)] = true
 				issued += 1
-		controller.advance_frame(0.25, 1, 2)
+		# Observe each fixed step, as the scene's before_fixed_tick AI barrier
+		# does; frame CPU budgets must not shift decision ticks in this fixture.
+		controller.advance_frame(0.05, 1, 2)
+		for id in scout_ids:
+			var scout: Variant = world.find_unit(int(id))
+			if scout != null and Vector2(scout["pos"]).distance_to(scout_home) >= 8.0: scout_explored = true
 		if world.is_battle_over():
 			break
 
@@ -79,8 +91,8 @@ func _initialize() -> void:
 			rejected += 1
 			var reason := String(event.get("payload", {}).get("reason", "unknown"))
 			rejection_reasons[reason] = int(rejection_reasons.get(reason, 0)) + 1
-	var home: Vector2 = team_two_buildings.filter(func(b): return b.get("kind") == "town_center")[0]["pos"]
-	var explored: bool = combatants.any(func(u): return scout_ids.has(int(u["id"])) and Vector2(u["pos"]).distance_to(home) >= 8.0)
+	# Exploration remains a completed milestone when the scout later returns or dies.
+	var explored: bool = scout_explored
 	assert_true(explored or int(accepted_types.get("attack", 0)) + int(accepted_types.get("attack_move", 0)) > 0, "a combat scout actually explores away from the starting town or begins combat")
 	var resources := [world.get_resource_amount(2, 0), world.get_resource_amount(2, 1), world.get_resource_amount(2, 2), world.get_resource_amount(2, 3)]
 	var queues: Array = team_two_buildings.map(func(building): return {"id": int(building.get("id", -1)), "kind": String(building.get("kind", "")), "pos": building.get("pos", Vector2.ZERO), "state": String(building.get("state", "")), "progress": snappedf(float(building.get("construction_progress", 0.0)), 0.01), "builders": building.get("builders", {}).size(), "queue": building.get("production_queue", []).size()})

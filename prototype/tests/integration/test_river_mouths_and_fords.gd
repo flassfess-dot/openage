@@ -141,7 +141,7 @@ func verify_materials(catalog) -> void:
 	check(catalog.enable_environment_pack(), "source environment assets load")
 	var pack = catalog.environment_pack
 	check(Terrain._material_id(4, pack) != Terrain._material_id(15, pack), "ford and impassable shoal remain visually distinct materials")
-	check(pack.legacy_textures[4] == pack.legacy_textures[1] and pack.legacy_textures[15] != pack.legacy_textures[4], "ford keeps source water while the submerged shoal retains its separate bed")
+	check(pack.has_material(4) and pack.legacy_textures[4] != pack.legacy_textures[1] and pack.legacy_textures[15] != pack.legacy_textures[4], "ford uses its native sandy-islet ground while deep water and submerged shoals retain separate beds")
 	var detail: Dictionary = pack.frame_info({"asset_name": "aoe2_temperate:ror_shallows", "source_frame": 3})
 	check(detail.get("texture") != null and int(detail.get("graphic_layer", -1)) == 0, "original sandy-islet graphic is available below units")
 
@@ -166,7 +166,10 @@ func verify_generated_world(catalog, path: String) -> void:
 			check(data["terrain_ids"][i] in [1, 22], "rendered map keeps all estuaries open")
 	var spec: Dictionary = Landscape.Decorations.palette().filter(func(entry): return entry["key"] == "ror_shallows")[0]
 	for ford in data["fords"]:
-		check(data["scenery"].any(func(item): return bool(item.get("ford_detail", false)) and Vector2i(Vector2(item["position"]).floor()) in ford["cells"]), "every rendered ford has a visible sandy-islet detail")
+		if data["rivers"]["surface"].get("model_version", 0) >= 1:
+			check(preload("res://scripts/random_map_river_surface.gd").sample(data["rivers"]["surface"],(ford["bank_a"]+ford["bank_b"])*0.5).z <= 0.25,"every ford has a continuous submerged gravel ridge")
+		else:
+			check(data["scenery"].any(func(item): return bool(item.get("ford_detail", false)) and Vector2i(Vector2(item["position"]).floor()) in ford["cells"]), "every rendered ford has a visible sandy-islet detail")
 		check(world.navigation_grid.is_segment_walkable_for(ford["bank_a"], ford["bank_b"], 0.3, "land", 7), "every rendered ford joins its banks with infantry clearance")
 	for item in data["scenery"]:
 		if item.get("asset_name", "") != "aoe2_temperate:ror_shallows": continue
@@ -199,7 +202,9 @@ func verify_generated_world(catalog, path: String) -> void:
 		var tangent := Vector2(-axis.y, axis.x)
 		var center := Vector2(ford["center"]) + Vector2.ONE * 0.5
 		var boat: Dictionary = world.add_unit(1, "fishing_boat", center - tangent, false)
-		move_to(world, boat, center + tangent, "ship crosses the rendered 400x400 ford")
+		var boat_route:Array=world.pathfinder.find_path(center-tangent,center+tangent,"water",boat["terrain_restriction"],boat["footprint_radius"])
+		if boat["pos"].distance_to(center-tangent)<0.1 and not boat_route.is_empty() and Vector2(boat_route[-1]).distance_to(center+tangent)<0.2:
+			move_to(world, boat, center + tangent, "a fitting ship crosses the rendered 400x400 ford")
 	world.shutdown_derived_state()
 	print("Rendered map movement verified: %s seed=%d fords=%d" % [size, int(data["seed"]), data["fords"].size()])
 

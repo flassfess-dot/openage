@@ -16,6 +16,8 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	var settings := SkirmishSettings.default_settings()
+	# Guaranteed per-player naval staging and deep fish belong to this v3 fixture.
+	settings["landscape_version"] = 3
 	settings["map_size_id"] = "compact"
 	settings["map_type_id"] = "islands"
 	settings["seed"] = 41721
@@ -50,6 +52,7 @@ func _initialize() -> void:
 
 	while int(controller.tick_index) < MAX_TICKS and not world.is_battle_over():
 		var next_tick := int(controller.tick_index) + 1
+		ai.collect_feedback(controller, controller.tick_index)
 		var submitted: Array = []
 		if ai.needs_decision(next_tick):
 			var knowledge := SimulationSnapshot.with_queries(world, controller.tick_index, AI_TEAM, ai.presentation_options())
@@ -57,7 +60,10 @@ func _initialize() -> void:
 			for command in ai.collect_commands(knowledge, next_tick):
 				var command_type := String(command.command_type())
 				issued_types[command_type] = int(issued_types.get(command_type, 0)) + 1
+				var metadata: Dictionary = command.params.get("_ai_feedback", {})
+				command.params.erase("_ai_feedback")
 				controller.enqueue_command(command, true, AI_TEAM)
+				ai.register_proposal(command, metadata)
 				submitted.append(command)
 		controller.advance_frame(0.5, 1, 2)
 		for command in submitted:

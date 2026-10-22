@@ -2,6 +2,7 @@ class_name RoRRandomMapRivers
 extends RefCounted
 
 const Navigation := preload("res://scripts/random_map_navigation.gd")
+const Channels := preload("res://scripts/random_map_river_channels.gd")
 const DIRECTIONS := [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN,
 	Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(1, 1)]
 const SHOAL := 15 # Native WaterImpassable: no land or ship restriction admits it.
@@ -110,6 +111,7 @@ static func carve(size: Vector2i, terrain: Array[int], relief: Dictionary, optio
 	var nodes: Array = []
 	var incoming: Dictionary = {}
 	var mouth_count := 0
+	var natural_channels := bool(options.get("natural_channels", false))
 	for i in order:
 		if runoff[i] < threshold or basin[i] < 0 or runoff[basin[i]] < minimum_basin_runoff: continue
 		var next := parent[i]
@@ -124,11 +126,13 @@ static func carve(size: Vector2i, terrain: Array[int], relief: Dictionary, optio
 			var upstream := Vector2i(strongest[i] % size.x, strongest[i] / size.x)
 			bend = Vector2(cell - upstream).normalized().cross(direction)
 		var radius := clampf((0.8 + sqrt(runoff[i] / threshold) * 0.65) * float(options.get("width_scale", 1.0)), 1.0 if not options.is_empty() else 1.4, float(options.get("maximum_radius", 5.8)))
+		if natural_channels: radius=Channels.radius(runoff[i]/threshold,float(options.get("width_scale",1.0)),float(options.get("maximum_radius",3.2)))
 		nodes.append({"cell": cell, "downstream": outlet, "discharge": runoff[i], "head": head[i],
 			"downstream_head": head[next] if not is_mouth else 0, "mouth_distance": distance[i],
-			"basin": basin[i], "is_mouth": is_mouth, "boundary_outlet": boundary_outlet, "radius": radius, "bend": bend})
+			"basin": basin[i], "is_mouth": is_mouth, "boundary_outlet": boundary_outlet, "radius": radius, "bend": bend, "surface_level":physical_head[i] / 1000})
 		if not is_mouth: incoming[next] = int(incoming.get(next, 0)) + 1
 		else: mouth_count += 1
+		if natural_channels: continue
 		var reach := ceili(radius)
 		for y in range(maxi(0, cell.y - reach), mini(size.y, cell.y + reach + 1)):
 			for x in range(maxi(0, cell.x - reach), mini(size.x, cell.x + reach + 1)):
@@ -155,7 +159,13 @@ static func carve(size: Vector2i, terrain: Array[int], relief: Dictionary, optio
 	# A shallow tributary's bank must not overwrite the larger river's thalweg.
 	# Preserve clearance through bends and confluences, with a scoured outlet
 	# joining the sea. This depends on runoff, independently of player access.
-	for node in nodes:
+	var channel_geometry: Dictionary = {}
+	if natural_channels:
+		channel_geometry = Channels.build(size, original, nodes, threshold, relief, options)
+		mask = channel_geometry["mask"]
+		types = channel_geometry["terrain_types"]
+		surface_levels = channel_geometry["surface_levels"]
+	for node in ([] if natural_channels else nodes):
 		if float(node["discharge"]) < threshold * 3.0: continue
 		var centers: Array[Vector2i] = [node["cell"]]
 		if bool(node["is_mouth"]): centers.append(node["downstream"])
@@ -191,6 +201,9 @@ static func carve(size: Vector2i, terrain: Array[int], relief: Dictionary, optio
 		"surface_levels": surface_levels,
 		"confluence_count": confluences, "runoff_threshold": threshold, "minimum_basin_runoff": minimum_basin_runoff,
 		"model": "priority_flood_runoff_v1"}
+	if natural_channels:
+		result["channels"] = channel_geometry["channels"]
+		result["model"] = "hydraulic_watershed_channels_v3"
 	if not options.is_empty():
 		result["drainage"] = {"raw_head": raw_head, "spill_head": spill, "physical_head": physical_head, "head": head,
 			"parent": parent, "basin": basin, "runoff": runoff}

@@ -18,6 +18,8 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	var settings := SkirmishSettings.default_settings()
+	# Use the legacy recipe that guarantees a Dock and staging zone per team.
+	settings["landscape_version"] = 3
 	settings["map_size_id"] = "compact"
 	settings["map_type_id"] = "islands"
 	settings["seed"] = 41721
@@ -39,6 +41,9 @@ func _initialize() -> void:
 	world.set_graphics_catalog(catalog.graphics_catalog_data)
 	world.set_runtime_catalog(catalog.runtime_catalog_data)
 	MatchBootstrap.apply(world, definition, built["map_data"])
+	# Keep boarding/transit/landing independent of neutral wildlife combat.
+	for actor in world.get_units().duplicate():
+		if int(actor["team"]) == 0: world.detach_unit_for_transport(int(actor["id"]))
 
 	var zones: Array = built["map_data"].get("naval_start_zones", [])
 	assert_equal(zones.size(), 2, "two-player islands fixture exposes two naval start zones")
@@ -54,8 +59,15 @@ func _initialize() -> void:
 		finish()
 		return
 	var transport: Dictionary = world.add_unit(AI_TEAM, "transport", transport_position, false)
-	var first: Dictionary = world.add_unit(AI_TEAM, "clubman", Vector2(ai_zone["land_staging"]), false)
-	var second: Dictionary = world.add_unit(AI_TEAM, "clubman", Vector2(ai_zone["land_staging"]) + Vector2(0.0, 0.35), false)
+	var passenger_radius := float(Footprint.mobile("clubman", world.unit_stats("clubman"))["movement_radius"])
+	var first_position: Variant = nearest_clear_position(world, Vector2(ai_zone["land_staging"]), passenger_radius, "land")
+	var second_position: Variant = nearest_clear_position(world, Vector2(ai_zone["land_staging"]), passenger_radius, "land", first_position)
+	assert_true(first_position is Vector2 and second_position is Vector2, "the assault pair starts on distinct clear land footprints")
+	if not first_position is Vector2 or not second_position is Vector2:
+		finish()
+		return
+	var first: Dictionary = world.add_unit(AI_TEAM, "clubman", first_position, false)
+	var second: Dictionary = world.add_unit(AI_TEAM, "clubman", second_position, false)
 	transport["components"]["vision"]["range"] = 100.0
 	world.update_fog_of_war()
 	var passenger_ids := [int(first["id"]), int(second["id"])]
@@ -120,7 +132,7 @@ func _initialize() -> void:
 	finish()
 
 
-func nearest_clear_position(world, origin: Vector2, radius: float, domain: String) -> Variant:
+func nearest_clear_position(world, origin: Vector2, radius: float, domain: String, avoid: Variant = null) -> Variant:
 	var origin_component: int = world.navigation_grid.surface_component_id(Vector2i(origin), domain)
 	var candidates: Array[Vector2] = []
 	for y in range(world.map_size.y):
@@ -129,6 +141,7 @@ func nearest_clear_position(world, origin: Vector2, radius: float, domain: Strin
 			if world.navigation_grid.surface_component_id(cell, domain) != origin_component:
 				continue
 			var candidate := Vector2(cell) + Vector2(0.5, 0.5)
+			if avoid is Vector2 and candidate.distance_squared_to(avoid) < pow(radius * 2.0 + 0.06, 2): continue
 			if world.navigation_grid.is_position_walkable_for(candidate, radius, domain):
 				candidates.append(candidate)
 	candidates.sort_custom(func(left: Vector2, right: Vector2):

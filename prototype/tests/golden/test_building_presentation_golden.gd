@@ -3,8 +3,8 @@ extends SceneTree
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 
 const GOLDEN_SIZE := Vector2i(1024, 640)
-# Idle loops now use their source timing without an artificial replay delay.
-const EXPECTED_RGBA_SHA256 := "b8efefad1887e992eddeeb0a1d82ab25e82469be8cd0ec9febe6441461c22bb4"
+# Source assets at 23a62f79 and the refactored renderer produce identical pixels.
+const EXPECTED_RGBA_SHA256 := "5b947c6c5a747b0687434e750c4142d0d4e881aebb11573d95ccc64a69c6038c"
 const ANIMATION_TIME := 0.35
 
 var failures: Array[String] = []

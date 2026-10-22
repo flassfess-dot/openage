@@ -33,6 +33,7 @@ var revision: int = 0
 var change_history: Array = []
 var size: Vector2i
 var vertex_levels: Dictionary = {}
+var river_shape: Dictionary = {}
 var nonzero_vertex_count: int = 0
 var maximum_vertex_level: int = 0
 var maximum_vertex_level_dirty: bool = false
@@ -47,6 +48,7 @@ func clear(level: int = 0) -> void:
 	ChangeJournal.record_full(change_history, revision, revision + 1)
 	revision += 1
 	vertex_levels.clear()
+	river_shape = {}
 	var safe_level := maxi(0, level)
 	nonzero_vertex_count = (size.x + 1) * (size.y + 1) if safe_level > 0 else 0
 	maximum_vertex_level = safe_level

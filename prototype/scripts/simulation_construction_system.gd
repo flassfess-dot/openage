@@ -133,7 +133,10 @@ func _worker_in_building_range(worker: Dictionary, building: Dictionary) -> bool
 
 
 func advance_repair(worker: Dictionary, target: Dictionary, requested_hp: float) -> float:
-	world.notify_entity_changed(target)
+	return float(world.mutate_entity(target, _mutate_advance_repair.bind(worker, target, requested_hp)))
+
+
+func _mutate_advance_repair(worker: Dictionary, target: Dictionary, requested_hp: float) -> float:
 	if not can_worker_repair(worker, target):
 		return 0.0
 	var repair_policy: Dictionary = world.data_repository.runtime_metadata(String(target.get("kind", "")))

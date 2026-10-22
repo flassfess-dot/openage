@@ -56,9 +56,16 @@ static func finish(size: Vector2i, terrain: Array[int], forms: Array, profile: S
 	var span := float(mini(size.x, size.y))
 	var no_starts: Array[Vector2] = []
 	var fields := Natural.fields(size, terrain, no_starts, profile, seed ^ 0x8194)
+	fields["vertex_levels"] = broad_relief(size, terrain, fields, seed ^ 0x8194, profile)
 	var original_levels: Array[int] = fields["vertex_levels"].duplicate()
-	var hydro := Hydrology.build(size, terrain, fields, seed, options.get("hydrology", {}))
-	if profile == "narrows": Shapes.add_strait_shallows(size, terrain, hydro, options)
+	var hydro_options: Dictionary = options.get("hydrology", {}).duplicate(true)
+	hydro_options["waterfalls"] = profile in ["highlands","hill_country","continental","grasslands"]
+	var before_strait: Array[int] = []
+	if profile == "narrows": before_strait.assign(terrain)
+	var hydro := Hydrology.build(size, terrain, fields, seed, hydro_options)
+	if profile == "narrows":
+		Shapes.add_strait_shallows(size, terrain, hydro, options)
+		hydro["rivers"]["surface"] = Hydrology.RiverSurface.build(size,before_strait,hydro["rivers"],hydro["lakes"],hydro["fords"])
 	fields = Natural.fields(size, terrain, no_starts, profile, seed ^ 0x8194)
 	fields["vertex_levels"] = original_levels
 	Hydrology.apply_surface_relief(size, terrain, original_levels, hydro["rivers"], hydro["lakes"])
@@ -89,6 +96,9 @@ static func finish(size: Vector2i, terrain: Array[int], forms: Array, profile: S
 				Base._append_cliff_strip(scenery, cells, used, at, Vector2i.RIGHT, size, terrain, fields["vertex_levels"], seed)
 			at += (Vector2i.RIGHT if rng.randf() > 0.28 else Vector2i.UP) * CliffChain.STRIDE * sign_axis
 	CliffChain.apply(scenery)
+	Hydrology.RiverFalls.append_cliffs(size,terrain,fields["vertex_levels"],hydro["rivers"],scenery,cells,used,seed)
+	Hydrology.RiverRapids.append_rocks(hydro["rivers"],scenery,cells,used,seed)
+	Hydrology.RiverFalls.restore_pools(size,terrain,fields["vertex_levels"],hydro["rivers"])
 	var walkable := PackedByteArray()
 	walkable.resize(terrain.size())
 	for i in range(terrain.size()): walkable[i] = int(terrain[i] in [0, 4])
@@ -106,4 +116,49 @@ static func contract(generator: Dictionary, geography_data: Dictionary, starts: 
 	result["water_ratio"] = [0.0, 0.95]
 	result["cliff_profile"] = ""
 	result["quality_contract"]["minimum_gate_width_cells"] = 0
+	return result
+
+# Settlement-sized terraces come from broad landforms. Short-period ecological
+# noise must not turn every integer elevation boundary into tiny build blockers.
+# Generate physical relief before drainage so rivers and elevated lakes still
+# follow the terrain that will actually be published.
+static func broad_relief(size: Vector2i, terrain: Array[int], fields: Dictionary, seed: int, profile: String = "") -> Array[int]:
+	var span := float(mini(size.x, size.y))
+	var macro := _relief_noise(size, minf(128.0, span * 0.70), seed)
+	var regional := _relief_noise(size, clampf(span * 0.35, 18.0, 64.0), seed ^ 0x732AF)
+	var cells := PackedInt32Array()
+	cells.resize(terrain.size())
+	var maximum := int(fields["recipe"]["relief"])
+	if profile == "highlands": maximum += 2
+	elif profile == "hill_country": maximum += 1
+	# Highlands are an upland plateau, including their valley floors. This
+	# preserves elevated drainage basins without adding small noisy hills.
+	var base_level := 1 if profile == "highlands" else 0
+	for i in range(terrain.size()):
+		if terrain[i] in Base.WATER: continue
+		var uplift := smoothstep(0.38, 0.80, macro[i] * 0.80 + regional[i] * 0.20)
+		cells[i] = mini(base_level + floori(uplift * (maximum - base_level) + 0.18), maxi(0, fields["coast_distance"][i] - 1))
+	var levels: Array[int] = []
+	levels.resize((size.x + 1) * (size.y + 1))
+	for y in range(size.y + 1):
+		for x in range(size.x + 1):
+			var height := maximum
+			for dy in [-1, 0]:
+				for dx in [-1, 0]:
+					var cell := Vector2i(clampi(x + dx, 0, size.x - 1), clampi(y + dy, 0, size.y - 1))
+					height = mini(height, cells[cell.y * size.x + cell.x])
+			levels[y * (size.x + 1) + x] = height
+	Base.relax_heights(levels, size)
+	return levels
+
+static func _relief_noise(size: Vector2i, period: float, seed: int) -> PackedFloat32Array:
+	var noise := FastNoiseLite.new()
+	noise.seed = int(seed & 0x7fffffff)
+	noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+	noise.frequency = 1.0 / maxf(1.0, period)
+	noise.fractal_type = FastNoiseLite.FRACTAL_NONE
+	var result := PackedFloat32Array()
+	result.resize(size.x * size.y)
+	for y in range(size.y):
+		for x in range(size.x): result[y * size.x + x] = clampf(0.5 + noise.get_noise_2d(x, y) * 0.90, 0.0, 1.0)
 	return result

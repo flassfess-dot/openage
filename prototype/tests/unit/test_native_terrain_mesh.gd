@@ -28,10 +28,27 @@ func _run() -> void:
 		if cell.x < 0 or cell.y < 0 or cell.x > 399 or cell.y > 399: return -1
 		return [1, 4, 15, 22, 0, 6, 1000, 1001][posmod(cell.x * 7 + cell.y * 3, 8)]
 	compare_patch("coast and junctions", Rect2i(190, 190, 4, 4), coast, elevation, canvas, kernel, 41689)
+	var coast_bounds := Rect2i(190, 190, 4, 4)
+	var coast_request := NativeMesh.capture(coast_bounds, 41689, coast, elevation, catalog.environment_pack, canvas.terrain_atlas_regions, canvas.terrain_atlas_size)
+	check(NativeMesh.build_request(kernel, coast_request, 4) == NativeMesh.build_request(kernel, coast_request, 16), "preview and refined meshes preserve exactly the same coast, UVs and blending")
 	compare_patch("map boundary", Rect2i(0, 0, 3, 3), coast, elevation, canvas, kernel, 2147483647)
 	for y in range(190, 196):
 		for x in range(190, 196): elevation.set_vertex(Vector2i(x, y), posmod(x + y, 3))
 	compare_patch("slopes and imported materials", Rect2i(190, 190, 4, 4), coast, elevation, canvas, kernel, 4172126579)
+	var samples := PackedFloat32Array()
+	for y in range(801):
+		for x in range(801):
+			var depth := 1.6 - absf(x * 0.5 - 192.0 - sin(y * 0.25) * 0.5)
+			samples.append_array(PackedFloat32Array([depth, 1.0 - smoothstep(0.75, 1.5, -depth), 0.65, 0.25]))
+	elevation.river_shape = {"size":Vector2i(801,801), "resolution":2, "samples":samples}
+	compare_patch("curved river with compact banks and silt", Rect2i(190, 190, 4, 4), coast, elevation, canvas, kernel, 41721)
+	var river_request := NativeMesh.capture(coast_bounds, 41721, coast, elevation, catalog.environment_pack, canvas.terrain_atlas_regions, canvas.terrain_atlas_size)
+	check(NativeMesh.build_request(kernel, river_request, 4) == NativeMesh.build_request(kernel, river_request, 16), "curved river shore stays identical during asynchronous refinement")
+	for i in range(samples.size()/4): samples[i*4+2] = -0.10 if i%801 < 386 else 1.2
+	elevation.river_shape["samples"] = samples
+	compare_patch("continuous native shoal material",Rect2i(190,190,4,4),coast,elevation,canvas,kernel,41721)
+	var shoal_request := NativeMesh.capture(coast_bounds,41721,coast,elevation,catalog.environment_pack,canvas.terrain_atlas_regions,canvas.terrain_atlas_size)
+	check(NativeMesh.build_request(kernel,shoal_request,4) == NativeMesh.build_request(kernel,shoal_request,16),"native bank ribbons do not move during refinement")
 	check(kernel.build_mesh(Rect2i(0, 0, 2, 2), PackedInt32Array(), PackedFloat32Array(), PackedInt32Array(), PackedFloat32Array(), 1).is_empty(), "malformed mesh input is rejected")
 	canvas.free()
 	finish()

@@ -50,6 +50,7 @@ func _initialize() -> void:
 
 func four_player_settings(map_type_id: String, seed: int) -> Dictionary:
 	var settings := SkirmishSettings.default_settings()
+	settings["landscape_version"] = 3
 	settings["map_size_id"] = "standard"
 	settings["map_type_id"] = map_type_id
 	settings["seed"] = seed

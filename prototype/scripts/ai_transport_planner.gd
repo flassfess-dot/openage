@@ -128,7 +128,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 				continue
 		if not expedition.is_empty() and occupied < mini(int(cargo.get("capacity", 0)), int(goal.get("minimum_landing_group", 3))) and tick - int(expedition["load_tick"]) < 240: continue
 		if not landing_computed:
-			target_landing = _landing_near(Vector2(goal.get("position", Vector2.ZERO)), navigation, target_land, goal)
+			target_landing = _landing_near(Vector2(goal.get("position", Vector2.ZERO)), navigation, target_land, goal, transport)
 			landing_computed = true
 		var landing: Variant = target_landing
 		if not landing is Vector2:
@@ -206,7 +206,7 @@ static func _nearest_coastal_land(origin: Vector2, navigation: Dictionary, probe
 	return _nearest(origin, candidates)
 
 
-static func _landing_near(target: Vector2, navigation: Dictionary, target_land: Dictionary = {}, goal: Dictionary = {}) -> Variant:
+static func _landing_near(target: Vector2, navigation: Dictionary, target_land: Dictionary = {}, goal: Dictionary = {}, transport: Dictionary = {}) -> Variant:
 	var component := target_land if not target_land.is_empty() else _known_land_component(target, navigation)
 	var water: Array = navigation.get("water", [])
 	if component.is_empty() or water.is_empty(): return null
@@ -223,6 +223,12 @@ static func _landing_near(target: Vector2, navigation: Dictionary, target_land: 
 		var ad := target.distance_squared_to(Vector2(a))
 		var bd := target.distance_squared_to(Vector2(b))
 		return ad < bd if ad != bd else (a.x < b.x or (a.x == b.x and a.y < b.y)))
+	# A beach cell is usable only if the actual hull can approach it. Narrow
+	# coastal puddles otherwise win scoring and strand a loaded expedition.
+	var known_water: Dictionary = {}
+	if not transport.is_empty():
+		for point in water: known_water[Vector2i(Vector2(point).floor())] = true
+		candidates = candidates.filter(func(point): return _water_approach(point, transport, navigation, known_water) is Vector2)
 	if not bool(goal.get("adaptive_strategy", false)): return candidates[0] if not candidates.is_empty() else null
 	var best: Variant = null
 	var best_score := INF
@@ -285,14 +291,14 @@ static func _nearest(origin: Vector2, points: Array) -> Variant:
 	return Vector2(ordered[0])
 
 
-static func _water_approach(landing: Vector2, transport: Dictionary, navigation: Dictionary) -> Variant:
+static func _water_approach(landing: Vector2, transport: Dictionary, navigation: Dictionary, known_water: Dictionary = {}) -> Variant:
 	var water: Array = navigation.get("water", [])
 	if not bool(navigation.get("cell_geometry", false)):
 		return _nearest_adjacent(landing, water)
 	var radius := maxf(0.0, float(transport.get("footprint_radius", 0.75)))
-	var known_water: Dictionary = {}
-	for point in water:
-		known_water[Vector2i(Vector2(point).floor())] = true
+	if known_water.is_empty():
+		for point in water:
+			known_water[Vector2i(Vector2(point).floor())] = true
 	var center := Vector2i(landing.floor())
 	var candidates: Array = []
 	var reach := ceili(MAX_UNLOAD_DISTANCE)

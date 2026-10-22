@@ -40,6 +40,15 @@ func available_slots(worker: Dictionary, candidates: Array[Vector2], reservation
 				break
 		if not too_close and respect_footprints:
 			too_close = _resource_slot_occupied(worker, candidate, simulation_world)
+		if not too_close and respect_footprints:
+			# Finished workers release reservations but remain solid at the depot.
+			# Do not keep assigning their occupied position to the next carrier.
+			for other in simulation_world.query_units_near(candidate, radius + 2.0):
+				if int(other["id"]) == int(worker["id"]) or float(other.get("hp", 0.0)) <= 0.0 or String(other.get("movement_domain", "land")) != domain or String(other.get("task", "idle")) not in ["idle", "hold"]: continue
+				var separation := Footprint.separation_distance(worker, other)
+				if Vector2(other["pos"]).distance_squared_to(candidate) < separation * separation:
+					too_close = true
+					break
 		if not too_close:
 			result.append(candidate)
 	var origin := Vector2(worker.get("pos", Vector2.ZERO))

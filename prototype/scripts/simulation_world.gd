@@ -1,4 +1,12 @@
 class_name RoRSimulationWorld
+const SimulationEntityMutations := preload("res://scripts/simulation_entity_mutations.gd")
+var entity_mutations := SimulationEntityMutations.new()
+const SimulationBuildQueries := preload("res://scripts/simulation_build_queries.gd")
+var build_queries := SimulationBuildQueries.new()
+const SimulationObserverMemory := preload("res://scripts/simulation_observer_memory.gd")
+var observer_memory := SimulationObserverMemory.new()
+const SimulationEntityStore := preload("res://scripts/simulation_entity_store.gd")
+var entity_store := SimulationEntityStore.new()
 const BuildSiteTask := preload("res://scripts/build_site_task.gd")
 const TaskData := preload("res://scripts/isolated_task_data.gd")
 const TaskCoordinator := preload("res://scripts/isolated_task_coordinator.gd")
@@ -75,55 +83,184 @@ var map_reserved_foundation_cells: Dictionary = {}
 var forest_resource_counts: Dictionary = {}
 const MAX_TERRAIN_CHANGE_HISTORY := 256
 var cache_epoch := 0
-var entity_changes := EntityChangeJournal.new()
+var entity_changes: EntityChangeJournal:
+	get:
+		return entity_mutations.entity_changes
+	set(value):
+		entity_mutations.entity_changes = value
 var entity_read_index := EntityReadIndex.new()
 # The event contract is mandatory; direct external mutation is unsupported.
-var read_generation_pins := 0
-var runtime_task_capture := false
-var runtime_previous_tasks: Dictionary = {}
-var runtime_actor_eligibility: Dictionary = {}
+var read_generation_pins: int:
+	get:
+		return entity_mutations.read_generation_pins
+	set(value):
+		entity_mutations.read_generation_pins = value
+var runtime_task_capture: bool:
+	get:
+		return entity_mutations.runtime_task_capture
+	set(value):
+		entity_mutations.runtime_task_capture = value
+var runtime_previous_tasks: Dictionary:
+	get:
+		return entity_mutations.runtime_previous_tasks
+	set(value):
+		entity_mutations.runtime_previous_tasks = value
+var runtime_actor_eligibility: Dictionary:
+	get:
+		return entity_mutations.runtime_actor_eligibility
+	set(value):
+		entity_mutations.runtime_actor_eligibility = value
 var terrain_revision: int = 0
 var terrain_change_history: Array = []
-var units: Array = []
-var units_by_id: Dictionary = {}
-var unit_activity_registry := SimulationActivityRegistry.new()
-var capturable_units: Array[Dictionary] = []
-var dying_units: Array[Dictionary] = []
-var dying_buildings: Array[Dictionary] = []
-var unit_removal_pending: bool = false
-var building_removal_pending: bool = false
-var resource_nodes: Array = []
-var resource_nodes_by_id: Dictionary = {}
-var resource_nodes_by_cell: Dictionary = {}
-var decaying_resource_nodes: Array = []
-# Only actively falling trees are visited by the fixed-tick lifecycle pass.
-var falling_resource_nodes: Array = []
-var known_resources_by_player: Dictionary = {}
-var ai_navigation_knowledge = AiNavigationKnowledge.new()
-var known_ai_resources_by_player: Dictionary = {}
+var units: Array:
+	get:
+		return entity_store.units
+	set(value):
+		entity_store.units = value
+var units_by_id: Dictionary:
+	get:
+		return entity_store.units_by_id
+	set(value):
+		entity_store.units_by_id = value
+var unit_activity_registry: SimulationActivityRegistry:
+	get:
+		return entity_store.unit_activity_registry
+	set(value):
+		entity_store.unit_activity_registry = value
+var capturable_units: Array[Dictionary]:
+	get:
+		return entity_store.capturable_units
+	set(value):
+		entity_store.capturable_units = value
+var dying_units: Array[Dictionary]:
+	get:
+		return entity_store.dying_units
+	set(value):
+		entity_store.dying_units = value
+var dying_buildings: Array[Dictionary]:
+	get:
+		return entity_store.dying_buildings
+	set(value):
+		entity_store.dying_buildings = value
+var unit_removal_pending: bool:
+	get:
+		return entity_store.unit_removal_pending
+	set(value):
+		entity_store.unit_removal_pending = value
+var building_removal_pending: bool:
+	get:
+		return entity_store.building_removal_pending
+	set(value):
+		entity_store.building_removal_pending = value
+var resource_nodes: Array:
+	get:
+		return entity_store.resource_nodes
+	set(value):
+		entity_store.resource_nodes = value
+var resource_nodes_by_id: Dictionary:
+	get:
+		return entity_store.resource_nodes_by_id
+	set(value):
+		entity_store.resource_nodes_by_id = value
+var resource_nodes_by_cell: Dictionary:
+	get:
+		return entity_store.resource_nodes_by_cell
+	set(value):
+		entity_store.resource_nodes_by_cell = value
+var decaying_resource_nodes: Array:
+	get:
+		return entity_store.decaying_resource_nodes
+	set(value):
+		entity_store.decaying_resource_nodes = value
+var falling_resource_nodes: Array:
+	get:
+		return entity_store.falling_resource_nodes
+	set(value):
+		entity_store.falling_resource_nodes = value
+var known_resources_by_player: Dictionary:
+	get:
+		return observer_memory.known_resources_by_player
+	set(value):
+		observer_memory.known_resources_by_player = value
+var ai_navigation_knowledge: AiNavigationKnowledge:
+	get:
+		return observer_memory.ai_navigation_knowledge
+	set(value):
+		observer_memory.ai_navigation_knowledge = value
+var known_ai_resources_by_player: Dictionary:
+	get:
+		return observer_memory.known_ai_resources_by_player
+	set(value):
+		observer_memory.known_ai_resources_by_player = value
 const RESOURCE_MEMORY_CHUNK_SIZE := 8
 const MAX_MINIMAP_RESOURCE_CHANGES := 4096
-var last_known_buildings_by_player: Dictionary = {}
-var local_build_site_cache: Dictionary = {}
-var build_query_scopes: Dictionary = {}
-var ai_build_capture_cache: Dictionary = {}
-var build_query_scope_bytes := 0
+var last_known_buildings_by_player: Dictionary:
+	get:
+		return observer_memory.last_known_buildings_by_player
+	set(value):
+		observer_memory.last_known_buildings_by_player = value
+var local_build_site_cache: Dictionary:
+	get:
+		return build_queries.local_build_site_cache
+	set(value):
+		build_queries.local_build_site_cache = value
+var build_query_scopes: Dictionary:
+	get:
+		return build_queries.build_query_scopes
+	set(value):
+		build_queries.build_query_scopes = value
+var ai_build_capture_cache: Dictionary:
+	get:
+		return build_queries.ai_build_capture_cache
+	set(value):
+		build_queries.ai_build_capture_cache = value
+var build_query_scope_bytes: int:
+	get:
+		return build_queries.build_query_scope_bytes
+	set(value):
+		build_queries.build_query_scope_bytes = value
 const MAX_BUILD_QUERY_SCOPE_BYTES := 4 * 1024 * 1024
-var local_build_site_cache_bytes := 0
+var local_build_site_cache_bytes: int:
+	get:
+		return build_queries.local_build_site_cache_bytes
+	set(value):
+		build_queries.local_build_site_cache_bytes = value
 const MAX_LOCAL_BUILD_SITE_CACHE_BYTES := 4 * 1024 * 1024
 const MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES := 64
-var build_option_catalog_cache: Dictionary = {}
+var build_option_catalog_cache: Dictionary:
+	get:
+		return build_queries.build_option_catalog_cache
+	set(value):
+		build_queries.build_option_catalog_cache = value
 var render_entity_projection_cache := RenderEntityProjectionCache.new()
 var native_render_resource_queries_enabled := true
-var static_obstructions: Array = []
-var buildings: Array = []
-var buildings_by_id: Dictionary = {}
-# Monotonic invalidation token for systems that retain live entity capability
-# rosters. Entity count alone is not enough because combat roles and archetype
-# tags can change in place.
+var static_obstructions: Array:
+	get:
+		return entity_store.static_obstructions
+	set(value):
+		entity_store.static_obstructions = value
+var buildings: Array:
+	get:
+		return entity_store.buildings
+	set(value):
+		entity_store.buildings = value
+var buildings_by_id: Dictionary:
+	get:
+		return entity_store.buildings_by_id
+	set(value):
+		entity_store.buildings_by_id = value
+# Capability changes can invalidate a roster without changing its entity count.
 var combat_roster_revision: int = 0
-var projectiles: Array = []
-var resolved_projectiles: Array = []
+var projectiles: Array:
+	get:
+		return entity_store.projectiles
+	set(value):
+		entity_store.projectiles = value
+var resolved_projectiles: Array:
+	get:
+		return entity_store.resolved_projectiles
+	set(value):
+		entity_store.resolved_projectiles = value
 var movement_neighbor_query_microseconds: int = 0
 var movement_local_calculation_microseconds: int = 0
 var movement_integration_microseconds: int = 0
@@ -135,7 +272,11 @@ var movement_neighbor_buffer: Array = []
 var open_movement_envelopes_by_id: Dictionary = {}
 var building_navigation_cells_by_id: Dictionary = {}
 
-var entity_id_sequence := EntityIds.new()
+var entity_id_sequence: EntityIds:
+	get:
+		return entity_store.entity_id_sequence
+	set(value):
+		entity_store.entity_id_sequence = value
 var spatial_index := SpatialHash.new(2.0)
 var spatial_sync_system := SimulationSpatialSyncSystem.new()
 var formation_groups_view: Dictionary = {}
@@ -189,8 +330,16 @@ var full_tech_tree_enabled := false
 var population_by_team: Dictionary = {}
 var population_reserved_by_team: Dictionary = {}
 var population_cap_by_team: Dictionary = {}
-var resource_approach_slots: Dictionary = {}
-var building_approach_slots: Dictionary = {}
+var resource_approach_slots: Dictionary:
+	get:
+		return entity_store.resource_approach_slots
+	set(value):
+		entity_store.resource_approach_slots = value
+var building_approach_slots: Dictionary:
+	get:
+		return entity_store.building_approach_slots
+	set(value):
+		entity_store.building_approach_slots = value
 var last_build_failure: String = ""
 var last_production_failure: String:
 	get: return production_system.last_production_failure if production_system != null else ""
@@ -422,18 +571,7 @@ func reveal_allied_town_centers(observer_team: int, ally_team: int) -> void:
 
 
 func restore_last_known_buildings(encoded: Dictionary) -> void:
-	# Save archives stringify dictionary keys; runtime lookups use integer team and entity IDs.
-	last_known_buildings_by_player.clear()
-	for observer_key in encoded:
-		var observer_team := int(observer_key)
-		if observer_team <= 0 or not encoded[observer_key] is Dictionary:
-			continue
-		var restored: Dictionary = {}
-		var records: Dictionary = encoded[observer_key]
-		for entity_key in records:
-			if records[entity_key] is Dictionary:
-				restored[int(entity_key)] = records[entity_key].duplicate(true)
-		last_known_buildings_by_player[observer_team] = restored
+	observer_memory.restore_last_known_buildings(self, encoded)
 
 
 func configure_players(definitions: Array) -> void:
@@ -448,28 +586,13 @@ func configure_players(definitions: Array) -> void:
 
 func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = false) -> void:
 	shutdown_derived_state()
-	read_generation_pins = 0
-	entity_changes.reset()
+	entity_mutations.reset()
 	cache_epoch += 1
 	if not preserve_bulk_load:
 		bulk_load_depth = 0
-	units.clear()
-	units_by_id.clear()
-	unit_activity_registry.clear()
-	capturable_units.clear()
-	dying_units.clear()
-	dying_buildings.clear()
-	unit_removal_pending = false
-	building_removal_pending = false
-	resource_nodes.clear()
-	resource_nodes_by_id.clear()
-	resource_nodes_by_cell.clear()
-	decaying_resource_nodes.clear()
-	falling_resource_nodes.clear()
-	known_resources_by_player.clear()
-	ai_navigation_knowledge.clear()
-	last_known_buildings_by_player.clear()
-	known_ai_resources_by_player.clear()
+	entity_store.clear_units()
+	entity_store.clear_resources()
+	observer_memory.reset()
 	local_build_site_cache.clear()
 	build_option_catalog_cache.clear()
 	render_entity_projection_cache.clear()
@@ -478,8 +601,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	movement_system.knowledge.clear()
 	forest_resource_counts.clear()
 	gate_system.reset()
-	buildings.clear()
-	buildings_by_id.clear()
+	entity_store.clear_buildings()
 	mark_combat_roster_dirty()
 	combat_system.reset()
 	ai_distress_system.reset()
@@ -494,8 +616,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	kills = 0
 	battle_over = false
 	battle_message = ""
-	resource_approach_slots.clear()
-	building_approach_slots.clear()
+	entity_store.clear_approaches()
 	open_movement_envelopes_by_id.clear()
 	building_navigation_cells_by_id.clear()
 	last_build_failure = ""
@@ -576,6 +697,7 @@ func configure_map_data(map_data: Dictionary) -> void:
 			if index < terrain_ids.size():
 				map_terrain_ids[Vector2i(x, y)] = int(terrain_ids[index])
 	terrain_elevation.clear()
+	terrain_elevation.river_shape = map_data.get("rivers", {}).get("surface", {})
 	var vertex_levels: Array = map_data.get("vertex_levels", [])
 	var vertex_width := map_size.x + 1
 	for y in range(map_size.y + 1):
@@ -1765,7 +1887,7 @@ func _team_relations() -> Dictionary:
 	return result
 
 func find_unit(id: int) -> Variant:
-	return units_by_id.get(id)
+	return entity_store.find_unit(self, id)
 
 
 func detach_unit_for_transport(id: int) -> Variant:
@@ -1851,12 +1973,7 @@ func get_combat_attackers() -> Array:
 	return result
 
 func find_resource(id: int) -> Variant:
-	if resource_nodes_by_id.has(id):
-		return resource_nodes_by_id[id]
-	for building in buildings:
-		if int(building.get("id", -1)) == id and bool(building.get("harvestable", false)) and String(building.get("state", "complete")) == "complete" and float(building.get("hp", 0.0)) > 0.0:
-			return building
-	return null
+	return entity_store.find_resource(self, id)
 
 
 func resource_accessible_to_team(resource: Dictionary, team: int) -> bool:
@@ -1921,7 +2038,7 @@ func assign_command_return_resources(selected: Array, target_building_id: int = 
 
 
 func find_building(id: int) -> Variant:
-	return buildings_by_id.get(id)
+	return entity_store.find_building(self, id)
 
 
 func dropoff_approach_position(worker: Dictionary, building: Dictionary) -> Variant:
@@ -1950,429 +2067,67 @@ func building_cost(kind: String, team: int) -> Dictionary:
 
 
 func get_build_options(team: int) -> Array:
-	var result: Array = []
-	if not data_repository.is_configured():
-		return result
-	for template_value in _build_option_catalog(team).get("ordered", []):
-		result.append(_present_build_option(template_value, team))
-	return result
+	return build_queries.get_build_options(self, team)
 
 
 func get_build_options_for_kinds(team: int, kinds: Array) -> Array:
-	var result: Array = []
-	if not data_repository.is_configured():
-		return result
-	var seen: Dictionary = {}
-	var catalog_by_kind: Dictionary = _build_option_catalog(team).get("by_kind", {})
-	for kind_value in kinds:
-		var kind := String(kind_value)
-		if seen.has(kind):
-			continue
-		seen[kind] = true
-		var template: Dictionary = catalog_by_kind.get(kind, {})
-		if not template.is_empty():
-			result.append(_present_build_option(template, team))
-	_sort_build_options(result)
-	return result
+	return build_queries.get_build_options_for_kinds(self, team, kinds)
 
 
 func _build_option(team: int, kind: String) -> Dictionary:
-	var template: Dictionary = _build_option_catalog(team).get("by_kind", {}).get(kind, {})
-	return {} if template.is_empty() else _present_build_option(template, team)
+	return build_queries._build_option(self, team, kind)
 
 
 func _build_option_catalog(team: int) -> Dictionary:
-	var technology_revision := technology_system.revision(team)
-	var cached: Dictionary = build_option_catalog_cache.get(team, {})
-	if int(cached.get("technology_revision", -1)) == technology_revision:
-		return cached
-	var ordered: Array = []
-	var by_kind: Dictionary = {}
-	for kind_value in data_repository.archetype_aliases("building"):
-		var kind := String(kind_value)
-		var template := _build_option_template(team, kind)
-		if template.is_empty():
-			continue
-		ordered.append(template)
-		by_kind[kind] = template
-	_sort_build_options(ordered)
-	cached = {
-		"technology_revision": technology_revision,
-		"ordered": ordered,
-		"by_kind": by_kind,
-	}
-	build_option_catalog_cache[team] = cached
-	return cached
+	return build_queries._build_option_catalog(self, team)
 
 
 func _build_option_template(team: int, kind: String) -> Dictionary:
-	if not data_repository.has_archetype(kind) or data_repository.category(kind) != "building":
-		return {}
-	var base_source_id := int(data_repository.identifiers(kind).get("source_unit_id", -1))
-	if base_source_id < 0:
-		return {}
-	var resolved_source_id: int = int(technology_system.resolved_unit_id(team, base_source_id))
-	var source: Dictionary = object_record_by_id(resolved_source_id, team)
-	var interface: Dictionary = source.get("interface", {})
-	if int(interface.get("button_id", -1)) <= 0:
-		return {}
-	var required_technology_id := int(data_repository.runtime_metadata(kind).get("required_technology_id", -1))
-	if required_technology_id >= 0 and not technology_system.is_researched(team, required_technology_id):
-		return {}
-	if not is_object_available(team, base_source_id):
-		return {}
-	var cost := building_cost(kind, team)
-	var option_footprint := Footprint.building(unit_stats(kind), Vector2.ZERO)
-	var option_half_size := Vector2(option_footprint.get("half_size", Vector2.ONE))
-	return {
-		"kind": kind,
-		"source_unit_id": resolved_source_id,
-		"icon_id": _build_option_icon_id(team, base_source_id, resolved_source_id, source),
-		"button_id": int(interface.get("button_id", -1)),
-		"cost": cost,
-		"duration": float(source.get("production", {}).get("creation_time", unit_stats(kind).get("creation_time", 0.0))),
-		"footprint_radius": maxf(option_half_size.x, option_half_size.y),
-	}
+	return build_queries._build_option_template(self, team, kind)
 
 
 func _build_option_icon_id(team: int, base_source_id: int, resolved_source_id: int, source: Dictionary) -> int:
-	var icon_id := int(source.get("interface", {}).get("icon_id", -1))
-	if icon_id < 0 or technology_system.current_age(team) == 100:
-		return icon_id
-	# Use the same DAT attribute-17 effects as a newly created building. This
-	# also handles ages that only change the facet, without replacing its ID.
-	var preview := {"team": team, "source_unit_id": resolved_source_id,
-		"unit_lineage": [base_source_id, resolved_source_id], "components": {}}
-	for effect in technology_system.persistent_entity_effects(team):
-		if int(effect.get("attr_c", -1)) == 17 and technology_effect_matches_entity(preview, effect):
-			var raw_type := int(effect.get("type_id", -1))
-			var operator := raw_type % 10 if raw_type >= 10 and raw_type < 30 else raw_type
-			if operator in [0, 4, 5]:
-				preview["presentation_facing"] = maxi(0, roundi(apply_effect_operator(float(preview.get("presentation_facing", 0)), operator, float(effect.get("attr_d", 0.0)))))
-	return icon_id + maxi(0, int(preview.get("presentation_facing", 0)))
+	return build_queries._build_option_icon_id(self, team, base_source_id, resolved_source_id, source)
 
 
 func _present_build_option(template: Dictionary, team: int) -> Dictionary:
-	var option := template.duplicate()
-	var cost: Dictionary = template.get("cost", {})
-	var reason := "" if can_afford_resource_cost(team, cost) else "insufficient_resources"
-	option["cost"] = cost.duplicate()
-	option["accepted"] = reason.is_empty()
-	option["reason"] = reason
-	return option
+	return build_queries._present_build_option(self, template, team)
 
 
 func _sort_build_options(options: Array) -> void:
-	options.sort_custom(func(left, right):
-		if int(left.get("button_id", 0)) != int(right.get("button_id", 0)):
-			return int(left.get("button_id", 0)) < int(right.get("button_id", 0))
-		return String(left.get("kind", "")) < String(right.get("kind", ""))
-	)
+	build_queries._sort_build_options(self, options)
 
 
 func get_mixed_domain_build_sites(team: int, maximum_per_kind: int = 4) -> Dictionary:
-	var result: Dictionary = {}
-	if not units.any(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and entity_is_worker(unit)):
-		return result
-	var previous_failure := last_build_failure
-	for option_value in get_build_options(team):
-		var option: Dictionary = option_value
-		if not bool(option.get("accepted", false)):
-			continue
-		var kind := String(option.get("kind", ""))
-		var placement: Dictionary = data_repository.runtime_metadata(kind).get("placement", {})
-		var required_domains: Array = placement.get("required_adjacent_domains", [])
-		if "water" not in required_domains:
-			continue
-		var sites: Array = []
-		for y in range(map_size.y):
-			for x in range(map_size.x):
-				var position := Vector2(x + 0.5, y + 0.5)
-				if visibility_system.state_at_world(team, position) == FogOfWar.UNKNOWN:
-					continue
-				if can_place_foundation(team, kind, position):
-					sites.append(position)
-					if sites.size() >= maximum_per_kind:
-						break
-			if sites.size() >= maximum_per_kind:
-				break
-		if not sites.is_empty():
-			result[kind] = sites
-	last_build_failure = previous_failure
-	return result
+	return build_queries.get_mixed_domain_build_sites(self, team, maximum_per_kind)
 
 
 func get_local_build_sites(team: int, kinds: Array, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
-	var result: Dictionary = {}
-	if kinds.is_empty():
-		return result
-	var workers: Array = units.filter(func(unit):
-		return int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0 and entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land"
-	)
-	workers.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
-	if workers.is_empty():
-		return result
-	if tick_pipeline.performance_probe != null:
-		tick_pipeline.performance_probe.increment("ai.build_site_searches")
-	# One synchronous query sees fixed unit positions. Index the exact five
-	# occupancy probes once, instead of scanning every unit for every site.
-	var mobile_occupied_cells := _mobile_foundation_obstructions()
-	var previous_failure := last_build_failure
-	for kind_value in kinds:
-		var kind := String(kind_value)
-		var sites: Array = []
-		var fallback_sites: Array = []
-		var seen_cells: Dictionary = {}
-		for preferred_value in preferred_sites.get(kind, []):
-			var preferred_position := Vector2(preferred_value)
-			var preferred_cell := Vector2i(floori(preferred_position.x), floori(preferred_position.y))
-			if seen_cells.has(preferred_cell) or not navigation_grid.contains(preferred_cell):
-				continue
-			seen_cells[preferred_cell] = true
-			if visibility_system.state_at_world(team, preferred_position) == FogOfWar.UNKNOWN:
-				continue
-			if building_placement_system.cached_map_supports_foundation(kind, preferred_position) and building_placement_system.known_foundation(team, kind, preferred_position) and _can_place_foundation(team, kind, preferred_position, mobile_occupied_cells) and workers.any(func(worker): return worker_can_reach_foundation(worker, kind, preferred_position)):
-				if foundation_preserves_structure_gap(team, kind, preferred_position, minimum_structure_gap):
-					sites.append(preferred_position)
-					if sites.size() >= maximum_per_kind:
-						break
-				elif fallback_sites.size() < maximum_per_kind:
-					fallback_sites.append(preferred_position)
-		if kind in strict_preferred_kinds:
-			_append_bounded_sites(sites, fallback_sites, maximum_per_kind)
-			if not sites.is_empty():
-				result[kind] = sites
-			continue
-		for worker_value in workers:
-			var worker: Dictionary = worker_value
-			var center := Vector2i(floori(float(worker.get("pos", Vector2.ZERO).x)), floori(float(worker.get("pos", Vector2.ZERO).y)))
-			for radius in range(1, maxi(1, search_radius) + 1):
-				for y in range(center.y - radius, center.y + radius + 1):
-					# Preserve row-major ring order without visiting its interior.
-					var columns: Array = range(center.x - radius, center.x + radius + 1) if absi(y - center.y) == radius else [center.x - radius, center.x + radius]
-					for x in columns:
-						var cell := Vector2i(x, y)
-						if seen_cells.has(cell) or not navigation_grid.contains(cell):
-							continue
-						seen_cells[cell] = true
-						var position := Vector2(cell) + Vector2(0.5, 0.5)
-						if building_placement_system.cached_map_supports_foundation(kind, position) and building_placement_system.known_foundation(team, kind, position) and _can_place_foundation(team, kind, position, mobile_occupied_cells) and worker_can_reach_foundation(worker, kind, position):
-							if foundation_preserves_structure_gap(team, kind, position, minimum_structure_gap):
-								sites.append(position)
-								if sites.size() >= maximum_per_kind:
-									break
-							elif fallback_sites.size() < maximum_per_kind:
-								fallback_sites.append(position)
-					if sites.size() >= maximum_per_kind:
-						break
-				if sites.size() >= maximum_per_kind:
-					break
-			if sites.size() >= maximum_per_kind:
-				break
-		_append_bounded_sites(sites, fallback_sites, maximum_per_kind)
-		if not sites.is_empty():
-			result[kind] = sites
-	last_build_failure = previous_failure
-	return result
+	return build_queries.get_local_build_sites(self, team, kinds, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
 
 
 func get_cached_local_build_sites(team: int, kinds: Array, tick: int, maximum_age_ticks: int, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
-	if not task_coordinator.is_enabled("ai_observation") or kinds.is_empty():
-		return _get_cached_local_build_sites_sequential(team, kinds, tick, maximum_age_ticks, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
-	if kinds.size() < 2:
-		return _get_cached_local_build_sites_sequential(team, kinds, tick, maximum_age_ticks, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
-	var dependencies := _build_site_query_dependencies(team, search_radius, preferred_sites)
-	var queries: Array = []
-	var records: Array = []
-	var result: Dictionary = {}
-	var query_cache_hits := 0
-	for kind_value in kinds:
-		var kind := String(kind_value)
-		var preferred: Dictionary = {kind: preferred_sites.get(kind, [])}
-		var strict: Array = [kind] if kind in strict_preferred_kinds else []
-		var cache_key := hash([team, kind, maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap])
-		var signature := hash([dependencies, can_afford_resource_cost(team, building_cost(kind, team))])
-		var cached: Dictionary = local_build_site_cache.get(cache_key, {})
-		if not cached.is_empty() and tick >= int(cached.get("tick", -1)) and tick - int(cached.get("tick", -1)) <= maxi(0, maximum_age_ticks) and int(cached.get("query_signature", -1)) == signature:
-			if cached.get("sites", {}).has(kind):
-				result[kind] = cached["sites"][kind].duplicate()
-			query_cache_hits += 1
-			continue
-		queries.append({"team": team, "kind": kind, "maximum": maximum_per_kind, "radius": search_radius, "preferred": preferred, "strict": strict, "gap": minimum_structure_gap})
-		records.append({"kind": kind, "key": cache_key, "signature": signature})
-	# A single kind keeps the serial early exit at the first sufficient worker.
-	# Capturing the full map and speculating over all worker rings costs more
-	# than this query, including after a topology revision.
-	if queries.size() == 1:
-		return _get_cached_local_build_sites_sequential(team, kinds, tick, maximum_age_ticks, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
-	if tick_pipeline.performance_probe != null:
-		tick_pipeline.performance_probe.increment("ai.build_site_cache_hits", query_cache_hits)
-	if queries.is_empty():
-		return result
-	var capture_started := Time.get_ticks_usec()
-	var base := BuildSiteTask.capture(self, team, kinds)
-	var placement = building_placement_system
-	var static_cache_current: bool = placement.site_map_source == navigation_grid and placement.site_map_revision == navigation_grid.revision
-	for query in queries:
-		query["base"] = base
-		query["static_cache"] = TaskData.copy(placement.site_map_cache.get(query["kind"], {})) if static_cache_current else {}
-		query["static_profiles"] = {query["kind"]: TaskData.copy(placement.site_footprint_profiles[query["kind"]])} if static_cache_current and placement.site_footprint_profiles.has(query["kind"]) else {}
-	if tick_pipeline.performance_probe != null:
-		tick_pipeline.performance_probe.observe_microseconds("presentation.ai.capture.build_sites", Time.get_ticks_usec() - capture_started)
-	var outputs := BuildSiteTask.calculate_queries(base, queries, task_coordinator, tick, pathfinder, tick_pipeline.performance_probe)
-	if placement.site_map_source != navigation_grid or placement.site_map_revision != navigation_grid.revision:
-		placement.invalidate_site_cache()
-		placement.site_map_source = navigation_grid
-		placement.site_map_revision = navigation_grid.revision
-	for index in range(records.size()):
-		var record: Dictionary = records[index]
-		var output: Dictionary = outputs[index]
-		var sites: Dictionary = output.get("sites", {})
-		_prune_local_build_site_cache(tick, maximum_age_ticks)
-		_store_local_build_site_cache(record["key"], {"tick": tick, "query_signature": record["signature"], "sites": TaskData.copy(sites)})
-		placement.site_map_cache[record["kind"]] = output.get("static_cache", {})
-		placement.site_footprint_profiles.merge(output.get("static_profiles", {}), true)
-		if sites.has(record["kind"]):
-			result[record["kind"]] = sites[record["kind"]].duplicate()
-	# Cache hits and worker completion must not change dictionary insertion order.
-	var ordered: Dictionary = {}
-	for kind_value in kinds:
-		var kind := String(kind_value)
-		if result.has(kind):
-			ordered[kind] = result[kind]
-	return ordered
-
-# Advisory placement requests capture immutable input at the AI source tick.
-# Searches run inside the AI worker; the owner never waits for placement jobs.
+	return build_queries.get_cached_local_build_sites(self, team, kinds, tick, maximum_age_ticks, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
 func capture_ai_build_site_queries(team: int, kinds: Array, tick: int, maximum_age_ticks: int, maximum_per_kind: int, search_radius: int, preferred_sites: Dictionary, strict_preferred_kinds: Array, minimum_structure_gap: float) -> Array:
-	var requests: Array = []
-	if kinds.is_empty():
-		return requests
-	var dependencies := _build_site_query_dependencies(team, search_radius, preferred_sites)
-	var pending_kinds: Array = []
-	for kind_value in kinds:
-		var kind := String(kind_value)
-		var preferred := {kind: preferred_sites.get(kind, [])}
-		var strict: Array = [kind] if kind in strict_preferred_kinds else []
-		var cache_key := hash([team, kind, maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap])
-		var signature := hash([dependencies, can_afford_resource_cost(team, building_cost(kind, team))])
-		var cached: Dictionary = local_build_site_cache.get(cache_key, {})
-		var request := {"kind": kind, "cache_key": cache_key, "signature": signature, "team": team, "dependency_scope": {"radius": search_radius, "preferred": preferred_sites}}
-		if not cached.is_empty() and tick >= int(cached.get("tick", -1)) and tick - int(cached.get("tick", -1)) <= maxi(0, maximum_age_ticks) and int(cached.get("query_signature", -1)) == signature:
-			request["cached_sites"] = cached.get("sites", {}).get(kind, []).duplicate()
-		else:
-			request["input"] = {"team": team, "kind": kind, "maximum": maximum_per_kind, "radius": search_radius, "preferred": preferred, "strict": strict, "gap": minimum_structure_gap}
-			pending_kinds.append(kind)
-		requests.append(request)
-	if not pending_kinds.is_empty():
-		var base: Dictionary = TaskData.capture_frozen(BuildSiteTask.capture(self, team, pending_kinds))
-		if base.is_empty():
-			push_error("AI build-site capture must be detached")
-		for request in requests:
-			if request.has("input"):
-				request["input"]["base"] = base
-	return requests
+	return build_queries.capture_ai_build_site_queries(self, team, kinds, tick, maximum_age_ticks, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
 
 func commit_ai_build_site_queries(updates: Array, tick: int) -> void:
-	var dependencies_by_scope: Dictionary = {}
-	# A moved worker, changed occupancy, exploration or technology invalidates
-	# a captured search. Build commands also validate the live site/worker.
-	for update in updates:
-		var team := int(update.get("team", 0))
-		var kind := String(update.get("kind", ""))
-		var scope: Dictionary = update["dependency_scope"]
-		var scope_key := hash([team, scope["radius"], scope["preferred"]])
-		if not dependencies_by_scope.has(scope_key):
-			dependencies_by_scope[scope_key] = _build_site_query_dependencies(team, int(scope["radius"]), scope["preferred"])
-		var signature := hash([dependencies_by_scope[scope_key], can_afford_resource_cost(team, building_cost(kind, team))])
-		if kind.is_empty() or signature != int(update.get("signature", -1)):
-			continue
-		_store_local_build_site_cache(int(update["cache_key"]), {"tick": tick, "query_signature": signature, "sites": TaskData.copy(update.get("sites", {}))})
-		_prune_local_build_site_cache(tick, 1200)
+	build_queries.commit_ai_build_site_queries(self, updates, tick)
 
 func _get_cached_local_build_sites_sequential(team: int, kinds: Array, tick: int, maximum_age_ticks: int, maximum_per_kind: int = 4, search_radius: int = 12, preferred_sites: Dictionary = {}, strict_preferred_kinds: Array = [], minimum_structure_gap: float = 0.0) -> Dictionary:
-	if kinds.is_empty():
-		return {}
-	# Retain each kind independently, including empty searches. Other priorities
-	# entering/leaving the request must not discard an unchanged failed dock search.
-	var dependencies := _build_site_query_dependencies(team, search_radius, preferred_sites)
-	var result: Dictionary = {}
-	for kind_value in kinds:
-		var kind := String(kind_value)
-		var preferred: Dictionary = {kind: preferred_sites.get(kind, [])}
-		var strict: Array = [kind] if kind in strict_preferred_kinds else []
-		var cache_key := hash([team, kind, maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap])
-		var signature := hash([dependencies, can_afford_resource_cost(team, building_cost(kind, team))])
-		var cached: Dictionary = local_build_site_cache.get(cache_key, {})
-		var sites: Dictionary
-		if not cached.is_empty() and tick >= int(cached.get("tick", -1)) and tick - int(cached.get("tick", -1)) <= maxi(0, maximum_age_ticks) and int(cached.get("query_signature", -1)) == signature:
-			sites = cached.get("sites", {})
-			if tick_pipeline.performance_probe != null:
-				tick_pipeline.performance_probe.increment("ai.build_site_cache_hits")
-		else:
-			sites = get_local_build_sites(team, [kind], maximum_per_kind, search_radius, preferred, strict, minimum_structure_gap)
-			_prune_local_build_site_cache(tick, maximum_age_ticks)
-			_store_local_build_site_cache(cache_key, {"tick": tick, "query_signature": signature, "sites": sites.duplicate(true)})
-		if sites.has(kind):
-			result[kind] = sites[kind].duplicate()
-	return result
+	return build_queries._get_cached_local_build_sites_sequential(self, team, kinds, tick, maximum_age_ticks, maximum_per_kind, search_radius, preferred_sites, strict_preferred_kinds, minimum_structure_gap)
 
 
 func _build_site_query_dependencies(team: int, search_radius: int = 12, preferred_sites: Dictionary = {}) -> Array:
-	var scope: Dictionary = entity_read_index.build_query_scope(self, team, search_radius, preferred_sites)
-	var planner = movement_system.knowledge.planner(self, team)
-	var key := hash([team, search_radius, preferred_sites])
-	var cached: Dictionary = build_query_scopes.get(key, {})
-	var local_revision := int(cached.get("local_revision", 0))
-	var changes: Variant = planner.grid.changed_cells_since(int(cached.get("grid_revision", -1))) if not cached.is_empty() else null
-	var changed: bool = changes == null or cached.get("workers") != scope["workers"] or cached.get("versions") != scope["versions"]
-	if not changed:
-		for cell in changes:
-			var sector := Vector2i(floori(float(cell.x) / 4.0), floori(float(cell.y) / 4.0))
-			if scope["keys"].has(sector):
-				changed = true
-				break
-	if changed: local_revision += 1
-	var record := {"local_revision": local_revision, "grid_revision": planner.grid.revision, "workers": scope["workers"], "versions": scope["versions"]}
-	var bytes := var_to_bytes(record).size() + 64
-	if build_query_scopes.has(key):
-		build_query_scope_bytes -= int(build_query_scopes[key].get("bytes", 0))
-		build_query_scopes.erase(key)
-	if bytes <= MAX_BUILD_QUERY_SCOPE_BYTES:
-		while not build_query_scopes.is_empty() and (build_query_scopes.size() >= 64 or build_query_scope_bytes + bytes > MAX_BUILD_QUERY_SCOPE_BYTES):
-			var oldest: Variant = build_query_scopes.keys()[0]
-			build_query_scope_bytes -= int(build_query_scopes[oldest].get("bytes", 0))
-			build_query_scopes.erase(oldest)
-		record["bytes"] = bytes
-		build_query_scopes[key] = record
-		build_query_scope_bytes += bytes
-	else:
-		local_revision = hash([scope["workers"], scope["versions"], planner.grid.revision])
-	return [cache_epoch, team, key, local_revision, technology_system.revision(team), fog_of_war.exploration_revision_for_player(team)]
+	return build_queries._build_site_query_dependencies(self, team, search_radius, preferred_sites)
 
 
 func _prune_local_build_site_cache(tick: int, maximum_age_ticks: int) -> void:
-	for key in local_build_site_cache.keys():
-		var cached: Dictionary = local_build_site_cache[key]
-		var cached_tick := int(cached.get("tick", -1))
-		if cached_tick > tick or tick - cached_tick > maxi(0, maximum_age_ticks):
-			_erase_local_build_site_cache(key)
-	while local_build_site_cache.size() >= MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES:
-		var oldest_key = local_build_site_cache.keys()[0]
-		var oldest_tick := int(local_build_site_cache[oldest_key].get("tick", -1))
-		for key in local_build_site_cache:
-			var cached_tick := int(local_build_site_cache[key].get("tick", -1))
-			if cached_tick < oldest_tick:
-				oldest_key = key
-				oldest_tick = cached_tick
-		_erase_local_build_site_cache(oldest_key)
+	build_queries._prune_local_build_site_cache(self, tick, maximum_age_ticks)
 
 
 func _append_bounded_sites(sites: Array, fallback_sites: Array, maximum: int) -> void:
-	for fallback_position in fallback_sites:
-		if sites.size() >= maximum:
-			break
-		sites.append(fallback_position)
+	build_queries._append_bounded_sites(self, sites, fallback_sites, maximum)
 
 
 func foundation_preserves_structure_gap(team: int, kind: String, position: Vector2, minimum_gap: float) -> bool:
@@ -3069,7 +2824,10 @@ func apply_scenario_technology_nodes(team: int, nodes: Array) -> void:
 
 
 func apply_technology_state_to_entity(entity: Dictionary, team: int) -> void:
-	notify_entity_changed(entity)
+	mutate_entity(entity, _mutate_apply_technology_state_to_entity.bind(entity, team))
+
+
+func _mutate_apply_technology_state_to_entity(entity: Dictionary, team: int) -> void:
 	var source_id := int(entity.get("source_unit_id", -1))
 	var resolved_id := technology_system.resolved_unit_id(team, source_id)
 	if resolved_id >= 0 and resolved_id != source_id:
@@ -3099,7 +2857,10 @@ func sync_building_age_presentation(entity: Dictionary) -> void:
 
 
 func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapply_persistent_effects: bool = true) -> void:
-	notify_entity_changed(entity)
+	mutate_entity(entity, _mutate_apply_unit_upgrade_to_entity.bind(entity, target_unit_id, reapply_persistent_effects))
+
+
+func _mutate_apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapply_persistent_effects: bool = true) -> void:
 	if bool(entity.get("technology_locked", false)):
 		return
 	var team := int(entity.get("team", 0))
@@ -3170,7 +2931,10 @@ func apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: int, reapp
 
 
 func apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
-	notify_entity_changed(entity)
+	mutate_entity(entity, _mutate_apply_attribute_effect.bind(entity, command))
+
+
+func _mutate_apply_attribute_effect(entity: Dictionary, command: Dictionary) -> void:
 	if bool(entity.get("technology_locked", false)):
 		return
 	if not technology_effect_matches_entity(entity, command):
@@ -3364,91 +3128,32 @@ func get_embarked_units() -> Array:
 	return transport_system.all_embarked_units()
 
 func get_units() -> Array:
-	return units
+	return entity_store.get_units(self)
 
 
 func get_units_in_bounds(bounds: Rect2) -> Array:
-	var result: Array = spatial_index.query_aabb(bounds, "unit")
-	# The movement index intentionally contains living mobile entities only;
-	# presentation still needs short-lived dying/corpse records.
-	for unit_value in dying_units:
-		var unit: Dictionary = unit_value
-		if bounds.has_point(Vector2(unit.get("pos", Vector2.ZERO))):
-			result.append(unit)
-	if not dying_units.is_empty():
-		result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
-	return result
+	return entity_store.get_units_in_bounds(self, bounds)
 
 func get_resources() -> Array:
-	return resource_nodes
+	return entity_store.get_resources(self)
 
 
 func known_resource_memory_state() -> Dictionary:
-	var result: Dictionary = {}
-	var observers: Array = known_resources_by_player.keys()
-	for observer_value in observers:
-		var observer_team := int(observer_value)
-		get_known_resources(observer_team)
-		var cached: Dictionary = known_resources_by_player[observer_value]
-		result[observer_team] = cached.get("resources", []).duplicate(true)
-	return result
+	return observer_memory.known_resource_memory_state(self)
 
 
 func known_resource_revision(observer_team: int) -> int:
-	get_known_resources(observer_team)
-	return int(known_resources_by_player.get(observer_team, {}).get("revision", 0))
-
-
-# One presentation consumer per observer. The queue contains only legal resource
-# memory changes that can alter a marker, not every decrement of a tree's wood.
-# null requests an initial/bulk rebuild; an empty dictionary means no work.
+	return observer_memory.known_resource_revision(self, observer_team)
 func consume_known_resource_marker_changes(observer_team: int) -> Variant:
-	get_known_resources(observer_team)
-	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
-	if cached.is_empty():
-		return null
-	var rebuild := not bool(cached.get("marker_changes_tracked", false)) or bool(cached.get("marker_changes_overflow", false))
-	cached["marker_changes_tracked"] = true
-	cached["marker_changes_overflow"] = false
-	var pending: Dictionary = cached.get("marker_changes", {})
-	var changes: Dictionary = {}
-	if not rebuild:
-		var ids: Dictionary = cached.get("ids", {})
-		for resource_id in pending:
-			changes[resource_id] = ids.get(resource_id)
-	pending.clear()
-	return null if rebuild else changes
+	return observer_memory.consume_known_resource_marker_changes(self, observer_team)
 
 
 func _mark_known_resource_marker_changed(cached: Dictionary, resource_id: int) -> void:
-	if not bool(cached.get("marker_changes_tracked", false)) or bool(cached.get("marker_changes_overflow", false)):
-		return
-	var pending: Dictionary = cached["marker_changes"]
-	pending[resource_id] = true
-	if pending.size() > MAX_MINIMAP_RESOURCE_CHANGES:
-		pending.clear()
-		cached["marker_changes_overflow"] = true
+	observer_memory._mark_known_resource_marker_changed(self, cached, resource_id)
 
 
 func restore_known_resource_memory(encoded: Dictionary) -> void:
-	known_resources_by_player.clear()
-	known_ai_resources_by_player.clear()
-	var fog = get_fog_of_war()
-	for observer_key in encoded.keys():
-		var observer_team := int(observer_key)
-		if observer_team <= 0 or not encoded[observer_key] is Array:
-			continue
-		fog.ensure_player(observer_team)
-		var ally_ids: Array = fog.shared_vision_by_player.get(observer_team, {}).keys()
-		ally_ids.sort()
-		var cached := _empty_known_resource_cache(hash(ally_ids))
-		for record_value in encoded[observer_key]:
-			if record_value is Dictionary:
-				_remember_known_resource(cached, record_value, true)
-		cached["revision"] = 1
-		known_resources_by_player[observer_team] = cached
-		fog.consume_newly_explored_cells(observer_team)
-		fog.consume_newly_visible_cells(observer_team)
+	observer_memory.restore_known_resource_memory(self, encoded)
 
 
 func compact_render_projection(entity: Dictionary) -> Dictionary:
@@ -3456,435 +3161,90 @@ func compact_render_projection(entity: Dictionary) -> Dictionary:
 
 
 func get_known_resources(observer_team: int) -> Array:
-	if observer_team <= 0:
-		return resource_nodes
-	var fog = get_fog_of_war()
-	fog.ensure_player(observer_team)
-	var ally_ids: Array = fog.shared_vision_by_player.get(observer_team, {}).keys()
-	ally_ids.sort()
-	var alliance_signature := hash(ally_ids)
-	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
-	if not cached.is_empty() and int(cached.get("alliance_signature", 0)) == alliance_signature:
-		_refresh_known_resource_cache(observer_team, cached, fog)
-		return cached.get("resources", [])
-	var states: PackedByteArray = fog.states_by_player[observer_team]
-	var allies: Dictionary = fog.shared_vision_by_player.get(observer_team, {})
-	cached = _empty_known_resource_cache(alliance_signature)
-	for resource_value in resource_nodes:
-		var resource: Dictionary = resource_value
-		var owner := int(resource.get("team", 0))
-		if owner > 0 and bool(allies.get(owner, false)):
-			_remember_known_resource(cached, resource)
-			continue
-		var position: Vector2 = resource.get("pos", Vector2.ZERO)
-		var cell_x := floori(position.x)
-		var cell_y := floori(position.y)
-		if cell_x < 0 or cell_y < 0 or cell_x >= fog.map_size.x or cell_y >= fog.map_size.y:
-			continue
-		if int(states[cell_y * fog.map_size.x + cell_x]) != FogOfWar.UNKNOWN:
-			_remember_known_resource(cached, resource)
-	fog.consume_newly_explored_cells(observer_team)
-	fog.consume_newly_visible_cells(observer_team)
-	cached["revision"] = 1
-	known_resources_by_player[observer_team] = cached
-	return cached.get("resources", [])
+	return observer_memory.get_known_resources(self, observer_team)
 
 
 func get_known_ai_resources(observer_team: int) -> Array:
-	# Strategic planners only read a small, stable projection of resource nodes.
-	# Reuse those dictionaries between decisions instead of allocating and
-	# populating thousands of copies for every AI player every two seconds.
-	var known: Array = get_known_resources(observer_team)
-	if observer_team <= 0:
-		return known
-	var known_cache: Dictionary = known_resources_by_player.get(observer_team, {})
-	if known_cache.has("ai_projection"):
-		return known_cache["ai_projection"]["resources"]
-	var projected := {"resources": [], "ids": {}}
-	for resource in known:
-		var item := _compact_ai_resource(resource)
-		projected["resources"].append(item)
-		projected["ids"][int(item["id"])] = item
-	known_cache["ai_projection"] = projected
-	known_ai_resources_by_player[observer_team] = projected
-	return projected["resources"]
-
-
-# Warm the immutable resource publication alongside incremental AI navigation.
-# A restored large forest must not produce a single long frame on first use.
+	return observer_memory.get_known_ai_resources(self, observer_team)
 func prepare_known_ai_resource_snapshot(observer_team: int, max_records: int = 64) -> bool:
-	var known := get_known_resources(observer_team)
-	var cache: Dictionary = known_resources_by_player.get(observer_team, {})
-	if observer_team <= 0 or cache.has("ai_projection"):
-		return true
-	var revision := int(cache.get("revision", 0))
-	var pending: Dictionary = cache.get("ai_projection_preparing", {})
-	if pending.is_empty() or int(pending["revision"]) != revision:
-		pending = {"revision": revision, "resources": [], "ids": {}, "publication": ResourcePublication.new()}
-		cache["ai_projection_preparing"] = pending
-	var end := mini(known.size(), pending["resources"].size() + maxi(1, max_records))
-	for index in range(pending["resources"].size(), end):
-		var item := _compact_ai_resource(known[index])
-		if not pending["publication"].upsert(item):
-			cache.erase("ai_projection_preparing")
-			return false
-		pending["resources"].append(item)
-		pending["ids"][int(item["id"])] = item
-	if end < known.size():
-		return false
-	pending.erase("revision")
-	cache["ai_projection"] = pending
-	known_ai_resources_by_player[observer_team] = pending
-	cache.erase("ai_projection_preparing")
-	return true
+	return observer_memory.prepare_known_ai_resource_snapshot(self, observer_team, max_records)
 
 func get_known_ai_resource_snapshot(observer_team: int) -> Array:
-	var resources := get_known_ai_resources(observer_team)
-	var cache: Dictionary = known_resources_by_player.get(observer_team, {})
-	var projection: Dictionary = cache.get("ai_projection", {})
-	if projection.is_empty():
-		return resources.duplicate()
-	if not projection.has("publication"):
-		var publication := ResourcePublication.new()
-		for record in resources:
-			if not publication.upsert(record):
-				return resources.duplicate()
-		projection["publication"] = publication
-	return projection["publication"].snapshot()
+	return observer_memory.get_known_ai_resource_snapshot(self, observer_team)
 
 
 func _update_ai_resource_projection(cached: Dictionary, memory: Dictionary) -> void:
-	if not cached.has("ai_projection"):
-		return
-	var projection: Dictionary = cached["ai_projection"]
-	var id := int(memory["id"])
-	var item := _compact_ai_resource(memory)
-	if projection["ids"].get(id) == item:
-		return
-	if projection.has("publication") and not projection["publication"].upsert(item):
-		projection.erase("publication")
-	if projection["ids"].has(id):
-		_replace_known_resource(projection["resources"], item)
-		projection["ids"][id] = item
-	else:
-		projection["ids"][id] = item
-		_insert_known_resource_sorted(projection["resources"], item)
+	observer_memory._update_ai_resource_projection(self, cached, memory)
 
 
 func _compact_ai_resource(resource: Dictionary) -> Dictionary:
-	return EntityReadContract.resource(resource)
+	return observer_memory._compact_ai_resource(self, resource)
 
 
 func _empty_known_resource_cache(alliance_signature: int) -> Dictionary:
-	return {
-		"alliance_signature": alliance_signature,
-		"resources": [],
-		"ids": {},
-		"by_cell": {},
-		"by_chunk": {},
-		"dirty_ids": {},
-		"marker_changes": {},
-		"marker_changes_tracked": false,
-		"marker_changes_overflow": false,
-		"revision": 0,
-	}
+	return observer_memory._empty_known_resource_cache(self, alliance_signature)
 
 
 func _refresh_known_resource_cache(observer_team: int, cached: Dictionary, fog) -> void:
-	var changed := false
-	var allies: Dictionary = fog.shared_vision_by_player.get(observer_team, {})
-	var candidate_cells: Dictionary = {}
-	for cell_index_value in fog.consume_newly_explored_cells(observer_team):
-		candidate_cells[int(cell_index_value)] = true
-	for cell_index_value in fog.consume_newly_visible_cells(observer_team):
-		candidate_cells[int(cell_index_value)] = true
-	for cell_index_value in candidate_cells.keys():
-		var cell_index := int(cell_index_value)
-		var cell := Vector2i(cell_index % map_size.x, cell_index / map_size.x)
-		if fog.state_at_cell(observer_team, cell) != FogOfWar.VISIBLE:
-			continue
-		var live_ids: Dictionary = {}
-		for resource_value in resource_nodes_by_cell.get(cell_index, []):
-			var resource: Dictionary = resource_value
-			var resource_id := int(resource.get("id", -1))
-			live_ids[resource_id] = true
-			changed = _remember_known_resource(cached, resource) or changed
-		var remembered_in_cell: Dictionary = cached.get("by_cell", {}).get(cell_index, {})
-		for resource_id_value in remembered_in_cell.keys():
-			var resource_id := int(resource_id_value)
-			if not live_ids.has(resource_id):
-				changed = _forget_known_resource(cached, resource_id) or changed
-	var dirty_ids: Dictionary = cached.get("dirty_ids", {})
-	for resource_id_value in dirty_ids.keys():
-		var resource_id := int(resource_id_value)
-		var live: Variant = resource_nodes_by_id.get(resource_id)
-		var remembered: Variant = cached.get("ids", {}).get(resource_id)
-		var position := Vector2.ZERO
-		if live is Dictionary:
-			position = Vector2(live.get("pos", Vector2.ZERO))
-		elif remembered is Dictionary:
-			position = Vector2(remembered.get("pos", Vector2.ZERO))
-		else:
-			continue
-		var ownership_source: Dictionary = live if live is Dictionary else remembered
-		var owner := int(ownership_source.get("team", 0))
-		var allied_resource := owner > 0 and bool(allies.get(owner, false))
-		if not allied_resource and fog.state_at_world(observer_team, position) != FogOfWar.VISIBLE:
-			continue
-		if live is Dictionary:
-			changed = _remember_known_resource(cached, live) or changed
-		else:
-			changed = _forget_known_resource(cached, resource_id) or changed
-	dirty_ids.clear()
-	if changed:
-		cached["revision"] = int(cached.get("revision", 0)) + 1
+	observer_memory._refresh_known_resource_cache(self, observer_team, cached, fog)
 
 
 func mark_known_resource_dirty(resource: Dictionary) -> void:
-	_mark_known_resource_dirty(resource)
+	observer_memory.mark_known_resource_dirty(self, resource)
 
 
 func _mark_known_resource_dirty(resource: Dictionary) -> void:
-	var resource_id := int(resource.get("id", -1))
-	if resource_id < 0:
-		return
-	for observer_value in known_resources_by_player.keys():
-		var cached: Dictionary = known_resources_by_player[observer_value]
-		var dirty_ids: Dictionary = cached.get("dirty_ids", {})
-		dirty_ids[resource_id] = true
-		cached["dirty_ids"] = dirty_ids
+	observer_memory._mark_known_resource_dirty(self, resource)
 
 
 func _remember_known_resource(cached: Dictionary, resource: Dictionary, compact_source: bool = false) -> bool:
-	var resource_id := int(resource.get("id", -1))
-	if resource_id < 0:
-		return false
-	if int(resource.get("amount", 0)) <= 0 and not bool(resource.get("visible_when_depleted", false)):
-		return _forget_known_resource(cached, resource_id)
-	var memory: Dictionary = EntityReadContract.render(resource) if compact_source else render_entity_projection_cache.project(resource)
-	var ids: Dictionary = cached.get("ids", {})
-	var existing: Variant = ids.get(resource_id)
-	if existing is Dictionary:
-		if existing == memory:
-			return false
-		if existing.get("pos") != memory.get("pos") or (int(existing.get("amount", 0)) > 0) != (int(memory.get("amount", 0)) > 0):
-			_mark_known_resource_marker_changed(cached, resource_id)
-		if existing.get("pos") == memory.get("pos"):
-			_mark_resource_view_changed(cached, resource_id)
-			_replace_known_resource(cached["resources"], memory)
-			ids[resource_id] = memory
-			_update_ai_resource_projection(cached, memory)
-			return true
-		# Moving a remembered resource must also migrate its spatial indices.
-		_forget_known_resource(cached, resource_id)
-	_mark_resource_view_changed(cached, resource_id)
-	var known: Array = cached.get("resources", [])
-	_insert_known_resource_sorted(known, memory)
-	ids[resource_id] = memory
-	_update_ai_resource_projection(cached, memory)
-	_mark_known_resource_marker_changed(cached, resource_id)
-	var cell_index := _resource_cell_index(memory)
-	var by_cell: Dictionary = cached.get("by_cell", {})
-	var cell_ids: Dictionary = by_cell.get(cell_index, {})
-	cell_ids[resource_id] = true
-	by_cell[cell_index] = cell_ids
-	var chunk_key := _resource_chunk_key(memory)
-	var by_chunk: Dictionary = cached.get("by_chunk", {})
-	var chunk_ids: Dictionary = by_chunk.get(chunk_key, {})
-	chunk_ids[resource_id] = true
-	by_chunk[chunk_key] = chunk_ids
-	cached["resources"] = known
-	cached["ids"] = ids
-	cached["by_cell"] = by_cell
-	cached["by_chunk"] = by_chunk
-	return true
+	return observer_memory._remember_known_resource(self, cached, resource, compact_source)
 
 
 func _forget_known_resource(cached: Dictionary, resource_id: int) -> bool:
-	var ids: Dictionary = cached.get("ids", {})
-	var memory: Variant = ids.get(resource_id)
-	if not memory is Dictionary:
-		return false
-	_mark_resource_view_changed(cached, resource_id)
-	var known: Array = cached.get("resources", [])
-	known.erase(memory)
-	if cached.has("ai_projection"):
-		var projected: Dictionary = cached["ai_projection"]
-		projected["resources"].erase(projected["ids"].get(resource_id))
-		projected["ids"].erase(resource_id)
-		if projected.has("publication"):
-			projected["publication"].erase(resource_id)
-	ids.erase(resource_id)
-	_mark_known_resource_marker_changed(cached, resource_id)
-	var cell_index := _resource_cell_index(memory)
-	var by_cell: Dictionary = cached.get("by_cell", {})
-	var cell_ids: Dictionary = by_cell.get(cell_index, {})
-	cell_ids.erase(resource_id)
-	if cell_ids.is_empty():
-		by_cell.erase(cell_index)
-	else:
-		by_cell[cell_index] = cell_ids
-	var chunk_key := _resource_chunk_key(memory)
-	var by_chunk: Dictionary = cached.get("by_chunk", {})
-	var chunk_ids: Dictionary = by_chunk.get(chunk_key, {})
-	chunk_ids.erase(resource_id)
-	if chunk_ids.is_empty():
-		by_chunk.erase(chunk_key)
-	else:
-		by_chunk[chunk_key] = chunk_ids
-	return true
+	return observer_memory._forget_known_resource(self, cached, resource_id)
 
 
 func _resource_cell_index(resource: Dictionary) -> int:
-	var position := Vector2(resource.get("pos", Vector2.ZERO))
-	return floori(position.y) * map_size.x + floori(position.x)
+	return observer_memory._resource_cell_index(self, resource)
 
 
 func _resource_chunk_key(resource: Dictionary) -> Vector2i:
-	var position := Vector2(resource.get("pos", Vector2.ZERO))
-	return Vector2i(
-		floori(position.x / float(RESOURCE_MEMORY_CHUNK_SIZE)),
-		floori(position.y / float(RESOURCE_MEMORY_CHUNK_SIZE))
-	)
+	return observer_memory._resource_chunk_key(self, resource)
 
 
 func get_known_resources_in_bounds(observer_team: int, bounds: Rect2) -> Array:
-	if observer_team <= 0:
-		return resource_nodes.filter(func(resource): return bounds.has_point(Vector2(resource.get("pos", Vector2.ZERO))))
-	# Ensure the incremental exploration cache is current, then traverse only
-	# remembered resource cells intersecting the camera. Reading the live cell
-	# index here would leak hidden depletion/removal through the fog.
-	get_known_resources(observer_team)
-	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
-	var known_ids: Dictionary = cached.get("ids", {})
-	var known_by_chunk: Dictionary = cached.get("by_chunk", {})
-	var start_x := clampi(floori(bounds.position.x), 0, map_size.x)
-	var start_y := clampi(floori(bounds.position.y), 0, map_size.y)
-	var end_x := clampi(ceili(bounds.end.x), 0, map_size.x)
-	var end_y := clampi(ceili(bounds.end.y), 0, map_size.y)
-	var view_bounds := Rect2i(start_x, start_y, maxi(0, end_x - start_x), maxi(0, end_y - start_y))
-	var view: Dictionary = cached.get("render_view", {})
-	if view.get("bounds") == view_bounds:
-		var retained: Array = view["records"]
-		var result := retained
-		var changed_records: Array = []
-		var removed_ids: Array = []
-		for id_value in view["dirty"]:
-			var id := int(id_value)
-			var low := 0
-			var high := result.size()
-			while low < high:
-				var middle := (low + high) / 2
-				if int(result[middle]["id"]) < id: low = middle + 1
-				else: high = middle
-			var existing := low < result.size() and int(result[low]["id"]) == id
-			var record: Dictionary = known_ids.get(id, {})
-			var inside := not record.is_empty() and view_bounds.has_point(Vector2i(Vector2(record["pos"]).floor()))
-			if not existing and not inside: continue
-			if existing and inside and is_same(result[low], record): continue
-			if inside: changed_records.append(record)
-			else: removed_ids.append(id)
-			if is_same(result, retained): result = retained.duplicate()
-			if existing:
-				if inside: result[low] = record
-				else: result.remove_at(low)
-			elif inside: result.insert(low, record)
-		view["dirty"].clear()
-		result.make_read_only()
-		view["records"] = result
-		if not is_same(result, retained):
-			changed_records.make_read_only()
-			removed_ids.make_read_only()
-			var delta := {"valid": true, "previous": retained, "current": result, "changed": changed_records, "removed": removed_ids}
-			delta.make_read_only()
-			view["delta"] = delta
-		return result
-	var result: Array = []
-	if end_x <= start_x or end_y <= start_y:
-		result.make_read_only()
-		cached["render_view"] = {"bounds": view_bounds, "records": result, "dirty": {}}
-		return result
-	var kernel: Variant = render_entity_projection_cache.native_kernel
-	if native_render_resource_queries_enabled and kernel != null and kernel.has_method("known_resources_in_bounds"):
-		result = kernel.known_resources_in_bounds(known_ids,known_by_chunk,view_bounds,RESOURCE_MEMORY_CHUNK_SIZE)
-		cached["render_view"] = {"bounds":view_bounds,"records":result,"dirty":{}}
-		return result
-	var first_chunk_x := floori(float(start_x) / float(RESOURCE_MEMORY_CHUNK_SIZE))
-	var first_chunk_y := floori(float(start_y) / float(RESOURCE_MEMORY_CHUNK_SIZE))
-	var last_chunk_x := floori(float(end_x - 1) / float(RESOURCE_MEMORY_CHUNK_SIZE))
-	var last_chunk_y := floori(float(end_y - 1) / float(RESOURCE_MEMORY_CHUNK_SIZE))
-	for chunk_y in range(first_chunk_y, last_chunk_y + 1):
-		for chunk_x in range(first_chunk_x, last_chunk_x + 1):
-			var chunk_ids: Dictionary = known_by_chunk.get(Vector2i(chunk_x, chunk_y), {})
-			for resource_id_value in chunk_ids.keys():
-				var resource: Variant = known_ids.get(int(resource_id_value))
-				if not resource is Dictionary:
-					continue
-				var position := Vector2(resource.get("pos", Vector2.ZERO))
-				var cell_x := floori(position.x)
-				var cell_y := floori(position.y)
-				if cell_x >= start_x and cell_x < end_x and cell_y >= start_y and cell_y < end_y:
-					result.append(resource)
-	result.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
-	result.make_read_only()
-	# One camera publication per observer, bounded by this query. Only legal
-	# observation changes enter its queue; hidden live changes never reach it.
-	cached["render_view"] = {"bounds": view_bounds, "records": result, "dirty": {}}
-	return result
+	return observer_memory.get_known_resources_in_bounds(self, observer_team, bounds)
 
 
 func known_resource_view_delta(observer_team: int) -> Dictionary:
-	# At most the latest legal publication and its predecessor. Consumers that
-	# missed a publication use the ordinary full comparison instead.
-	return known_resources_by_player.get(observer_team, {}).get("render_view", {}).get("delta", {})
+	return observer_memory.known_resource_view_delta(self, observer_team)
 
 
 func _mark_resource_view_changed(cached: Dictionary, id: int) -> void:
-	var view: Dictionary = cached.get("render_view", {})
-	if not view.is_empty(): view["dirty"][id] = true
+	observer_memory._mark_resource_view_changed(self, cached, id)
 
 
 func _replace_known_resource(known: Array, replacement: Dictionary) -> void:
-	var id := int(replacement["id"])
-	var low := 0
-	var high := known.size()
-	while low < high:
-		var middle := (low + high) / 2
-		if int(known[middle]["id"]) < id:
-			low = middle + 1
-		else:
-			high = middle
-	if low < known.size() and int(known[low]["id"]) == id:
-		known[low] = replacement
-	else:
-		known.insert(low, replacement)
+	observer_memory._replace_known_resource(self, known, replacement)
 
 
 func _insert_known_resource_sorted(known: Array, resource: Dictionary) -> void:
-	var resource_id := int(resource.get("id", -1))
-	var lower := 0
-	var upper := known.size()
-	while lower < upper:
-		var middle := (lower + upper) / 2
-		if resource_id < int(known[middle].get("id", -1)):
-			upper = middle
-		else:
-			lower = middle + 1
-	known.insert(lower, resource)
+	observer_memory._insert_known_resource_sorted(self, known, resource)
 
 func get_static_obstructions() -> Array:
-	return static_obstructions
+	return entity_store.get_static_obstructions(self)
 
 func get_buildings() -> Array:
-	return buildings
+	return entity_store.get_buildings(self)
 
 
 func get_projectiles() -> Array:
-	return projectiles
+	return entity_store.get_projectiles(self)
 
 
 func get_resolved_projectiles() -> Array:
-	return resolved_projectiles
+	return entity_store.get_resolved_projectiles(self)
 
 func get_navigation_grid() -> NavigationGrid:
 	return navigation_grid
@@ -4086,135 +3446,78 @@ func get_last_battle_message() -> String:
 
 # The world owns authoritative dictionary writes and source group notifications.
 # Reads never notify; repeated scalar values do not create journal work.
+func mutate_entity(entity: Dictionary, operation: Callable, mask: int = EntityChangeJournal.MUTABLE_GROUPS) -> Variant:
+	return entity_mutations.mutate_entity(self, entity, operation, mask)
+
+
+func set_entity_fields(entity: Dictionary, values: Dictionary) -> void:
+	entity_mutations.set_entity_fields(self, entity, values)
+
+
 func set_entity_field(entity: Dictionary, field: String, value: Variant) -> void:
-	assert(read_generation_pins == 0, "Pinned observation generation is immutable")
-	if not (value is Array or value is Dictionary) and entity.has(field) and typeof(entity[field]) == typeof(value) and entity[field] == value: return
-	if runtime_task_capture and field in ["task", "hp", "state", "combat_enabled"]:
-		var id := int(entity.get("id", -1))
-		if not runtime_actor_eligibility.has(id): runtime_actor_eligibility[id] = bool(entity.get("combat_enabled", false)) and float(entity.get("hp", 0.0)) > 0.0 and (not entity_is_static(entity) or String(entity.get("state", "complete")) == "complete")
-		if field == "task" and bool(runtime_actor_eligibility[id]) and not runtime_previous_tasks.has(id): runtime_previous_tasks[id] = [entity, String(entity.get("task", "idle"))]
-	entity[field] = value
-	var mask := EntityChangeJournal.field_mask(field)
-	entity_changes.mark(int(entity.get("id", -1)), mask)
-	if mask & EntityChangeJournal.ACTIVITY: refresh_unit_activity(entity)
+	entity_mutations.set_entity_field(self, entity, field, value)
 
 func register_entity_changes(entity: Dictionary) -> void:
-	entity_changes.mark(int(entity.get("id", -1)), EntityChangeJournal.ALL)
-	refresh_unit_activity(entity)
+	entity_mutations.register_entity_changes(self, entity)
 
 func rebuild_entity_change_tracking() -> void:
-	entity_changes.reset()
-	entity_read_index.clear()
-	unit_activity_registry.clear()
-	for entity in _entity_change_comparison_roster(): register_entity_changes(entity)
-	entity_changes.flush()
-	if entity_changes.comparison_enabled:
-		entity_changes.set_comparison_enabled(true, _entity_change_comparison_roster())
+	entity_mutations.rebuild_entity_change_tracking(self)
 
 func set_entity_change_comparison(enabled: bool) -> void:
-	entity_changes.flush()
-	entity_changes.set_comparison_enabled(enabled, _entity_change_comparison_roster())
+	entity_mutations.set_entity_change_comparison(self, enabled)
 
 func _entity_change_comparison_roster() -> Array:
-	return get_all_units_including_embarked() + buildings + resource_nodes + victory_objectives
+	return entity_mutations._entity_change_comparison_roster(self)
 
 func _mark_entity_order_changed(entity: Dictionary) -> void:
-	entity_changes.mark(int(entity.get("id", -1)), EntityChangeJournal.ACTIVITY | EntityChangeJournal.CONTROL)
-	refresh_unit_activity(entity)
+	entity_mutations._mark_entity_order_changed(self, entity)
 
 func begin_entity_order(entity: Dictionary, order_type: String, target_entity_id: int = -1, target_position: Vector2 = Vector2.ZERO, repeat: bool = false) -> Dictionary:
-	var result := OrderPipeline.begin(entity, order_type, target_entity_id, target_position, repeat)
-	_mark_entity_order_changed(entity)
-	return result
+	return entity_mutations.begin_entity_order(self, entity, order_type, target_entity_id, target_position, repeat)
 
 func transition_entity_order(entity: Dictionary, phase: String) -> void:
-	var order := OrderPipeline.current(entity)
-	var changed := not bool(order.get("completed", true)) and String(order.get("phase", "")) != phase and OrderPipeline.PHASES.has(phase)
-	OrderPipeline.transition(entity, phase)
-	if changed: _mark_entity_order_changed(entity)
+	entity_mutations.transition_entity_order(self, entity, phase)
 
 func complete_entity_order(entity: Dictionary, reason: String = "complete") -> void:
-	var order := OrderPipeline.current(entity)
-	var changed := not bool(order.get("completed", true)) or String(order.get("completion_reason", "")) != reason or String(order.get("phase", "")) != OrderPipeline.REPEAT_OR_COMPLETE
-	OrderPipeline.complete(entity, reason)
-	if changed: _mark_entity_order_changed(entity)
+	entity_mutations.complete_entity_order(self, entity, reason)
 
 func restart_entity_order(entity: Dictionary) -> void:
-	var order := OrderPipeline.current(entity)
-	var changed := not bool(order.get("completed", true)) and bool(order.get("repeat", false))
-	OrderPipeline.restart(entity)
-	if changed: _mark_entity_order_changed(entity)
+	entity_mutations.restart_entity_order(self, entity)
 
 func append_entity_queued_order(entity: Dictionary, entry: Dictionary) -> bool:
-	var result := OrderPipeline.append_queued(entity, entry)
-	if result: _mark_entity_order_changed(entity)
-	return result
+	return entity_mutations.append_entity_queued_order(self, entity, entry)
 
 func prepend_entity_queued_order(entity: Dictionary, entry: Dictionary) -> bool:
-	var result := OrderPipeline.prepend_queued(entity, entry)
-	if result: _mark_entity_order_changed(entity)
-	return result
+	return entity_mutations.prepend_entity_queued_order(self, entity, entry)
 
 func pop_entity_queued_order(entity: Dictionary) -> Dictionary:
-	var result := OrderPipeline.pop_queued(entity)
-	if not result.is_empty(): _mark_entity_order_changed(entity)
-	return result
+	return entity_mutations.pop_entity_queued_order(self, entity)
 
 func clear_entity_queued_orders(entity: Dictionary) -> void:
-	var changed := not OrderPipeline.queued(entity).is_empty()
-	OrderPipeline.clear_queued(entity)
-	if changed: _mark_entity_order_changed(entity)
-
-# Pinning is owner-thread isolation, not a saved gameplay cursor. The fixed-step
-# barrier holds source_tick until all deterministic capture portions are sealed.
+	entity_mutations.clear_entity_queued_orders(self, entity)
 func pin_read_generation() -> Dictionary:
-	entity_changes.flush()
-	read_generation_pins += 1
-	return {"epoch": entity_changes.epoch, "revision": entity_changes.revision}
+	return entity_mutations.pin_read_generation(self)
 
 func release_read_generation(token: Dictionary) -> void:
-	if int(token.get("epoch", -1)) == int(entity_changes.epoch): read_generation_pins = maxi(0, read_generation_pins - 1)
+	entity_mutations.release_read_generation(self, token)
 
 func _erase_local_build_site_cache(key: Variant) -> void:
-	if local_build_site_cache.has(key):
-		local_build_site_cache_bytes -= int(local_build_site_cache[key].get("bytes", 0))
-		local_build_site_cache.erase(key)
+	build_queries._erase_local_build_site_cache(self, key)
 
 func _store_local_build_site_cache(key: Variant, record: Dictionary) -> void:
-	_erase_local_build_site_cache(key)
-	var bytes := var_to_bytes(record).size() + 64
-	if bytes > MAX_LOCAL_BUILD_SITE_CACHE_BYTES: return
-	while not local_build_site_cache.is_empty() and (local_build_site_cache.size() >= MAX_LOCAL_BUILD_SITE_CACHE_ENTRIES or local_build_site_cache_bytes + bytes > MAX_LOCAL_BUILD_SITE_CACHE_BYTES): _erase_local_build_site_cache(local_build_site_cache.keys()[0])
-	record["bytes"] = bytes
-	local_build_site_cache[key] = record
-	local_build_site_cache_bytes += bytes
+	build_queries._store_local_build_site_cache(self, key, record)
 
 func begin_runtime_task_capture() -> void:
-	runtime_previous_tasks.clear()
-	runtime_actor_eligibility.clear()
-	runtime_task_capture = true
+	entity_mutations.begin_runtime_task_capture(self)
 
 func end_runtime_task_capture() -> Array:
-	runtime_task_capture = false
-	var result: Array = []
-	var ids: Array = runtime_previous_tasks.keys()
-	ids.sort()
-	for id in ids:
-		var old: Array = runtime_previous_tasks[id]
-		var current := String(old[0].get("task", "idle"))
-		if not bool(old[0].get("removed", false)) and current != String(old[1]): result.append({"entity_id": int(id), "previous_task": old[1], "current_task": current, "issuer_id": 0, "command_sequence_id": 0})
-	runtime_previous_tasks.clear()
-	runtime_actor_eligibility.clear()
-	return result
+	return entity_mutations.end_runtime_task_capture(self)
 
 func notify_entity_changed(entity: Dictionary, mask: int = EntityChangeJournal.MUTABLE_GROUPS) -> void:
-	entity_changes.mark(int(entity.get("id", -1)), mask)
-	if mask & EntityChangeJournal.ACTIVITY: refresh_unit_activity(entity)
+	entity_mutations.notify_entity_changed(self, entity, mask)
 
 func erase_entity_field(entity: Dictionary, field: String) -> void:
-	if entity.erase(field):
-		entity_changes.mark(int(entity.get("id", -1)), EntityChangeJournal.field_mask(field))
-		refresh_unit_activity(entity)
+	entity_mutations.erase_entity_field(self, entity, field)
 
 func shutdown_derived_state() -> void:
 	task_coordinator.shutdown()
@@ -4222,18 +3525,9 @@ func shutdown_derived_state() -> void:
 	unit_activity_registry.clear()
 	render_entity_projection_cache.clear()
 	ai_navigation_knowledge.clear()
-	ai_build_capture_cache.clear()
-	build_query_scopes.clear()
-	build_query_scope_bytes = 0
-	local_build_site_cache.clear()
-	local_build_site_cache_bytes = 0
+	build_queries.clear_derived_queries()
 	pathfinder.clear_cache()
-	runtime_task_capture = false
-	runtime_previous_tasks.clear()
-	runtime_actor_eligibility.clear()
+	entity_mutations.clear_runtime_capture()
 
 func advance_entity_animation(entity: Dictionary, state: String, delta: float, restart_same_clip: bool = false) -> bool:
-	assert(read_generation_pins == 0, "Pinned observation generation is immutable")
-	var changed := AnimationController.update(entity, state, delta, restart_same_clip)
-	if changed: entity_changes.mark(int(entity["id"]), EntityChangeJournal.APPEARANCE)
-	return changed
+	return entity_mutations.advance_entity_animation(self, entity, state, delta, restart_same_clip)

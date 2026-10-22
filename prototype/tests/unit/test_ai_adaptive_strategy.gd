@@ -23,6 +23,7 @@ class FeedbackController:
 func _initialize() -> void:
 	verify_budget()
 	verify_knowledge_and_exact_json()
+	verify_predator_safety()
 	verify_group_lifecycle()
 	verify_scout_mission()
 	verify_gather_retry()
@@ -73,6 +74,44 @@ func verify_knowledge_and_exact_json() -> void:
 	state.observe(snapshot, 1, policy)
 	check(not state.memory.has(20), "visible empty locations invalidate a remembered opponent")
 
+func verify_predator_safety() -> void:
+	var snapshot := base_snapshot()
+	var policy := Policy.resolve()
+	snapshot["buildings"] = snapshot["buildings"].filter(func(b): return b.get("team") == 1)
+	snapshot["units"] = [{"id":30, "team":0, "hp":20.0, "pos":Vector2(10, 4), "combat_enabled":true, "acquisition_range":5.0, "behavior_tags":["predator"], "ai_profile":{"enabled":true}}]
+	var state := State.new()
+	state.observe(snapshot, 1, policy)
+	check(state.danger(Vector2(6, 4), 40, policy) > float(policy["maximum_economic_danger"]), "observed neutral predator makes nearby work unsafe")
+	check(state.danger(Vector2(2, 4), 40, policy) == 0.0, "safe work outside predator warning range remains available")
+	check(state.enemies(40, policy).is_empty() and state.choose_goal(snapshot, 1, policy, 0).get("type") != "attack", "wildlife danger does not create military enemy objectives")
+	snapshot["navigation"]["reachable_frontier"] = {"land":[Vector2(2, 8)]}
+	snapshot["navigation"]["unit_regions"] = {100:"land:0"}
+	snapshot["navigation"]["frontier_by_region"] = {"land:0":[Vector2(2, 8)]}
+	var scout_commands := Operations.new()._scout(snapshot, 41, 1, [fighter(100, Vector2(4, 4))], policy, state, {})
+	check(scout_commands.size() == 1 and scout_commands[0].command_type() == "move", "predator memory does not withhold a combat scout as a home defender")
+	var restored := State.new()
+	check(restored.restore_state(state.canonical_state()) and restored.danger(Vector2(6, 4), 40, policy) == state.danger(Vector2(6, 4), 40, policy), "observed predator risk survives save and planning handoff")
+	snapshot["units"][0]["task"] = "attack"
+	snapshot["units"][0]["target_id"] = 110
+	snapshot["units"].append_array([fighter(100, Vector2(4, 4)), {"id":110, "team":1, "hp":25.0, "pos":Vector2(6, 4), "components":{"worker":{"enabled":true}}}])
+	snapshot["navigation"]["unit_regions"] = {100:"land:7:0.30000000:0", 110:"land:7:0.20000000:0"}
+	var protected_ids := {}
+	var protection := preload("res://scripts/ai_economy_gathering.gd").worker_safety(snapshot, 41, 1, policy, state, protected_ids)
+	check(protection.any(func(command): return command.command_type() == "attack" and 100 in command.unit_ids and int(command.params.get("target_entity_id", -1)) == 30) and protected_ids.has(100), "nearby soldiers protect workers attacked by an observed predator")
+	snapshot["tick"] = 41
+	snapshot["units"] = []
+	snapshot["ai_visible_memory_locations"] = {30:true}
+	state.observe(snapshot, 1, policy)
+	check(state.danger(Vector2(6, 4), 41, policy) == 0.0, "visible empty predator location clears stale danger")
+	var feedback_controller := FeedbackController.new()
+	var delivery = Commands.ReturnResourcesCommand.new(42, [110])
+	delivery.assign_envelope(1, 20)
+	state.register(delivery, {"key":"return:110", "cost":{}})
+	feedback_controller.results[20] = Result.rejected(delivery, 42, "invalid_dropoff")
+	state.feedback(feedback_controller, 1, 42, policy)
+	check(int(state.cooldowns.get("return:110", 0)) >= 42 + int(policy["gather_retry_ticks"]), "unreachable delivery uses the navigation retry interval instead of command spam")
+
+
 func verify_group_lifecycle() -> void:
 	var policy := Policy.resolve()
 	var snapshot := base_snapshot()
@@ -118,6 +157,11 @@ func verify_scout_mission() -> void:
 	state.observe(snapshot, 1, Policy.resolve())
 	commands = operations.plan(snapshot, 241, 1, goal, Policy.resolve(), state, {}, "RECTANGLE", true)
 	check(commands.is_empty() and operations.scouts["land"]["target"] == Vector2(20, 4), "a moving scout completes a reachable mission before chasing a new frontier")
+	snapshot["tick"] = int(operations.scouts["land"]["deadline_tick"]) + 20
+	scout["pos"] = Vector2(12, 4)
+	state.observe(snapshot, 1, Policy.resolve())
+	commands = operations.plan(snapshot, int(snapshot["tick"]) + 1, 1, goal, Policy.resolve(), state, {}, "RECTANGLE", true)
+	check(commands.is_empty() and operations.scouts["land"]["target"] == Vector2(20, 4), "a progressing detour outlives the straight-line arrival estimate without losing its route")
 
 func verify_gather_retry() -> void:
 	var policy := Policy.resolve()

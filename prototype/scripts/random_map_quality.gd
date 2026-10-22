@@ -31,12 +31,31 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 				errors.append("random_map_player_sanctuary_missing:%d" % team)
 	var cliff_cells: Array = map_data.get("cliff_cells", [])
 	var cliff_lookup: Dictionary = {}
+	var river_barriers := WatershedWorld.Hydrology.RiverFalls.obstruction_cells(map_data.get("rivers",{}))
 	for value in cliff_cells:
 		var cell: Vector2i = value
-		if cell.x < 0 or cell.y < 0 or cell.x >= size.x or cell.y >= size.y or _is_water(cell, size, terrain_ids) or cliff_lookup.has(cell):
+		if cell.x < 0 or cell.y < 0 or cell.x >= size.x or cell.y >= size.y or (_is_water(cell, size, terrain_ids) and not river_barriers.has(cell)) or cliff_lookup.has(cell):
 			errors.append("random_map_cliff_cell_invalid")
 			continue
 		cliff_lookup[cell] = true
+	for fall in map_data.get("rivers",{}).get("waterfalls",[]):
+		var upper := Vector2i(Vector2(fall["upper"]).floor())
+		var lower := Vector2i(Vector2(fall["lower"]).floor())
+		if upper.x < 0 or upper.y < 0 or upper.x >= size.x or upper.y >= size.y or lower.x < 0 or lower.y < 0 or lower.x >= size.x or lower.y >= size.y:
+			errors.append("random_map_waterfall_endpoint_invalid")
+			continue
+		var upper_index := upper.y*(size.x+1)+upper.x
+		var lower_index := lower.y*(size.x+1)+lower.x
+		var upper_level := mini(mini(vertex_levels[upper_index],vertex_levels[upper_index+1]),mini(vertex_levels[upper_index+size.x+1],vertex_levels[upper_index+size.x+2]))
+		var lower_level := mini(mini(vertex_levels[lower_index],vertex_levels[lower_index+1]),mini(vertex_levels[lower_index+size.x+1],vertex_levels[lower_index+size.x+2]))
+		if upper_level <= lower_level: errors.append("random_map_waterfall_without_drop")
+		for cell in fall["barrier_cells"]:
+			if not cliff_lookup.has(cell) or not _is_water(cell,size,terrain_ids): errors.append("random_map_waterfall_barrier_invalid")
+	for rapid in map_data.get("rivers",{}).get("rapids",[]):
+		for cell in rapid["barrier_cells"]:
+			if not cliff_lookup.has(cell) or not _is_water(cell,size,terrain_ids): errors.append("random_map_rapid_barrier_invalid")
+		if not map_data.get("cliff_obstructions",[]).any(func(item):return item.get("river_rapid",false) and Vector2(item["position"]).distance_to(rapid["position"])<float(rapid["radius"])+3.0):
+			errors.append("random_map_rapid_art_missing")
 	if String(generator.get("cliff_profile", "")) != "" and cliff_lookup.is_empty():
 		errors.append("random_map_cliffs_missing")
 	var starts: Array[Vector2] = []
@@ -141,6 +160,8 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 		if not expected_hash.is_empty() and expected_hash != String(map_data.get("content_hash", "")):
 			errors.append("random_map_content_hash_mismatch")
 	metrics.merge(RandomMapMetrics.measure(definition, map_data), true)
+	if int(map_data.get("generator_version", 0)) == WatershedWorld.VERSION:
+		metrics["construction_space"] = preload("res://scripts/random_map_building_space.gd").measure(map_data)
 	if map_data.has("rivers"):
 		var rivers := WildIslands.Rivers.inspect(map_data["rivers"])
 		metrics["river_network"] = rivers

@@ -92,6 +92,8 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 				String(player.get("starting_technology_mode", "age_start")) == "post_iron"
 			)
 	world.end_bulk_load()
+	if definition.has("skirmish_settings"):
+		_settle_generated_start_units(world)
 	var naval_start_zones: Array = map_data.get("naval_start_zones", [])
 	var active_team_count: int = definition.get("players", []).filter(func(player): return int(player.get("team", 0)) > 0).size()
 	var naval_start_guarantees_met: bool = naval_start_zones.size() == active_team_count and naval_start_zones.all(func(zone):
@@ -118,3 +120,23 @@ static func _apply_source_identity(world, runtime_entity: Dictionary, source_ent
 	for key in ["environment_asset", "environment_variant", "tree_condition", "visible_when_depleted", "scenario_object_id", "source_state", "source_angle", "source_elevation", "source_frame", "source_graphic_id", "source_graphic_asset_name", "source_requested_graphic_asset_name", "source_asset_fallback_reason", "source_depleted_graphic_id", "source_depleted_asset_name", "static_field_node", "graphic_id", "asset_name"]:
 		if source_entity.has(key):
 			runtime_entity[key] = source_entity[key]
+
+
+static func _settle_generated_start_units(world) -> void:
+	# Geography can put a fixed starting offset on the edge of a river or ridge.
+	# Resolve it after resources and buildings have registered their footprints.
+	var moved := false
+	for unit in world.get_units():
+		var radius := float(unit["footprint_radius"])
+		var domain := String(unit["movement_domain"])
+		var restriction := int(unit["terrain_restriction"])
+		var origin := Vector2(unit["pos"])
+		if world.navigation_grid.is_position_walkable_for(origin, radius, domain, restriction): continue
+		var cell: Vector2i = world.pathfinder.nearest_walkable(Vector2i(origin.floor()), domain, restriction, radius)
+		if cell.x < 0: continue
+		var position := Vector2(cell) + Vector2.ONE * 0.5
+		world.set_entity_fields(unit, {"pos":position, "previous_pos":position, "target":position, "destination":position, "elevation":world.elevation_at(position)})
+		moved = true
+	# Idle wildlife is absent from the active movement roster. Publish these
+	# initial relocations before collision and wildlife queries use the index.
+	if moved: world.rebuild_spatial_index(false)

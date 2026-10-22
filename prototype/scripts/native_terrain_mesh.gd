@@ -3,6 +3,7 @@ extends RefCounted
 
 const Terrain := preload("res://scripts/environment_terrain.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
+const RiverSurface := preload("res://scripts/random_map_river_surface.gd")
 
 # Capture each terrain/height sample once, instead of crossing the script and
 # dictionary boundary for every vertex of every material layer. The native
@@ -75,8 +76,15 @@ static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pa
 	samples["cells"] = next_cells
 	samples["heights"] = next_heights
 	samples["frames"] = next_frames
+	var river := PackedFloat32Array()
+	if not elevation.river_shape.is_empty():
+		river.append_array(PackedFloat32Array([slots[0],slots[1004],slots[1],slots[4],slots[1005],slots[22]]))
+		for y in range(bounds.size.y * 2 + 1):
+			for x in range(bounds.size.x * 2 + 1):
+				var field := RiverSurface.sample(elevation.river_shape, Vector2(bounds.position) + Vector2(x, y) * 0.5)
+				river.append_array(PackedFloat32Array([field.x,field.y,field.z,field.w]))
 	timings["capture_us"] = Time.get_ticks_usec() - started
-	return {"bounds": bounds, "cells": cells, "heights": heights, "frames": frames, "materials": materials, "seed": seed}
+	return {"bounds": bounds, "cells": cells, "heights": heights, "frames": frames, "materials": materials, "seed": seed, "river": river}
 
 
 static func build_arrays(kernel, bounds: Rect2i, seed: int, provider: Callable, elevation, pack, regions: Dictionary, atlas_size: Vector2, timings: Dictionary = {}) -> Array:
@@ -86,7 +94,7 @@ static func build_arrays(kernel, bounds: Rect2i, seed: int, provider: Callable, 
 static func build_request(kernel, request: Dictionary, subdivisions: int = 16, timings: Dictionary = {}) -> Array:
 	if kernel == null or request.is_empty(): return []
 	var started := Time.get_ticks_usec()
-	var geometry: Dictionary = kernel.build_mesh(request["bounds"], request["cells"], request["heights"], request["frames"], request["materials"], request["seed"], subdivisions)
+	var geometry: Dictionary = kernel.build_mesh(request["bounds"], request["cells"], request["heights"], request["frames"], request["materials"], request["seed"], subdivisions, request.get("river", PackedFloat32Array()))
 	timings["native_us"] = Time.get_ticks_usec() - started
 	if geometry.is_empty() or geometry["vertices"].is_empty(): return []
 	var arrays: Array = []

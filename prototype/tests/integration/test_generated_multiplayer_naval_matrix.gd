@@ -32,6 +32,9 @@ func verify_case(case_value: Dictionary, catalog) -> void:
 	var map_type := String(case_value["map_type_id"])
 	var context := "%dp %s" % [player_count, map_type]
 	var settings := SkirmishSettings.default_settings()
+	# These guarantees belong to the v3 naval-start contract. The v6 wild
+	# geography deliberately does not reserve a Dock zone for every player.
+	settings["landscape_version"] = 3
 	settings["map_size_id"] = String(case_value["map_size_id"])
 	settings["map_type_id"] = map_type
 	settings["seed"] = int(case_value["seed"])

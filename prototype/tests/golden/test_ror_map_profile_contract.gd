@@ -10,6 +10,9 @@ func _initialize() -> void:
 	for profile in ["continental", "mediterranean", "hill_country", "narrows"]:
 		for seed in [41721, 7919]:
 			var settings := SkirmishSettings.default_settings()
+			# This fixture covers the v3 central cliff gate. The default v6
+			# watershed profiles have their own contracts in test_world_generator.
+			settings["landscape_version"] = 3
 			settings["map_type_id"] = profile
 			settings["seed"] = seed
 			var first := SkirmishSettings.build(settings)

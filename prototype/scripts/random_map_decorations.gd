@@ -101,7 +101,7 @@ static func footprint_cells(spec: Dictionary, variant: int, position: Vector2) -
 	# Upright rocks and wood use their base; projecting their height onto the
 	# ground would incorrectly exclude the bank behind a coastal rock.
 	if spec.get("role", "") == "scenery":
-		var radius := 0.499 if spec["key"] in ["boulders", "ror_rocks", "coastal_rocks", "ror_sea_rocks"] else 0.35
+		var radius := float(spec.get("footprint_radius", 0.499 if spec["key"] in ["boulders", "ror_rocks", "coastal_rocks", "ror_sea_rocks"] else 0.35))
 		bounds = [-radius, -radius, radius, radius]
 	var result: Array[Vector2i] = []
 	if spec.has("ground_masks"):
@@ -184,6 +184,10 @@ static func generate(data: Dictionary, fields: Dictionary, reserved: Dictionary,
 	for spec in palette():
 		by_key[spec["key"]] = spec
 		var rule: Dictionary = spec["placement"]
+		# Hydrological features are composed after ambient ecology. Random
+		# shoreline stamps would compete with coherent bars and quiet margins.
+		if rule.get("mode", "natural") == "water_detail": continue
+		if spec["key"] == "ror_shallows" and data.get("rivers", {}).has("channels"): continue
 		var pass_id := 0 if rule.get("mode", "natural") == "route" else 1 if rule.get("large", false) else 2
 		for material in rule["materials"]:
 			if not by_pass[pass_id].has(material): by_pass[pass_id][material] = []

@@ -33,12 +33,16 @@ func _initialize() -> void:
 
 func run_match(use_checkpoint: bool) -> String:
 	var trace := {"checkpoint": use_checkpoint}
+	# A headless root window has no reliable render area for pointer culling.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(1280, 752)
+	root.add_child(viewport)
 	var scene: PackedScene = load("res://main.tscn")
 	var game = scene.instantiate()
 	game.match_path = MATCH_PATH
 	game.process_mode = Node.PROCESS_MODE_DISABLED
 	game.set_process(false)
-	root.add_child(game)
+	viewport.add_child(game)
 	await process_frame
 	game.set_process(false)
 	game.game_controller.set_speed_multiplier(1.0)
@@ -62,7 +66,7 @@ func run_match(use_checkpoint: bool) -> String:
 	var build_position := first_build_position(game, "house", Vector2(8.0, 20.0))
 	assert_true(build_position != Vector2.ZERO, "controlled map exposes a legal House footprint")
 	if build_position == Vector2.ZERO:
-		game.free()
+		viewport.free()
 		await process_frame
 		return ""
 	var build_screen: Vector2 = game.world_to_screen(build_position)
@@ -130,7 +134,7 @@ func run_match(use_checkpoint: bool) -> String:
 	var verifier := ReplaySystem.new()
 	final_snapshots.append(verifier.encode_variant(verifier.world_snapshot(game.simulation_world, game.game_controller.tick_index, game.game_controller)))
 	var final_hash := verifier.world_state_hash(game.simulation_world, game.game_controller.tick_index, game.game_controller)
-	game.free()
+	viewport.free()
 	await process_frame
 	return final_hash
 

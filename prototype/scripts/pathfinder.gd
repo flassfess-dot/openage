@@ -606,11 +606,56 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	var start_center := Vector2(start) + Vector2(0.5, 0.5)
 	if not result.is_empty() and not start_world.is_equal_approx(start_center) and not is_segment_walkable(start_world, result[0], clearance_radius, movement_domain, restriction_id):
 		result.push_front(start_center)
+	if not result.is_empty() and not _world_route_is_clear(start_world, result, clearance_radius, movement_domain, restriction_id):
+		result = _swept_world_route(start_world, result.back(), start, goal, clearance_radius, movement_domain, restriction_id)
 	cache[key] = result.duplicate()
 	_record_geometry("world", key, result, start, requested_goal, clearance_radius)
 	# Opening a closer endpoint can occur outside the previous route bounds.
 	geometry_metadata["world"][key]["global"] = goal != requested_goal
 	return _finish_path_observation(started, result, false)
+
+
+func _world_route_is_clear(origin: Vector2, route: Array[Vector2], radius: float, domain: String, restriction: int) -> bool:
+	var cursor := origin
+	var escaped_start := not is_position_walkable(origin, radius, domain, restriction)
+	for index in range(route.size()):
+		# Legacy overlapping starts retain the existing gradual escape to their
+		# cell centre. Every subsequent segment must fit the complete footprint.
+		if not (index == 0 and escaped_start) and not is_segment_walkable(cursor, route[index], radius, domain, restriction):
+			return false
+		cursor = route[index]
+	return true
+
+
+func _swept_world_route(origin: Vector2, destination: Vector2, start: Vector2i, goal: Vector2i, radius: float, domain: String, restriction: int) -> Array[Vector2]:
+	# Grid-line smoothing can miss a circle clipping the edge of a one-cell
+	# passage. Reuse the cell route and smooth its actual world-space segments,
+	# with the same swept-footprint predicate used by movement and corner skips.
+	var cells: Array[Vector2i] = find_cell_path(start, goal, domain, restriction, radius)
+	var candidates: Array[Vector2] = []
+	if cells.is_empty(): return candidates
+	var start_center := Vector2(start) + Vector2(0.5, 0.5)
+	if not origin.is_equal_approx(start_center): candidates.append(start_center)
+	for index in range(1, cells.size()): candidates.append(Vector2(cells[index]) + Vector2(0.5, 0.5))
+	if candidates.is_empty() or not candidates.back().is_equal_approx(destination): candidates.append(destination)
+	var result: Array[Vector2] = []
+	var cursor := origin
+	var first := 0
+	if not is_position_walkable(origin, radius, domain, restriction) and candidates[0].is_equal_approx(start_center):
+		result.append(start_center)
+		cursor = start_center
+		first = 1
+	while first < candidates.size():
+		var selected := -1
+		for index in range(candidates.size() - 1, first - 1, -1):
+			if is_segment_walkable(cursor, candidates[index], radius, domain, restriction):
+				selected = index
+				break
+		if selected < 0: return []
+		cursor = candidates[selected]
+		result.append(cursor)
+		first = selected + 1
+	return result
 
 
 func _finish_path_observation(started: int, path: Array[Vector2], cache_hit: bool) -> Array[Vector2]:

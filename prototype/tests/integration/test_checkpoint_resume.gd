@@ -25,11 +25,15 @@ func _initialize() -> void:
 	var original_definition: Dictionary = game.match_definition.duplicate(true)
 	var original_map: Dictionary = game.map_definition.duplicate(true)
 	var saved_hash := verifier.world_state_hash(game.simulation_world, tick, game.game_controller)
+	game.simulation_world.terrain_elevation.river_shape = {"size":Vector2i(2,2), "resolution":2, "samples":PackedFloat32Array([1,1,0,0,0,0,0,0,0,0,0,0])}
 	check(game.save_game_to_path(PATH), "complete checkpoint writes")
 	var archive: Dictionary = Archive.read(PATH).get("archive", {})
 	check(int(archive.get("format_version", 0)) == Archive.FORMAT_VERSION and "world_checkpoint" in archive.get("schema_features", []), "new saves declare complete checkpoint schema")
 	var data: Dictionary = Checkpoint.unpack(archive.get("checkpoint", {}))
 	check(not data.is_empty(), "typed compressed state decodes")
+	var legacy: Dictionary = data.duplicate(true)
+	legacy["systems"]["terrain_elevation"].erase("river_shape")
+	check(Checkpoint.validate(legacy), "older checkpoints without a continuous river contour remain valid")
 	var continued_ticks := []
 	for step in range(30):
 		game.game_controller.advance_frame(0.05, 1, 2)
@@ -40,6 +44,7 @@ func _initialize() -> void:
 	game.map_definition = {"size": Vector2i(12, 12)}
 	game.map_size = Vector2i(12, 12)
 	check(game.load_game_from_path(PATH), "checkpoint loads independently of currently selected map (%s)" % game.last_save_error)
+	check(game.simulation_world.terrain_elevation.river_shape == data["systems"]["terrain_elevation"]["river_shape"], "saved river contour returns unchanged after loading")
 	check(game.match_definition == original_definition and game.map_definition == original_map, "embedded match and exact terrain replace current settings")
 	check(verifier.world_state_hash(game.simulation_world, tick, game.game_controller) == saved_hash, "restoration preserves exact authoritative checksum")
 	check(game.game_controller.command_queue.size() == 1 and bool(game.game_controller.command_queue[0].params.get("plan_only", false)), "future construction retains planning semantics")

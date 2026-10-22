@@ -505,12 +505,12 @@ func release_resource_approach_slot(worker: Dictionary) -> void:
 
 func begin_resource_return(worker: Dictionary) -> bool:
 	release_resource_approach_slot(worker)
-	var dropoff: Variant = nearest_dropoff(worker)
-	if dropoff == null:
-		return false
+	var delivery := _reachable_dropoff(worker)
+	if delivery.is_empty(): return false
+	var dropoff: Dictionary = delivery["building"]
 	world.set_entity_field(worker, "gather_stage", "returning")
 	world.set_entity_field(worker, "dropoff_id", int(dropoff["id"]))
-	world.set_entity_field(worker, "dropoff_position", dropoff_approach_position(worker, dropoff))
+	world.set_entity_field(worker, "dropoff_position", delivery["position"])
 	if not worker["dropoff_position"] is Vector2:
 		world.set_entity_field(worker, "gather_stage", "approaching")
 		return false
@@ -619,11 +619,12 @@ func assign_command_return_resources(selected: Array, target_building_id: int = 
 		for value in drop_site_ids:
 			if int(value) >= 0:
 				allowed[int(value)] = true
-		var dropoff: Variant = world.find_building(target_building_id) if target_building_id >= 0 else nearest_dropoff(worker)
+		var delivery: Dictionary = {} if target_building_id >= 0 else _reachable_dropoff(worker)
+		var dropoff: Variant = world.find_building(target_building_id) if target_building_id >= 0 else delivery.get("building")
 		if dropoff == null or int(dropoff.get("team", 0)) != int(worker.get("team", 0)) or not dropoff_accepts_resource(dropoff, int(worker.get("carried_resource_type_id", -1)), allowed):
 			continue
 		release_resource_approach_slot(worker)
-		world.release_building_approach_slot(worker)
+		if target_building_id >= 0: world.release_building_approach_slot(worker)
 		world.release_unit_destination(worker)
 		world.set_entity_field(worker, "task", "gather")
 		# A manual deposit ends here; automatic harvesting keeps its resource ID.
@@ -632,7 +633,7 @@ func assign_command_return_resources(selected: Array, target_building_id: int = 
 		world.set_entity_field(worker, "pending_hunt_target_id", -1)
 		world.set_entity_field(worker, "gather_stage", "returning")
 		world.set_entity_field(worker, "dropoff_id", int(dropoff["id"]))
-		world.set_entity_field(worker, "dropoff_position", dropoff_approach_position(worker, dropoff))
+		world.set_entity_field(worker, "dropoff_position", dropoff_approach_position(worker, dropoff) if target_building_id >= 0 else delivery["position"])
 		if not worker["dropoff_position"] is Vector2:
 			finish_gather_order(worker, "no_dropoff_slot")
 			continue
@@ -795,3 +796,21 @@ func advance_resource_lifecycle(delta: float) -> void:
 		cell_resources.erase(retired)
 		if cell_resources.is_empty():
 			world.resource_nodes_by_cell.erase(cell_index)
+
+
+func _reachable_dropoff(worker: Dictionary) -> Dictionary:
+	# A nearer compatible depot can be enclosed or have all approaches occupied.
+	# Keep the ordinary distance/ID order, then try the next reachable depot.
+	var allowed: Dictionary = {}
+	for id in worker.get("components", {}).get("worker", {}).get("drop_site_ids", []):
+		if int(id) >= 0: allowed[int(id)] = true
+	var candidates: Array = _dropoff_candidates(int(worker["team"]), int(worker["carried_resource_type_id"]), allowed).duplicate()
+	var origin := Vector2(worker["pos"])
+	candidates.sort_custom(func(a, b):
+		var ad := origin.distance_squared_to(a["pos"])
+		var bd := origin.distance_squared_to(b["pos"])
+		return ad < bd if not is_equal_approx(ad, bd) else int(a["id"]) < int(b["id"]))
+	for building in candidates:
+		var position: Variant = dropoff_approach_position(worker, building)
+		if position is Vector2: return {"building":building, "position":position}
+	return {}

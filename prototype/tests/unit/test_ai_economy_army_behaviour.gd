@@ -45,7 +45,7 @@ func plan_economy(input: Dictionary, defending: bool = false) -> Array:
 func verify_economy() -> void:
 	var input := snapshot()
 	var commands := plan_economy(input)
-	check(commands.any(func(c): return c.command_type() == "train" and 10 in c.unit_ids), "age saving retains the next worker")
+	check(not commands.any(func(c): return c.command_type() == "train" and 10 in c.unit_ids), "an age-ready workforce saves food instead of continually growing its worker target")
 	check(commands.any(func(c): return c.command_type() == "train" and 11 in c.unit_ids), "age saving retains the minimum army")
 	input["player_state"]["food"] = 500
 	input["buildings"][0]["command_options"]["research"][0]["accepted"] = true
@@ -58,7 +58,13 @@ func verify_economy() -> void:
 	input["player_state"]["food"] = 560
 	input["buildings"][0]["command_options"]["train"][0]["cost"] = {0: 75}
 	commands = plan_economy(input)
-	check(not commands.any(func(c): return c.command_type() == "research") and commands.any(func(c): return c.command_type() == "train" and 10 in c.unit_ids), "age saving uses the civilization's actual worker price")
+	check(commands.any(func(c): return c.command_type() == "research") and not commands.any(func(c): return c.command_type() == "train" and 10 in c.unit_ids), "an age-ready workforce does not reserve the price of an unnecessary worker")
+	var recovering := input.duplicate(true)
+	recovering["units"] = recovering["units"].slice(0, 5)
+	recovering["player_state"]["food"] = 74
+	check(not plan_economy(recovering).any(func(c): return c.command_type() == "train" and 10 in c.unit_ids), "essential worker recovery cannot spend less than the civilization's actual price")
+	recovering["player_state"]["food"] = 75
+	check(plan_economy(recovering).any(func(c): return c.command_type() == "train" and 10 in c.unit_ids), "essential worker recovery retains a worker at its exact civilization price")
 	input["player_state"]["food"] = 700
 	input["buildings"][0]["command_options"]["train"][0]["cost"] = {0: 50}
 	input["units"][0]["ai_profile"] = {"carried_amount": 10.0, "gather_stage": "none"}

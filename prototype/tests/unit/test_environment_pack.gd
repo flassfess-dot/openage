@@ -50,7 +50,7 @@ func check(condition: bool, message: String) -> void:
 
 func _test_assets() -> void:
 	var pack = catalog.environment_pack
-	check(pack.materials_by_id.size() == 4, "four materials")
+	check(pack.materials_by_id.size() == 6, "six ground materials including river silt and gravel")
 	var count := 0
 	for key in pack.objects_by_key:
 		for variant in range(pack.object_variant_count(key)):
@@ -61,7 +61,7 @@ func _test_assets() -> void:
 			var record: Dictionary = pack.manifest["objects"][key]["frames"][variant]
 			check(info["texture"].get_size() == Vector2(record["width"], record["height"]), "object dimensions")
 			check(Vector2(record["source_hotspot"][0], record["source_hotspot"][1]).distance_to(info["hotspot"] / float(record.get("scale", 2.0 / 3.0))) <= 1.1, "hotspot remains within one source pixel")
-	check(count == 129, "8 tree variants and 121 mixed decoration variants")
+	check(count == 146, "8 tree variants and 138 decoration variants, including seven native river islets")
 	for id in pack.materials_by_id:
 		var image: Image = pack.material_texture(id).get_image()
 		check(image.get_size() == Vector2i(320, 320), "full 10x10 pattern at target density")

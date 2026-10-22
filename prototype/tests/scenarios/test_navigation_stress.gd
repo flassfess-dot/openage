@@ -9,7 +9,8 @@ var failures: Array[String] = []
 
 
 func _initialize() -> void:
-	test_hundred_opposing_units()
+	test_hundred_opposing_units(false)
+	test_hundred_opposing_units(true)
 	test_crossing_groups_with_shared_destination()
 	test_narrow_forest_and_building_ring()
 
@@ -22,18 +23,22 @@ func _initialize() -> void:
 	quit(1)
 
 
-func test_hundred_opposing_units() -> void:
-	var world = SimulationWorld.new(Vector2i(64, 64))
+func test_hundred_opposing_units(passable_lanes: bool) -> void:
+	var world = SimulationWorld.new(Vector2i(64, 96 if passable_lanes else 64))
+	# Solid bodies need at least their combined diameter between opposite lanes.
+	# Keep the original dense crowd as a collision stress case as well.
+	var spacing := 1.5 if passable_lanes else 1.0
+	var lane_offset := 0.75 if passable_lanes else 0.0
 	var moving_right: Array = []
 	var moving_left: Array = []
 	for index in range(50):
-		var y := 6.0 + float(index)
+		var y := 6.0 + float(index) * spacing
 		var right: Dictionary = world.add_unit(1, "clubman", Vector2(20.0, y), false)
-		var left: Dictionary = world.add_unit(1, "clubman", Vector2(24.0, y), false)
+		var left: Dictionary = world.add_unit(1, "clubman", Vector2(24.0, y + lane_offset), false)
 		moving_right.append(right)
 		moving_left.append(left)
 		world.assign_command_move([right], Vector2(27.0, y))
-		world.assign_command_move([left], Vector2(17.0, y))
+		world.assign_command_move([left], Vector2(17.0, y + lane_offset))
 	for _tick in range(90):
 		for unit in world.get_units():
 			unit["previous_pos"] = unit["pos"]
@@ -41,11 +46,17 @@ func test_hundred_opposing_units() -> void:
 		world.rebuild_spatial_index()
 	var progressed_right := moving_right.filter(func(unit): return unit["pos"].x > 22.0).size()
 	var progressed_left := moving_left.filter(func(unit): return unit["pos"].x < 22.0).size()
-	assert_true(progressed_right >= 40, "most right-moving units pass the meeting line")
-	assert_true(progressed_left >= 40, "most left-moving units pass the meeting line")
-	for unit in world.get_units():
+	if passable_lanes:
+		assert_true(progressed_right >= 40, "most right-moving units pass the meeting line")
+		assert_true(progressed_left >= 40, "most left-moving units pass the meeting line")
+	var actors: Array = world.get_units()
+	for i in range(actors.size()):
+		for j in range(i + 1, actors.size()):
+			var minimum := float(actors[i]["footprint_radius"]) + float(actors[j]["footprint_radius"]) - 0.04
+			assert_true(Vector2(actors[i]["pos"]).distance_squared_to(actors[j]["pos"]) >= minimum * minimum, "opposing traffic does not pass through other bodies")
+	for unit in actors:
 		assert_true(is_finite(unit["pos"].x) and is_finite(unit["pos"].y), "stress positions remain finite")
-		assert_true(unit["pos"].x >= 0.0 and unit["pos"].y >= 0.0 and unit["pos"].x <= 64.0 and unit["pos"].y <= 64.0, "stress positions stay in world")
+		assert_true(unit["pos"].x >= 0.0 and unit["pos"].y >= 0.0 and unit["pos"].x <= 64.0 and unit["pos"].y <= world.map_size.y, "stress positions stay in world")
 
 
 func test_crossing_groups_with_shared_destination() -> void:

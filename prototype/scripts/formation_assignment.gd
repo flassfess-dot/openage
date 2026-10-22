@@ -5,7 +5,9 @@ const Roles := preload("res://scripts/formation_roles.gd")
 const RETENTION_BONUS: float = 4.0
 const SIZE_PENALTY: float = 10000.0
 const ROLE_WEIGHT: float = 25.0
-const EXACT_ASSIGNMENT_LIMIT: int = 32
+# Tactical groups need a minimum-distance assignment when rotating; spatial
+# ordering alone produces crossed paths inside a hundred-member block.
+const EXACT_ASSIGNMENT_LIMIT: int = 128
 const ROLE_ORDER := [
 	Roles.PRIEST,
 	Roles.SIEGE,

@@ -64,3 +64,11 @@ func slot_for(entity_id: int) -> Dictionary:
 	if not assignments.has(entity_id):
 		return {}
 	return slots[int(assignments[entity_id])]
+
+
+func exchange_assignments(first_id: int, second_id: int) -> void:
+	assert(assignments.has(first_id) and assignments.has(second_id))
+	var first_slot := int(assignments[first_id])
+	assignments[first_id] = assignments[second_id]
+	assignments[second_id] = first_slot
+	lifecycle_revision += 1

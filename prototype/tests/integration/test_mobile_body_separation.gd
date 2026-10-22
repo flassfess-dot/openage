@@ -33,7 +33,7 @@ func configured_world(native: bool):
 func step(world, count: int) -> void:
 	for unused in range(count):
 		world.update_units(0.05,1,2)
-		world.rebuild_spatial_index(false)
+		world._tick_spatial_index({})
 
 func clear_bodies(units: Array) -> bool:
 	for i in range(units.size()):
@@ -53,6 +53,9 @@ func test_idle_saved_group(native: bool, corner: bool = false) -> void:
 	world.rebuild_spatial_index(false)
 	check(not clear_bodies(units),"saved group reproduces overlap")
 	step(world,80)
+	for unit in units:
+		var slot := int(world.spatial_index.unit_index_by_id[unit["id"]])
+		check(world.spatial_index.unit_positions[slot] == unit["pos"], "incremental index follows passive separation (native=%s corner=%s)" % [native,corner])
 	check(clear_bodies(units),"idle saved elephants separate without receiving an order (native=%s corner=%s)" % [native,corner])
 	check(units.all(func(unit):return unit["task"]=="idle"),"separation preserves idle orders")
 	check(units.all(func(unit):return world.navigation_grid.is_position_walkable_for(unit["pos"],unit["footprint_radius"],unit["movement_domain"],unit["terrain_restriction"])),"separation keeps every footprint clear of terrain")

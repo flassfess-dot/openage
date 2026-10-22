@@ -5,6 +5,13 @@
   "source_game": "Age of Empires II / The Conquerors (classic)",
   "tile_pitch": [64, 32],
   "object_scale": 0.6666666666666666,
+  "native_shoreline": {"recipe": "authored_waterline_ribbon", "source_slps": [20000, 20004]},
+  "native_water_material": {
+    "style_recipe": "ror_native_river_1",
+    "terrain_id": 4,
+    "water_slp": 15002,
+    "bed_slp": 15000
+  },
   "materials": [
     {
       "key": "earth",
@@ -15,16 +22,8 @@
       "saturation": 0.78,
       "gain": [0.84, 0.92, 1.02],
       "minimap": "877447",
-      "tags": [
-        "forest_interior",
-        "worn_ground",
-        "rock_foot"
-      ],
-      "neighbors": [
-        "grass_dirt",
-        "dry_grass",
-        "forest_grass"
-      ],
+      "tags": ["forest_interior", "worn_ground", "rock_foot"],
+      "neighbors": ["grass_dirt", "dry_grass", "forest_grass"],
       "movement_terrain_id": 0
     },
     {
@@ -36,16 +35,8 @@
       "saturation": 0.87,
       "gain": [0.93, 0.98, 0.96],
       "minimap": "7e804c",
-      "tags": [
-        "forest_edge",
-        "path_margin"
-      ],
-      "neighbors": [
-        "ror_grass",
-        "earth",
-        "dry_grass",
-        "forest_grass"
-      ],
+      "tags": ["forest_edge", "path_margin"],
+      "neighbors": ["ror_grass", "earth", "dry_grass", "forest_grass"],
       "movement_terrain_id": 0
     },
     {
@@ -57,15 +48,8 @@
       "saturation": 0.84,
       "gain": [0.94, 0.98, 0.96],
       "minimap": "969253",
-      "tags": [
-        "dry_slope",
-        "meadow_margin"
-      ],
-      "neighbors": [
-        "ror_grass",
-        "grass_dirt",
-        "earth"
-      ],
+      "tags": ["dry_slope", "meadow_margin"],
+      "neighbors": ["ror_grass", "grass_dirt", "earth"],
       "movement_terrain_id": 0
     },
     {
@@ -77,15 +61,38 @@
       "saturation": 0.86,
       "gain": [1.03, 1, 0.95],
       "minimap": "52613a",
-      "tags": [
-        "forest_edge",
-        "moist_meadow"
-      ],
-      "neighbors": [
-        "ror_grass",
-        "grass_dirt",
-        "earth"
-      ],
+      "tags": ["forest_edge", "moist_meadow"],
+      "neighbors": ["ror_grass", "grass_dirt", "earth"],
+      "movement_terrain_id": 0
+    },
+    {
+      "key": "river_silt",
+      "source_game": "ror",
+      "terrain_id": 1004,
+      "title": "Влажный речной нанос",
+      "slp": 15000,
+      "priority": 45,
+      "saturation": 0.6,
+      "gain": [1, 1, 1],
+      "river_recipe": "silt",
+      "minimap": "827b61",
+      "tags": ["river_bed", "wet_bank"],
+      "neighbors": ["ror_grass", "earth", "river_silt", "river_gravel"],
+      "movement_terrain_id": 0
+    },
+    {
+      "key": "river_gravel",
+      "source_game": "ror",
+      "terrain_id": 1005,
+      "title": "Речной гравий",
+      "slp": 15000,
+      "priority": 45,
+      "saturation": 0.6,
+      "gain": [1, 1, 1],
+      "river_recipe": "gravel",
+      "minimap": "858578",
+      "tags": ["river_bed", "wet_bank"],
+      "neighbors": ["ror_grass", "earth", "river_silt", "river_gravel"],
       "movement_terrain_id": 0
     }
   ],
@@ -102,12 +109,7 @@
       "depleted_key": "stump",
       "footprint_radius": 0.28,
       "max_slope_levels": 0,
-      "materials": [
-        "ror_grass",
-        "forest_grass",
-        "grass_dirt",
-        "earth"
-      ]
+      "materials": ["ror_grass", "forest_grass", "grass_dirt", "earth"]
     },
     {
       "key": "pine",
@@ -121,12 +123,7 @@
       "depleted_key": "stump",
       "footprint_radius": 0.28,
       "max_slope_levels": 0,
-      "materials": [
-        "ror_grass",
-        "forest_grass",
-        "grass_dirt",
-        "earth"
-      ]
+      "materials": ["ror_grass", "forest_grass", "grass_dirt", "earth"]
     },
     {
       "key": "boulders",
@@ -138,11 +135,7 @@
       "role": "scenery",
       "footprint_radius": 0.5,
       "max_slope_levels": 1,
-      "materials": [
-        "earth",
-        "grass_dirt",
-        "dry_grass"
-      ],
+      "materials": ["earth", "grass_dirt", "dry_grass"],
       "placement": {
         "materials": [1000, 1001, 1002],
         "weight": 2,
@@ -170,11 +163,7 @@
       "role": "scenery",
       "footprint_radius": 0.12,
       "max_slope_levels": 0,
-      "materials": [
-        "earth",
-        "grass_dirt",
-        "forest_grass"
-      ],
+      "materials": ["earth", "grass_dirt", "forest_grass"],
       "placement": {
         "materials": [0, 10, 1000, 1001, 1002, 1003, 6],
         "weight": 1.2,
@@ -353,7 +342,7 @@
         "materials": [0, 10, 1001, 1003],
         "weight": 2.5,
         "spacing": 5.5,
-        "occurrence": 0.10,
+        "occurrence": 0.1,
         "area_per_item": 260,
         "budget_family": "small_stones",
         "moisture": [0, 1],
@@ -385,7 +374,7 @@
         "materials": [1000, 1002, 6],
         "weight": 2.5,
         "spacing": 5.5,
-        "occurrence": 0.10,
+        "occurrence": 0.1,
         "area_per_item": 260,
         "budget_family": "small_stones",
         "moisture": [0, 0.46],
@@ -410,10 +399,10 @@
       "gain": [1, 1, 1],
       "role": "scenery",
       "placement": {
-        "materials": [1000, 1001],
+        "materials": [0, 6, 1000, 1001, 1003],
         "weight": 2,
         "spacing": 5.5,
-        "occurrence": 0.10,
+        "occurrence": 0.1,
         "area_per_item": 260,
         "budget_family": "small_stones",
         "moisture": [0.45, 1],
@@ -507,6 +496,134 @@
         [-0.6875, -0.625, 0.65625, 0.625],
         [-0.71875, -1, 0.71875, 0.75],
         [-0.8125, -0.8125, 0.65625, 0.53125]
+      ]
+    },
+    {
+      "key": "ror_river_islets",
+      "title": "Связные песчаные островки RoR",
+      "source_game": "ror",
+      "slp": 596,
+      "frames": [0, 1, 2, 3, 4, 5, 6],
+      "native_islets": true,
+      "ground_bounds": [
+        [-0.59375, -0.1875, 0.1875, 0.4375],
+        [-0.5, -0.5, 0.25, 0.5],
+        [0.0625, -0.28125, 0.5, -0.0625],
+        [-0.59375, -0.625, 0.375, 0.5],
+        [-0.40625, -0.59375, 0.1875, 0.1875],
+        [-0.21875, -0.375, 0.46875, 0.46875],
+        [-0.75, -0.8125, 0.375, 0.375]
+      ],
+      "saturation": 1,
+      "gain": [1, 1, 1],
+      "role": "decal"
+    },
+    {
+      "key": "ror_shore_wrack",
+      "title": "Ветки у воды RoR",
+      "source_game": "ror",
+      "slp": 767,
+      "source_graphics": [918, 918],
+      "frames": [0, 1],
+      "saturation": 1,
+      "gain": [1, 1, 1],
+      "role": "decal",
+      "placement": {
+        "mode": "water_detail",
+        "materials": [0, 2, 6, 1000, 1001, 1002, 1003],
+        "weight": 1,
+        "spacing": 2.4,
+        "moisture": [0, 1],
+        "max_slope": 0
+      },
+      "ground_bounds": [
+        [-0.25, -0.40625, 0.1875, 0.28125],
+        [-0.28125, -0.3125, 0.28125, 0.1875]
+      ]
+    },
+    {
+      "key": "ror_reeds",
+      "title": "Осока исходных Shallows RoR",
+      "source_game": "ror",
+      "slp": 596,
+      "source_graphics": [503, 503],
+      "frames": [0, 5],
+      "source_cutouts": [
+        {
+          "rect": [12, 10, 13, 15],
+          "anchor": [17, 25],
+          "vegetation": true
+        },
+        {
+          "rect": [23, 0, 10, 38],
+          "anchor": [27, 38],
+          "vegetation": true
+        }
+      ],
+      "saturation": 1,
+      "gain": [1, 1, 1],
+      "role": "scenery",
+      "footprint_radius": 0.15,
+      "placement": {
+        "mode": "water_detail",
+        "materials": [1, 4],
+        "weight": 1,
+        "spacing": 1.15,
+        "moisture": [0, 1],
+        "max_slope": 0,
+        "water_distance": [1, 2]
+      },
+      "ground_bounds": [
+        [-0.5, -0.46875, 0.03125, 0],
+        [-0.4375, -0.40625, -0.03125, -0.03125]
+      ]
+    },
+    {
+      "key": "ror_beach_articles",
+      "title": "Морской прибрежный декор RoR",
+      "source_game": "ror",
+      "slp": 767,
+      "source_graphics": [918, 918, 918, 918, 918],
+      "frames": [2, 3, 4, 5, 6],
+      "saturation": 1,
+      "gain": [1, 1, 1],
+      "role": "decal",
+      "placement": {
+        "mode": "water_detail",
+        "materials": [2, 6],
+        "weight": 1,
+        "spacing": 2.2,
+        "moisture": [0, 1],
+        "max_slope": 1
+      },
+      "ground_bounds": [
+        [-0.46875, -0.34375, 0.3125, 0.21875],
+        [-0.4375, -0.3125, 0.21875, 0.34375],
+        [-0.46875, -0.15625, 0.34375, 0.21875],
+        [-0.5, -0.1875, 0.1875, 0.34375],
+        [0, -0.3125, 0.28125, 0.34375]
+      ]
+    },
+    {
+      "key": "ror_waterfall",
+      "title": "Водопад RoR",
+      "source_game": "ror",
+      "slp": 702,
+      "source_graphics": [833],
+      "frames": [0],
+      "saturation": 1,
+      "gain": [1, 1, 1],
+      "role": "scenery",
+      "placement": {
+        "mode": "water_detail",
+        "materials": [1],
+        "weight": 1,
+        "spacing": 10,
+        "moisture": [0, 1],
+        "max_slope": 1
+      },
+      "ground_bounds": [
+        [-0.90625, -1.46875, 0.75, 1.5]
       ]
     },
     {

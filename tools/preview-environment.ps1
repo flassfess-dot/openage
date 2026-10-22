@@ -26,6 +26,7 @@ if (-not $taskNeedsImport) {
     $taskAssetRoot = Split-Path -Parent $taskManifest
     function Test-EnvironmentImage {
         param($Record)
+        if ($null -eq $Record -or $null -eq $Record.PSObject.Properties['file'] -or $null -eq $Record.PSObject.Properties['sha256']) { return $false }
         $taskImagePath = Join-Path $taskAssetRoot $Record.file
         if (-not (Test-Path -LiteralPath $taskImagePath)) { return $false }
         return (Get-FileHash -LiteralPath $taskImagePath -Algorithm SHA256).Hash.ToLowerInvariant() -eq $Record.sha256
@@ -36,7 +37,29 @@ if (-not $taskNeedsImport) {
     foreach ($taskObject in $taskPack.objects.PSObject.Properties) {
         foreach ($taskFrame in $taskObject.Value.frames) {
             $taskNeedsImport = $taskNeedsImport -or -not (Test-EnvironmentImage $taskFrame)
+            $taskShadow = $taskFrame.PSObject.Properties['shadow']
+            if ($null -ne $taskShadow) { $taskNeedsImport = $taskNeedsImport -or -not (Test-EnvironmentImage $taskShadow.Value) }
         }
+    }
+    foreach ($taskRiverKey in @('native_water_material', 'river_flow_material', 'river_foam_material', 'river_rock_material')) {
+        $taskRiverRecord = $taskPack.PSObject.Properties[$taskRiverKey]
+        $taskNeedsImport = $taskNeedsImport -or $null -eq $taskRiverRecord
+        if ($null -ne $taskRiverRecord) { $taskNeedsImport = $taskNeedsImport -or -not (Test-EnvironmentImage $taskRiverRecord.Value) }
+    }
+    $taskShoreSet = $taskPack.PSObject.Properties['shoreline_materials']
+    if ($null -eq $taskShoreSet) { $taskNeedsImport = $true }
+    else {
+        foreach ($taskShoreKind in @('marine','fresh')) {
+            $taskShoreRecord = $taskShoreSet.Value.PSObject.Properties[$taskShoreKind]
+            $taskNeedsImport = $taskNeedsImport -or $null -eq $taskShoreRecord
+            if ($null -ne $taskShoreRecord) { $taskNeedsImport = $taskNeedsImport -or -not (Test-EnvironmentImage $taskShoreRecord.Value) }
+        }
+    }
+    $taskBanks = $taskPack.PSObject.Properties['river_bank_rocks']
+    if ($null -eq $taskBanks -or @($taskBanks.Value).Count -ne 5) {
+        $taskNeedsImport = $true
+    } else {
+        foreach ($taskBank in $taskBanks.Value) { $taskNeedsImport = $taskNeedsImport -or -not (Test-EnvironmentImage $taskBank) }
     }
 }
 if ($taskNeedsImport) {

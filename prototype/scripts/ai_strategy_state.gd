@@ -44,6 +44,10 @@ static func enemy(entity: Dictionary, snapshot: Dictionary, team: int) -> bool:
 	)
 
 
+static func wildlife_threat(entity: Dictionary) -> bool:
+	return int(entity.get("team", 0)) == 0 and "predator" in entity.get("behavior_tags", [])
+
+
 func observe(snapshot: Dictionary, team: int, policy: Dictionary) -> void:
 	var tick := int(snapshot.get("tick", 0))
 	var lifetime := maxi(20, int(policy.get("memory_ticks", 1200)))
@@ -65,7 +69,7 @@ func observe(snapshot: Dictionary, team: int, policy: Dictionary) -> void:
 						if String(entity.get("task", "idle")) == "idle":
 							idle += 1
 				continue
-			if not enemy(entity, snapshot, team):
+			if not enemy(entity, snapshot, team) and not wildlife_threat(entity):
 				continue
 			seen[id] = true
 			if float(entity.get("hp", 0.0)) <= 0.0 and not bool(entity.get("health_unknown", false)):
@@ -84,7 +88,7 @@ func observe(snapshot: Dictionary, team: int, policy: Dictionary) -> void:
 		entry["observed"] = seen.has(id) and int(entry["seen_tick"]) == tick
 		if (
 			tick - int(entry["seen_tick"]) > lifetime
-			or not enemy(entry["entity"], snapshot, team)
+			or (not enemy(entry["entity"], snapshot, team) and not wildlife_threat(entry["entity"]))
 			or (visible_locations.has(int(id)) and not seen.has(id))
 		):
 			memory.erase(id)
@@ -131,12 +135,13 @@ func observe(snapshot: Dictionary, team: int, policy: Dictionary) -> void:
 	_threat_tick = -1
 
 
-func enemies(tick: int, policy: Dictionary, observed_only: bool = false) -> Array:
+func enemies(tick: int, policy: Dictionary, observed_only: bool = false, include_wildlife: bool = false) -> Array:
 	var result: Array = []
 	var ids: Array = memory.keys()
 	ids.sort()
 	for id in ids:
 		var entry: Dictionary = memory[id]
+		if not include_wildlife and wildlife_threat(entry["entity"]): continue
 		if observed_only and not bool(entry["observed"]):
 			continue
 		var actor: Dictionary = entry["entity"].duplicate()
@@ -155,7 +160,7 @@ func enemies(tick: int, policy: Dictionary, observed_only: bool = false) -> Arra
 func danger(position: Vector2, tick: int, policy: Dictionary, domain: String = "land") -> float:
 	var total := 0.0
 	if _threat_tick != tick:
-		_threats = enemies(tick, policy)
+		_threats = enemies(tick, policy, false, true)
 		_threat_tick = tick
 	for actor in _threats:
 		var data := Combat.profile(actor)
@@ -165,6 +170,14 @@ func danger(position: Vector2, tick: int, policy: Dictionary, domain: String = "
 		if domain not in targets:
 			continue
 		var distance := position.distance_to(Vector2(actor.get("pos", Vector2.ZERO)))
+		if wildlife_threat(actor):
+			# An observed predator is an economic hazard even though neutral
+			# animals are absent from military objectives. Avoid its acquisition
+			# range with two world units of warning for a working villager.
+			var acquisition := maxf(0.0, float(actor.get("acquisition_range", 3.0)))
+			var warning := maxf(0.0, (acquisition + 2.0 - distance) / 2.0)
+			total += (float(policy.get("maximum_economic_danger", 8.0)) + 1.0) * warning * float(actor.get("confidence", 1.0))
+			continue
 		var radius := 6.0 + float(data.get("range", 0.0))
 		if distance < radius:
 			total += Combat.strength([actor]) * float(actor.get("confidence", 1.0)) * (1.0 - distance / radius)
@@ -295,9 +308,11 @@ func feedback(controller, team: int, tick: int, policy: Dictionary) -> void:
 		else:
 			var reason := String(result.get("reason", "unknown"))
 			metrics["rejection_reasons"][reason] = int(metrics["rejection_reasons"].get(reason, 0)) + 1
-			cooldowns[String(entry["metadata"].get("key", ""))] = (
-				tick + maxi(1, int(policy.get("command_retry_ticks", 60)))
-			)
+			var retry := maxi(1, int(policy.get("command_retry_ticks", 60)))
+			# A blocked or unreachable depot needs a traffic/navigation retry,
+			# not another identical return proposal every economic decision.
+			if reason == "invalid_dropoff": retry = maxi(retry, int(policy.get("gather_retry_ticks", 400)))
+			cooldowns[String(entry["metadata"].get("key", ""))] = tick + retry
 			if entry["metadata"].has("site_key") and reason in ["blocked_or_sloped", "occupied_by_unit", "missing_domain_access", "no_approach_slot", "no_path"]:
 				cooldowns[String(entry["metadata"]["site_key"])] = tick + maxi(20, int(policy.get("build_site_retry_ticks", 600)))
 	while cooldowns.size() > 1024:

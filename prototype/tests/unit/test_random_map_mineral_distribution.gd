@@ -32,6 +32,7 @@ func test_source_group_multiplicity() -> void:
 
 func check_generated_mines(profile: String, size_id: String, players: int, seed: int) -> void:
 	var settings := Settings.default_settings()
+	settings["landscape_version"] = 3
 	settings["map_type_id"] = profile
 	settings["map_size_id"] = size_id
 	settings["seed"] = seed

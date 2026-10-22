@@ -43,7 +43,10 @@ func run_march(scenario: String, native: bool, mixed: bool, count: int = 20, sha
 	var last_tick := 0
 	var invalid_positions: Dictionary = {}
 	var excessive_steps: Dictionary = {}
-	for tick in range(1600):
+	# A hundred solid bodies must queue through a one-cell gate; include that
+	# travel time instead of the short open-field deadline.
+	var tick_limit := 3200 if scenario == "passage" and count > 20 else 1600
+	for tick in range(tick_limit):
 		if scenario == "turn" and tick == 60:
 			controller.enqueue_command(Commands.FormationMoveCommand.new(controller.tick_index + 1, ids, Vector2(30.5, 12.5), "LINE", Vector2.UP))
 		if scenario == "turn" and tick == 120:
@@ -74,4 +77,10 @@ func run_march(scenario: String, native: bool, mixed: bool, count: int = 20, sha
 	if not excessive_steps.is_empty(): failures.append("%s: excessive speed or teleport: %s" % [context, excessive_steps.keys()])
 	var group = controller.formation_groups.get(int(world.find_unit(ids[0])["formation_group_id"]))
 	if group == null or group.deployed_columns != 0: failures.append("%s: preferred formation did not deploy in the open destination" % context)
+	if group != null:
+		for id in ids:
+			var member: Dictionary = world.find_unit(id)
+			var slot: Dictionary = group.slot_for(id)
+			if slot.is_empty() or member["formation_slot_id"] != slot["slot_id"] or member["formation_home"] != slot["world"]:
+				failures.append("%s: entity and group slot ownership diverged for %d" % [context, id])
 	world.task_coordinator.shutdown()

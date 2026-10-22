@@ -34,6 +34,7 @@ func _run() -> void:
 	canvas.set_view_state(1.0, Vector2(200, 0), Vector2(2560, 1080), 1)
 	check(canvas.terrain_mesh != null, "new camera view is drawable before worker completes")
 	check(canvas.queued_refinement != null, "rapid camera changes replace the pending request")
+	compare_full_mesh(canvas, provider, elevation, "coast before asynchronous refinement")
 	var latest_bounds: Rect2i = canvas.terrain_mesh_bounds
 	await drain(canvas)
 	check(canvas.terrain_mesh_bounds == latest_bounds, "old camera result never replaces the new bounds")

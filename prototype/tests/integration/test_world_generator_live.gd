@@ -22,7 +22,7 @@ func _initialize() -> void:
 	for profile in profiles:
 		var file := FileAccess.open(DIRECTORY.path_join(profile + "-large.bin"), FileAccess.READ)
 		var built: Dictionary = {}
-		if file != null and "--fresh" not in OS.get_cmdline_user_args():
+		if file != null and "--use-cache" in OS.get_cmdline_user_args():
 			built = file.get_var()
 		else:
 			var settings := Settings.default_settings()
@@ -44,7 +44,15 @@ func _initialize() -> void:
 			player["controller"] = "human"
 			player["ai"]["enabled"] = false
 		Bootstrap.apply(world, runtime_definition, data)
+		for actor in world.get_units():
+			check(world.query_units_near(actor["pos"], 0.0).any(func(candidate): return candidate["id"] == actor["id"]), "%s spatial index contains every actor at its settled starting position" % profile)
 		var grid = world.navigation_grid
+		for clearing in data.get("building_clearings", []):
+			var cells: Array = []
+			var origin: Vector2i = clearing["origin"]
+			for y in range(origin.y, origin.y + clearing["width"]):
+				for x in range(origin.x, origin.x + clearing["width"]): cells.append(Vector2i(x, y))
+			check(grid.can_build_for(cells, "land"), "%s protected expansion clearing admits a real foundation" % profile)
 		var expected := Navigation.mask(data, built["definition"])
 		for i in range(expected.size()):
 			check((expected[i] != 0) == grid.is_walkable(Vector2i(i % grid.size.x, i / grid.size.x)), "%s generator and real land occupancy agree" % profile)
@@ -54,6 +62,8 @@ func _initialize() -> void:
 			var workers: Array = world.get_units().filter(func(unit): return unit.get("team", 0) == team and unit.get("kind", "") == "villager")
 			check(not workers.is_empty(), "%s starting workers bootstrap" % profile)
 			if workers.is_empty(): continue
+			for starting_worker in workers:
+				check(grid.is_position_walkable_for(starting_worker["pos"], starting_worker["footprint_radius"], "land", starting_worker["terrain_restriction"]), "%s player %d starts each worker on a valid footprint" % [profile, team])
 			var worker: Dictionary = workers[0]
 			for kind in ["tree", "berries"]:
 				var reachable := false
@@ -90,8 +100,14 @@ func _initialize() -> void:
 				var start: Vector2 = ford["bank_a"] if kind == "clubman" else center - tangent
 				var goal: Vector2 = ford["bank_b"] if kind == "clubman" else center + tangent
 				var unit: Dictionary = world.add_unit(1, kind, start, false)
+				if kind=="fishing_boat":
+					var route:Array=world.pathfinder.find_path(start,goal,"water",unit["terrain_restriction"],unit["footprint_radius"])
+					if unit["pos"].distance_to(start)>0.1 or route.is_empty() or Vector2(route[-1]).distance_to(goal)>0.2:
+						crossings.append({"kind":kind,"reason":"natural_river_too_narrow"})
+						world.detach_unit_for_transport(int(unit["id"]))
+						continue
 				var spawned_at: Vector2 = unit["pos"]
-				var command = Commands.MoveCommand.new(1, [int(unit["id"])], goal)
+				var command = Commands.MoveCommand.new(controller.tick_index+1, [int(unit["id"])], goal)
 				controller.enqueue_command(command, true, 1)
 				controller.advance_frame(0.05, 1, 2)
 				check(controller.get_command_result(command.sequence_id).get("accepted", false), "%s accepts %s ford movement" % [profile, kind])

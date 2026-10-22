@@ -12,6 +12,7 @@ func _initialize() -> void:
 	var catalog := ResourceCatalog.new()
 	catalog.load_generated_data()
 	test_explicit_return_and_resource_types(catalog)
+	test_automatic_return_skips_unreachable_depot(catalog)
 	if failures.is_empty():
 		print("I8-006 return-resources integration tests passed")
 		quit(0)
@@ -80,3 +81,34 @@ func assert_true(value: bool, context: String) -> void:
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, expected, actual])
+
+
+func test_automatic_return_skips_unreachable_depot(catalog) -> void:
+	var world = SimulationWorld.new(Vector2i(24, 24))
+	world.reset_game(false)
+	world.set_gamespec(catalog.gamespec_data)
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
+	world.navigation_grid.configure_terrain(func(cell): return "water" if cell.x == 8 else "grass")
+	world.add_building(700, "town_center", Vector2(11.5, 5.5), 1)
+	var reachable: Dictionary = world.add_building(701, "town_center", Vector2(3.5, 17.5), 1)
+	var worker: Dictionary = world.add_unit(1, "villager", Vector2(5.5, 5.5), false)
+	world.add_unit(2, "clubman", Vector2(22.5, 22.5), false)["stance"] = "passive"
+	world.worker_role_system.apply(worker, world.worker_role_system.profile_for_resource_type(worker, 1), false)
+	worker["carried_amount"] = 7.0
+	worker["carried_resource_type_id"] = 1
+	world.set_resource_amount(1, 1, 0)
+	for y in range(world.map_size.y):
+		for x in range(world.map_size.x): world.fog_of_war.reveal_explored_cell(1, Vector2i(x,y))
+	var controller := GameController.new(world)
+	var command = Commands.ReturnResourcesCommand.new(1, [int(worker["id"])])
+	controller.enqueue_command(command, true, 1)
+	controller.advance_frame(0.05, 1, 2)
+	assert_true(bool(controller.get_command_result(command.sequence_id).get("accepted", false)), "automatic return accepts a reachable alternative depot")
+	assert_equal(worker["dropoff_id"], int(reachable["id"]), "a closer depot across an impassable river is skipped")
+	assert_true(world.building_approach_slots.get(int(reachable["id"]), {}).has(int(worker["id"])), "the selected depot approach remains reserved")
+	for tick in range(1000):
+		controller.advance_frame(0.05, 1, 2)
+		if float(worker["carried_amount"]) <= 0.0: break
+	assert_equal(world.get_wood(), 7, "the carrier actually deposits at the alternative depot")
+	world.task_coordinator.shutdown()

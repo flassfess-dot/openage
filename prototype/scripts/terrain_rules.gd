@@ -267,4 +267,4 @@ static func is_source_forest_terrain_id(terrain_id: int) -> bool:
 
 
 static func is_environment_terrain_id(terrain_id: int) -> bool:
-	return terrain_id >= 1000 and terrain_id <= 1003
+	return terrain_id >= 1000 and terrain_id <= 1005

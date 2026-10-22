@@ -16,6 +16,8 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	var settings := SkirmishSettings.default_settings()
+	# This fishing fixture requires the v3 guaranteed Dock/staging zones.
+	settings["landscape_version"] = 3
 	settings["map_size_id"] = "compact"
 	settings["map_type_id"] = "islands"
 	settings["seed"] = 41721
@@ -46,7 +48,12 @@ func _initialize() -> void:
 	world.set_runtime_catalog(catalog.runtime_catalog_data)
 	MatchBootstrap.apply(world, definition, built["map_data"])
 
-	var zone: Dictionary = built["map_data"].get("naval_start_zones", [])[1]
+	var zones: Array = built["map_data"].get("naval_start_zones", [])
+	assert_equal(zones.size(), 2, "the fishing fixture exposes both guaranteed naval zones")
+	if zones.size() < 2:
+		finish()
+		return
+	var zone: Dictionary = zones[1]
 	var dock: Dictionary = world.add_building(10001, "dock", Vector2(zone["dock_position"]), AI_TEAM)
 	var scout: Dictionary = world.add_unit(AI_TEAM, "scout_ship", Vector2(zone["water_staging"]), false)
 	scout["components"]["vision"]["range"] = 20.0

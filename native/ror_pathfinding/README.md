@@ -58,10 +58,17 @@ does not rescan all 160,000 cells of a supergiant map on the next path query.
 `RoRTerrainKernel` builds presentation geometry from detached numeric terrain,
 elevation and atlas samples. Its full-detail output matches the GDScript terrain
 reference (8x8 material blends, 16x16 coast contours). Camera changes display a
-4x4 preview immediately and refine it on `WorkerThreadPool`; scene resources and
+4x4 soil-blend preview immediately and refine it on `WorkerThreadPool`; coastline
+cells retain 16x16 geometry in both passes so the water contour never changes.
+Scene resources and
 mesh upload remain on the main thread. Only the newest request may install its
 result. Reconfiguration and shutdown join outstanding work. The GDScript renderer
 remains the fallback when the extension is unavailable.
+River geometry uses a four-component depth field (bank distance, influence,
+depth below water, gravel fraction), preceded by six material slots. Exposed
+silt/gravel, submerged shelves and deep water use the same field as logical
+terrain classification. The native walkability model recognizes both added
+land materials, 1004 and 1005.
 The CPU worker partitions indexed triangles into at most 16384 vertices per GPU
 part, preserving every attribute and triangle order. Upload and retirement are
 bounded on main; a full replacement publishes only after every part is ready.

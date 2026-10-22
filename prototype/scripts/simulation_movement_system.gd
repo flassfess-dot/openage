@@ -203,6 +203,14 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 		simulation_world.movement_native_neighbor_candidates += maxi(0, roundi(native_result.w))
 	else:
 		movement_reason = LocalMovement.calculate_runtime_unit_into(unit, steering_target, simulation_world.movement_neighbor_buffer, simulation_world.navigation_grid, delta, open_envelope)
+	var formation_yielding := false
+	if int(unit["formation_group_id"]) >= 0 and int(unit["stuck_ticks"]) >= 4:
+		if native_movement:
+			simulation_world.spatial_index.query_neighbors_into(unit, simulation_world.spatial_index.movement_neighbor_radius(unit), "unit", simulation_world.movement_neighbor_buffer)
+		var yielding: Variant = _formation_yield_velocity(unit, simulation_world.movement_neighbor_buffer, delta)
+		if yielding is Vector2:
+			simulation_world.set_entity_field(unit, "actual_velocity", yielding)
+			formation_yielding = true
 	if movement_reason == "local_blocked":
 		var escape_velocity := _escape_invalid_footprint(unit, delta)
 		if escape_velocity.length_squared() > 0.000001:
@@ -233,19 +241,21 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 				stop_tick = 600
 				break
 	var group = simulation_world.formation_groups_view.get(int(unit["formation_group_id"]))
-	if group != null and group.has_compression:
+	if group != null:
 		# Waiting in a convoy can outlast the ordinary 1.5-second stall window.
-		# Keep retries bounded (one local and one global replan), and cap patience
-		# at nine seconds even for the largest group. Real deadlocks still stop.
-		stop_tick += mini(150, group.member_ids.size() * 2)
-	var recovery_action := StuckRecovery.update_route_progress(unit, stop_tick)
+		# Initial local/global retries and later deployment checks stay bounded. Columns
+		# and final deployment receive a finite size-dependent waiting budget.
+		stop_tick += mini(1200, group.member_ids.size() * 20)
+	var recovery_action := "" if formation_yielding else StuckRecovery.update_route_progress(unit, stop_tick)
 	match recovery_action:
 		"local_repath":
-			if not _try_work_traffic_detour(unit, planner):
+			if _try_formation_slot_exchange(unit, planner): pass
+			elif not _try_work_traffic_detour(unit, planner):
 				assign_unit_destination(unit, unit["destination"], false)
 		"global_repath":
 			planner.clear_route_cache()
-			if not _try_work_traffic_detour(unit, planner):
+			if _try_formation_slot_exchange(unit, planner): pass
+			elif not _try_work_traffic_detour(unit, planner):
 				if String(unit["task"]) != "gather" or not simulation_world.gathering_system.replan_work_approach(unit):
 					assign_unit_destination(unit, unit["destination"], false)
 		"stop":
@@ -265,13 +275,17 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			if probe != null:
 				simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return false
+	if group != null and recovery_action.is_empty() and int(unit["stuck_ticks"]) in [60, 180, 360, 720]:
+		# Deployment changes as earlier ranks take their homes. Retry the local
+		# body detour at a bounded set of later checkpoints, not every fixed tick.
+		_try_work_traffic_detour(unit, planner)
 	if probe != null:
 		simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 	return true
 
 
 func _try_work_traffic_detour(unit: Dictionary, planner) -> bool:
-	if String(unit["task"]) != "gather": return false
+	if String(unit["task"]) != "gather" and not (int(unit["formation_group_id"]) >= 0 and String(unit["task"]) in ["move", "attack_move"] and Vector2(unit["pos"]).distance_squared_to(unit["destination"]) < 64.0): return false
 	var simulation_world = world
 	var origin := Vector2(unit["pos"])
 	var destination := Vector2(unit["destination"])
@@ -285,7 +299,7 @@ func _try_work_traffic_detour(unit: Dictionary, planner) -> bool:
 	# route clears the nearby bodies, without changing the gather/deposit goal.
 	var candidates: Array[Vector2] = []
 	var forward := (destination - origin).normalized()
-	for distance in [1.0, 2.0, 3.0]:
+	for distance in ([1.0, 2.0, 3.0, 4.0, 6.0] if int(unit["formation_group_id"]) >= 0 else [1.0, 2.0, 3.0]):
 		for angle in range(8):
 			candidates.append(origin + forward.rotated(TAU * float(angle) / 8.0) * float(distance) * maxf(1.0, radius * 2.0))
 	candidates.sort_custom(func(a, b): return origin.distance_to(a) + a.distance_to(destination) < origin.distance_to(b) + b.distance_to(destination))
@@ -352,11 +366,17 @@ func _advance_formation_corner(unit: Dictionary, planner) -> void:
 	if int(unit["formation_group_id"]) < 0 or String(unit["task"]) not in ["move", "attack_move"]: return
 	var path: Array = unit["path"]
 	var next_index := int(unit["path_index"]) + 1
-	if next_index >= path.size() or Vector2(unit["pos"]).distance_squared_to(unit["target"]) > 0.75 * 0.75: return
+	if next_index >= path.size() or Vector2(unit["pos"]).distance_squared_to(unit["target"]) > 2.0 * 2.0: return
 	# Intermediate gates must not require every rank to touch the same exact
 	# point. Advance only when the entire swept footprint to the next leg is
 	# clear; the final reserved destination still uses the precise arrival rule.
 	if not planner.is_segment_walkable(unit["pos"], path[next_index], float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])): return
+	if next_index == path.size() - 1 and Vector2(unit["pos"]).distance_squared_to(unit["destination"]) < 64.0:
+		# Preserve an actual detour around members already standing at home.
+		# Terrain visibility alone would cut the corner back through their bodies.
+		var neighbors: Array = world.query_units_near(unit["pos"], 8.0 + float(unit["footprint_radius"]))
+		neighbors = neighbors.filter(func(other): return int(other["id"]) != int(unit["id"]) and String(other["movement_domain"]) == String(unit["movement_domain"]))
+		if not _work_segment_clear(unit, unit["pos"], path[next_index], neighbors): return
 	world.set_entity_field(unit, "path_index", next_index)
 	world.set_entity_field(unit, "target", path[next_index])
 
@@ -691,3 +711,60 @@ func release_unit_destination(unit: Dictionary) -> void:
 	world.destination_reservations.release(int(unit.get("id", -1)))
 	world.open_movement_envelopes_by_id.erase(int(unit.get("id", -1)))
 	world.set_entity_field(unit, "reserved_destination", null)
+
+
+func _formation_yield_velocity(unit: Dictionary, neighbors: Array, delta: float) -> Variant:
+	var blocker: Variant = null
+	for other in neighbors:
+		if int(other["formation_group_id"]) != int(unit["formation_group_id"]) or int(other["id"]) >= int(unit["id"]) or int(other["stuck_ticks"]) < 4: continue
+		if Vector2(other["pos"]).distance_to(unit["pos"]) > 1.5: continue
+		if blocker == null or int(other["id"]) < int(blocker["id"]): blocker = other
+	if blocker == null: return null
+	var watch: Dictionary = unit.get("navigation_progress", {})
+	if watch.is_empty() or int(watch.get("formation_yield_ticks", 0)) >= 1200: return null
+	var backwards := (Vector2(unit["pos"]) - Vector2(unit["destination"])).normalized()
+	var speed := float(unit["speed"]) * float(unit["cohesion_speed_scale"])
+	for angle in [0.0, PI / 4.0, -PI / 4.0, PI / 2.0, -PI / 2.0]:
+		var velocity := MobileCollision.constrain(unit, backwards.rotated(angle) * speed, neighbors, delta)
+		if velocity.length_squared() < speed * speed * 0.1: continue
+		var finish := Vector2(unit["pos"]) + velocity * delta
+		if world.navigation_grid.is_segment_walkable_for(unit["pos"], finish, float(unit["footprint_radius"]), String(unit["movement_domain"]), int(unit["terrain_restriction"])):
+			watch["formation_yield_ticks"] = int(watch.get("formation_yield_ticks", 0)) + 1
+			return velocity
+	return null
+
+
+func _try_formation_slot_exchange(unit: Dictionary, planner) -> bool:
+	var group = world.formation_groups_view.get(int(unit["formation_group_id"]))
+	if group == null or unit.get("formation_home") == null or Vector2(unit["pos"]).distance_squared_to(unit["formation_home"]) > 64.0: return false
+	var home := Vector2(unit["formation_home"])
+	var candidates: Array = world.query_units_near(home, 8.0)
+	candidates.sort_custom(func(a, b): return int(a["id"]) < int(b["id"]))
+	for other in candidates:
+		if int(other["id"]) == int(unit["id"]) or float(other["hp"]) <= 0.0 or int(other["formation_group_id"]) != group.group_id or String(other["task"]) != "idle" or String(other["kind"]) != String(unit["kind"]): continue
+		if other.get("formation_home") == null or Vector2(other["pos"]).distance_squared_to(other["formation_home"]) > 0.0016: continue
+		if not is_equal_approx(float(unit["footprint_radius"]), float(other["footprint_radius"])): continue
+		var other_home := Vector2(other["formation_home"])
+		var before := Vector2(unit["pos"]).distance_squared_to(home)
+		var after := Vector2(unit["pos"]).distance_squared_to(other_home) + Vector2(other["pos"]).distance_squared_to(home)
+		if after >= before - 0.01: continue
+		if not planner.is_segment_walkable(other["pos"], home, float(other["footprint_radius"]), String(other["movement_domain"]), int(other["terrain_restriction"])): continue
+		var blockers: Array = candidates.filter(func(actor): return int(actor["id"]) not in [int(unit["id"]), int(other["id"])] and String(actor["movement_domain"]) == String(unit["movement_domain"]))
+		if not _work_segment_clear(other, other["pos"], home, blockers): continue
+		# A settled outer rank can enclose an empty inner slot. Exchange only
+		# identical unit kinds/radii, and only when total travel strictly falls.
+		# The formation keeps every slot; both actors walk at their ordinary speed.
+		world.destination_reservations.release(int(unit["id"]))
+		world.destination_reservations.release(int(other["id"]))
+		group.exchange_assignments(int(unit["id"]), int(other["id"]))
+		for actor in [other, unit]:
+			var slot: Dictionary = group.slot_for(int(actor["id"]))
+			var destination := Vector2(slot["world"])
+			var reserved: Vector2 = world.destination_reservations.reserve(int(actor["id"]), destination, float(actor["footprint_radius"]), planner.grid, group.group_id, String(actor["movement_domain"]), int(actor["terrain_restriction"]))
+			world.set_entity_fields(actor, {"formation_home":destination, "formation_slot_id":slot["slot_id"], "formation_slot_capacity":slot["capacity_radius"], "reserved_destination":reserved, "task":group.order_kind})
+			if group.order_kind == "attack_move": world.set_entity_field(actor, "attack_move_destination", destination)
+			world.begin_entity_order(actor, group.order_kind, -1, destination, false)
+			StuckRecovery.reset(actor)
+			assign_unit_destination(actor, reserved, false)
+		return true
+	return false

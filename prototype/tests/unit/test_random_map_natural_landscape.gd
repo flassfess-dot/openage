@@ -51,6 +51,7 @@ func _test_coastal_orientation() -> void:
 
 func _test_completed_landscape_and_legacy() -> void:
 	var settings := Settings.default_settings()
+	settings["landscape_version"] = 3
 	settings["seed"] = 41721
 	settings["map_size_id"] = "standard"
 	settings["map_type_id"] = "grasslands"
@@ -60,7 +61,7 @@ func _test_completed_landscape_and_legacy() -> void:
 	if not bool(built.get("valid", false)): return
 	var data: Dictionary = built["map_data"]
 	var definition: Dictionary = built["definition"]
-	check(data["generator_version"] == 3, "new games select revision three")
+	check(data["generator_version"] == 3, "the explicit v3 fixture retains revision three")
 	var selection: Dictionary = data["generation_candidates"]
 	check(selection["scope"] == "final_landscape", "selection evaluates the landscape after paths, economy and tree placement")
 	var chosen: Dictionary = selection["scores"][selection["selected_candidate_index"]]

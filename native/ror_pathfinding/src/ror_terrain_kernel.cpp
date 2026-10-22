@@ -17,8 +17,8 @@ constexpr int MATERIAL_STRIDE = 7; // priority, water, imported, atlas x/y/width
 // this CPU-only extension's generated class profile.
 enum MeshArray { ARRAY_VERTEX = 0, ARRAY_COLOR = 3, ARRAY_TEX_UV = 4, ARRAY_INDEX = 12, ARRAY_MAX = 13 };
 struct Weights {
-    std::array<int, 4> ids{};
-    std::array<double, 4> values{};
+    std::array<int, 12> ids{};
+    std::array<double, 12> values{};
     int count = 0;
     void add(int id, double value) {
         for (int i = 0; i < count; ++i) {
@@ -49,7 +49,7 @@ Packed pack(const std::vector<Value> &values) {
 }
 
 void RoRTerrainKernel::_bind_methods() {
-    ClassDB::bind_method(D_METHOD("build_mesh", "bounds", "cells", "heights", "frames", "materials", "seed", "maximum_subdivisions"), &RoRTerrainKernel::build_mesh, DEFVAL(16));
+    ClassDB::bind_method(D_METHOD("build_mesh", "bounds", "cells", "heights", "frames", "materials", "seed", "maximum_subdivisions", "river"), &RoRTerrainKernel::build_mesh, DEFVAL(16), DEFVAL(PackedFloat32Array()));
     ClassDB::bind_method(D_METHOD("split_mesh_arrays", "arrays", "maximum_vertices"), &RoRTerrainKernel::split_mesh_arrays, DEFVAL(16384));
 }
 
@@ -113,7 +113,8 @@ Array RoRTerrainKernel::split_mesh_arrays(const Array &arrays, int32_t maximum_v
 
 Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32Array &cells,
         const PackedFloat32Array &heights, const PackedInt32Array &frames,
-        const PackedFloat32Array &materials, int64_t seed, int32_t maximum_subdivisions) const {
+        const PackedFloat32Array &materials, int64_t seed, int32_t maximum_subdivisions,
+        const PackedFloat32Array &river) const {
     Dictionary result;
     const int width = bounds.size.x;
     const int height = bounds.size.y;
@@ -130,6 +131,32 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
     for (int64_t i = 0; i < cells.size(); ++i) if (cell_data[i] < -1 || cell_data[i] >= material_count) return result;
     for (int64_t i = 0; i < heights.size(); ++i) if (!std::isfinite(height_data[i])) return result;
     for (int64_t i = 0; i < materials.size(); ++i) if (!std::isfinite(material_data[i])) return result;
+    const int river_width = width * 2 + 1, river_height = height * 2 + 1;
+    const bool has_river = !river.is_empty();
+    const int river_header = 6;
+    if (has_river && river.size() != river_header + int64_t(river_width) * river_height * 4) return result;
+    const float *river_data = river.ptr();
+    if (has_river) {
+        for (int64_t i = 0; i < river.size(); ++i) if (!std::isfinite(river_data[i])) return result;
+        for (int i = 0; i < river_header; ++i) if (river_data[i] < 0 || river_data[i] >= material_count || river_data[i] != int(river_data[i])) return result;
+        for (int64_t i = river_header; i < river.size(); i += 4) if (river_data[i + 1] < 0 || river_data[i + 1] > 1 || river_data[i + 2] < -0.5 || river_data[i + 2] > 3 || river_data[i + 3] < 0 || river_data[i + 3] > 1) return result;
+    }
+    auto river_at = [&](const Vector2 &point) {
+        const Vector2 local = (point - Vector2(bounds.position)) * 2.0;
+        const int ox = std::clamp(int(std::floor(local.x)), 0, river_width - 1);
+        const int oy = std::clamp(int(std::floor(local.y)), 0, river_height - 1);
+        const int nx = std::min(ox + 1, river_width - 1), ny = std::min(oy + 1, river_height - 1);
+        const double fx = local.x - ox, fy = local.y - oy;
+        std::array<double, 4> field;
+        for (int i = 0; i < 4; ++i) {
+            const double a = river_data[river_header + (oy * river_width + ox) * 4 + i];
+            const double b = river_data[river_header + (oy * river_width + nx) * 4 + i];
+            const double c = river_data[river_header + (ny * river_width + ox) * 4 + i];
+            const double d = river_data[river_header + (ny * river_width + nx) * 4 + i];
+            field[i] = (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy;
+        }
+        return field;
+    };
     auto cell_at = [&](int x, int y) {
         const int lx = x - bounds.position.x + 1;
         const int ly = y - bounds.position.y + 1;
@@ -168,6 +195,28 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
             weights.values[i] *= water(weights.ids[i]) ? (water_sum > 0.0 ? (1.0 - coverage) / water_sum : 0.0) :
                 (land_sum > 0.0 ? coverage / land_sum : 0.0);
         }
+        if (has_river) {
+            const auto field = river_at(point);
+            if (field[1] > 0.0) {
+                double land = 0.0;
+                for (int i=0;i<weights.count;++i) if(!water(weights.ids[i])) land+=weights.values[i];
+                const double influence=field[1];
+                const double wet=smooth(-0.08,0.10,field[0])*smooth(-0.035,0.10,field[2]);
+                const double target_land=land+(1.0-wet-land)*influence,target_water=1.0-target_land;
+                const double exposed=target_land*influence*smooth(-0.8,0.1,field[0]);
+                const double edge=target_land*influence*(1.0-smooth(0.15,0.8,-field[0]))*0.65;
+                const double bed_land=std::max(exposed,edge),gravel=std::clamp(field[3],0.0,1.0);
+                for(int i=0;i<weights.count;++i)weights.values[i]*= !water(weights.ids[i])&&land>0?(target_land-bed_land)/land:0;
+                if(land<=0)weights.add(int(river_data[0]),target_land-bed_land);
+                weights.add(int(river_data[1]),bed_land*(1.0-gravel));
+                weights.add(int(river_data[4]),bed_land*gravel);
+                const double shallow=target_water*influence*(1.0-smooth(0.10,0.95,field[2]))*0.85;
+                const double deep=target_water*influence*smooth(0.95,1.65,field[2])*0.55;
+                weights.add(int(river_data[2]),target_water-shallow-deep);
+                weights.add(int(river_data[3]),shallow);
+                weights.add(int(river_data[5]),deep);
+            }
+        }
         return weights;
     };
     std::vector<Vector3> vertices;
@@ -194,7 +243,12 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
                 if (water(neighbor) != water(center)) coast = true;
             }
         }
-        const int n = uniform ? 1 : std::min(coast ? 16 : 8, std::clamp(maximum_subdivisions, 1, 16));
+        if (has_river) for (int y = 0; y < 3; ++y) for (int x = 0; x < 3; ++x) {
+            if (river_data[river_header + ((cy * 2 + y) * river_width + cx * 2 + x) * 4 + 1] > 0) { uniform = false; coast = true; }
+        }
+        // The preview budget may simplify soil blends, but the land/water
+        // contour must stay identical when the asynchronous mesh is published.
+        const int n = uniform ? 1 : coast ? 16 : std::min(8, std::clamp(maximum_subdivisions, 1, 16));
         const int count = (n + 1) * (n + 1);
         std::array<Weights, 289> weights;
         std::array<Vector2, 289> local;

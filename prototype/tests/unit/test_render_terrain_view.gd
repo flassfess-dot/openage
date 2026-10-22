@@ -16,8 +16,10 @@ func _initialize() -> void:
 	world.map_terrain_ids[cell] = before + 1
 	world._record_terrain_change(cell)
 	world.terrain_elevation.set_vertex(cell,2)
+	world.terrain_elevation.river_shape = {"size":Vector2i(2,2), "resolution":2, "samples":PackedFloat32Array([1,1,0])}
 	check(view.terrain_id_at_cell(cell) == before and geometry.vertex_elevation(cell) == 0,"surface and height remain isolated while simulation changes")
 	view.synchronize(world)
+	check(view.terrain_elevation.river_shape == world.terrain_elevation.river_shape and geometry.river_shape.is_empty(), "river contour publishes with the geometry and preserves the old render view")
 	check(view.terrain_id_at_cell(cell) == before+1,"incremental terrain surface reaches the renderer")
 	check(view.terrain_elevation.vertex_elevation(cell) == 2 and geometry.vertex_elevation(cell) == 0,"geometry replacement preserves the old render view")
 	var changes := Dependency.changes(view,Dependency.TERRAIN_SURFACE,stamp)

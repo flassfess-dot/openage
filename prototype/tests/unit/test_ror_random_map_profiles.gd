@@ -10,6 +10,7 @@ func _initialize() -> void:
 		for player_count in [2, 4, 8]:
 			for seed in [41721, 7919]:
 				var settings := SkirmishSettings.default_settings()
+				settings["landscape_version"] = 3
 				settings["map_type_id"] = profile
 				settings["map_size_id"] = "large" if player_count == 8 else "standard"
 				settings["seed"] = seed

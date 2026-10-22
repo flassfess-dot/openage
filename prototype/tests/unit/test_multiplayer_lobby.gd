@@ -2,6 +2,7 @@ extends SceneTree
 
 const MultiplayerLobby := preload("res://scripts/multiplayer_lobby.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
+const SkirmishSettings := preload("res://scripts/skirmish_settings.gd")
 
 var failures: Array[String] = []
 
@@ -25,6 +26,8 @@ func _initialize() -> void:
 				assert_equal(String(built["definition"].get("victory_rules", [])[0].get("type", "")), "conquest", "lobby victory setting reaches the match")
 			var invited = MultiplayerLobby.new()
 			assert_equal(invited.load_invite(lobby.invite_code()), "", "joiner imports the host's complete lobby configuration")
+			var normalized: Dictionary = SkirmishSettings.normalize(invited.settings)["settings"]
+			assert_equal(typeof(normalized["landscape_version"]), TYPE_INT, "JSON invitations normalize the recipe version to an integer")
 			assert_equal(GameSaveArchive.fingerprint(invited.build_match().get("definition", {})), GameSaveArchive.fingerprint(built.get("definition", {})), "invitation produces the same deterministic match fingerprint")
 		assert_equal(lobby.set_slot(count, 13, count, "ai"), "lobby_slot_invalid", "AI cannot silently occupy a remote frame without host authority")
 		assert_equal(lobby.participant_teams().size(), count, "rejected AI slot leaves all network participants intact")

@@ -864,7 +864,7 @@ PackedByteArray RoRReadModelKernel::walkability_mask(const Vector2i &size, const
         if (!occupied.has(cell)) {
             if (restriction >= 0 && !restrictions.is_empty()) {
                 int64_t id = terrain_ids.get(cell, -1);
-                if (id >= 1000 && id <= 1003) id = 0;
+                if (id >= 1000 && id <= 1005) id = 0;
                 allowed = id >= 0 && id < accessible.size() && double(accessible[id]) > 0.05;
             } else {
                 const String value = terrain.get(cell, "void");

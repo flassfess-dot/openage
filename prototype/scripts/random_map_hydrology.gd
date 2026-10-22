@@ -6,6 +6,11 @@ const Rules := preload("res://scripts/terrain_rules.gd")
 const Navigation := preload("res://scripts/random_map_navigation.gd")
 const Topology := preload("res://scripts/random_map_topology.gd")
 const Landscape := preload("res://scripts/random_map_landscape.gd")
+const Crossings := preload("res://scripts/random_map_river_crossings.gd")
+const RiverSurface := preload("res://scripts/random_map_river_surface.gd")
+const RiverBanks := preload("res://scripts/random_map_river_banks.gd")
+const RiverFalls := preload("res://scripts/random_map_river_falls.gd")
+const RiverRapids := preload("res://scripts/random_map_river_rapids.gd")
 
 # Shared by geographic profiles, including highlands. Neither feature receives
 # settlement positions. Lake/ford counts scale with geographic area and reach.
@@ -13,11 +18,20 @@ static func build(size: Vector2i, terrain: Array[int], fields: Dictionary, seed:
 	var span := float(mini(size.x, size.y))
 	var threshold := maxf(float(options.get("minimum_runoff", 48.0)), span * float(options.get("runoff_scale", 0.55)))
 	var original := terrain.duplicate()
-	var rivers := Rivers.carve(size, terrain, fields, {"runoff_threshold": threshold, "minimum_basin_runoff": threshold * float(options.get("basin_scale", 10.0)), "width_scale": float(options.get("width_scale", 0.72)), "maximum_radius": 3.8, "edge_outlets": bool(options.get("edge_outlets", false))})
+	var rivers := Rivers.carve(size, terrain, fields, {"runoff_threshold": threshold, "minimum_basin_runoff": threshold * float(options.get("basin_scale", 10.0)), "width_scale": float(options.get("width_scale", 0.9)), "maximum_radius": float(options.get("maximum_radius",3.2)), "natural_channels":true, "edge_outlets": bool(options.get("edge_outlets", false))})
 	var lakes := _lakes(size, original, rivers, seed)
+	Rivers.apply(terrain, rivers)
+	rivers["waterfalls"] = RiverFalls.plan(size,terrain,rivers,lakes,seed) if options.get("waterfalls",false) else []
+	Rivers.apply(terrain,rivers)
+	rivers["rapids"] = RiverRapids.plan(size,terrain,rivers,lakes,seed)
+	Rivers.apply(terrain,rivers)
+	rivers["shoals"] = RiverBanks.build(size, terrain, fields, rivers, lakes, seed)
 	Rivers.apply(terrain, rivers)
 	var fords := _fords(size, terrain, fields, rivers, lakes, seed)
 	Rivers.apply(terrain, rivers)
+	rivers["surface"] = RiverSurface.build(size, original, rivers, lakes, fords)
+	RiverSurface.classify(size,rivers,lakes,fords)
+	Rivers.apply(terrain,rivers)
 	rivers.erase("drainage")
 	rivers["ford_count"] = fords.size()
 	rivers["lake_count"] = lakes.size()
@@ -95,6 +109,7 @@ static func _lakes(size: Vector2i, original: Array[int], rivers: Dictionary, see
 # and upstream river into a sea-level trench. Hydraulic ordering also contains
 # drainage tie-breaks; physical_head deliberately excludes those artificial terms.
 static func apply_surface_relief(size: Vector2i, terrain: Array[int], levels: Array[int], rivers: Dictionary, lakes: Array) -> void:
+	RiverBanks.shape_valleys(size,terrain,levels,rivers)
 	var width := size.x + 1
 	var desired := PackedInt32Array()
 	desired.resize(levels.size())
@@ -121,6 +136,8 @@ static func refresh_lake_levels(size: Vector2i, levels: Array[int], lakes: Array
 		lake["surface_level"] = levels[(i / size.x) * (size.x + 1) + i % size.x]
 
 static func _fords(size: Vector2i, terrain: Array[int], fields: Dictionary, rivers: Dictionary, lakes: Array, seed: int) -> Array:
+	if rivers.has("channels"):
+		return Crossings.build(size, terrain, fields, rivers, lakes, seed)
 	var nodes: Array = rivers["nodes"]
 	var incoming: Dictionary = {}
 	for node in nodes:
@@ -190,6 +207,12 @@ static func _fords(size: Vector2i, terrain: Array[int], fields: Dictionary, rive
 
 
 static func decorate_fords(data: Dictionary, seed: int) -> void:
+	if data.get("rivers", {}).get("surface", {}).get("model_version", 0) >= 2:
+		# The ground material now supplies the continuous bar. Full oval source
+		# sprites would reintroduce the isolated patches this field replaces.
+		data["scenery"] = data["scenery"].filter(func(item): return item.get("decoration_key", "") != "ror_shallows")
+		data["decoration_summary"] = Landscape.Decorations.summarize(data["scenery"])
+		return
 	# Native Shallows (terrain 4) uses water plus unit 80's sandy islets.
 	# Reuse the imported source frames, below units and without obstructions.
 	var spec: Dictionary = {}
@@ -209,12 +232,11 @@ static func decorate_fords(data: Dictionary, seed: int) -> void:
 		for cell in candidates:
 			if seen.has(cell): continue
 			seen[cell] = true
-			if has_anchor and Topology.roll(cell, seed ^ 0x54A110) > 0.55: continue
-			var frame: int = 3 if not has_anchor else [1, 3, 6][mini(2, int(Topology.roll(cell, seed ^ 0x54A111) * 3.0))]
+			var frame: int = 3 if not has_anchor else [0, 1, 3, 5, 6][mini(4, int(Topology.roll(cell, seed ^ 0x54A111) * 5.0))]
 			var position := Vector2.INF
-			for offset in [Vector2.ZERO, Vector2(-0.25, -0.25), Vector2(0.25, -0.25), Vector2(-0.25, 0.25), Vector2(0.25, 0.25)]:
+			for offset in [Vector2.ZERO, Vector2(-0.25, -0.25), Vector2(0.25, -0.25), Vector2(-0.25, 0.25), Vector2(0.25, 0.25), Vector2(-0.5,-0.5), Vector2(0.5,-0.5), Vector2(-0.5,0.5), Vector2(0.5,0.5)]:
 				var candidate: Vector2 = Vector2(cell) + Vector2.ONE * 0.5 + offset
-				if placed.any(func(at): return at.distance_squared_to(candidate) < 4.0): continue
+				if placed.any(func(at): return at.distance_squared_to(candidate) < 0.95 * 0.95): continue
 				if not _ford_detail_fits(data, spec, frame, candidate): continue
 				position = candidate
 				break
@@ -241,6 +263,7 @@ static func _ford_detail_fits(data: Dictionary, spec: Dictionary, frame: int, po
 	# water, including its opaque blue border, rather than spilling over a bank.
 	var size: Vector2i = data["size"]
 	var cell := Vector2i(position.floor())
+	if not Navigation.inside(cell, size): return false
 	var levels: Array = data["vertex_levels"]
 	var reference := int(levels[cell.y * (size.x + 1) + cell.x])
 	for covered in Landscape.Decorations.footprint_cells(spec, frame, position):
@@ -251,4 +274,13 @@ static func _ford_detail_fits(data: Dictionary, spec: Dictionary, frame: int, po
 		var vertex := covered.y * (size.x + 1) + covered.x
 		for offset in [0, 1, size.x + 1, size.x + 2]:
 			if int(levels[vertex + offset]) != reference: return false
+	# The raster and the smoothly rendered shoreline need not coincide.
+	# Check the visible contour too, including the sprite's blue perimeter.
+	var shape: Dictionary = data.get("rivers", {}).get("surface", {})
+	var bounds: Array = spec["ground_bounds"][frame]
+	for y in range(5):
+		for x in range(5):
+			var point := position + Vector2(lerpf(bounds[0], bounds[2], x / 4.0), lerpf(bounds[1], bounds[3], y / 4.0))
+			var field := RiverSurface.sample(shape, point)
+			if field.y > 0.05 and field.x < 0.08: return false
 	return true

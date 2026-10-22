@@ -42,7 +42,10 @@ func profile_for_hunt(worker: Dictionary, target: Dictionary) -> Dictionary:
 
 
 func apply(worker: Dictionary, profile: Dictionary, combat_role: bool = false) -> bool:
-	world.notify_entity_changed(worker)
+	return bool(world.mutate_entity(worker, _mutate_apply.bind(worker, profile, combat_role)))
+
+
+func _mutate_apply(worker: Dictionary, profile: Dictionary, combat_role: bool = false) -> bool:
 	if profile.is_empty():
 		clear(worker)
 		return false
@@ -64,7 +67,10 @@ func apply(worker: Dictionary, profile: Dictionary, combat_role: bool = false) -
 
 
 func clear(worker: Dictionary) -> void:
-	world.notify_entity_changed(worker)
+	world.mutate_entity(worker, _mutate_clear.bind(worker))
+
+
+func _mutate_clear(worker: Dictionary) -> void:
 	var previous_combat_enabled := bool(worker.get("combat_enabled", false))
 	if worker.has("_worker_base_combat"):
 		var backup: Dictionary = worker["_worker_base_combat"]
@@ -123,11 +129,13 @@ func _presentation_overrides(profile: Dictionary) -> Dictionary:
 
 
 func _apply_task_source(worker: Dictionary, source: Dictionary) -> void:
-	world.notify_entity_changed(worker)
+	world.mutate_entity(worker, _mutate_apply_task_source.bind(worker, source))
+
+
+func _mutate_apply_task_source(worker: Dictionary, source: Dictionary) -> void:
 	var components: Dictionary = worker.get("components", {})
 	var worker_component: Dictionary = components.get("worker", {})
 	var carrier_component: Dictionary = components.get("resource_carrier", {})
-	world.notify_entity_changed(worker)
 	worker["_worker_base_task"] = {
 		"gather_interval": worker.get("gather_interval", 1.0),
 		"carry_capacity": worker.get("carry_capacity", 0.0),
@@ -172,12 +180,14 @@ func _apply_effect_operator(current: float, effect_type: int, value: float) -> f
 
 
 func _apply_combat_source(worker: Dictionary, source: Dictionary) -> void:
-	world.notify_entity_changed(worker)
+	world.mutate_entity(worker, _mutate_apply_combat_source.bind(worker, source))
+
+
+func _mutate_apply_combat_source(worker: Dictionary, source: Dictionary) -> void:
 	if source.is_empty():
 		return
 	var previous_combat_enabled := bool(worker.get("combat_enabled", false))
 	var component: Dictionary = worker.get("components", {}).get("combat", {})
-	world.notify_entity_changed(worker)
 	worker["_worker_base_combat"] = {
 		"attack_damage": worker.get("attack_damage", 0.0),
 		"attack_period": worker.get("attack_period", 0.0),

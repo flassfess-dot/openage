@@ -25,7 +25,7 @@ const AI_FIELDS := [
 	"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
 	"pos", "hp", "max_hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
 	"resource_type_id", "harvestable", "footprint_radius", "rally_point", "attack_range",
-	"projectile_id", "blast_range",
+	"projectile_id", "blast_range", "acquisition_range",
 	"reachable_builder_ids",
 ]
 const CONTROL_FIELDS := [

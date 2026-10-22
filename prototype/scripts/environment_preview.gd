@@ -19,8 +19,10 @@ class ObjectsLayer extends Node2D:
 	func _draw() -> void:
 		if preview == null:
 			return
+		preload("res://scripts/shoreline_presentation.gd").begin_frame(self)
 		var items: Array = []
 		for source in preview.objects:
+			if source.get("shoreline_detail",false) and not preload("res://scripts/shoreline_presentation.gd").visible(source,preview.elevation,preview.zoom,preview.view_offset,Rect2(Vector2.ZERO,get_viewport_rect().size)): continue
 			var item: Dictionary = source.duplicate()
 			if not preview.show_pack and not bool(item.get("reference", false)):
 				continue
@@ -28,7 +30,7 @@ class ObjectsLayer extends Node2D:
 			if item.has("animated_resource"):
 				info = preview.catalog.resource_frame_info(item["animated_resource"], preview.animation_time)
 			elif info.is_empty():
-				info = preview.catalog.environment_frame_info(item)
+				info = preview.catalog.environment_frame_info(item,preview.animation_time)
 			if info.is_empty():
 				continue
 			item["frame_info"] = info
@@ -39,9 +41,20 @@ class ObjectsLayer extends Node2D:
 		for item in items:
 			var info: Dictionary = item["frame_info"]
 			var point: Vector2 = preview.elevation.world_to_screen(item["position"], preview.zoom, preview.view_offset)
+			if info.has("river_geometry"):
+				preload("res://scripts/river_feature_presentation.gd").draw(self,info,point,preview.zoom)
+				continue
+			if info.has("shore_geometry"):
+				preload("res://scripts/shoreline_presentation.gd").draw(self,info,point,preview.zoom)
+				continue
 			var texture: Texture2D = info["texture"]
-			var origin: Vector2 = (point - Vector2(info["hotspot"]) * preview.zoom).round()
-			draw_texture_rect(texture, Rect2(origin, texture.get_size() * preview.zoom), false)
+			point += Vector2(info.get("screen_offset",Vector2.ZERO))*preview.zoom
+			var hotspot: Vector2 = info["hotspot"]
+			var sprite_size: Vector2 = texture.get_size()*preview.zoom
+			if info.get("mirrored",false): hotspot.x = texture.get_width()-hotspot.x
+			var origin: Vector2 = (point-hotspot*preview.zoom).round()
+			if info.get("mirrored",false): sprite_size.x = -sprite_size.x
+			draw_texture_rect(texture, Rect2(origin, sprite_size), false)
 		if preview.show_grid:
 			for y in range(preview.map_size.y):
 				for x in range(preview.map_size.x):
@@ -113,7 +126,7 @@ func _ready() -> void:
 	label_style.corner_radius_bottom_right = 3
 	get_viewport().size_changed.connect(_fit_view)
 	set_mode(0)
-	print("Mixed environment preview ready: 4 materials, 121 decoration variants")
+	print("Mixed environment preview ready: 4 materials, 131 decoration variants")
 
 
 func _build_ui() -> void:

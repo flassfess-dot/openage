@@ -64,6 +64,7 @@ func inspect_map(data: Dictionary, context: String) -> void:
 	var occupied: Dictionary = {}
 	var reserved: Array = data.get("reserved_foundation_cells", [])
 	var whales: Array[Vector2] = []
+	var fresh_water: PackedByteArray = data.get("rivers", {}).get("mask", PackedByteArray())
 	for resource in data["resources"]:
 		var kind := String(resource.get("kind", ""))
 		if kind not in KINDS: continue
@@ -77,9 +78,11 @@ func inspect_map(data: Dictionary, context: String) -> void:
 		check(info.get("texture") != null and info.get("asset_name", "") == kind, context + ": every marine resource has real art")
 		if kind == "shore_fish":
 			check(resource["placement_domain"] == "shore_water", context + ": shore habitat is retained")
-			check(terrain[cell.y * size.x + cell.x] == 1 and Generator._cell_matches_domain(cell, size, terrain, "shore_water"), context + ": shore fish remain beside dry land")
+			var id:int=terrain[cell.y*size.x+cell.x]
+			check((id==1 or (id==4 and not fresh_water.is_empty() and fresh_water[cell.y*size.x+cell.x]!=0)) and Generator._cell_matches_domain(cell, size, terrain, "shore_water"), context + ": shore fish remain beside dry land, including freshwater shallows")
 		else:
-			check(Generator._cell_matches_domain_with_clearance(cell, size, terrain, "water", 2), context + ": boats have water around offshore resources")
+			var clearance := 1 if not fresh_water.is_empty() and fresh_water[cell.y * size.x + cell.x] != 0 else 2
+			check(Generator._cell_matches_domain_with_clearance(cell, size, terrain, "water", clearance), context + ": boats have water around offshore resources")
 		if kind == "whale":
 			check(terrain[cell.y * size.x + cell.x] == 22 and distances[cell.y * size.x + cell.x] >= 5, context + ": whales remain offshore in deep water")
 			check(cell.x >= 5 and cell.y >= 5 and cell.x < size.x - 5 and cell.y < size.y - 5, context + ": whale sprites stay inside the map boundary")

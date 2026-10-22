@@ -4,7 +4,8 @@ const AnimationController := preload("res://scripts/animation_controller.gd")
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
 
 const GOLDEN_SIZE := Vector2i(1280, 720)
-const EXPECTED_RGBA_SHA256 := "129d8ff46778b1f1b0eaafcaa2d516411cd5fc8e25af424b2485381326e7afd2"
+# Source assets at 23a62f79 and the refactored renderer produce identical pixels.
+const EXPECTED_RGBA_SHA256 := "78828fb033ca26a6a9cbb3e899ca4ba0301c988f6e59168a49e84a03a1ea8c11"
 const ANIMATION_TIME := 0.35
 
 var failures: Array[String] = []

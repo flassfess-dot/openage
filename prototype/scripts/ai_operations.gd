@@ -320,8 +320,10 @@ func _scout(
 	snapshot: Dictionary, tick: int, team: int, own: Array, policy: Dictionary, state, claimed: Dictionary
 ) -> Array:
 	var result: Array = []
+	var navigation: Dictionary = snapshot.get("navigation", {})
 	if String(state.goal.get("type", "")) == "defend":
 		return result
+	var known_opponents: bool = not state.enemies(int(snapshot.get("tick", 0)), policy).is_empty()
 	for domain in ["land", "water"]:
 		var assignment: Dictionary = scouts.get(domain, {})
 		var actor: Dictionary = {}
@@ -329,9 +331,12 @@ func _scout(
 			for unit in own:
 				if int(unit.get("id", -1)) == int(assignment.get("id", -2)) and not claimed.has(int(unit["id"])):
 					actor = unit
+		if not actor.is_empty() and _scout_frontier(navigation, actor, domain).is_empty():
+			scouts.erase(domain)
+			actor = {}
 		if actor.is_empty():
 			var candidates: Array = own.filter(
-				func(u): return ( not claimed.has(int(u.get("id", -1))) and String(u.get("movement_domain", "land")) == domain and not bool(u.get("components", {}).get("worker", {}).get("enabled", false)) and not bool(u.get("components", {}).get("cargo", {}).get("enabled", false)) and bool(u.get("combat_enabled", false)) )
+				func(u): return ( not claimed.has(int(u.get("id", -1))) and String(u.get("movement_domain", "land")) == domain and not bool(u.get("components", {}).get("worker", {}).get("enabled", false)) and not bool(u.get("components", {}).get("cargo", {}).get("enabled", false)) and bool(u.get("combat_enabled", false)) and not _scout_frontier(navigation, u, domain).is_empty() )
 			)
 			candidates.sort_custom(
 				func(a, b):
@@ -342,27 +347,23 @@ func _scout(
 			if (
 				candidates.is_empty()
 				or (
-					not state.memory.is_empty() and candidates.size() <= int(policy.get("minimum_attack_group_size", 3)) + (int(policy.get("home_guard_count", 2)) if domain == "land" and own.size() >= 8 else 0)
+					known_opponents and candidates.size() <= int(policy.get("minimum_attack_group_size", 3)) + (int(policy.get("home_guard_count", 2)) if domain == "land" and own.size() >= 8 else 0)
 				)
 			):
 				continue
 			actor = candidates[0]
 			assignment = {"id": int(actor["id"]), "target": Vector2(actor.get("pos", Vector2.ZERO)), "order_tick": -1}
 			scouts[domain] = assignment
-		var navigation: Dictionary = snapshot.get("navigation", {})
-		var region := String(navigation.get("unit_regions", {}).get(int(actor["id"]), domain))
-		var frontier: Array = navigation.get("frontier_by_region", {}).get(
-			region, navigation.get("reachable_frontier", {}).get(domain, [])
-		)
+		var frontier: Array = _scout_frontier(navigation, actor, domain)
 		if frontier.is_empty():
 			scouts.erase(domain)
 			continue
 		claimed[int(actor["id"])] = true
 		if int(assignment["order_tick"]) >= 0 and Vector2(actor.get("pos", Vector2.ZERO)).distance_to(Vector2(assignment["target"])) > 2.0:
-			var deadline := int(assignment.get("deadline_tick", int(assignment["order_tick"]) + int(policy.get("scout_interval_ticks", 160)) * 3))
-			# Keep a moving scout on its information goal for the estimated trip,
-			# instead of replacing a long route every short decision interval.
-			if String(actor.get("task", "idle")) == "move" and tick < deadline: continue
+			# A straight-line travel estimate cannot bound a forest or river detour.
+			# The movement system owns finite stuck recovery; keep a live route
+			# until arrival or that recovery completes the movement order.
+			if String(actor.get("task", "idle")) == "move": continue
 			if tick - int(assignment["order_tick"]) < int(policy.get("scout_interval_ticks", 160)): continue
 		var best: Variant = null
 		var best_score := -INF
@@ -471,3 +472,12 @@ func restore_state(data: Dictionary, team: int) -> bool:
 	next_id = maxi(next_id, int(data.get("next_id", 1)))
 	scouts = data.get("scouts", {}).duplicate(true)
 	return true
+
+
+static func _scout_frontier(navigation: Dictionary, actor: Dictionary, domain: String) -> Array:
+	if navigation.has("unit_regions"):
+		var region := String(navigation["unit_regions"].get(int(actor["id"]), ""))
+		# An absent regional frontier means this actor cannot explore further.
+		# A domain-wide fallback belongs to another island or enclosed pocket.
+		return navigation.get("frontier_by_region", {}).get(region, [])
+	return navigation.get("reachable_frontier", {}).get(domain, [])

@@ -12,6 +12,7 @@ var failures: Array[String] = []
 
 func _initialize() -> void:
 	var settings := Settings.default_settings()
+	settings["landscape_version"] = 3
 	var built := Settings.build(settings)
 	check(bool(built.get("valid", false)), "v2 builds: %s" % [built.get("errors", [])])
 	if not bool(built.get("valid", false)):
@@ -20,7 +21,7 @@ func _initialize() -> void:
 	var data: Dictionary = built["map_data"]
 	var definition: Dictionary = built["definition"]
 	var size: Vector2i = data["size"]
-	check(definition["map"]["generator"]["type"] == Landscape.TYPE, "new matches opt into version two")
+	check(definition["map"]["generator"]["type"] == Landscape.TYPE, "the versioned fixture uses the landscape generator")
 	check(data["generator_version"] == 3 and String(data["content_hash"]).length() == 64, "version and hash are explicit")
 	check(definition["map"]["content_hash"] == data["content_hash"], "save identity includes generated content")
 	var codec := Replay.new()

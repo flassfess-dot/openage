@@ -37,6 +37,8 @@ func _initialize() -> void:
 
 func verify_case(case_value: Dictionary, catalog) -> void:
 	var settings := SkirmishSettings.default_settings()
+	# All four nearby resources are guarantees of the balanced v3 recipe.
+	settings["landscape_version"] = 3
 	settings["map_type_id"] = String(case_value["map_type_id"])
 	settings["map_size_id"] = String(case_value["map_size_id"])
 	settings["seed"] = int(case_value["seed"])

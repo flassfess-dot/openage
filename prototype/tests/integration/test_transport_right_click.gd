@@ -209,6 +209,8 @@ func test_boarding_replay(catalog) -> void:
 
 func test_generated_island_crossing(catalog, profile: String, native: bool) -> void:
 	var settings := Settings.default_settings()
+	# This scenario uses the guaranteed naval zones of the v3 fixture.
+	settings["landscape_version"] = 3
 	settings["map_type_id"] = profile
 	settings["map_size_id"] = "compact"
 	settings["seed"] = 41721

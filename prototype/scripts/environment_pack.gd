@@ -44,6 +44,20 @@ func enable() -> bool:
 				return false
 			if frame.has("shadow") and (not _valid_image(frame["shadow"]) or frame["shadow"].get("hotspot", []).size() != 2):
 				return false
+	if parsed_definition.has("native_water_material") and not _valid_image(parsed_manifest.get("native_water_material", {})): return false
+	if parsed_definition.has("native_shoreline"):
+		for kind in ["marine","fresh"]:
+			if not _valid_image(parsed_manifest.get("shoreline_materials",{}).get(kind,{})): return false
+	if not _valid_image(parsed_manifest.get("river_flow_material",{})): return false
+	for key in ["river_foam_material","river_rock_material"]:
+		if not _valid_image(parsed_manifest.get(key,{})): return false
+	for key in ["river_flow_material","river_foam_material"]:
+		var clip: Dictionary = parsed_manifest[key]
+		if int(clip.get("frames",0)) != 8 or int(clip.get("height",0)) != int(clip.get("frame_height",0))*8: return false
+	var river_banks: Array = parsed_manifest.get("river_bank_rocks",[])
+	if river_banks.size() != 5: return false
+	for bank in river_banks:
+		if not _valid_image(bank) or bank.get("hotspot",[]).size() != 2: return false
 	definition = parsed_definition
 	manifest = parsed_manifest
 	for material in definition["materials"]:
@@ -78,12 +92,13 @@ func terrain_textures() -> Array:
 
 
 func has_material(terrain_id: int) -> bool:
-	return enabled and materials_by_id.has(terrain_id)
+	return enabled and (materials_by_id.has(terrain_id) or (terrain_id == 4 and manifest.has("native_water_material")))
 
 
 func material_texture(terrain_id: int) -> Texture2D:
 	if not has_material(terrain_id):
 		return null
+	if terrain_id == 4: return _texture(String(manifest["native_water_material"]["file"]))
 	return _texture(String(manifest["materials"][materials_by_id[terrain_id]["key"]]["file"]))
 
 
@@ -92,6 +107,20 @@ func terrain_id(key: String) -> int:
 		if materials_by_id[id]["key"] == key:
 			return int(id)
 	return -1
+
+func river_flow_texture() -> Texture2D:
+	return _texture(String(manifest["river_flow_material"]["file"]))
+
+func shoreline_texture(marine: bool) -> Texture2D:
+	if not enabled or not manifest.has("shoreline_materials"): return null
+	return _texture(manifest["shoreline_materials"]["marine" if marine else "fresh"]["file"])
+
+func river_presentation_materials() -> Dictionary:
+	var banks: Array = []
+	for record in manifest["river_bank_rocks"]:
+		banks.append({"texture":_texture(record["file"]),"hotspot":Vector2(record["hotspot"][0],record["hotspot"][1]),"source_frame":record["source_frame"]})
+	return {"rock":_texture(manifest["river_rock_material"]["file"]),"banks":banks,
+		"cascade":_texture(manifest["objects"]["ror_waterfall"]["frames"][0]["file"])}
 
 
 func material(key: String) -> Dictionary:
@@ -127,7 +156,8 @@ func frame_info(item: Dictionary, resource: bool = false) -> Dictionary:
 		"hotspot": Vector2(record["hotspot"][0], record["hotspot"][1]),
 		"asset_name": PREFIX + key,
 		"frame_index": index,
-		"mirrored": false,
+		"mirrored": bool(item.get("mirrored",false)),
+		"screen_offset": item.get("waterfall_screen_offset",Vector2.ZERO),
 		"graphic_layer": 0 if objects_by_key[key].get("role", "") == "decal" else 20,
 	}
 	if record.has("shadow") and ResourcePresentation.tree_canopy_visible(item):
@@ -191,6 +221,4 @@ func prepare_legacy_terrain(frames_by_kind: Dictionary) -> void:
 			bed.g *= 0.93
 			shallows.set_pixel(x, y, shallows.get_pixel(x, y).lerp(bed, 0.42))
 	legacy_textures[15] = ImageTexture.create_from_image(shallows)
-	# A ford uses the source water with its separate sandy Shallows sprites.
-	# The tinted submerged bed belongs exclusively to impassable shoals.
-	legacy_textures[4] = legacy_textures[1]
+	legacy_textures[4] = material_texture(4) if manifest.has("native_water_material") else legacy_textures[1]

@@ -141,12 +141,14 @@ func generate_map() -> void:
 	animation_time = 0.0
 	markers.clear()
 	elevation = Elevation.new(map_size)
+	elevation.river_shape = data.get("rivers", {}).get("surface", {})
 	for y in range(map_size.y + 1):
 		for x in range(map_size.x + 1): elevation.set_vertex(Vector2i(x, y), int(data["vertex_levels"][y * (map_size.x + 1) + x]))
 	for y in range(map_size.y):
 		for x in range(map_size.x): cells[Vector2i(x, y)] = int(data["terrain_ids"][y * map_size.x + x])
 	objects.append_array(data["scenery"])
 	objects.append_array(data.get("cliff_obstructions", []))
+	if data.get("cliff_obstructions",[]).any(func(item):return item.get("animated",false)): has_animated_objects = true
 	for resource_index in range(data["resources"].size()):
 		var resource: Dictionary = data["resources"][resource_index]
 		var presentation: Dictionary = resource.duplicate(true)
@@ -190,6 +192,11 @@ func terrain_id_at(cell: Vector2i) -> int:
 func _fit_view() -> void:
 	if generated.is_empty() or not bool(generated.get("valid", false)): return
 	var viewport := get_viewport_rect().size
+	# Startup/minimised windows can be smaller than the controls. Retain the
+	# last valid camera instead of publishing a negative terrain/shore zoom.
+	if viewport.x<=60.0 or viewport.y<=180.0:
+		_refresh()
+		return
 	zoom = minf((viewport.x - 60.0) / ((map_size.x + map_size.y) * 32.0), (viewport.y - 180.0) / ((map_size.x + map_size.y) * 16.0))
 	view_offset = Vector2(viewport.x * 0.5, 134.0)
 	_refresh()
@@ -208,7 +215,7 @@ func _refresh(reconfigure: bool = true) -> void:
 	object_layer.queue_redraw()
 	var sources: Dictionary = generated["map_data"]["ecology"]["tree_sources"]
 	var marine: Dictionary = generated["map_data"].get("marine_resources", {})
-	status.text = "%d × %d · Игроков: %d · Деревья RoR/AoE2: %d/%d · Рыба у берега/в море: %d/%d · Киты: %d · Декали %d · Масштаб %d%%" % [map_size.x, map_size.y, generated["definition"]["players"].size(), sources["ror"], sources["aoe2"], marine.get("shore_fish", 0), marine.get("deep_fish", 0), marine.get("whale", 0), data_decals(), roundi(zoom * 100)]
+	status.text = "%d × %d · Игроков: %d · Деревья RoR/AoE2: %d/%d · Рыба у берега/на глубине: %d/%d · Киты: %d · Декали %d · Масштаб %d%%" % [map_size.x, map_size.y, generated["definition"]["players"].size(), sources["ror"], sources["aoe2"], marine.get("shore_fish", 0), marine.get("deep_fish", 0), marine.get("whale", 0), data_decals(), roundi(zoom * 100)]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:

@@ -98,6 +98,7 @@ func _near_published_coast(map_data: Dictionary, origin: Vector2i, radius: int) 
 
 func _build(profile: String, player_count: int, seed: int) -> Dictionary:
 	var settings := SkirmishSettings.default_settings()
+	settings["landscape_version"] = 3
 	settings["map_type_id"] = profile
 	settings["seed"] = seed
 	for index in range(settings["players"].size()):

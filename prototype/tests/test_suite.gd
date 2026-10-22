@@ -1,6 +1,12 @@
 extends SceneTree
 
 const TEST_TIMEOUT_MSEC := 300_000
+# These complete legacy v3 matrices regenerate dozens of maps. Keep their
+# seed/player coverage while giving them a separate, finite process budget.
+const TEST_TIMEOUT_OVERRIDES := {
+	"tests/unit/test_random_map_profiles.gd": 600_000,
+	"tests/unit/test_random_map_source_fairness.gd": 600_000,
+}
 
 const TEST_DIRECTORIES := [
 	"tests/unit",
@@ -63,7 +69,7 @@ func _initialize() -> void:
 			"--script",
 			"res://%s" % script,
 		])
-		var result := run_test_process(executable, arguments, log_path, TEST_TIMEOUT_MSEC)
+		var result := run_test_process(executable, arguments, log_path, int(TEST_TIMEOUT_OVERRIDES.get(script, TEST_TIMEOUT_MSEC)))
 		var exit_code := int(result["exit_code"])
 		var output_text := String(result["output"])
 		print(output_text.strip_edges())

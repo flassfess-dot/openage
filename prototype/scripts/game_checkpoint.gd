@@ -31,7 +31,7 @@ const SYSTEM_FIELDS := {
 	"scenario_system": ["definition", "condition_states", "group_states", "result"],
 	"visibility_system": ["movement_refresh_bucket"],
 	"destination_reservations": ["reservations"],
-	"terrain_elevation": ["vertex_levels"],
+	"terrain_elevation": ["vertex_levels", "river_shape"],
 }
 
 static func _capture_fields(owner, fields: Array) -> Dictionary:
@@ -41,6 +41,9 @@ static func _capture_fields(owner, fields: Array) -> Dictionary:
 
 static func _restore_fields(owner, values: Dictionary, fields: Array) -> void:
 	for field in fields:
+		if field == "river_shape" and not values.has(field):
+			owner.set(field, {})
+			continue
 		var current: Variant = owner.get(field)
 		if current is Array and current.is_typed():
 			current.assign(values[field])
@@ -166,6 +169,7 @@ static func validate(data: Dictionary) -> bool:
 	for system in SYSTEM_FIELDS:
 		if not data["systems"].get(system) is Dictionary: return false
 		for field in SYSTEM_FIELDS[system]:
+			if system == "terrain_elevation" and field == "river_shape": continue # Optional in checkpoints predating curved river banks.
 			if not data["systems"][system].has(field): return false
 	for section in [["grid", GRID_FIELDS], ["fog", FOG_FIELDS]]:
 		for field in section[1]:

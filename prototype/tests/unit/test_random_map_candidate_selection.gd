@@ -7,7 +7,9 @@ const Settings := preload("res://scripts/skirmish_settings.gd")
 var failures: Array[String] = []
 
 func _initialize() -> void:
-	var first := Settings.build(Settings.default_settings())
+	var settings := Settings.default_settings()
+	settings["landscape_version"] = 3
+	var first := Settings.build(settings)
 	check(bool(first.get("valid", false)), "fixture builds: %s" % [first.get("errors", [])])
 	if not bool(first.get("valid", false)):
 		finish()

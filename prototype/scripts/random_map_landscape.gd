@@ -430,6 +430,12 @@ static func random_at(cell: Vector2i, seed: int) -> float:
 static func fingerprint(map_data: Dictionary) -> String:
 	var stable: Array = [VERSION, map_data.get("size"), map_data.get("seed"), map_data.get("terrain_ids"), map_data.get("vertex_levels"),
 		map_data.get("cliff_cells", []), map_data.get("cliff_obstructions", []), map_data.get("resources", []), map_data.get("scenery", []), map_data.get("naval_start_zones", [])]
+	var river_surface: Dictionary = map_data.get("rivers", {}).get("surface", {})
+	if not river_surface.is_empty():
+		var digest := HashingContext.new()
+		digest.start(HashingContext.HASH_SHA256)
+		digest.update(var_to_bytes(river_surface))
+		stable.append(digest.finish().hex_encode())
 	return JSON.stringify(Replay.new().encode_variant(stable)).sha256_text()
 
 

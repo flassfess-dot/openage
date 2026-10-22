@@ -82,6 +82,9 @@ static func normalize(source: Dictionary) -> Dictionary:
 		errors.append("skirmish_population_limit_invalid")
 	settings["population_limit"] = int(settings.get("population_limit", 0))
 	settings["seed"] = int(settings.get("seed", 1))
+	# JSON invitations decode numbers as floats. The recipe version is part
+	# of the saved definition and must have the same type for every peer.
+	settings["landscape_version"] = int(settings.get("landscape_version", 3))
 	if int(settings.get("landscape_version", 3)) not in [3, Geography.VERSION, WildIslands.VERSION, WatershedWorld.VERSION]:
 		errors.append("skirmish_landscape_version_unsupported")
 	if int(settings.get("landscape_version", 3)) == Geography.VERSION and String(settings.get("map_type_id", "")) not in Geography.PROFILES:
@@ -373,16 +376,7 @@ static func _start_site_clear(point: Vector2, size: Vector2i, map_type: String, 
 
 
 static func _starting_villager_positions(start: Vector2, size: Vector2i) -> Array[Vector2]:
-	var inward := (Vector2(size) * 0.5 - start).normalized()
-	if inward.length_squared() <= 0.000001:
-		inward = Vector2.DOWN
-	var side := Vector2(-inward.y, inward.x)
-	var forward_distance := 3.25
-	return [
-		start + inward * forward_distance - side * 1.1,
-		start + inward * (forward_distance + 0.3),
-		start + inward * forward_distance + side * 1.1,
-	]
+	return Geography.starting_villager_positions(start, size)
 
 
 static func _alliances(players: Array) -> Array:
