@@ -41,6 +41,17 @@ func _run() -> void:
 			var depth := 1.6 - absf(x * 0.5 - 192.0 - sin(y * 0.25) * 0.5)
 			samples.append_array(PackedFloat32Array([depth, 1.0 - smoothstep(0.75, 1.5, -depth), 0.65, 0.25]))
 	elevation.river_shape = {"size":Vector2i(801,801), "resolution":2, "samples":samples}
+	check(kernel.has_method("capture_river_samples"), "native river field capture is available")
+	for bounds in [Rect2i(190,190,4,4), Rect2i(-2,-1,4,3), Rect2i(399,399,3,2)]:
+		var captured: PackedFloat32Array = kernel.capture_river_samples(bounds, elevation.river_shape)
+		check(captured == NativeMesh.capture_river_reference(bounds, elevation.river_shape), "native field capture preserves exact samples and clamped map edges: %s" % bounds)
+		if not captured.is_empty():
+			captured[0] += 1.0
+			check(elevation.river_shape["samples"] == samples, "captured river field is detached from the source")
+	var invalid_shape := {"size":Vector2i(2,2), "resolution":2, "samples":PackedFloat32Array([1.0])}
+	check(kernel.capture_river_samples(Rect2i(0,0,1,1), invalid_shape).is_empty(), "malformed river field is rejected")
+	var cached_request := NativeMesh.capture(coast_bounds,41721,coast,elevation,catalog.environment_pack,canvas.terrain_atlas_regions,canvas.terrain_atlas_size,{},null,kernel)
+	check(cached_request == NativeMesh.capture(coast_bounds,41721,coast,elevation,catalog.environment_pack,canvas.terrain_atlas_regions,canvas.terrain_atlas_size), "native and fallback captures produce exactly the same mesh input")
 	compare_patch("curved river with compact banks and silt", Rect2i(190, 190, 4, 4), coast, elevation, canvas, kernel, 41721)
 	var river_request := NativeMesh.capture(coast_bounds, 41721, coast, elevation, catalog.environment_pack, canvas.terrain_atlas_regions, canvas.terrain_atlas_size)
 	check(NativeMesh.build_request(kernel, river_request, 4) == NativeMesh.build_request(kernel, river_request, 16), "curved river shore stays identical during asynchronous refinement")

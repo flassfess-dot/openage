@@ -248,6 +248,7 @@ var health_status_frames: Array[Texture2D] = []
 var unit_textures := {}
 var gamespec_data: Dictionary = {}
 var audio_player: AudioStreamPlayer
+var audio_muted := false
 var sfx_player: AudioStreamPlayer
 var sfx_players: Array[AudioStreamPlayer] = []
 var sfx_round_robin: int = 0
@@ -657,6 +658,23 @@ func setup_audio() -> void:
 		audio_player.volume_db = -18.0
 		add_child(audio_player)
 		audio_player.play()
+		_sync_music_playback()
+
+
+func _sync_music_playback() -> void:
+	if not is_instance_valid(audio_player): return
+	# An outstanding owner job was dispatched from a running match. Never read
+	# its live controller while it owns the simulation.
+	var paused := not simulation_owner.pending and game_controller != null and game_controller.paused
+	var menu_open := hud_modal_overlay != null and hud_modal_overlay.is_blocking()
+	var scenario_open := scenario_overlay != null and scenario_overlay.is_blocking()
+	audio_player.stream_paused = audio_muted or paused or menu_open or scenario_open or launcher_suspended
+
+
+func toggle_audio() -> void:
+	audio_muted = not audio_muted
+	for player in sfx_players: player.stream_paused = audio_muted
+	_sync_music_playback()
 
 func setup_sfx() -> void:
 	sfx_players.clear()
@@ -840,6 +858,7 @@ func _process(delta: float) -> void:
 
 		if navigation_loading_label != null:
 			navigation_loading_label.hide()
+	_sync_music_playback()
 	task_coordinator.reap_abandoned()
 	_poll_save_jobs()
 	_poll_autosave(owner_delta)
@@ -1388,6 +1407,7 @@ func _open_hud_modal(mode: String) -> void:
 		hud_modal_overlay.set_named_saves(GameSaveArchive.list_saves())
 		hud_modal_overlay.set_menu_status("")
 		hud_modal_overlay.show_menu()
+	_sync_music_playback()
 
 
 func _close_hud_modal() -> void:
@@ -1397,6 +1417,7 @@ func _close_hud_modal() -> void:
 	hud_modal_overlay.close()
 	if game_controller != null and network_session == null:
 		game_controller.set_paused(modal_restore_paused)
+	_sync_music_playback()
 	game_message = "Пауза" if modal_restore_paused else "Игра продолжена"
 	message_time = 1.5
 
@@ -1408,6 +1429,7 @@ func _resign_from_hud_modal() -> void:
 	if game_controller == null or local_spectator or battle_over:
 		return
 	game_controller.set_paused(false)
+	_sync_music_playback()
 	var command = RoRCommands.ResignCommand.new(game_controller.tick_index + 1)
 	_queue_local_command(command)
 	_register_local_feedback(command, "Вы сдались", "", null)
@@ -1753,6 +1775,7 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 		hud_modal_overlay.close()
 	game_message = "Игра загружена"
 	message_time = 2.0
+	_sync_music_playback()
 	queue_redraw()
 	return true
 
@@ -2266,6 +2289,7 @@ func _return_to_launcher() -> void:
 		if is_instance_valid(player):
 			launcher_audio_states.append({"player": player, "paused": player.stream_paused})
 			player.stream_paused = true
+	_sync_music_playback()
 	cancel_pending_targeting()
 	input_adapter.reset()
 	hide()
@@ -2292,6 +2316,7 @@ func resume_from_launcher() -> void:
 		launcher_suspended = false
 	process_mode = Node.PROCESS_MODE_INHERIT
 	show()
+	_sync_music_playback()
 	input_adapter.reset()
 	source_cursor_frame_applied = -1
 	_install_source_control_cursors()

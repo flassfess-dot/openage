@@ -376,10 +376,15 @@ func snapshot(player_id: int) -> PackedByteArray:
 	return PackedByteArray(states_by_player[player_id]).duplicate()
 
 
+static func can_emit_vision(entity: Dictionary) -> bool:
+	var vision: Dictionary = entity.get("components", {}).get("vision", {})
+	return float(entity.get("hp", 0.0)) > 0.0 and int(entity.get("team", 0)) > 0 and String(entity.get("state", "complete")) != "foundation" and bool(vision.get("enabled", false)) and float(vision.get("range", 0.0)) > 0.0
+
+
 func _collect_sources(entities: Array, category_id: int, result: Dictionary, movement_bucket_count: int, movement_bucket_index: int) -> void:
 	for index in range(entities.size()):
 		var entity: Dictionary = entities[index]
-		if float(entity["hp"]) <= 0.0:
+		if not can_emit_vision(entity):
 			continue
 		var vision: Dictionary = entity["components"]["vision"]
 		var sight_radius := maxf(0.0, float(vision["range"]))
@@ -450,7 +455,7 @@ func _collect_source_deltas(
 		return
 	for index in range(entities.size()):
 		var entity: Dictionary = entities[index]
-		if float(entity["hp"]) <= 0.0:
+		if not can_emit_vision(entity):
 			continue
 		var vision: Dictionary = entity["components"]["vision"]
 		var sight_radius := maxf(0.0, float(vision["range"]))
@@ -513,12 +518,9 @@ func _retire_invalid_sources(removed_sources: Array[Dictionary]) -> void:
 		if not entity_value is Dictionary:
 			continue
 		var entity: Dictionary = entity_value
-		var vision: Dictionary = entity.get("components", {}).get("vision", {})
 		var remains_valid := (
-			float(entity.get("hp", 0.0)) > 0.0
+			can_emit_vision(entity)
 			and int(entity.get("team", 0)) == int(source.get("team", -1))
-			and bool(vision.get("enabled", false))
-			and float(vision.get("range", 0.0)) > 0.0
 		)
 		if remains_valid:
 			continue

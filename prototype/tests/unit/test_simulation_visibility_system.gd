@@ -2,6 +2,9 @@ extends SceneTree
 
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const SimulationVisibilitySystem := preload("res://scripts/simulation_visibility_system.gd")
+const World := preload("res://scripts/simulation_world.gd")
+const Controller := preload("res://scripts/game_controller.gd")
+const Checkpoint := preload("res://scripts/game_checkpoint.gd")
 
 var failures: Array[String] = []
 
@@ -9,6 +12,8 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	test_visibility_system_matches_fog_reference()
 	test_movement_refresh_is_bounded()
+	for native in [false, true]:
+		test_foundation_lifecycle(native)
 	if failures.is_empty():
 		print("I1-005a simulation visibility parity tests passed")
 		quit(0)
@@ -59,6 +64,43 @@ func test_movement_refresh_is_bounded() -> void:
 		system.advance({"tick": tick})
 	assert_equal(system.get_fog().state_at_world(1, Vector2(10.5, 10.5)), FogOfWar.VISIBLE, "moving vision refreshes within one four-bucket cycle")
 	assert_equal(system.get_fog().state_at_world(1, Vector2(2.5, 2.5)), FogOfWar.EXPLORED, "bounded movement refresh retires the previous footprint")
+
+
+func test_foundation_lifecycle(native: bool) -> void:
+	var world := World.new(Vector2i(24, 24))
+	world.visibility_system.set_native_enabled(native)
+	world.fog_of_war.ensure_player(1)
+	var building: Dictionary = world.add_building(100, "house", Vector2(12.5, 12.5), 1, false)
+	building["components"]["vision"] = {"range": 4.0, "enabled": true}
+	world.notify_entity_changed(building)
+	world._tick_fog({})
+	assert_equal(world.fog_of_war.state_at_world(1, building["pos"]), FogOfWar.UNKNOWN, "foundation never reveals unknown ground (native=%s)" % native)
+	world.update_fog_of_war()
+	assert_equal(world.fog_of_war.vision_sources.has(201), false, "full refresh excludes the foundation")
+	var restored := World.new(world.map_size)
+	restored.visibility_system.set_native_enabled(native)
+	var data := Checkpoint.capture(world, Controller.new(world), {}, {"size": world.map_size})
+	assert_equal(Checkpoint.restore(data, restored, Controller.new(restored)), true, "foundation checkpoint restores")
+	restored.update_fog_of_war()
+	assert_equal(restored.fog_of_war.state_at_world(1, building["pos"]), FogOfWar.UNKNOWN, "restored foundation keeps unknown ground hidden")
+	world.complete_foundation(building)
+	world._tick_fog({})
+	assert_equal(world.fog_of_war.state_at_world(1, building["pos"]), FogOfWar.VISIBLE, "completed building starts providing sight")
+	# Reseeding/reverting a completed structure retires its old source immediately.
+	world.set_entity_field(building, "state", "foundation")
+	world._tick_fog({})
+	assert_equal(world.fog_of_war.state_at_world(1, building["pos"]), FogOfWar.EXPLORED, "foundation transition removes sight while preserving exploration")
+	# Simulate an older checkpoint containing the previously erroneous source.
+	building["state"] = "complete"
+	world.update_fog_of_war()
+	building["state"] = "foundation"
+	data = Checkpoint.capture(world, Controller.new(world), {}, {"size": world.map_size})
+	assert_equal(Checkpoint.restore(data, restored, Controller.new(restored)), true, "legacy foundation source restores")
+	assert_equal(restored.fog_of_war.state_at_world(1, building["pos"]), FogOfWar.EXPLORED, "legacy source is retired on load without erasing exploration")
+	world.cancel_foundation(int(building["id"]))
+	assert_equal(world.fog_of_war.vision_sources.has(201), false, "cancelling a foundation cannot leave sight behind")
+	world.shutdown_derived_state()
+	restored.shutdown_derived_state()
 
 
 func vision_entity(id: int, team: int, position: Vector2, sight: float) -> Dictionary:

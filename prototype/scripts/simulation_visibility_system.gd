@@ -35,12 +35,20 @@ func restore_source_tracking(world) -> void:
 	source_cursor = world.entity_changes.revision
 	source_epoch = world.entity_changes.epoch
 	pending_motion.clear()
+	var inactive_foundations: Array = []
 	for key in fog.vision_sources:
+		var entity: Dictionary = fog.vision_sources[key].get("entity", {})
+		if String(entity.get("state", "complete")) == "foundation":
+			inactive_foundations.append(key)
+			continue
 		if int(key) & 1: continue
 		var source: Dictionary = fog.vision_sources[key]
 		var unit: Variant = world.find_unit(int(key) >> 1)
 		if unit != null and not Vector2(source["center"]).is_equal_approx(Vector2(unit["pos"])):
 			pending_motion[int(unit["id"])] = true
+	# Older checkpoints may retain the erroneous foundation source. Remove its
+	# current sight without undoing durable exploration or advancing unit motion.
+	if not inactive_foundations.is_empty(): fog.apply_entity_changes([], [], inactive_foundations)
 
 func advance(context: Dictionary = {}) -> void:
 	var world: Variant = world_ref.get_ref() if world_ref != null else null
@@ -77,8 +85,7 @@ func advance(context: Dictionary = {}) -> void:
 				removed.append(int(id) << 1)
 				removed.append((int(id) << 1) | 1)
 				continue
-			var vision: Dictionary = row.get("components", {}).get("vision", {})
-			if float(row.get("hp", 0.0)) <= 0.0 or not bool(vision.get("enabled", false)) or float(vision.get("range", 0.0)) <= 0.0 or int(row.get("team", 0)) <= 0:
+			if not FogOfWar.can_emit_vision(row):
 				removed.append((int(id) << 1) | category)
 			elif category == 0: units.append(row)
 			else: buildings.append(row)

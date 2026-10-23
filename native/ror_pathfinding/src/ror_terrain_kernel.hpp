@@ -19,6 +19,7 @@ public:
         const PackedFloat32Array &materials, int64_t seed, int32_t maximum_subdivisions = 16,
         const PackedFloat32Array &river = PackedFloat32Array()) const;
     Array split_mesh_arrays(const Array &arrays, int32_t maximum_vertices = 16384) const;
+    PackedFloat32Array capture_river_samples(const Rect2i &bounds, const Dictionary &shape) const;
 protected:
     static void _bind_methods();
 };

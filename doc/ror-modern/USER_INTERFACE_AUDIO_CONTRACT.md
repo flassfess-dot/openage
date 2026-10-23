@@ -28,6 +28,13 @@ Animation-owned sounds follow `archetype -> animation graphic -> graphic sound_i
 
 Music and effects have separate players. Muting effects pauses the SFX player without changing simulation state.
 
+Match music pauses while the controller is paused, an Esc/F10 or scenario modal
+is blocking, or the match is suspended behind the launcher. Closing a modal or
+resuming the match continues the same stream position only when no other pause
+reason remains. The manual audio toggle retains its own mute state; opening or
+closing menus must never unmute it. Music synchronization never reads the live
+controller while a simulation-owner job is outstanding.
+
 ## Evidence and limits
 
 - `test_hud_view_model.gd`: snapshot-to-view-model, localization, availability reasons and queue formatting.
@@ -36,6 +43,8 @@ Music and effects have separate players. Muting effects pauses the SFX player wi
 - `test_minimap_projection.gd`: reversible projection, map polygon and bounds.
 - `test_presentation_audio_router.gd`: original selection/command/train/death IDs, real WAV loading, deterministic variants and throttling.
 - `test_presentation_audio_event_router.gd`: visibility-safe attack/death/conversion/healing/gather/build/train event mapping.
+- `test_match_menu_pipeline.gd`: menu and ordinary pause suspend music; closing a menu preserves an earlier pause or manual mute.
+- `tests/manual/verify_reported_gameplay_fixes.gd` (`--verify-reported-gameplay-fixes`): the exported Release loads the specified save and checks placement/vision, music pause/resume, manual mute and launcher round trips without writing to the source save.
 - `test_interface_icon_registry.gd`: complete source sheets and direct DAT icon lookup.
 - `test_build_palette_pipeline.gd`: worker palette -> icon button -> placement click -> normal BuildCommand -> foundation.
 - Historical regression frame: `prototype/qa/golden/hud-main-1280x720.png`. It does not prove source layout or responsive-resolution parity.

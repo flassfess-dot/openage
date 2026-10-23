@@ -14,6 +14,12 @@ func _initialize() -> void:
 		return
 	game.set_process(false)
 	game.game_controller.set_paused(false)
+	game._sync_music_playback()
+	check(not game.audio_player.stream_paused, "running match plays music")
+	game.handle_input_action({"type":"toggle_pause"})
+	check(game.game_controller.paused and game.audio_player.stream_paused, "ordinary pause also pauses music")
+	game.handle_input_action({"type":"toggle_pause"})
+	check(not game.audio_player.stream_paused, "ordinary resume restores music")
 	game.view_offset += Vector2(137, -83)
 	var camera_before: Vector2 = game.screen_to_world(game.viewport_focus)
 	viewport.size = Vector2i(800,600)
@@ -29,6 +35,7 @@ func _initialize() -> void:
 	viewport.push_input(event, true)
 	await process_frame
 	check(game.hud_modal_overlay.is_blocking() and game.game_controller.paused, "Escape opens menu and pauses the single-player match")
+	check(game.audio_player.stream_paused, "Escape menu pauses music")
 	await process_frame
 	check(Rect2(0,0,640,480).encloses(game.hud_modal_overlay.menu_card.get_global_rect()), "first menu opening in the real scene fits 640x480 after container layout")
 	for section in ["save", "load", "settings", "achievements", "timeline", "instructions", "help", "menu"]:
@@ -38,6 +45,13 @@ func _initialize() -> void:
 		check(Rect2(0,0,640,480).encloses(game.hud_modal_overlay.menu_card.get_global_rect()), "real scene %s fits 640x480" % section)
 	game._close_hud_modal()
 	check(not game.game_controller.paused, "closing menu restores running state")
+	check(not game.audio_player.stream_paused, "closing menu resumes music")
+	game.handle_input_action({"type":"toggle_audio"})
+	game._toggle_game_menu()
+	game._close_hud_modal()
+	check(game.audio_muted and game.audio_player.stream_paused, "menu close preserves manual mute")
+	game.handle_input_action({"type":"toggle_audio"})
+	check(not game.audio_player.stream_paused, "manual unmute resumes a running match")
 	game._request_window_quit()
 	check(game.hud_modal_overlay.active_section == "confirm" and game.hud_modal_overlay.pending_action.get("type") == "quit", "window close routes through a cancellable confirmation")
 	game.hud_modal_overlay.go_back()
@@ -46,6 +60,7 @@ func _initialize() -> void:
 	game._toggle_game_menu()
 	game._close_hud_modal()
 	check(game.game_controller.paused, "closing menu preserves a pre-existing pause")
+	check(game.audio_player.stream_paused, "closing menu preserves music pause when the match remains paused")
 	game.game_controller.set_paused(false)
 	game.player_control_state.clear()
 	var before_tick: int = game.game_controller.tick_index

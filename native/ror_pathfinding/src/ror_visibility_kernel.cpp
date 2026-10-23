@@ -179,7 +179,7 @@ Dictionary RoRVisibilityKernel::apply_source_deltas(const Dictionary &input) con
     return result;
 }
 Dictionary RoRVisibilityKernel::collect_source_deltas(const Dictionary &input) const {
-    static const Variant hp("hp"), components_key("components"), vision_key("vision"), range("range"), enabled("enabled");
+    static const Variant hp("hp"), components_key("components"), vision_key("vision"), range("range"), enabled("enabled"), state("state");
     static const Variant team_key("team"), id_key("id"), pos("pos"), radius_key("radius"), center_key("center"), cells_key("cells");
     static const Variant seen_generation("seen_generation"), entity_key("entity"), source_revision("source_revision");
     const Array entities = input["entities"];
@@ -192,7 +192,7 @@ Dictionary RoRVisibilityKernel::collect_source_deltas(const Dictionary &input) c
     const bool profile = input.get("profile", false);
     for (int64_t index = 0; index < entities.size(); ++index) {
         const Dictionary entity = entities[index];
-        if (double(entity.get(hp, 0.0)) <= 0.0) continue;
+        if (double(entity.get(hp, 0.0)) <= 0.0 || String(entity.get(state, "complete")) == "foundation") continue;
         const Dictionary components = entity.get(components_key, Dictionary()), vision = components.get(vision_key, Dictionary());
         const double radius = std::max(0.0, double(vision.get(range, 0.0)));
         if (radius <= 0.0 || !bool(vision.get(enabled, false))) continue;

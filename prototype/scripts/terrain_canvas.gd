@@ -275,7 +275,7 @@ func _rebuild_terrain_mesh(refine_async: bool = false) -> void:
 			native_kernel = ClassDB.instantiate("RoRTerrainKernel")
 		var native_bounds := _expanded_bounds(bounds_provider.call(), MESH_OVERSCAN_CELLS)
 		_prepare_native_samples()
-		var request := NativeTerrainMesh.capture(native_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, last_mesh_build_metrics, native_sample_cache)
+		var request := NativeTerrainMesh.capture(native_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, last_mesh_build_metrics, native_sample_cache, native_kernel)
 		var native_arrays := NativeTerrainMesh.build_request(native_kernel, request, 4 if refine_async else 16, last_mesh_build_metrics)
 		if not native_arrays.is_empty():
 			terrain_mesh_bounds = native_bounds
@@ -436,7 +436,7 @@ func _schedule_terrain_prefetch(visible_bounds: Rect2i) -> void:
 	var next_bounds := _expanded_bounds(visible_bounds, MESH_OVERSCAN_CELLS)
 	var job := NativeTerrainMesh.new()
 	job.kernel = native_kernel
-	job.request = NativeTerrainMesh.capture(next_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, job.timings, native_sample_cache)
+	job.request = NativeTerrainMesh.capture(next_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, job.timings, native_sample_cache, native_kernel)
 	queued_refinement = {"job": job, "bounds": next_bounds, "revision": terrain_revision, "generation": mesh_generation, "prefetch": true}
 	_start_queued_refinement()
 

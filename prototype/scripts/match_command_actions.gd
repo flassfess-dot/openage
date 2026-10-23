@@ -92,15 +92,14 @@ func handle_input_action(game, action: Dictionary) -> void:
 				game.center_view_on_world(cue["position"])
 				game.queue_redraw()
 		"toggle_audio":
-			game.audio_player.stream_paused = not game.audio_player.stream_paused
-			for player in game.sfx_players:
-				player.stream_paused = game.audio_player.stream_paused
+			game.toggle_audio()
 		"toggle_pause":
 			game.join_simulation_owner()
 			if game.network_session != null:
 				game.game_message = "Пауза в сетевом матче недоступна"
 				return
 			var is_paused = game.game_controller.toggle_paused()
+			game._sync_music_playback()
 			game.game_message = "Пауза" if is_paused else "Игра продолжена"
 			game.message_time = 1.5
 		"change_speed":

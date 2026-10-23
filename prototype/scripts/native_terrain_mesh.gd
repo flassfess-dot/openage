@@ -8,7 +8,7 @@ const RiverSurface := preload("res://scripts/random_map_river_surface.gd")
 # Capture each terrain/height sample once, instead of crossing the script and
 # dictionary boundary for every vertex of every material layer. The native
 # kernel retains the reference's 8x8 blends and 16x16 coastline tessellation.
-static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pack, regions: Dictionary, atlas_size: Vector2, timings: Dictionary = {}, sample_cache: Variant = null) -> Dictionary:
+static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pack, regions: Dictionary, atlas_size: Vector2, timings: Dictionary = {}, sample_cache: Variant = null, capture_kernel: Variant = null) -> Dictionary:
 	if bounds.size.x <= 0 or bounds.size.y <= 0:
 		return {}
 	var started := Time.get_ticks_usec()
@@ -79,16 +79,27 @@ static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pa
 	var river := PackedFloat32Array()
 	if not elevation.river_shape.is_empty():
 		river.append_array(PackedFloat32Array([slots[0],slots[1004],slots[1],slots[4],slots[1005],slots[22]]))
-		for y in range(bounds.size.y * 2 + 1):
-			for x in range(bounds.size.x * 2 + 1):
-				var field := RiverSurface.sample(elevation.river_shape, Vector2(bounds.position) + Vector2(x, y) * 0.5)
-				river.append_array(PackedFloat32Array([field.x,field.y,field.z,field.w]))
+		var field_samples := PackedFloat32Array()
+		if capture_kernel != null and capture_kernel.has_method("capture_river_samples"):
+			field_samples = capture_kernel.capture_river_samples(bounds, elevation.river_shape)
+		if field_samples.is_empty():
+			field_samples = capture_river_reference(bounds, elevation.river_shape)
+		river.append_array(field_samples)
 	timings["capture_us"] = Time.get_ticks_usec() - started
 	return {"bounds": bounds, "cells": cells, "heights": heights, "frames": frames, "materials": materials, "seed": seed, "river": river}
 
 
+static func capture_river_reference(bounds: Rect2i, shape: Dictionary) -> PackedFloat32Array:
+	var result := PackedFloat32Array()
+	for y in range(bounds.size.y * 2 + 1):
+		for x in range(bounds.size.x * 2 + 1):
+			var field := RiverSurface.sample(shape, Vector2(bounds.position) + Vector2(x, y) * 0.5)
+			result.append_array(PackedFloat32Array([field.x, field.y, field.z, field.w]))
+	return result
+
+
 static func build_arrays(kernel, bounds: Rect2i, seed: int, provider: Callable, elevation, pack, regions: Dictionary, atlas_size: Vector2, timings: Dictionary = {}) -> Array:
-	return build_request(kernel, capture(bounds, seed, provider, elevation, pack, regions, atlas_size, timings), 16, timings)
+	return build_request(kernel, capture(bounds, seed, provider, elevation, pack, regions, atlas_size, timings, null, kernel), 16, timings)
 
 
 static func build_request(kernel, request: Dictionary, subdivisions: int = 16, timings: Dictionary = {}) -> Array:

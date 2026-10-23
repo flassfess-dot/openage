@@ -51,6 +51,38 @@ Packed pack(const std::vector<Value> &values) {
 void RoRTerrainKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("build_mesh", "bounds", "cells", "heights", "frames", "materials", "seed", "maximum_subdivisions", "river"), &RoRTerrainKernel::build_mesh, DEFVAL(16), DEFVAL(PackedFloat32Array()));
     ClassDB::bind_method(D_METHOD("split_mesh_arrays", "arrays", "maximum_vertices"), &RoRTerrainKernel::split_mesh_arrays, DEFVAL(16384));
+    ClassDB::bind_method(D_METHOD("capture_river_samples", "bounds", "shape"), &RoRTerrainKernel::capture_river_samples);
+}
+
+PackedFloat32Array RoRTerrainKernel::capture_river_samples(const Rect2i &bounds, const Dictionary &shape) const {
+    PackedFloat32Array result;
+    // The renderer samples at half-cell coordinates, exactly on the existing
+    // resolution-two field. Copy those samples; no interpolation or map scan.
+    if (bounds.size.x <= 0 || bounds.size.y <= 0 || int64_t(shape.get("resolution", 0)) != 2 ||
+        shape.get("size", Variant()).get_type() != Variant::VECTOR2I ||
+        shape.get("samples", Variant()).get_type() != Variant::PACKED_FLOAT32_ARRAY) return result;
+    const Vector2i size = shape["size"];
+    const PackedFloat32Array samples = shape["samples"];
+    const int64_t width = int64_t(bounds.size.x) * 2 + 1, height = int64_t(bounds.size.y) * 2 + 1;
+    if (size.x <= 0 || size.y <= 0 || samples.size() != int64_t(size.x) * size.y * 4 ||
+        width > 32768 || height > 32768 || width * height > 4194304) return result;
+    result.resize(width * height * 4);
+    const float *source = samples.ptr();
+    float *destination = result.ptrw();
+    const int64_t first_x = int64_t(bounds.position.x) * 2, first_y = int64_t(bounds.position.y) * 2;
+    for (int64_t y = 0; y < height; ++y) {
+        const int64_t source_y = std::clamp<int64_t>(first_y + y, 0, size.y - 1);
+        float *row = destination + y * width * 4;
+        if (first_x >= 0 && first_x + width <= size.x) {
+            std::copy_n(source + (source_y * size.x + first_x) * 4, width * 4, row);
+        } else {
+            for (int64_t x = 0; x < width; ++x) {
+                const int64_t source_x = std::clamp<int64_t>(first_x + x, 0, size.x - 1);
+                std::copy_n(source + (source_y * size.x + source_x) * 4, 4, row + x * 4);
+            }
+        }
+    }
+    return result;
 }
 
 Array RoRTerrainKernel::split_mesh_arrays(const Array &arrays, int32_t maximum_vertices) const {
