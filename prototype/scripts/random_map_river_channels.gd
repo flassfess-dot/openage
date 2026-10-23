@@ -11,6 +11,7 @@ static func build(size: Vector2i, original: Array[int], nodes: Array, threshold:
 		var next: Vector2i = node["downstream"]
 		incoming[next] = int(incoming.get(next, 0)) + 1
 	var channels: Array = []
+	var width_reference:=float(options.get("width_reference_runoff",threshold))
 	for node in nodes:
 		if int(incoming.get(node["cell"], 0)) == 1: continue
 		var chain: Array = [node]
@@ -21,7 +22,7 @@ static func build(size: Vector2i, original: Array[int], nodes: Array, threshold:
 			chain.append(next)
 			if int(incoming.get(next["cell"], 0)) != 1: break
 			at = next
-		var channel := _curve(chain, threshold)
+		var channel := _curve(chain, width_reference)
 		_shape_widths(channel, size, fields, options)
 		channels.append(channel)
 	var mask := PackedByteArray()
@@ -53,7 +54,7 @@ static func build(size: Vector2i, original: Array[int], nodes: Array, threshold:
 					mask[index] = 1
 					coverage[index] = depth
 					levels[index] = channel["levels"][i]
-					var ratio: float = channel["runoff"][i] / threshold
+					var ratio: float = channel["runoff"][i] / width_reference
 					var kind := 4 if ratio < 2.0 else 1
 					if ratio > 18.0 and depth > 1.25: kind = 22
 					if original[index] != 0: kind = 22 if original[index] == 22 else 1
@@ -72,7 +73,7 @@ static func build(size: Vector2i, original: Array[int], nodes: Array, threshold:
 				if levels[next] >= 0 and levels[next] != levels[i]: shallow[i] = 1
 	return {"mask":mask, "terrain_types":shallow, "surface_levels":levels, "channels":channels}
 
-static func _curve(chain: Array, threshold: float) -> Dictionary:
+static func _curve(chain: Array, width_reference: float) -> Dictionary:
 	var source := PackedVector2Array()
 	var flows := PackedFloat32Array()
 	var heights := PackedInt32Array()
@@ -114,15 +115,15 @@ static func _curve(chain: Array, threshold: float) -> Dictionary:
 			points.append(point)
 			var flow := lerpf(flows[i], flows[i + 1], t)
 			runoff.append(flow)
-			radii.append(radius(flow / threshold,1.0,INF))
+			radii.append(radius(flow / width_reference,1.0,INF))
 			levels.append(heights[i] if t < 0.5 else heights[i + 1])
 			var bend := (b - a).normalized().cross((d - c).normalized())
-			var ratio := flow / threshold
+			var ratio := flow / width_reference
 			sediment.append(clampf(1.5 - ratio * 0.5, 0.0, 0.8))
 			bends.append(bend)
 	points.append(controls[-1])
 	runoff.append(flows[-1])
-	radii.append(radius(flows[-1] / threshold,1.0,INF))
+	radii.append(radius(flows[-1] / width_reference,1.0,INF))
 	levels.append(heights[-1])
 	sediment.append(sediment[-1] if not sediment.is_empty() else 0.0)
 	bends.append(bends[-1] if not bends.is_empty() else 0.0)
@@ -177,11 +178,13 @@ static func _shape_widths(channel: Dictionary, size: Vector2i, fields: Dictionar
 		raw[i] = clampf(base*lerpf(1.0,local_factor,end_weight),0.42,maximum)
 		rocks[i] = clampf(rocks[i]+resistance*0.45+confinement*0.20,0.0,1.0)
 	# Width changes belong to reaches, never to independent individual tiles.
+	var transition:=float(options.get("width_transition_cells",2.4))
+	var window:=ceili(transition/0.30)
 	for i in range(points.size()):
 		var sum := 0.0
 		var weight := 0.0
-		for j in range(maxi(0,i-8),mini(points.size(),i+9)):
-			var w := maxf(0.0,1.0-points[i].distance_to(points[j])/2.4)
+		for j in range(maxi(0,i-window),mini(points.size(),i+window+1)):
+			var w := maxf(0.0,1.0-points[i].distance_to(points[j])/transition)
 			sum += raw[j]*w;weight += w
 		radii[i] = sum/maxf(weight,0.001)
 	channel["radii"] = radii

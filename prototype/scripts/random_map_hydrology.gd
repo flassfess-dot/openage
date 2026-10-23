@@ -18,7 +18,14 @@ static func build(size: Vector2i, terrain: Array[int], fields: Dictionary, seed:
 	var span := float(mini(size.x, size.y))
 	var threshold := maxf(float(options.get("minimum_runoff", 48.0)), span * float(options.get("runoff_scale", 0.55)))
 	var original := terrain.duplicate()
-	var rivers := Rivers.carve(size, terrain, fields, {"runoff_threshold": threshold, "minimum_basin_runoff": threshold * float(options.get("basin_scale", 10.0)), "width_scale": float(options.get("width_scale", 0.9)), "maximum_radius": float(options.get("maximum_radius",3.2)), "natural_channels":true, "edge_outlets": bool(options.get("edge_outlets", false))})
+	var river_options:=options.duplicate(true)
+	# The hydraulic reference is independent of the visibility threshold and
+	# basin/tributary quotas. Increasing a visibility cutoff cannot narrow water.
+	river_options.merge({"runoff_threshold":threshold,"minimum_basin_runoff":threshold*float(options.get("basin_scale",10.0)),
+		"width_reference_runoff":float(options.get("width_reference_runoff",maxf(48.0,span*0.55))),
+		"width_scale":float(options.get("width_scale",0.9)),"maximum_radius":float(options.get("maximum_radius",3.2)),
+		"natural_channels":true,"edge_outlets":bool(options.get("edge_outlets",false)),"network_seed":seed},true)
+	var rivers := Rivers.carve(size, terrain, fields, river_options)
 	var lakes := _lakes(size, original, rivers, seed)
 	Rivers.apply(terrain, rivers)
 	rivers["waterfalls"] = RiverFalls.plan(size,terrain,rivers,lakes,seed) if options.get("waterfalls",false) else []

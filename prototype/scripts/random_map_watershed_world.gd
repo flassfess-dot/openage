@@ -59,6 +59,10 @@ static func finish(size: Vector2i, terrain: Array[int], forms: Array, profile: S
 	fields["vertex_levels"] = broad_relief(size, terrain, fields, seed ^ 0x8194, profile)
 	var original_levels: Array[int] = fields["vertex_levels"].duplicate()
 	var hydro_options: Dictionary = options.get("hydrology", {}).duplicate(true)
+	if profile=="continental":
+		# Expose narrow headwater candidates, then select whole drainage systems.
+		# Width keeps its independent hydraulic reference rather than this cutoff.
+		hydro_options.merge({"network_layout":"hierarchical","runoff_scale":0.32,"maximum_radius":3.5,"width_transition_cells":4.0},true)
 	hydro_options["waterfalls"] = profile in ["highlands","hill_country","continental","grasslands"]
 	var before_strait: Array[int] = []
 	if profile == "narrows": before_strait.assign(terrain)

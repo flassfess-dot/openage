@@ -3,6 +3,7 @@ extends RefCounted
 
 const Navigation := preload("res://scripts/random_map_navigation.gd")
 const Channels := preload("res://scripts/random_map_river_channels.gd")
+const Network := preload("res://scripts/random_map_river_network.gd")
 const DIRECTIONS := [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN,
 	Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(1, 1)]
 const SHOAL := 15 # Native WaterImpassable: no land or ship restriction admits it.
@@ -126,7 +127,7 @@ static func carve(size: Vector2i, terrain: Array[int], relief: Dictionary, optio
 			var upstream := Vector2i(strongest[i] % size.x, strongest[i] / size.x)
 			bend = Vector2(cell - upstream).normalized().cross(direction)
 		var radius := clampf((0.8 + sqrt(runoff[i] / threshold) * 0.65) * float(options.get("width_scale", 1.0)), 1.0 if not options.is_empty() else 1.4, float(options.get("maximum_radius", 5.8)))
-		if natural_channels: radius=Channels.radius(runoff[i]/threshold,float(options.get("width_scale",1.0)),float(options.get("maximum_radius",3.2)))
+		if natural_channels: radius=Channels.radius(runoff[i]/float(options.get("width_reference_runoff",threshold)),float(options.get("width_scale",1.0)),float(options.get("maximum_radius",3.2)))
 		nodes.append({"cell": cell, "downstream": outlet, "discharge": runoff[i], "head": head[i],
 			"downstream_head": head[next] if not is_mouth else 0, "mouth_distance": distance[i],
 			"basin": basin[i], "is_mouth": is_mouth, "boundary_outlet": boundary_outlet, "radius": radius, "bend": bend, "surface_level":physical_head[i] / 1000})
@@ -156,6 +157,14 @@ static func carve(size: Vector2i, terrain: Array[int], relief: Dictionary, optio
 				if original[index] != 0: kind = 22 if original[index] == 22 else 1
 				types[index] = kind
 				surface_levels[index] = physical_head[i] / 1000
+	var network_plan: Dictionary={}
+	if natural_channels and options.get("network_layout","")=="hierarchical":
+		var selected:=Network.select(size,original,nodes,int(options.get("network_seed",1)),options)
+		nodes=selected["nodes"];network_plan=selected["plan"]
+		incoming.clear();mouth_count=0
+		for node in nodes:
+			if node["is_mouth"]:mouth_count+=1
+			else:incoming[node["downstream"]]=int(incoming.get(node["downstream"],0))+1
 	# A shallow tributary's bank must not overwrite the larger river's thalweg.
 	# Preserve clearance through bends and confluences, with a scoured outlet
 	# joining the sea. This depends on runoff, independently of player access.
@@ -204,6 +213,10 @@ static func carve(size: Vector2i, terrain: Array[int], relief: Dictionary, optio
 	if natural_channels:
 		result["channels"] = channel_geometry["channels"]
 		result["model"] = "hydraulic_watershed_channels_v3"
+		result["width_reference_runoff"]=float(options.get("width_reference_runoff",threshold))
+		if not network_plan.is_empty():
+			result["network_plan"]=network_plan
+			result["model"]="hierarchical_watershed_channels_v4"
 	if not options.is_empty():
 		result["drainage"] = {"raw_head": raw_head, "spill_head": spill, "physical_head": physical_head, "head": head,
 			"parent": parent, "basin": basin, "runoff": runoff}

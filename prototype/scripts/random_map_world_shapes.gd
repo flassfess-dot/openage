@@ -75,7 +75,7 @@ static func build(size: Vector2i, profile: String, seed: int) -> Dictionary:
 	Water.smooth_coast(terrain, size)
 	var inland := profile in ["grasslands", "highlands", "hill_country"]
 	var hydrology := {"edge_outlets": inland}
-	if insular: hydrology.merge({"minimum_runoff": 24.0, "runoff_scale": 0.24, "basin_scale": 4.5, "width_scale": 0.72})
+	if insular: hydrology.merge({"minimum_runoff": 24.0, "runoff_scale": 0.24, "basin_scale": 4.5, "width_scale": 0.72,"width_reference_runoff":maxf(24.0,span*0.24)})
 	return {"terrain": terrain, "forms": forms, "hydrology": hydrology, "angle": angle, "slots": slots,
 		"shape_kind": "archipelago" if insular else "interior" if inland else "inland_sea" if profile == "mediterranean" else "straits" if profile == "narrows" else "coastal",
 		"ridge_count": 5 if profile == "highlands" else 1 if profile in ["hill_country", "grasslands", "small_islands"] else 2}

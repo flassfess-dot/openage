@@ -21,6 +21,7 @@ __pycache__
 *.pdb
 *.dll
 *.dll.previous.*
+/prototype/bin/~*.TMP
 *.exe
 
 # workflow

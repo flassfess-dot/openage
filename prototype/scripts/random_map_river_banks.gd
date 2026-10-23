@@ -45,7 +45,7 @@ static func build(size: Vector2i, terrain: Array[int], fields: Dictionary, river
 			if distances[hi]-distances[lo]<3.5: continue
 			var positions := PackedVector2Array()
 			var widths := PackedFloat32Array()
-			var source: bool = channel["runoff"][at]<rivers["runoff_threshold"]*2.0
+			var source: bool = channel["runoff"][at]<float(rivers.get("width_reference_runoff",rivers["runoff_threshold"]))*2.0
 			var maximum_width := radius*(0.42 if source else 0.58)
 			var side: int = candidate["side"]
 			for i in range(lo,hi+1):
