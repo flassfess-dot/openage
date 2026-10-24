@@ -648,6 +648,25 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary, avoid: 
 	var building_id := int(building["id"])
 	var reservations: Dictionary = world.building_approach_slots.get(building_id, {})
 	var candidates: Array[Vector2] = world.available_approach_slots(worker, world.building_perimeter_candidates(worker, building), reservations, true)
+	if candidates.is_empty() and String(worker.get("movement_domain", "land")) == "water":
+		# A shore Dock can have only one navigable side. Its four fractional
+		# perimeter samples may all be covered by one idle boat and a returning
+		# carrier, even though a clear berth remains at the end of that side.
+		# Include nearby cell centres inside the ordinary deposit reach; the same
+		# footprint, reservation and route checks below still decide eligibility.
+		var center := Vector2(building["pos"])
+		var half_size := Vector2(building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5)))
+		var reach := float(worker.get("footprint_radius", 0.3)) + 0.55 + 0.12
+		var extent := half_size + Vector2.ONE * reach
+		var perimeter: Array[Vector2] = []
+		for y in range(maxi(0, floori(center.y - extent.y)), mini(world.map_size.y, ceili(center.y + extent.y))):
+			for x in range(maxi(0, floori(center.x - extent.x)), mini(world.map_size.x, ceili(center.x + extent.x))):
+				var point := Vector2(x + 0.5, y + 0.5)
+				var offset := (point - center).abs() - half_size
+				var outside := Vector2(maxf(0.0, offset.x), maxf(0.0, offset.y))
+				if outside.length_squared() > 0.0 and outside.length_squared() <= reach * reach:
+					perimeter.append(point)
+		candidates = world.available_approach_slots(worker, perimeter, reservations, true)
 	if avoid is Vector2:
 		candidates.assign(candidates.filter(func(point): return point.distance_squared_to(avoid) > 0.0625))
 	var best: Variant = null

@@ -13,6 +13,7 @@ func _initialize() -> void:
 	test_continuous_delivery(catalog, false)
 	test_continuous_delivery(catalog, true)
 	test_full_cargo_remembers_next_shoal(catalog)
+	test_crowded_dock_resumes_work(catalog)
 	test_own_vision(catalog)
 	test_extended_sight_and_ties(catalog)
 	test_unreachable_shoal(catalog)
@@ -24,7 +25,7 @@ func _initialize() -> void:
 		for failure in failures: push_error(failure)
 		quit(1)
 
-func fixture(catalog) -> Dictionary:
+func fixture(catalog, with_dock: bool = true) -> Dictionary:
 	var world := World.new(Vector2i(32, 32))
 	world.set_gamespec(catalog.gamespec_data)
 	world.set_object_catalog(catalog.object_catalog_data)
@@ -42,7 +43,7 @@ func fixture(catalog) -> Dictionary:
 	world.set_team_civilization(2, 13)
 	var enemy: Dictionary = world.add_unit(2, "clubman", Vector2(29.5,29.5), false)
 	enemy["stance"] = "passive"
-	world.add_building(1001, "dock", Vector2(23.5,10.5), 1)
+	if with_dock: world.add_building(1001, "dock", Vector2(23.5,10.5), 1)
 	var boat: Dictionary = world.add_unit(1, "fishing_boat", Vector2(18.5,10.5), false)
 	return {"world":world,"boat":boat}
 
@@ -79,6 +80,42 @@ func test_full_cargo_remembers_next_shoal(catalog) -> void:
 	check(boat["resource_id"] == next["id"] and boat["gather_stage"] == "returning", "full cargo remembers the next shoal before sailing to Dock")
 	advance_until(world, func():return next["amount"] == 0 and boat["task"] == "idle", 3000)
 	check(world.get_resource_amount(1,0) == food_before+3, "boat resumes its selected shoal after every delivery")
+
+func test_crowded_dock_resumes_work(catalog) -> void:
+	var f := fixture(catalog,false)
+	var world = f["world"]
+	var boat: Dictionary = f["boat"]
+	# Only the east side of this coast Dock is navigable. Two idle boats cover
+	# the four old samples, but leave a real, reachable berth at its north end.
+	var terrain: Array[int] = []
+	for y in range(32):
+		for x in range(32): terrain.append(1 if x >= 12 else 2 if x == 11 else 0)
+	world.configure_map_data({"terrain_ids":terrain})
+	var dock: Dictionary = world.add_building(1002,"dock",Vector2(10,10),1)
+	world.add_unit(1,"fishing_boat",Vector2(12.55,9.625),false)
+	world.add_unit(1,"fishing_boat",Vector2(12.55,11.125),false)
+	boat["pos"] = Vector2(17.5,8.5)
+	boat["previous_pos"] = boat["pos"]
+	boat["target"] = boat["pos"]
+	boat["destination"] = boat["pos"]
+	world.rebuild_spatial_index(false)
+	var old_slots: Array[Vector2] = world.available_approach_slots(boat,world.building_perimeter_candidates(boat,dock),{},true)
+	check(old_slots.is_empty(),"crowded coast fixture blocks all four original water berths")
+	var fish: Dictionary = world.add_resource("deep_fish",Vector2(18.5,8.5),40)
+	world.assign_command_gather([boat],fish["id"])
+	world.set_entity_field(boat,"carried_amount",float(boat["carry_capacity"]))
+	world.set_entity_field(boat,"carried_resource_type_id",0)
+	var food_before: int = world.get_resource_amount(1,0)
+	world.advance(.05,1,2)
+	check(boat["gather_stage"]=="returning" and boat["dropoff_id"]==dock["id"],"full boat immediately selects the clear end of its crowded Dock")
+	advance_until(world,func():return int(boat["deposit_cycles"])>0,700)
+	check(int(boat["deposit_cycles"])>0,"full boat actually deposits past stationary boats at its Dock")
+	check(world.get_resource_amount(1,0)==food_before+int(boat["carry_capacity"]),"crowded Dock receives the full cargo exactly once")
+	advance_until(world,func():return boat["anim_state"]=="Gather" and float(boat["carried_amount"])>0.0,700)
+	check(boat["anim_state"]=="Gather","boat resumes its fishing pose after unloading")
+	var info: Dictionary = catalog.unit_frame_info(boat,preload("res://scripts/animation_controller.gd").clip_for_state(boat["anim_state"]))
+	check(info.get("graphic_id")==43 and not info.get("composite_parts",[]).is_empty(),"resumed actual fishing state displays both net and hull")
+	world.task_coordinator.shutdown()
 
 func test_own_vision(catalog) -> void:
 	var f := fixture(catalog)
