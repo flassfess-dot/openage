@@ -12,6 +12,10 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
+namespace {
+constexpr double MAX_INTERPOLATION_ALPHA = 5.0;
+}
+
 void RoRReadModelKernel::cache_actor_sprites(const Array &items, double scale) const {
     if (scale <= 0.0) return;
     static const Variant info_key("frame_info"), texture("texture"), mirrored("mirrored"), rotation("rotation"), polygon("gate_polygon");
@@ -42,7 +46,7 @@ bool RoRReadModelKernel::refresh_interpolated_items(const Array &items, const Ca
     struct Projected { Dictionary source; Vector2 position, screen; double depth; };
     std::unordered_map<int64_t, Projected> projected;
     bool moved = false;
-    alpha = std::max(0.0, std::min(1.0, alpha));
+	alpha = std::max(0.0, std::min(MAX_INTERPOLATION_ALPHA, alpha));
     for (int64_t i = 0; i < items.size(); ++i) {
         Dictionary item = items[i];
         const String type = item[kind];
@@ -52,7 +56,8 @@ bool RoRReadModelKernel::refresh_interpolated_items(const Array &items, const Ca
         auto found = projected.find(entity_id);
         if (found == projected.end() || !UtilityFunctions::is_same(found->second.source, source)) {
             Projected point; point.source = source;
-            point.position = Vector2(source.get(previous, source.get(pos, Vector2()))).lerp(source.get(pos, Vector2()), real_t(alpha));
+            const double bounded_alpha = std::min(alpha, double(source.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA)));
+            point.position = Vector2(source.get(previous, source.get(pos, Vector2()))).lerp(source.get(pos, Vector2()), real_t(bounded_alpha));
             point.screen = project.call(point.position);
             point.depth = unit_depth_offset(point.position, point.screen.y, depth_index, project);
             projected[entity_id] = point;
@@ -258,7 +263,8 @@ Array RoRReadModelKernel::create_unit_render_items(const Array &units, const Cal
         const Dictionary unit = units[i];
         const String death = unit.get(phase, "alive");
         if (double(unit.get(hp, 0.0)) <= 0.0 && death != "dying" && death != "corpse") continue;
-        const Vector2 position = Vector2(unit.get(previous, unit[pos])).lerp(unit[pos], real_t(std::max(0.0, std::min(1.0, alpha))));
+		const double bounded_alpha = std::min(std::max(0.0, std::min(MAX_INTERPOLATION_ALPHA, alpha)), double(unit.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA)));
+		const Vector2 position = Vector2(unit.get(previous, unit[pos])).lerp(unit[pos], real_t(bounded_alpha));
         const Vector2 screen = project.call(position);
         const double offset = unit_depth_offset(position, screen.y, depth_index, project);
         Vector2 sort_screen = screen; sort_screen.y += offset;
@@ -844,6 +850,9 @@ void RoRReadModelKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("infrastructure_site_bonuses", "resources", "sites", "kind"), &RoRReadModelKernel::infrastructure_site_bonuses);
     ClassDB::bind_method(D_METHOD("foundation_intersects_structures", "footprint", "center", "structures", "replaced"), &RoRReadModelKernel::foundation_intersects_structures);
     ClassDB::bind_method(D_METHOD("walkability_mask", "size", "terrain", "terrain_ids", "occupied", "restrictions", "learned", "knowledge", "domain", "restriction"), &RoRReadModelKernel::walkability_mask);
+    ClassDB::bind_method(D_METHOD("surface_components", "size", "terrain", "terrain_ids", "restrictions", "learned", "knowledge", "domain", "restriction"), &RoRReadModelKernel::surface_components);
+    ClassDB::bind_method(D_METHOD("surface_component_labels", "size", "terrain", "terrain_ids", "restrictions", "learned", "knowledge", "domain", "restriction"), &RoRReadModelKernel::surface_component_labels);
+    ClassDB::bind_method(D_METHOD("surface_reachability_changes", "points", "previous", "surface", "reachable", "width"), &RoRReadModelKernel::surface_reachability_changes);
     ClassDB::bind_method(D_METHOD("project_control", "source", "rendered", "observer", "fields", "private_trade_fields"), &RoRReadModelKernel::project_control);
     ClassDB::bind_method(D_METHOD("encode_replay_variant", "source", "quantize_numbers"), &RoRReadModelKernel::encode_replay_variant, DEFVAL(true));
     ClassDB::bind_method(D_METHOD("capture_frozen", "source", "trusted"), &RoRReadModelKernel::capture_frozen);
@@ -879,6 +888,42 @@ PackedByteArray RoRReadModelKernel::walkability_mask(const Vector2i &size, const
         const Array keys = terrain.keys();
         for (int64_t i = 0; i < keys.size(); ++i) evaluate(keys[i]);
     } else for (int y = 0; y < size.y; ++y) for (int x = 0; x < size.x; ++x) evaluate(Vector2i(x,y));
+    return result;
+}
+
+Dictionary RoRReadModelKernel::surface_components(const Vector2i &size, const Dictionary &terrain, const Dictionary &terrain_ids, const Array &restrictions, const PackedByteArray &learned, bool knowledge, const String &domain, int64_t restriction) const {
+    Dictionary result;
+    const int64_t count = int64_t(size.x) * size.y;
+    if (size.x <= 0 || size.y <= 0 || count > std::numeric_limits<int32_t>::max() || (knowledge && learned.size() != count)) return result;
+    // Surface connectivity deliberately ignores occupants. Each caller supplies
+    // its own legal terrain view; unknown knowledge cells remain optimistic.
+    const PackedByteArray mask = walkability_mask(size, terrain, terrain_ids, Dictionary(), restrictions, learned, knowledge, domain, restriction);
+    const uint8_t *allowed = mask.ptr();
+    std::vector<int32_t> labels(size_t(count), -1);
+    std::vector<int32_t> queue;
+    queue.reserve(size_t(count));
+    int32_t component = 0;
+    for (int32_t root = 0; root < count; ++root) {
+        if (!allowed[root] || labels[root] >= 0) continue;
+        queue.clear();
+        queue.push_back(root);
+        labels[root] = component;
+        result[Vector2i(root % size.x, root / size.x)] = int64_t(component);
+        for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
+            const int32_t index = queue[cursor];
+            const int32_t x = index % size.x, y = index / size.x;
+            // Match the reference's left, right, up, down visitation and
+            // Dictionary insertion order, including serialized publications.
+            const int32_t adjacent[] = {x > 0 ? index - 1 : -1, x + 1 < size.x ? index + 1 : -1, y > 0 ? index - size.x : -1, y + 1 < size.y ? index + size.x : -1};
+            for (const int32_t neighbor : adjacent) {
+                if (neighbor < 0 || !allowed[neighbor] || labels[neighbor] >= 0) continue;
+                labels[neighbor] = component;
+                queue.push_back(neighbor);
+                result[Vector2i(neighbor % size.x, neighbor / size.x)] = int64_t(component);
+            }
+        }
+        ++component;
+    }
     return result;
 }
 
@@ -1000,6 +1045,63 @@ PackedByteArray RoRReadModelKernel::rasterize_minimap_fog(const Vector2i &size, 
         }
     }
     return pixels;
+}
+
+} // namespace godot
+
+
+namespace godot {
+PackedInt32Array RoRReadModelKernel::surface_component_labels(const Vector2i &size, const Dictionary &terrain, const Dictionary &terrain_ids, const Array &restrictions, const PackedByteArray &learned, bool knowledge, const String &domain, int64_t restriction) const {
+    PackedInt32Array result;
+    const int64_t count = int64_t(size.x) * size.y;
+    if (size.x <= 0 || size.y <= 0 || count > std::numeric_limits<int32_t>::max() || (knowledge && learned.size() != count)) return result;
+    // Same terrain-only connectivity and component numbering as surface_components.
+    // Keep dense labels packed instead of allocating one Variant dictionary entry
+    // for every unknown/traversable cell during a live AI observation.
+    const PackedByteArray mask = walkability_mask(size, terrain, terrain_ids, Dictionary(), restrictions, learned, knowledge, domain, restriction);
+    const uint8_t *allowed = mask.ptr();
+    result.resize(count);
+    result.fill(-1);
+    int32_t *labels = result.ptrw();
+    std::vector<int32_t> queue;
+    queue.reserve(size_t(count));
+    int32_t component = 0;
+    for (int32_t root = 0; root < count; ++root) {
+        if (!allowed[root] || labels[root] >= 0) continue;
+        queue.clear(); queue.push_back(root); labels[root] = component;
+        for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
+            const int32_t index = queue[cursor];
+            const int32_t x = index % size.x, y = index / size.x;
+            const int32_t adjacent[] = {x > 0 ? index - 1 : -1, x + 1 < size.x ? index + 1 : -1, y > 0 ? index - size.x : -1, y + 1 < size.y ? index + size.x : -1};
+            for (const int32_t neighbor : adjacent) {
+                if (neighbor < 0 || !allowed[neighbor] || labels[neighbor] >= 0) continue;
+                labels[neighbor] = component; queue.push_back(neighbor);
+            }
+        }
+        ++component;
+    }
+    return result;
+}
+
+
+PackedInt32Array RoRReadModelKernel::surface_reachability_changes(const Array &points, const Array &previous, const Dictionary &surface, const Dictionary &reachable, int64_t width) const {
+    PackedInt32Array changed;
+    if (width <= 0) return changed;
+    const PackedInt32Array labels = surface.get("labels", PackedInt32Array());
+    const int32_t *packed = labels.is_empty() ? nullptr : labels.ptr();
+    int64_t old_cursor = 0;
+    // Both publications are row-major; the old reachable list is a subset of
+    // the old walkable points. Compare in one pass without rebuilding buckets.
+    for (int64_t i = 0; i < points.size(); ++i) {
+        const Vector2 point = points[i];
+        const Vector2i cell(point);
+        const int64_t index = int64_t(cell.y) * width + cell.x;
+        const bool was_included = old_cursor < previous.size() && Vector2(previous[old_cursor]) == point;
+        if (was_included) ++old_cursor;
+        const int64_t component = packed && index >= 0 && index < labels.size() ? packed[index] : int64_t(surface.get(cell, -1));
+        if (was_included != reachable.has(component) && index >= 0 && index <= std::numeric_limits<int32_t>::max()) changed.push_back(int32_t(index));
+    }
+    return changed;
 }
 
 } // namespace godot

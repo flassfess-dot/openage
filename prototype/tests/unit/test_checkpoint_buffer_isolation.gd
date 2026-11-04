@@ -10,6 +10,9 @@ func _initialize() -> void:
 	var checkpoint := Checkpoint.capture(world, controller, {}, {"size": world.map_size})
 	planner.grid.learned[0] = 1
 	var passed := int(checkpoint["knowledge"][1]["grid"]["learned"][0]) == 0
+	var owned_view := Checkpoint.capture(world,controller,{}, {"size":world.map_size},false)
+	var detached := Checkpoint.capture(world,controller,{}, {"size":world.map_size})
+	passed = passed and var_to_bytes(owned_view)==var_to_bytes(detached)
 	world.shutdown_derived_state()
 	if not passed: push_error("A captured checkpoint must not share its learned-cell buffer with the live world")
 	print("Checkpoint buffer isolation: ", passed)

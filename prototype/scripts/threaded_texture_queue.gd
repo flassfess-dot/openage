@@ -9,6 +9,13 @@ var active: Dictionary = {}
 var completed: Dictionary = {}
 
 func request(paths: Array[String]) -> void:
+	# Headless runs have no presentation latency budget. Keep texture creation
+	# on the caller thread for the dummy rendering server; graphical runs retain
+	# the bounded background queue and its normal publication boundary.
+	if DisplayServer.get_name()=="headless":
+		for path in paths:
+			if not completed.has(path): completed[path]=ResourceLoader.load(path,"Texture2D")
+		return
 	for path in paths:
 		if completed.has(path) or active.has(path) or queued_paths.has(path):
 			continue

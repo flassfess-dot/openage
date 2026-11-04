@@ -4,8 +4,9 @@ const Planning := preload("res://scripts/ai_planning_task.gd")
 const Queries := preload("res://scripts/simulation_observation_queries.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 const MAX_CAPTURES := 8
-const ACTORS_PER_PORTION := 96
-const PRODUCERS_PER_PORTION := 1
+const PROJECTION_ACTORS_PER_PORTION := 48
+const COMMAND_ACTORS_PER_PORTION := 96
+const PRODUCERS_PER_PORTION := 4
 const CAPTURE_BUDGET_USEC := 7000
 const MAX_COMMAND_RULE_SCHEMA_BYTES := 64 * 1024
 var captures: Dictionary = {}
@@ -52,7 +53,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 	var pending: Dictionary = captures.get(team, {})
 	if pending.is_empty():
 		assert(captures.size() < MAX_CAPTURES)
-		var initial_options: Dictionary = ai.presentation_options()
+		var initial_options: Dictionary = ai.decision_options(apply_tick) if ai.has_method("decision_options") else ai.presentation_options()
 		initial_options["defer_build_sites"] = true
 		initial_options["build_site_filter_in_worker"] = true
 		initial_options["_ai_profile_cache"] = {}
@@ -75,7 +76,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 		var phase := String(pending["phase"])
 		match phase:
 			"actors":
-				if store.prepare_projection(world, team, pending["projection"], ACTORS_PER_PORTION): pending["phase"] = "navigation"
+				if store.prepare_projection(world, team, pending["projection"], PROJECTION_ACTORS_PER_PORTION): pending["phase"] = "navigation"
 			"navigation":
 				if not bool(options.get("include_navigation", true)) or world.ai_navigation_knowledge.prepare_snapshot(world, world.get_fog_of_war(), team): pending["phase"] = "resources"
 			"resources":
@@ -87,7 +88,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 				pending["phase"] = "commands"
 			"commands":
 				var snapshot: Dictionary = pending["snapshot"]
-				var unit_finish := mini(snapshot["units"].size(), int(pending["unit_cursor"]) + ACTORS_PER_PORTION)
+				var unit_finish := mini(snapshot["units"].size(), int(pending["unit_cursor"]) + COMMAND_ACTORS_PER_PORTION)
 				var building_finish := mini(snapshot["buildings"].size(), int(pending["building_cursor"]) + PRODUCERS_PER_PORTION)
 				var portion: Dictionary = snapshot.duplicate()
 				portion["units"] = snapshot["units"].slice(int(pending["unit_cursor"]), unit_finish)

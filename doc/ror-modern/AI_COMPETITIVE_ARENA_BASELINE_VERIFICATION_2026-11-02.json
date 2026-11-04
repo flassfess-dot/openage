@@ -1,0 +1,202 @@
+{
+  "passed": true,
+  "release": {
+    "executable": "f6b5e6bf0c1031cff1c17a924cac26f0ddb1e07ff5669bc3db1e99273152322c",
+    "package": "d202d3c8542371e0f71bc7a1e208339ff2a6b23a66e278a55ca8bf1231ec1b68",
+    "native": "0ff22cb00b5a6dec20e4b58899d0093abd24b0c7ff75cf95d07bf362272e5839"
+  },
+  "steps": {
+    "calibration12": {
+      "reports": 12,
+      "counts": {
+        "DRAW_TIME_LIMIT": 10,
+        "LOSS": 1,
+        "WIN": 1
+      },
+      "score": 0.5,
+      "seed_block_95_percent": [
+        0.5,
+        0.5
+      ],
+      "paired_blocks": 6,
+      "directory": "prototype/qa/ai-competitive/competitive-20261030/arena/07133127b8c6e2a8",
+      "summary_sha256": "5090a08a7612509b0e0fd78eaea5d95e35663b59e8cc6406f698ad99f6b27671",
+      "series_sha256": "3d65ee98218f05561d456611cff1714b62f36cec087fc00ca6529336f00715ae"
+    },
+    "candidate_smoke24": {
+      "reports": 24,
+      "counts": {
+        "DRAW_TIME_LIMIT": 21,
+        "WIN": 3
+      },
+      "score": 0.5625,
+      "seed_block_95_percent": [
+        0.5,
+        0.625
+      ],
+      "paired_blocks": 12,
+      "directory": "prototype/qa/ai-competitive/competitive-20261030/arena/f28bf4dc61fdd100",
+      "summary_sha256": "8925dad89f0bc58143591c13abd6764efd49563bb95999bf0f196ee6e345813a",
+      "series_sha256": "6ddcf1cd9d45b2f4eb026c99f1bd24786829e7e346bf0bbc9a2cbf401d74e148"
+    },
+    "baseline_smoke24": {
+      "reports": 24,
+      "counts": {
+        "DRAW_TIME_LIMIT": 21,
+        "LOSS": 1,
+        "WIN": 2
+      },
+      "score": 0.5208333333333334,
+      "seed_block_95_percent": [
+        0.5,
+        0.5625
+      ],
+      "paired_blocks": 12,
+      "directory": "prototype/qa/ai-competitive/competitive-20261030/arena/0f9947a7b3ff4787",
+      "summary_sha256": "58b90b1642c33fdb342dce8a90724301510e17efaf2453b7d8869120c1e828d7",
+      "series_sha256": "e315c5e0f2b378cef2acca3072ddc2fe403103aec9dbcbfe26c2bc7cc785e32d"
+    },
+    "baseline_dev96": {
+      "reports": 96,
+      "counts": {
+        "DRAW_TIME_LIMIT": 91,
+        "LOSS": 1,
+        "WIN": 4
+      },
+      "score": 0.515625,
+      "seed_block_95_percent": [
+        0.5,
+        0.5364583333333334
+      ],
+      "paired_blocks": 48,
+      "directory": "prototype/qa/ai-competitive/competitive-20261030/arena/b3194142f778f3df",
+      "summary_sha256": "520bc8cdf26d0573149eb274b549ef90fca571545a3b2e6920581f4181b867e9",
+      "series_sha256": "ed0498f6f5735b8b8890227657c96a89a72836923e7f8d64293355874c5a7656"
+    }
+  },
+  "full_logical_scenario_repeats": [
+    {
+      "case": "smoke-000-seat1",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 36000,
+      "final_hash": "1a8ede6165c4282db2b664ca25309105894e0426238648033319a96b79515d9a",
+      "commands": 10121,
+      "command_sha256": "e4f7e4beee4833f1481647484e582f6f585f60dc67165dc37854a2d9340b8b6a",
+      "semantic_input_sha256": "be9a46db54566eb499eca324ba4a29ba902e22e1bdd39330e24c60f2ee77b1c2"
+    },
+    {
+      "case": "smoke-000-seat2",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 36000,
+      "final_hash": "6930c7b7cd61fa9533ccd28a58aefc9b280c477e0332047e895530e30933eedb",
+      "commands": 10121,
+      "command_sha256": "e4f7e4beee4833f1481647484e582f6f585f60dc67165dc37854a2d9340b8b6a",
+      "semantic_input_sha256": "e1e1eff314e35d869ff379463807821c588a1c2c5754214a86e8ca4f80ce9de2"
+    },
+    {
+      "case": "smoke-001-seat1",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 36000,
+      "final_hash": "96f970fef03272f1e135a32ff183e857ab6551c453b954c1b21076bdf0f7098d",
+      "commands": 6916,
+      "command_sha256": "79c7c9560158a1819fe95ea2484f58fbdf5e2066eb459c1a46b20e93c723bf40",
+      "semantic_input_sha256": "513a9900debc3247a0fdd02a4e47b50d50c1a964a1c6edf3a35ff4800152b5f9"
+    },
+    {
+      "case": "smoke-001-seat2",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 36000,
+      "final_hash": "efe469210b66178c8418fad7b1e0df0c5d54e5be1186121fd09e017e6ca1df4d",
+      "commands": 9882,
+      "command_sha256": "1d3919ffdb31dfac2207760e2e1bd49950ddc7103b794b1607d7761372ece010",
+      "semantic_input_sha256": "4f7b435a766077f5f42a70ddcc4d6d6cbfa94c712faad36ab4ff542f82d0870a"
+    },
+    {
+      "case": "smoke-002-seat1",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 36000,
+      "final_hash": "c4ef39c7fe984f74c83e69e146cd97ff47cc7ae07ff2320531a35741a6927eab",
+      "commands": 8451,
+      "command_sha256": "d5c827c2233de844e78a31fc1b551745090dfc15f28408ecbe2b4c55f0937ea3",
+      "semantic_input_sha256": "0f892e1772399adf1fb7f570287bd36c05643a82bb80fa2a109691cce0485b38"
+    },
+    {
+      "case": "smoke-002-seat2",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 36000,
+      "final_hash": "009c6cbdccc96ecec4e13f7582b9081bdc82630c03adf7c7da9eb0a97b07d75a",
+      "commands": 3658,
+      "command_sha256": "74556eafdc334e5dffa21c24cbd568d645374f0c7f49b2e2bb122faa8d01bc30",
+      "semantic_input_sha256": "756df8fdbe7e9cfc2a0261c36d45bff7c95f79d3cd40137024a4a6a509f48a60"
+    },
+    {
+      "case": "smoke-003-seat1",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 72000,
+      "final_hash": "0dbfeb5531c2b24df7737033f98ae3b1542f0d4a33c2a53af037032c7864ac24",
+      "commands": 10452,
+      "command_sha256": "105b4d04caa87ecb71b2d95de8f8d5365cdd2fe278b77ff18abd467470177486",
+      "semantic_input_sha256": "60ffcd1b30e089ef63f453c4412cf0c46f3bb179ce8216a6df6d2f5ba60f24ce"
+    },
+    {
+      "case": "smoke-003-seat2",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 72000,
+      "final_hash": "76acabc160bfd34af61d1bee1794fe62dd968ee2e539925bb689d6bba0dbc25d",
+      "commands": 25236,
+      "command_sha256": "3765dc74405ffaca0e6b69cf2e86e3e46d6de17f451acacd7b3fad55cd714340",
+      "semantic_input_sha256": "57ee69369e5f195c0b1b10d892a344579305f5685dc8fe050b0c36531bb775a8"
+    },
+    {
+      "case": "smoke-004-seat1",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 36000,
+      "final_hash": "9db22b9fd8a48379575c929bf051d3372b79e89c4d263ad028082d79dabb8d43",
+      "commands": 10378,
+      "command_sha256": "fce3c2afa4e1925ad1f80bc8bd4472621050555e71b26183bd513e5cdeb1b66a",
+      "semantic_input_sha256": "7e6d1dc8a4c652e4ea997b65ab3b7e1f9c95f38b8bf66ad09a28d3241e85ec29"
+    },
+    {
+      "case": "smoke-004-seat2",
+      "status": "DRAW_TIME_LIMIT",
+      "tick": 36000,
+      "final_hash": "186556b1c25212381438316359a503eca2e4affee7f360c526d9f13273919f8c",
+      "commands": 9385,
+      "command_sha256": "5beec596bf82c82886062956014c8ca2e9ade96a6dd1adc4911a4a7390c598b0",
+      "semantic_input_sha256": "7ace84c18d182a16d6d90e72b495fa5a6b32d1e90982cf6521d40a4496062801"
+    },
+    {
+      "case": "smoke-005-seat1",
+      "status": "WIN",
+      "tick": 32214,
+      "final_hash": "e9c476eca11d2f137fb73e6db2db6546ac350490ec1b1d288ad00b15c6f8802c",
+      "commands": 2198,
+      "command_sha256": "0e92b0e195324bd52afdc7c09676f3bb1050496ec5e8b1aaf928036bcfffafe9",
+      "semantic_input_sha256": "2ac5f16495312165dd0acd758bcde4ce906a0534e49f4e05781240385b215834"
+    },
+    {
+      "case": "smoke-005-seat2",
+      "status": "LOSS",
+      "tick": 21535,
+      "final_hash": "1e83673214ada9d4d4b68dbe1b5ff8621002c6484dc28549ad1f41487e792747",
+      "commands": 2328,
+      "command_sha256": "20916f721deea5445d3f25a2927536180d3cc1fb9997e6d1852bfe75efcb68ac",
+      "semantic_input_sha256": "2524cc89da6fbef452f1754d2fe02a38f4ae32aafcc951aed482822ade78eadd"
+    }
+  ],
+  "calibration_actual_counts": {
+    "DRAW_TIME_LIMIT": 10,
+    "LOSS": 1,
+    "WIN": 1
+  },
+  "evaluation_state_sha256": "e33ad50cfa739e85ff3023238ffff0d6c4705d7820759f40652ef703c87768a7",
+  "real_child_failure_receipt_sha256": "0eeb206f5d791388e8b399c0fde9898bb406ffd091e3f9aa64904e1741180fd6",
+  "python42_receipt_sha256": "44cfc0c375598cfa203172f5d723e455ddf5eaf217cd342d056fe44653f7bf2d",
+  "scope": "Infrastructure baseline gate only:12 calibration, both24 smoke and96 baseline dev. Twelve existing full logical scenarios also repeated with identical commands/outcomes/world hashes across2/4-process scheduling. Case series/fingerprint and exogenous timeout3600/2789 differ and are retained; no claim of identical input JSON, no new games or final holdout/human/FPS acceptance.",
+  "evidence": {
+    "path": "prototype/qa/ai-competitive/competitive-20261030/quality-r19/baseline-completion/qualification.json",
+    "sha256": "ca36ec77e00a71db66ab7d3fdf0f5fb67a6e4b276975fbbb023d403420a64fb3"
+  },
+  "human_strength": "HUMAN_UNMEASURED",
+  "final_holdout_used": false
+}

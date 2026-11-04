@@ -12,6 +12,8 @@ func _initialize() -> void:
 	world.navigation_grid.configure_terrain(func(_cell): return "grass")
 	var entities: Array = [world.add_unit(1, "villager", Vector2(4, 4), false), world.add_building(900, "town_center", Vector2(16, 16), 1), world.add_resource("tree", Vector2(9, 9), 100)]
 	for entity in entities:
+		entity["carried_amount"]=7.5; entity["carried_resource_type_id"]=0
+		entity["rally_point"]=Vector2(98.5,97.5); entity["target_id"]=991; entity["target_building_id"]=992; entity["retaliation_target_id"]=993
 		entity["components"]["trade"] = {"enabled": true, "cargo_gold": 7, "target_dock_id": 900, "approach_position": Vector2.ONE}
 		entity["components"]["cargo"] = {"enabled": true, "passenger_ids": [3, 4], "capacity": 4, "allow_allied": false}
 		entity["components"]["order"] = {"type": "move", "completed": false, "target_entity_id": 13}
@@ -36,7 +38,11 @@ func _initialize() -> void:
 				entity["components"]["cargo"]["passenger_ids"].append(step)
 				entity["allowed_gatherer_domains"].append("test")
 				check(projected == before, "live nested changes cannot mutate published knowledge")
-				if observer > 1:
+				if observer > 0 and observer != int(entity.get("team",0)):
+					check(not projected.has("carried_amount") and not projected.has("carried_resource_type_id") and not projected.has("rally_point") and not projected.has("target_id") and not projected.has("target_building_id") and not projected.has("retaliation_target_id") and not projected.has("task") and not projected.has("diagnostic_reason"),"foreign destinations, targets and command intent remain private")
+				else:
+					check(is_equal_approx(float(projected.get("carried_amount",0)),7.5) and projected.get("rally_point")==Vector2(98.5,97.5) and int(projected.get("target_id",-1))==991,"own destinations and targets remain available")
+				if observer > 0 and observer != int(entity.get("team",0)):
 					check(not projected.has("production_queue") and not projected["components"].has("order"), "foreign production/orders remain private")
 					check(not projected["components"]["cargo"].has("passenger_ids") and not projected["components"]["trade"].has("cargo_gold"), "foreign cargo and trade remain private")
 				previous = projected

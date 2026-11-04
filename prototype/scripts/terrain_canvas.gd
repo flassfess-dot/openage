@@ -5,8 +5,11 @@ const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const NativeTerrainMesh := preload("res://scripts/native_terrain_mesh.gd")
 const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
+# Full-detail mixed terrain is intentionally expensive.  Keep enough terrain
+# ahead of the camera for its worker build and bounded GPU uploads to finish.
 const MESH_OVERSCAN_CELLS := 12
-const MESH_PREFETCH_CELLS := 6
+const MESH_PREFETCH_CELLS := 10
+const MESH_PREFETCH_LEAD_CELLS := 10
 
 var map_size := Vector2i.ONE
 var map_seed := 1
@@ -110,8 +113,19 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 	terrain_revision = next_terrain_revision
 	cached_geometry_key = geometry_key
 	var visible_bounds: Rect2i = bounds_provider.call() if bounds_provider.is_valid() else Rect2i()
-	if projection_changed or terrain_mesh == null or not _bounds_contains(terrain_mesh_bounds, visible_bounds):
-		_rebuild_terrain_mesh(async_rebuilds)
+	if projection_changed or terrain_mesh == null:
+		if async_rebuilds and _uses_world_mesh() and terrain_mesh != null:
+			_schedule_terrain_prefetch(visible_bounds, true)
+		else:
+			_rebuild_terrain_mesh(async_rebuilds)
+	elif not _bounds_contains(terrain_mesh_bounds, visible_bounds):
+		if async_rebuilds and _uses_world_mesh():
+			# Never put the full native terrain build back on the camera frame.
+			# The previous complete mesh remains visible until its replacement is
+			# ready; normal panning reaches this branch only if prefetch fell behind.
+			_schedule_terrain_prefetch(visible_bounds)
+		else:
+			_rebuild_terrain_mesh(false)
 	elif async_rebuilds and _uses_world_mesh() and not _bounds_contains(terrain_mesh_bounds, _expanded_bounds(visible_bounds, MESH_PREFETCH_CELLS)):
 		_schedule_terrain_prefetch(visible_bounds)
 	queue_redraw()
@@ -134,14 +148,26 @@ func _advance_unchanged_refinement(cells: Array, next_revision: int) -> void:
 
 
 func _invalidate_terrain_cells(cells: Array) -> void:
-	var samples: Dictionary = native_sample_cache.get("cells", {})
+	var samples: Variant = native_sample_cache.get("cells", {})
+	var bounds: Rect2i = native_sample_cache.get("bounds", Rect2i())
+	var packed_detached := false
 	for cell_value in cells:
 		var cell := Vector2i(cell_value)
-		samples.erase(cell)
+		if samples is Dictionary: samples.erase(cell)
+		elif samples is PackedInt32Array and bounds.grow(1).has_point(cell):
+			var index := (cell.y-bounds.position.y+1)*(bounds.size.x+2)+cell.x-bounds.position.x+1
+			if index >= 0 and index < samples.size():
+				# Packed arrays assigned through Variants share their storage with
+				# issued requests. Detach once before changing the retained cache.
+				if not packed_detached:
+					samples = samples.duplicate()
+					packed_detached = true
+				samples[index] = -2
 		# Borders and blends also depend on adjacent cells.
 		for y in range(-1, 2):
 			for x in range(-1, 2):
 				terrain_drawable_cache.erase(cell + Vector2i(x, y))
+	native_sample_cache["cells"] = samples
 
 
 func invalidate_content() -> void:
@@ -429,16 +455,52 @@ func _prepare_native_samples() -> void:
 		native_sample_revision = terrain_revision
 
 
-func _schedule_terrain_prefetch(visible_bounds: Rect2i) -> void:
-	if not native_enabled or native_kernel == null or refinement_task_id >= 0 or queued_refinement != null or refinement_upload != null:
+func _schedule_terrain_prefetch(visible_bounds: Rect2i, invalidate_pending: bool = false) -> void:
+	if not native_enabled or native_kernel == null:
 		return
+	# A predictive request is deliberately asymmetric, so require pending work
+	# to cover the actual view rather than a symmetric prefetch halo.  This also
+	# lets a direction reversal replace the job as soon as it matters.
+	var required_bounds := visible_bounds
+	if not invalidate_pending:
+		if queued_refinement != null and int(queued_refinement["revision"]) == terrain_revision and _bounds_contains(queued_refinement["bounds"], required_bounds):
+			return
+		if refinement_task_id >= 0 and refinement_revision == terrain_revision and _bounds_contains(refinement_bounds, required_bounds):
+			return
+		if refinement_upload != null and int(refinement_upload["revision"]) == terrain_revision and _bounds_contains(refinement_upload["bounds"], required_bounds):
+			return
+	if invalidate_pending:
+		# Geometry or visible surface content changed.  Let an already running
+		# worker finish safely, but make its generation ineligible to publish.
+		mesh_generation += 1
+	if refinement_upload != null:
+		_discard_refinement_upload()
 	_prepare_native_samples()
-	var next_bounds := _expanded_bounds(visible_bounds, MESH_OVERSCAN_CELLS)
+	var next_bounds := _prefetch_target_bounds(visible_bounds)
+	if not invalidate_pending and queued_refinement != null and int(queued_refinement["revision"]) == terrain_revision and queued_refinement["bounds"] == next_bounds:
+		return
 	var job := NativeTerrainMesh.new()
 	job.kernel = native_kernel
 	job.request = NativeTerrainMesh.capture(next_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, job.timings, native_sample_cache, native_kernel)
 	queued_refinement = {"job": job, "bounds": next_bounds, "revision": terrain_revision, "generation": mesh_generation, "prefetch": true}
 	_start_queued_refinement()
+
+
+func _prefetch_target_bounds(visible_bounds: Rect2i) -> Rect2i:
+	var lead := Vector2i.ZERO
+	if terrain_mesh_bounds.size != Vector2i.ZERO:
+		# Shift the next window toward the edge the camera is approaching.  A
+		# centred request wastes half of its build latency behind the camera and
+		# was the reason the old six-cell prefetch window repeatedly ran dry.
+		var visible_center_twice := visible_bounds.position * 2 + visible_bounds.size
+		var mesh_center_twice := terrain_mesh_bounds.position * 2 + terrain_mesh_bounds.size
+		var delta := visible_center_twice - mesh_center_twice
+		if absi(delta.x) > 2:
+			lead.x = signi(delta.x) * MESH_PREFETCH_LEAD_CELLS
+		if absi(delta.y) > 2:
+			lead.y = signi(delta.y) * MESH_PREFETCH_LEAD_CELLS
+	var anticipated_view := Rect2i(visible_bounds.position + lead, visible_bounds.size)
+	return _expanded_bounds(anticipated_view, MESH_OVERSCAN_CELLS)
 
 func _start_queued_refinement() -> void:
 	if refinement_task_id >= 0 or queued_refinement == null or refinement_upload != null: return

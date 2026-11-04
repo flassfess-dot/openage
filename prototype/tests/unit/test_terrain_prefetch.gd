@@ -44,7 +44,10 @@ func run() -> void:
 	state["material"] = 6
 	canvas.set_view_state(1, Vector2(-128, 0), Vector2(1280, 720), 1)
 	var updated: Dictionary = NativeMesh.capture(canvas.terrain_mesh_bounds, 41689, provider, world.terrain_elevation, catalog.environment_pack, canvas.terrain_atlas_regions, canvas.terrain_atlas_size)
-	check(canvas.native_sample_cache["cells"].values().all(func(slot): return slot == updated["cells"][0]), "terrain revision invalidates cached samples")
+	var cached_values: Variant = canvas.native_sample_cache["cells"]
+	if cached_values is Dictionary: cached_values = cached_values.values()
+	for slot in cached_values:
+		check(slot == updated["cells"][0], "terrain revision invalidates cached samples")
 	canvas.free()
 	for failure in failures: push_error(failure)
 	print("Terrain prefetch, exact samples and invalidation: %d failures" % failures.size())

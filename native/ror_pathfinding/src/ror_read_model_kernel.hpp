@@ -69,6 +69,9 @@ public:
     Dictionary infrastructure_site_bonuses(const Array &resources, const Array &sites, const String &kind) const;
     bool foundation_intersects_structures(const Dictionary &footprint, const Vector2 &center, const Dictionary &structures, const Dictionary &replaced) const;
     PackedByteArray walkability_mask(const Vector2i &size, const Dictionary &terrain, const Dictionary &terrain_ids, const Dictionary &occupied, const Array &restrictions, const PackedByteArray &learned, bool knowledge, const String &domain, int64_t restriction) const;
+    Dictionary surface_components(const Vector2i &size, const Dictionary &terrain, const Dictionary &terrain_ids, const Array &restrictions, const PackedByteArray &learned, bool knowledge, const String &domain, int64_t restriction) const;
+    PackedInt32Array surface_component_labels(const Vector2i &size, const Dictionary &terrain, const Dictionary &terrain_ids, const Array &restrictions, const PackedByteArray &learned, bool knowledge, const String &domain, int64_t restriction) const;
+    PackedInt32Array surface_reachability_changes(const Array &points, const Array &previous, const Dictionary &surface, const Dictionary &reachable, int64_t width) const;
     Dictionary project_control(const Dictionary &source, const Dictionary &rendered, int64_t observer, const Array &fields, const Array &private_trade_fields) const;
     Dictionary encode_replay_variant(const Variant &source, bool quantize_numbers = true) const;
     Dictionary capture_frozen(const Variant &source, const Array &trusted) const;

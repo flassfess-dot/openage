@@ -28,6 +28,8 @@ func _initialize() -> void:
 	verify_scout_mission()
 	verify_gather_retry()
 	verify_gather_allocation()
+	verify_idle_gather_recovery()
+	verify_deposit_route_filter()
 	verify_adaptive_threading()
 	for failure in failures: push_error(failure)
 	print("Adaptive AI regressions: ", failures.size(), " failures")
@@ -221,3 +223,54 @@ func base_snapshot() -> Dictionary:
 
 func check(value: bool, message: String) -> void:
 	if not value: failures.append(message)
+
+func verify_idle_gather_recovery() -> void:
+	var snapshot := base_snapshot()
+	snapshot["units"] = [{"id":100,"team":1,"hp":25.0,"pos":Vector2(4,4),"task":"idle","resource_id":300,"movement_domain":"land","components":{"worker":{"enabled":true}}}]
+	snapshot["resources"] = [{"id":300,"pos":Vector2(5,4),"amount":500,"resource_type_id":0}]
+	var policy := Policy.resolve()
+	policy["desired_stock"] = {0:500.0}
+	var state := State.new()
+	var commands: Array = Economy._gather(snapshot,41,1,policy,state,{})
+	check(commands.size()==1 and int(commands[0].params["resource_id"])==300,"idle workers retry their retained resource after an interrupted order")
+	snapshot["units"][0]["task"]="gather"
+	commands=Economy._gather(snapshot,41,1,policy,State.new(),{})
+	check(commands.is_empty(),"productive gather orders retain their route when the resource quota is satisfied")
+	snapshot["units"][0]["task"]="idle"
+	snapshot["resources"].append({"id":301,"pos":Vector2(6,4),"amount":500,"resource_type_id":0})
+	state.cooldowns["gather:100:300"]=440
+	commands=Economy._gather(snapshot,41,1,policy,state,{})
+	check(commands.size()==1 and int(commands[0].params["resource_id"])==301,"a cooling-down retained target permits a reachable alternative in the same decision")
+	policy["failed_gather_targets"]={100:{300:true}}
+	snapshot["units"][0]["task"]="gather"
+	commands=Economy._gather(snapshot,41,1,policy,State.new(),{})
+	check(commands.size()==1 and int(commands[0].params["resource_id"])==301,"a failed current gather cannot bypass the failure blacklist through the quota shortcut")
+
+func verify_deposit_route_filter() -> void:
+	var rules = preload("res://scripts/ai_economy_rules.gd")
+	var snapshot := base_snapshot()
+	snapshot["navigation"]["frontier"]={"land":[]}
+	var worker := {"pos":Vector2(4.5,4.5),"movement_domain":"land","footprint_radius":0.3,"ai_profile":{"carried_resource_type_id":0,"drop_site_kinds":["granary"]}}
+	var granary := {"id":50,"team":1,"kind":"granary","hp":200.0,"pos":Vector2(10.5,4.5),"footprint":{"half_size":Vector2(0.5,0.5)}}
+	check(not rules.has_known_deposit_route(worker,[],snapshot),"cargo without a compatible depot does not generate a futile deposit order")
+	check(not rules.has_known_deposit_route(worker,snapshot["buildings"],snapshot),"a task-specific depot restriction is respected")
+	check(not rules.has_known_deposit_route(worker,[granary],snapshot),"a fully explored disconnected component does not generate a deposit order")
+	snapshot["navigation"]["frontier"]={"land":[Vector2(7,4)]}
+	check(rules.has_known_deposit_route(worker,[granary],snapshot),"an unexplored continuation is unknown and never proves the depot unreachable")
+	snapshot["navigation"].erase("frontier")
+	check(rules.has_known_deposit_route(worker,[granary],snapshot),"missing frontier metadata never proves a depot unreachable")
+	snapshot["navigation"]["frontier"]={"land":[]}
+	var unknown_geometry := granary.duplicate(true)
+	unknown_geometry.erase("footprint")
+	check(rules.has_known_deposit_route(worker,[unknown_geometry],snapshot),"missing compact footprint dimensions never become false proof of disconnection")
+	for x in range(4,11):snapshot["navigation"]["reachable"]["land"].append(Vector2(x+0.5,4.5))
+	check(rules.has_known_deposit_route(worker,[granary],snapshot),"an explored route to a compatible depot permits normal authoritative delivery")
+	snapshot["navigation"]={}
+	check(rules.has_known_deposit_route(worker,[granary],snapshot),"missing navigation knowledge never vetoes an otherwise compatible delivery")
+
+	# A bounded prefix cannot prove that a long explored route is impossible.
+	snapshot["map_size"]=Vector2i(1024,24)
+	snapshot["navigation"]={"reachable":{"land":[]},"frontier":{"land":[]}}
+	for x in range(4,651):snapshot["navigation"]["reachable"]["land"].append(Vector2(x+0.5,4.5))
+	granary["pos"]=Vector2(650.5,4.5)
+	check(rules.has_known_deposit_route(worker,[granary],snapshot),"the 512-cell search limit preserves authoritative checks for long routes")

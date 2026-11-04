@@ -2,6 +2,7 @@ class_name RoRAiNavigationKnowledge
 extends RefCounted
 
 const Data := preload("res://scripts/isolated_task_data.gd")
+const NavigationGrid := preload("res://scripts/navigation_grid.gd")
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const DEFAULT_PREPARE_CELLS := 256
 const OFFSETS := [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]
@@ -32,16 +33,16 @@ func snapshot(world, fog, team: int, probe: Variant = null, maximum_region_units
 	last_bucket_merged_points = 0
 	last_bucket_patch_count = 0
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
-	var grid = world.navigation_grid
+	var grid = world.movement_system.knowledge.planner(world, team).grid
 	var size: Vector2i = world.map_size
-	var reach: Dictionary = _reachable_components(world, team)
+	var reach: Dictionary = _reachable_components(world, team, grid)
 	_observe_stage(probe, "reach", stage_started)
 	stage_started = Time.get_ticks_usec() if probe != null else 0
 	var entry: Dictionary = entries.get(team, {})
 	fog.ensure_player(team)
-	var topology := CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
+	var topology := _topology_changes(grid, entry.get("topology_stamp", {}))
 	var exploration := CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
-	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
+	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
 	if full_rebuild:
 		entry = _new_entry(size)
 		entry["building_full"] = true
@@ -64,6 +65,7 @@ func snapshot(world, fog, team: int, probe: Variant = null, maximum_region_units
 	entry["surface_revision"] = int(grid.surface_revision)
 	entry["exploration_revision"] = int(fog.exploration_revision_for_player(team))
 	entry["reach_signature"] = reach["signature"]
+	entry["surface_components"] = reach["surface_components"]
 	entry["topology_stamp"] = topology["stamp"]
 	entry["exploration_stamp"] = exploration["stamp"]
 	# The legacy queue remains bounded; cache correctness uses non-consuming journals.
@@ -95,7 +97,7 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
 	last_prepared_cells = 0
 	fog.ensure_player(team)
-	var grid = world.navigation_grid
+	var grid = world.movement_system.knowledge.planner(world, team).grid
 	var size: Vector2i = world.map_size
 	var entry: Dictionary = entries.get(team, {})
 	var pending: Dictionary = pending_preparations.get(team, {})
@@ -103,13 +105,13 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 	# Do not re-scan its reachability and journals for every eight actors.
 	var pin_source := [world.entity_changes.epoch, world.entity_changes.revision, grid.cache_epoch, grid.revision, fog.revision_for_player(team)] if world.read_generation_pins > 0 else []
 	var reuse_dependencies: bool = not pin_source.is_empty() and pending.get("pin_source") == pin_source and pending.has("dependencies")
-	var topology: Dictionary = pending["dependencies"]["topology"] if reuse_dependencies else CacheDependency.changes(world, CacheDependency.NAVIGATION_TOPOLOGY, entry.get("topology_stamp", {}))
+	var topology: Dictionary = pending["dependencies"]["topology"] if reuse_dependencies else _topology_changes(grid, entry.get("topology_stamp", {}))
 	var exploration: Dictionary = pending["dependencies"]["exploration"] if reuse_dependencies else CacheDependency.changes(world, CacheDependency.FOG_EXPLORATION, entry.get("exploration_stamp", {}), team)
-	var reach: Dictionary = pending["dependencies"]["reach"] if reuse_dependencies else _reachable_components(world, team)
+	var reach: Dictionary = pending["dependencies"]["reach"] if reuse_dependencies else _reachable_components(world, team, grid)
 	_observe_stage(probe, "prepare.dependencies", stage_started)
 	stage_started = Time.get_ticks_usec() if probe != null else 0
-	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or int(entry.get("surface_revision", -1)) != int(grid.surface_revision) or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
-	var signature := [topology["stamp"], CacheDependency.stamp(world, CacheDependency.NAVIGATION_SURFACE), exploration["stamp"], reach["signature"]]
+	var full_rebuild: bool = entry.is_empty() or entry.get("size") != size or bool(topology["full"]) or not bool(topology["exact"]) or bool(exploration["full"]) or not bool(exploration["exact"])
+	var signature := [topology["stamp"], [grid.get_instance_id(), grid.cache_epoch, grid.surface_revision], exploration["stamp"], reach["signature"]]
 	if pending.is_empty() or pending.get("signature") != signature:
 		var indices: Array = []
 		if full_rebuild:
@@ -139,6 +141,7 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 		entry["surface_revision"] = int(grid.surface_revision)
 		entry["exploration_revision"] = int(fog.exploration_revision_for_player(team))
 		entry["reach_signature"] = reach["signature"]
+		entry["surface_components"] = reach["surface_components"]
 		entry["topology_stamp"] = topology["stamp"]
 		entry["exploration_stamp"] = exploration["stamp"]
 		fog.track_navigation_exploration(team)
@@ -165,6 +168,19 @@ func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPAR
 	return true
 
 
+# Observe the team's legal grid journal, not the authoritative world journal.
+# An obstacle can change while hidden and become visible later without another
+# world revision. Its legal discovery must still invalidate the publication.
+func _topology_changes(grid, previous: Dictionary) -> Dictionary:
+	var current := {"source_id": grid.get_instance_id(), "epoch": grid.cache_epoch, "revision": grid.revision}
+	var before := int(previous.get("revision", -1))
+	if previous.get("source_id") != current["source_id"] or previous.get("epoch") != current["epoch"]:
+		before = -1
+	var delta: Dictionary = CacheDependency.Journal.delta(grid._change_log, before, grid.revision)
+	delta["stamp"] = current
+	return delta
+
+
 func _dirty_cell_indices(entry: Dictionary, topology: Dictionary, exploration: Dictionary, reach: Dictionary, size: Vector2i) -> Array:
 	var dirty: Dictionary = {}
 	for cell_value in topology["cells"]:
@@ -177,9 +193,34 @@ func _dirty_cell_indices(entry: Dictionary, topology: Dictionary, exploration: D
 			var neighbor: Vector2i = cell + offset
 			if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < size.x and neighbor.y < size.y:
 				dirty[neighbor.y * size.x + neighbor.x] = true
-	if entry.get("reach_signature") != reach["signature"]:
-		for index in entry["known"]:
-			dirty[index] = true
+	# A surface edit can relabel distant components while actor IDs stay equal.
+	# Compare the old published membership with the new terrain labels. Only
+	# cells whose answer changed need the full eight-bucket projection again.
+	if entry.get("reach_signature") != reach["signature"] or int(entry.get("surface_revision", -1)) != int(reach["surface_revision"]):
+		var previous_surfaces: Dictionary = entry.get("surface_components", {})
+		var previous_reach: Array = entry.get("reach_signature", [[], []])
+		for domain_index in range(2):
+			var domain := "land" if domain_index == 0 else "water"
+			var surface: Dictionary = reach["surface_components"].get(domain, {})
+			if previous_reach[domain_index] == reach["signature"][domain_index] and previous_surfaces.has(domain) and is_same(previous_surfaces[domain], surface): continue
+			var previously: Array = entry["buckets"]["reachable_" + domain]
+			var components: Dictionary = reach[domain]
+			if components.is_empty():
+				for point in previously: dirty[int(point.y) * size.x + int(point.x)] = true
+				continue
+			var kernel: Variant = NavigationGrid.mask_kernel
+			if NavigationGrid.native_masks_enabled and kernel != null and kernel.has_method("surface_reachability_changes"):
+				for index in kernel.surface_reachability_changes(entry["buckets"][domain], previously, surface, components, size.x): dirty[int(index)] = true
+				continue
+			var labels: PackedInt32Array = surface.get("labels", PackedInt32Array())
+			var old_cursor := 0
+			for point in entry["buckets"][domain]:
+				var cell := Vector2i(point)
+				var index := cell.y * size.x + cell.x
+				var included: bool = old_cursor < previously.size() and previously[old_cursor] == point
+				if included: old_cursor += 1
+				var component: int = int(labels[index]) if not labels.is_empty() else int(surface.get(cell, -1))
+				if included != components.has(component): dirty[index] = true
 	var indices: Array = dirty.keys()
 	indices.sort()
 	return indices
@@ -310,15 +351,15 @@ func _bucket_position(bucket: Array, point: Vector2) -> int:
 	return low
 
 
-func _reachable_components(world, team: int) -> Dictionary:
+func _reachable_components(world, team: int, grid) -> Dictionary:
 	var journal = world.entity_changes
 	var cached: Dictionary = reach_caches.get(team, {})
 	var delta: Dictionary = journal.changes_since(int(cached.get("cursor", -1)) if int(cached.get("epoch", -1)) == int(journal.epoch) else -1)
-	var full: bool = cached.is_empty() or bool(delta["full"]) or cached.get("surface", -1) != world.navigation_grid.surface_revision
+	var full: bool = cached.is_empty() or bool(delta["full"]) or cached.get("surface", -1) != grid.surface_revision or cached.get("surface_grid") != grid
 	if full:
 		cached = {"rows": {}, "units": {"land": {}, "water": {}}, "buildings": {"land": {}, "water": {}}}
 		var rows: Array = world.entity_read_index.legal_entities(world, team, "units") + world.entity_read_index.legal_entities(world, team, "buildings")
-		for row in rows: _update_reach_actor(world, team, cached, row)
+		for row in rows: _update_reach_actor(world, team, cached, row, grid)
 	else:
 		for id in delta["ids"]:
 			if not (int(delta["masks"][id]) & (1 | 2 | 8 | 128)): continue
@@ -330,10 +371,11 @@ func _reachable_components(world, team: int) -> Dictionary:
 				cached["rows"].erase(id)
 			var row: Variant = world.find_unit(int(id))
 			if row == null: row = world.find_building(int(id))
-			if row != null: _update_reach_actor(world, team, cached, row)
+			if row != null: _update_reach_actor(world, team, cached, row, grid)
 	cached["cursor"] = int(delta["revision"])
 	cached["epoch"] = int(journal.epoch)
-	cached["surface"] = world.navigation_grid.surface_revision
+	cached["surface"] = grid.surface_revision
+	cached["surface_grid"] = grid
 	reach_caches[team] = cached
 	var components := {"land": cached["units"]["land"].duplicate(), "water": cached["units"]["water"].duplicate()}
 	if components["land"].is_empty(): components["land"] = cached["buildings"]["land"].duplicate()
@@ -342,14 +384,16 @@ func _reachable_components(world, team: int) -> Dictionary:
 	land_keys.sort()
 	water_keys.sort()
 	components["signature"] = [land_keys, water_keys]
+	components["surface_revision"] = grid.surface_revision
+	components["surface_components"] = {"land": grid.surface_component_cache.get("land:-1", {}), "water": grid.surface_component_cache.get("water:-1", {})}
 	return components
 
-func _update_reach_actor(world, team: int, cached: Dictionary, row: Dictionary) -> void:
+func _update_reach_actor(world, team: int, cached: Dictionary, row: Dictionary, grid) -> void:
 	if int(row.get("team", 0)) != team or float(row.get("hp", 0.0)) <= 0.0: return
 	var domain := String(row.get("movement_domain", "land"))
 	if domain not in ["land", "water"]: domain = "land"
 	var category := "buildings" if world.find_building(int(row["id"])) != null else "units"
-	var component: int = world.navigation_grid.surface_component_id(Vector2i(Vector2(row["pos"])), domain)
+	var component: int = grid.surface_component_id(Vector2i(Vector2(row["pos"])), domain)
 	if component < 0: return
 	cached[category][domain][component] = int(cached[category][domain].get(component, 0)) + 1
 	cached["rows"][int(row["id"])] = [category, domain, component]

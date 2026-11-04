@@ -29,6 +29,11 @@ func _initialize() -> void:
 	MatchBootstrap.apply(world, built["definition"], built["map_data"])
 	var target: Dictionary = world.get_buildings().filter(func(building): return int(building.get("team", 0)) == 1 and String(building.get("kind", "")) == "town_center")[0]
 	var origin: Dictionary = world.get_units().filter(func(unit): return int(unit.get("team", 0)) == 2 and String(unit.get("kind", "")) == "villager")[0]
+	# V6 permits natural forest barriers between settlements (WORLD_V6).
+	# Test local attack-space geometry independently of an enemy's land link;
+	# crossing a closed forest requires legal chopping or a naval operation.
+	if int(settings.get("landscape_version",3))>=6:
+		origin=world.get_units().filter(func(unit): return int(unit.get("team",0))==1 and String(unit.get("kind",""))=="villager")[0]
 	var center := Vector2(target["pos"])
 	var near_resources: Array = world.get_resources().filter(func(resource): return Vector2(resource.get("pos", Vector2.ZERO)).distance_to(center) <= 7.0)
 	var reachable := 0

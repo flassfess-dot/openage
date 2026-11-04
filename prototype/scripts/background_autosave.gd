@@ -8,6 +8,7 @@ const Checkpoint := preload("res://scripts/game_checkpoint.gd")
 const Loading := preload("res://scripts/navigation_loading.gd")
 const SaveTask := preload("res://scripts/background_save_task.gd")
 const Archive := preload("res://scripts/game_save_archive.gd")
+const ProcessChannel := preload("res://scripts/autosave_process_channel.gd")
 const INTERVAL_SECONDS := 60.0
 const FIRST_SAVE_SECONDS := 15.0
 const RECOVERY_SLICE_USEC := 2000
@@ -31,6 +32,12 @@ var _job: Dictionary = {}
 var _result: Dictionary = {}
 var _stage := ""
 var _sent_commands := 0
+var _seed_command_count := 0
+var _process_channel
+var _process_fallback := false
+var worker_process_isolated := false
+var recovery_full_ai_views := false
+var last_initialization_us := 0
 
 func seed_from(world, controller, definition: Dictionary, map: Dictionary, catalogs: Dictionary) -> void:
 	shutdown()
@@ -38,14 +45,26 @@ func seed_from(world, controller, definition: Dictionary, map: Dictionary, catal
 	next_save = FIRST_SAVE_SECONDS
 	last_tick = -1
 	last_error = ""
+	last_initialization_us = 0
 	# Loading work only. Every packed array, including learned navigation cells,
 	# must be detached before the live match resumes.
-	_seed = {"checkpoint": Checkpoint.capture(world, controller, definition, map), "catalogs": catalogs.duplicate(true), "replay": controller.replay_recorder.to_dictionary()}
+	_process_channel = ProcessChannel.new()
+	var process_available: bool = _process_channel.supported()
+	_seed = {"checkpoint": Checkpoint.capture(world, controller, definition, map, not process_available), "catalogs": catalogs if process_available else catalogs.duplicate(true), "replay": controller.replay_recorder.to_dictionary(), "recovery_full_ai_views": recovery_full_ai_views}
 	_sent_commands = controller.replay_recorder.issuance_records.size()
+	_seed_command_count = _sent_commands
 	_clean_abandoned_staging()
 	_stage = save_path.get_base_dir().path_join(".autosave-%d-%d.pending" % [OS.get_process_id(), get_instance_id()])
 	_stop = false
-	var error := _thread.start(_run, Thread.PRIORITY_LOW)
+	_process_fallback = false
+	if process_available and _process_channel.prepare(_seed, _stage, _seed_command_count):
+		_seed = {}
+	else:
+		if process_available:
+			_seed["checkpoint"]=Checkpoint.capture(world,controller,definition,map)
+			_seed["catalogs"]=catalogs.duplicate(true)
+		_process_channel = null
+	var error := _thread.start(_run_process if _process_channel != null else _run, Thread.PRIORITY_LOW)
 	if error != OK:
 		_seed = {}
 		last_error = "autosave_thread:%d" % error
@@ -60,9 +79,12 @@ func submit(input: Dictionary, world, controller) -> bool:
 	if busy or not _thread.is_started(): return false
 	var started := Time.get_ticks_usec()
 	var recorder = controller.replay_recorder
+	if _process_channel != null and not _process_fallback and _process_channel.needs_reseed(): _sent_commands=_seed_command_count
+	input["sent_from"]=_sent_commands
 	input["new_commands"] = recorder.issuance_records.slice(_sent_commands).duplicate(true)
 	input["anchor"] = state_anchor(world, controller)
-	_sent_commands = recorder.issuance_records.size()
+	input["sent_until"] = recorder.issuance_records.size()
+	if _process_channel == null or _process_fallback: _sent_commands = recorder.issuance_records.size()
 	last_capture_us = Time.get_ticks_usec() - started
 	next_save = elapsed + INTERVAL_SECONDS
 	_mutex.lock()
@@ -79,6 +101,10 @@ func poll() -> Dictionary:
 	_mutex.unlock()
 	if result.is_empty(): return {}
 	busy = false
+	if bool(result.get("restart_from_seed",false)): _sent_commands = _seed_command_count
+	elif bool(result.get("transport_delivered",false)): _sent_commands = int(result["sent_until"])
+	worker_process_isolated = bool(result.get("worker_process_isolated",false))
+	last_initialization_us = int(result.get("initialization_us", 0))
 	last_worker_us = int(result.get("worker_us", 0))
 	worker_pool_shared = bool(result.get("worker_pool_shared", true))
 	var error := int(result.get("error", ERR_INVALID_DATA))
@@ -100,10 +126,43 @@ func _cancelled() -> bool:
 	_mutex.unlock()
 	return stopped
 
+func _run_process() -> void:
+	while true:
+		_wake.wait()
+		if _cancelled(): break
+		_mutex.lock()
+		var input := _job
+		_job = {}
+		_mutex.unlock()
+		if input.is_empty(): continue
+		var started := Time.get_ticks_usec()
+		var result: Dictionary = _process_channel.run_job(input,_cancelled)
+		if _cancelled(): break
+		# A platform/job restriction preserves the existing thread fallback.
+		if bool(result.get("unavailable",false)):
+			var seed_message := ProcessChannel.read_message(_stage+".seed")
+			if seed_message.get("seed") is Dictionary:
+				_seed=seed_message["seed"]
+				_mutex.lock()
+				_process_fallback=true
+				_sent_commands=int(input["sent_until"])
+				_job=input
+				_mutex.unlock()
+				_wake.post()
+				_run()
+				break
+		result["worker_us"]=Time.get_ticks_usec()-started
+		result["worker_pool_shared"]=false
+		_mutex.lock()
+		_result=result
+		_mutex.unlock()
+	_process_channel.stop()
+
 func _run() -> void:
 	# Do not allocate a second world until an autosave is actually due.
 	_wake.wait()
 	if _cancelled(): return
+	var initialization_started := Time.get_ticks_usec()
 	var seed := _seed
 	_seed = {}
 	var data: Dictionary = seed["checkpoint"]
@@ -125,6 +184,7 @@ func _run() -> void:
 	var history: Dictionary = seed["replay"]
 	var preparation := Loading.new()
 	preparation.coordinator.enabled = false
+	preparation.prepare_ai_views = bool(seed.get("recovery_full_ai_views", false))
 	# Loading also establishes durable fog/resource memory for AI observers.
 	# Recovery must follow that contract even though its orders are recorded.
 	preparation.begin(world, definition.get("players", []), false)
@@ -137,6 +197,7 @@ func _run() -> void:
 	# The durable fog/resource observation above is required for checkpoint
 	# equality. Recovery never asks AI to plan, so release its derived views.
 	world.ai_navigation_knowledge.clear()
+	var initialization_us := Time.get_ticks_usec() - initialization_started
 	seed = {}
 	data = {}
 	var codec := Replay.new()
@@ -178,9 +239,10 @@ func _run() -> void:
 			input["path"] = _stage
 			input["atomic_replace"] = true
 			input["replay"] = history
-			input["checkpoint"] = Checkpoint.capture(world, controller, definition, map)
+			input["checkpoint"] = Checkpoint.capture(world, controller, definition, map, false)
 			result = SaveTask.run(input)
 		result["worker_us"] = Time.get_ticks_usec() - started
+		result["initialization_us"] = initialization_us
 		result["worker_pool_shared"] = world.task_coordinator.enabled
 		# Release materialized checkpoint storage on the worker.
 		input = {}
@@ -200,7 +262,7 @@ func _clean_abandoned_staging() -> void:
 	var directory := DirAccess.open(save_path.get_base_dir())
 	if directory == null: return
 	for filename in directory.get_files():
-		if not filename.begins_with(".autosave-") or not (filename.ends_with(".pending") or filename.ends_with(".pending.tmp") or filename.ends_with(".pending.bak")): continue
+		if not filename.begins_with(".autosave-") or not [".pending",".pending.tmp",".pending.bak",".pending.seed",".pending.job",".pending.job.tmp",".pending.result",".pending.result.tmp",".pending.worker.log"].any(func(suffix):return filename.ends_with(suffix)): continue
 		var pid := int(filename.trim_prefix(".autosave-").get_slice("-", 0))
 		if pid > 0 and not OS.is_process_running(pid): directory.remove(filename)
 
@@ -211,6 +273,9 @@ func shutdown() -> void:
 		_mutex.unlock()
 		_wake.post()
 		_thread.wait_to_finish()
+	if _process_channel != null: _process_channel.clear()
+	_process_channel=null
+	worker_process_isolated=false
 	_thread = Thread.new()
 	_wake = Semaphore.new()
 	_seed = {}

@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "status": "IMPLEMENTED_TARGETED_CONTRACTS_PASSED_FINAL_ACCEPTANCE_PENDING",
+  "date": "2026-11-01",
+  "human_strength": "HUMAN_UNMEASURED",
+  "scope": "Five previously missing AI algorithms together; editor functional contracts with official R16 native and four small preliminary performance cases. Standard R18 build and full513 are in progress. No final strength/FPS claim.",
+  "sources": {
+    "prototype/scripts/ai_belief_model.gd": "3f7bdaf280fb7bbe44290d18947030a579eec7aca15702c22e545cfdf1205e26",
+    "prototype/scripts/ai_builder_model.gd": "175f41accd143553a2e5f160b8f5076b18b22f6b5e1b47c9a7d896830ddebac3",
+    "prototype/scripts/ai_economy_construction.gd": "96b290bc2a1b1d1dbffe3d654cf17790a4d35569d424f9121b1dc54405bb6e3d",
+    "prototype/scripts/ai_economy_production.gd": "31f28990ac75776011cc5d4f5d3de2af9dea49c452024eac235e8a93c500a0cd",
+    "prototype/scripts/ai_macro_plan.gd": "389dd64872ae43a45e8504a0a11dc96a4dd2f873e274b7c21cc82e3b06ebf952",
+    "prototype/scripts/ai_operations.gd": "13de2c87615ee6baf84772640b54fea1e1cf7a8946b35038ce7d19dd5d4ebf9c",
+    "prototype/scripts/ai_player.gd": "6facf9900af7243ac9297f279dae55d3059105a316165a36767f87ea520fbb72",
+    "prototype/scripts/ai_production_forecast.gd": "d1ba542f79d5322ad13d3fb3993353eda6aeb48a5fe62b29bcd598de20a9a134",
+    "prototype/scripts/ai_scout_information.gd": "05d739cfc58737e3bbb0dc6c2e61ff416b13f9519dd3a2bc34f5d66a8c23f01a",
+    "prototype/scripts/ai_strategy_state.gd": "bf8933a0c41ac5e35bdd5e4e8f0f7e2c02a71ee02e526d03493c8a3dfff5dfbf",
+    "prototype/scripts/simulation_observation_queries.gd": "471cf59be4b7c371b2a238b6a018198e7502718c12699b771cfa0925f1d92b89",
+    "prototype/scripts/worker_role_system.gd": "2b4114bbec1d0745051d0a7d2ef154ff6714ad9a00df90ec62b1f4b225a54d29",
+    "prototype/tools/ai_performance_runner.gd": "206b0998eb7b847456fc50f35bbc97cd5b863adbdd11e4f5b16a921ac1e9aa07",
+    "prototype/tests/unit/test_ai_competitive_knowledge.gd": "1cdaba96eb6938ce832572043747ded63f93c67734482f09704e703684864b42",
+    "prototype/tests/unit/test_ai_competitive_macro.gd": "cca34b2cc4bbaffeb3d9bb33aacd18765c6c64adfbd0280f7bb40d88b08aa474",
+    "prototype/tests/unit/test_ai_competitive_strategy.gd": "5fdbbf6c57834189e48a2b779d21177dbbb0e47acdde482312c96aa86fd16a30",
+    "prototype/tests/unit/test_ai_scout_regions.gd": "2b11805e5798bbdb46e16c360a142d94917007032bff4b762f2f1455ce9dfd1a",
+    "prototype/tests/integration/test_cooperative_worker_orders.gd": "d8c7b4769cc2c76d6dd7f11471a8985481e9fde4ebaf9b8afde6923f9767bc9f"
+  },
+  "checks": {
+    "functional_scripts": 15,
+    "all_functional_passed": true,
+    "prior_r16_archive": {
+      "exact_ai_restore": true,
+      "advanced_from_tick": 110,
+      "advanced_to_tick": 120,
+      "pending": false
+    },
+    "small_preliminary_performance": {
+      "cases": 4,
+      "world_and_ai_equal_sequential_threaded": true,
+      "teams": 2,
+      "units_per_team": 50,
+      "map_side": 48,
+      "ticks": 12,
+      "graphical_fps": false
+    }
+  },
+  "bounds": {
+    "route_updates_per_observation": 2,
+    "route_cells": 64,
+    "route_hypotheses": 16,
+    "builder_candidates": 32,
+    "maximum_builder_crew": 16,
+    "active_foundation_crew_evaluations_per_macro": 1,
+    "production_enemy_samples": 32,
+    "production_own_producers": 128,
+    "scout_questions": 12,
+    "scout_enemy_interests": 6,
+    "scout_resource_samples": 64
+  },
+  "limitations": [
+    "Upgrade probabilities and switching opportunity are planning estimates, not calibrated enemy technology facts. Tactical combat profiles remain observed facts.",
+    "Scout information ranks legal regional frontier points; no new fully-explored-map patrol routine is claimed.",
+    "Opening context uses legal learned terrain and own civilization/capabilities; no hidden map geography.",
+    "Full513, final26, actual rendered performance, finite tuning, holdout/challenge, all13 acceptance, final commit/push/ZIP remain pending."
+  ],
+  "local_evidence": {
+    "targeted_qualification_sha256": "8691dbbbe2c0428810252d892c392e45d2c754d819d74e1b529ad7d6dbc4980f",
+    "prior_archive_process_sha256": "54ae737d1e806fa0e6ca5586b5e032185626e236e0b80c669cc36059a41b0dc0",
+    "preliminary_performance_summary_sha256": "2d702874b76119ba38d87d57c49875e8a7c7a334d6f417ab909dda0cf8f7bf36",
+    "promotion_sha256": "26dcaffc17c9876d6b5e14ebbd24e5f4eb7669a5f823f4da8bf4144446d32061"
+  }
+}

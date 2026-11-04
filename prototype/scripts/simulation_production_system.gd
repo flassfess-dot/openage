@@ -25,6 +25,9 @@ var option_template_cache_bytes := 0
 var option_template_sizes: Dictionary = {}
 var option_template_cache_enabled := true
 var option_template_cache: Dictionary = {}
+const MAX_SPAWN_GEOMETRY_ENTRIES := 128
+var spawn_geometry_cache_enabled := true
+var spawn_geometry_cache: Dictionary = {}
 
 
 func _init(simulation_world) -> void:
@@ -32,6 +35,7 @@ func _init(simulation_world) -> void:
 
 
 func reset() -> void:
+	spawn_geometry_cache.clear()
 	next_order_id = 1
 	last_production_failure = ""
 	last_research_failure = ""
@@ -99,6 +103,7 @@ func register_building(building_id: int) -> void:
 
 
 func unregister_building(building_id: int) -> void:
+	spawn_geometry_cache.erase(building_id)
 	active_building_ids.erase(building_id)
 	building_order_by_id.erase(building_id)
 
@@ -148,7 +153,7 @@ func enqueue_unit(building_id: int, team: int, kind: String, enforce_runtime_rul
 	var queue: Array = building.get("production_queue", [])
 	var cost: Dictionary = availability.get("cost", {})
 	var population_cost := int(availability.get("population_cost", 0))
-	world.economy_system.spend(team, cost)
+	world.economy_system.spend(team, cost,"production")
 	var duration := float(availability.get("duration", 0.05))
 	var order := {
 		"id": next_order_id,
@@ -250,7 +255,7 @@ func enqueue_research(building_id: int, team: int, technology_id: int) -> Varian
 		return null
 	var queue: Array = building.get("production_queue", [])
 	var cost: Dictionary = availability.get("cost", {})
-	world.economy_system.spend(team, cost)
+	world.economy_system.spend(team, cost,"research")
 	world.technology_system.mark_researching(team, technology_id)
 	var order := {
 		"id": next_order_id,
@@ -469,6 +474,41 @@ func set_rally_point(building_id: int, target: Vector2, show_flag: bool = true) 
 
 
 func free_spawn_position(building: Dictionary, kind: String) -> Variant:
+	if not spawn_geometry_cache_enabled:
+		return _free_spawn_position_uncached(building, kind)
+	var grid = world.get_navigation_grid()
+	var team := int(building.get("team", 0))
+	var half_size: Vector2 = building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))
+	var signature := [world.cache_epoch, world.data_repository.revision, world.technology_system.revision(team), world.civilization_by_team.get(team, 13), grid.get_instance_id(), grid.cache_epoch, grid.revision, grid.surface_revision, world.get_map_size(), building["pos"], half_size, kind]
+	var id := int(building.get("id", -1))
+	var entry: Dictionary = spawn_geometry_cache.get(id, {})
+	if entry.get("signature") != signature:
+		var unit_footprint := Footprint.mobile(kind, world.unit_stats(kind))
+		var radius := float(unit_footprint.get("movement_radius", 0.3))
+		var source: Dictionary = world.object_record_for(kind, team)
+		var restriction := int(source.get("links", {}).get("terrain_restriction", world.unit_stats(kind).get("terrain_restriction", -1)))
+		var domain := "water" if restriction == 3 else "land"
+		var points: Array[Vector2] = []
+		for slot_index in range(24):
+			var angle := TAU * float(slot_index) / 24.0
+			var candidate := Coordinates.clamp_world(Vector2(building["pos"]) + Vector2(cos(angle) * (half_size.x + radius + 0.35), sin(angle) * (half_size.y + radius + 0.35)), world.get_map_size())
+			if grid.is_position_walkable_for(candidate, radius, domain, restriction): points.append(candidate)
+		entry = {"signature": signature, "radius": radius, "points": points}
+		if not spawn_geometry_cache.has(id) and spawn_geometry_cache.size() >= MAX_SPAWN_GEOMETRY_ENTRIES:
+			spawn_geometry_cache.erase(spawn_geometry_cache.keys()[0])
+		spawn_geometry_cache[id] = entry
+	# Cache only terrain/obstruction geometry. Mobile occupancy must be queried
+	# on every attempt so an exit opens on the very tick its occupant moves.
+	var unit_radius := float(entry["radius"])
+	for candidate in entry["points"]:
+		var neighbors: Array = world.query_units_near(candidate, unit_radius + 0.7)
+		if neighbors.any(func(unit): return float(unit.get("hp", 0.0)) > 0.0 and Vector2(unit["pos"]).distance_to(candidate) < float(unit.get("footprint_radius", 0.3)) + unit_radius + 0.06):
+			continue
+		return candidate
+	return null
+
+
+func _free_spawn_position_uncached(building: Dictionary, kind: String) -> Variant:
 	var unit_footprint := Footprint.mobile(kind, world.unit_stats(kind))
 	var unit_radius := float(unit_footprint.get("movement_radius", 0.3))
 	var source: Dictionary = world.object_record_for(kind, int(building.get("team", 0)))

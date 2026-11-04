@@ -14,7 +14,23 @@ func _init(simulation_world) -> void:
 
 
 func assign_reachable_slot(worker: Dictionary, candidates: Array[Vector2], reservations: Dictionary, respect_footprints: bool = false) -> Variant:
-	for candidate in available_slots(worker, candidates, reservations, respect_footprints):
+	var available:=available_slots(worker,candidates,reservations,respect_footprints)
+	if respect_footprints and String(worker.get("task",""))=="gather":
+		# Euclidean-nearest can lie behind the mineral/forest cluster, requiring
+		# a map-sized detour. Minimize actual route length among bounded slots.
+		var origin:=Vector2(worker["pos"])
+		var planner=world.movement_system.knowledge.planner(world,int(worker["team"]))
+		var best: Variant=null; var best_cost:=INF
+		for candidate in available.slice(0,32):
+			if origin.distance_to(candidate)>=best_cost: break
+			var route: Array[Vector2]=planner.find_path(origin,candidate,String(worker["movement_domain"]),int(worker["terrain_restriction"]),float(worker["footprint_radius"]))
+			if route.is_empty() or route.back().distance_squared_to(candidate)>0.0144: continue
+			var cursor:=origin; var cost:=0.0
+			for point in route: cost+=cursor.distance_to(point); cursor=point
+			if cost<best_cost: best=candidate; best_cost=cost
+		if best is Vector2 and resume(worker,best): return best
+		return null
+	for candidate in available:
 		if resume(worker, candidate):
 			return candidate
 	return null
@@ -90,13 +106,13 @@ func resume(worker: Dictionary, slot: Vector2) -> bool:
 	return not worker["path"].is_empty() and Vector2(worker["path"].back()).distance_squared_to(slot) <= 0.0144
 
 
-func resource_slot_occupied(worker: Dictionary, candidate: Vector2) -> bool:
+func resource_slot_occupied(worker: Dictionary, candidate: Vector2, minimum_clearance: float = -1.0) -> bool:
 	# Resource types keep separate reservation tables. Inspect adjacent cells as
 	# well so neighbouring trees or bushes cannot reserve overlapping positions.
-	return _resource_slot_occupied(worker, candidate, world)
+	return _resource_slot_occupied(worker, candidate, world,minimum_clearance)
 
 
-func _resource_slot_occupied(worker: Dictionary, candidate: Vector2, simulation_world) -> bool:
+func _resource_slot_occupied(worker: Dictionary, candidate: Vector2, simulation_world, minimum_clearance: float = -1.0) -> bool:
 	var map_width: int = simulation_world.map_size.x
 	var map_height: int = simulation_world.map_size.y
 	var resources_by_cell: Dictionary = simulation_world.resource_nodes_by_cell
@@ -113,6 +129,7 @@ func _resource_slot_occupied(worker: Dictionary, candidate: Vector2, simulation_
 						continue
 					var other: Variant = units_by_id.get(int(other_id))
 					var separation := Footprint.separation_distance(worker, other) if other != null else float(worker.get("footprint_radius", 0.3)) * 2.0 + Footprint.DEFAULT_CLEARANCE
+					if minimum_clearance>=0.0: separation=float(worker.get("footprint_radius",0.3))+float(other.get("footprint_radius",0.3) if other!=null else worker.get("footprint_radius",0.3))+minimum_clearance
 					if Vector2(slots[other_id]).distance_squared_to(candidate) < separation * separation:
 						return true
 	return false

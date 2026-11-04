@@ -35,6 +35,27 @@ func profile_for_task(worker: Dictionary, task_name: String) -> Dictionary:
 	return worker_runtime.get("worker_task_profiles", {}).get(task_name, {}).duplicate(true)
 
 
+# Read-only forecast of the same role source and own persistent attribute-13
+# effects applied below. Querying a future task must not change a live worker.
+func expected_task_work_rate(worker: Dictionary, task_name: String) -> float:
+	var base: Dictionary=worker.get("_worker_base_task",{}).get("worker_component",worker.get("components",{}).get("worker",{}))
+	var fallback:=maxf(0.01,float(base.get("work_rate",1.0)))
+	var profile:=profile_for_task(worker,task_name)
+	var source_id:=int(profile.get("role_source_unit_id",-1))
+	if source_id<0: return fallback
+	var source: Dictionary=world.object_record_by_id(source_id,int(worker.get("team",0)))
+	if source.is_empty(): return fallback
+	var rate:=maxf(0.01,float(source.get("work_rate",1.0)))
+	var resolved_id:=int(source.get("unit_id",-1))
+	for effect_value in world.technology_system.persistent_entity_effects(int(worker.get("team",0))):
+		var effect: Dictionary=effect_value
+		if int(effect.get("attr_c",-1))!=13 or not _effect_matches_source(effect,source,resolved_id): continue
+		var raw:=int(effect.get("type_id",-1))
+		var operation:=raw%10 if raw>=10 and raw<30 else raw
+		rate=maxf(0.01,_apply_effect_operator(rate,operation,float(effect.get("attr_d",0.0))))
+	return rate
+
+
 func profile_for_hunt(worker: Dictionary, target: Dictionary) -> Dictionary:
 	var target_runtime: Dictionary = world.data_repository.runtime_metadata(String(target.get("kind", "")))
 	var profile_name := String(target_runtime.get("worker_profile", "hunt"))

@@ -42,6 +42,9 @@ func run() -> void:
 	var scheduler := Autosave.new()
 	check(not scheduler.advance(120, false) and scheduler.elapsed == 0, "paused/loading/network time does not count")
 	world.shutdown_derived_state()
+	var channel=preload("res://scripts/autosave_process_channel.gd").new()
+	if channel.supported():
+		failures.append_array(await preload("res://tests/support/autosave_process_contract.gd").verify(self,DIRECTORY.path_join("process-%d/автосохранение.json" % OS.get_process_id())))
 	for failure in failures: push_error(failure)
 	print("Autosave archive: ", failures.size(), " failures")
 	quit(0 if failures.is_empty() else 1)

@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "status": "REVISED_CURRENT_SOURCE_FILTER_QUALIFIED_FINAL_PROMOTION_PENDING",
+  "human_strength": "HUMAN_UNMEASURED",
+  "before_transport_sha256": "3fcf77084c41a7528a33db487a938897e0df5cc3dccfc8de93652a1f6bbd6426",
+  "after_transport_sha256": "f7a1693f1df473a70a2462e4e7689c7a670fab820233d1484a9f3239b2431ff1",
+  "native_sha256": "0ff22cb00b5a6dec20e4b58899d0093abd24b0c7ff75cf95d07bf362272e5839",
+  "legacy_exact_world_commands_ai_parity": true,
+  "same_allied_test_as_failed": true,
+  "physical_comparisons": {
+    "before-competitive": {
+      "passed": true,
+      "tick": 841,
+      "reboarded_arrived_troops": 2,
+      "accepted_types": {
+        "board": 5,
+        "formation_move": 1,
+        "move": 3,
+        "unload": 2
+      },
+      "fresh": false
+    },
+    "before-legacy": {
+      "passed": true,
+      "tick": 821,
+      "reboarded_arrived_troops": 0,
+      "accepted_types": {
+        "board": 3,
+        "formation_move": 1,
+        "move": 3,
+        "unload": 2
+      },
+      "fresh": false
+    },
+    "after-competitive": {
+      "passed": true,
+      "tick": 821,
+      "reboarded_arrived_troops": 0,
+      "accepted_types": {
+        "board": 3,
+        "formation_move": 1,
+        "move": 3,
+        "unload": 2
+      },
+      "fresh": true
+    },
+    "after-legacy": {
+      "passed": true,
+      "tick": 821,
+      "reboarded_arrived_troops": 0,
+      "accepted_types": {
+        "board": 3,
+        "formation_move": 1,
+        "move": 3,
+        "unload": 2
+      },
+      "fresh": true
+    }
+  },
+  "fresh_linked_contracts": 5,
+  "all_linked_passed": true,
+  "rejected_candidate": {
+    "sha256": "ee5a6113ad70abc7f6b3b9875184b3cd9fca489e2d184ce9b7fa6c1c05118a19",
+    "linked_failure_sha256": "29ac9089dbba0b6b7ee244769e57584b5eb90cc8b545182c8a546cb3f899a846",
+    "cause": "Nearest-known-land fallback was incorrectly treated as the actual target region when the goal was unexplored. Unchanged allied boarding failed."
+  },
+  "qualified_revision": "Only proven target-cell membership enables the new unconditional landed-troop filter. Unidentified target keeps the previous uncertain-target behavior; the landing-search heuristic is unchanged.",
+  "qualification_sha256": "efb0fa2d1849a478e9783dc627ed55ac56bc9d616a6043a025d3241c5b933b03",
+  "scope": "Two exact current-R19 before cases reused, two revised after cases and five linked contracts fresh. No test changes, world-rule changes or Root promotion. Final selected Release and three transport/save cases remain pending; no full strategic or human-strength claim."
+}

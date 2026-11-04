@@ -30,6 +30,12 @@ func surface_accessible(cell: Vector2i, domain: String = "land", restriction_id:
 	return super.surface_accessible(cell, domain, restriction_id)
 
 
+func _native_surface_components(domain: String, restriction_id: int) -> Variant:
+	if native_masks_enabled and mask_kernel != null and mask_kernel.has_method("surface_components"):
+		return mask_kernel.surface_components(size, terrain_cells, terrain_ids, terrain_restrictions, learned, true, domain, restriction_id)
+	return null
+
+
 func native_walkability_mask(domain: String, restriction_id: int, probe: Variant = null) -> PackedByteArray:
 	if native_masks_enabled and mask_kernel != null and mask_kernel.has_method("walkability_mask"):
 		if probe != null: probe.increment("navigation.native_mask_evaluated_cells", terrain_cells.size())
@@ -45,3 +51,9 @@ func native_walkability_mask(domain: String, restriction_id: int, probe: Variant
 	if probe != null:
 		probe.increment("navigation.native_mask_evaluated_cells", terrain_cells.size())
 	return mask
+
+
+func _native_surface_component_labels(domain: String, restriction_id: int) -> Variant:
+	if native_masks_enabled and mask_kernel != null and mask_kernel.has_method("surface_component_labels"):
+		return mask_kernel.surface_component_labels(size, terrain_cells, terrain_ids, terrain_restrictions, learned, true, domain, restriction_id)
+	return null

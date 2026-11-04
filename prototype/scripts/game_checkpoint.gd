@@ -2,12 +2,13 @@ class_name RoRGameCheckpoint
 extends RefCounted
 
 const EntityComponents := preload("res://scripts/entity_components.gd")
+const Economy := preload("res://scripts/simulation_economy_system.gd")
 const Snapshot := preload("res://scripts/simulation_snapshot.gd")
 const Replay := preload("res://scripts/replay_system.gd")
 const Formation := preload("res://scripts/formation_group.gd")
 const KnowledgeGrid := preload("res://scripts/navigation_knowledge_grid.gd")
 const Pathfinder := preload("res://scripts/pathfinder.gd")
-const VERSION := 3
+const VERSION := 4
 # A generated 400x400 forest already needs about 370 MiB before compression.
 # Keep a finite bound with room for supported dense maps and a developed match.
 const MAX_BYTES := 1_073_741_824
@@ -19,12 +20,12 @@ const GRID_FIELDS := ["size", "terrain_cells", "terrain_ids", "occupied_cells", 
 const FOG_FIELDS := ["map_size", "states_by_player", "personally_explored_by_player", "visible_counts_by_player", "revisions_by_player", "exploration_revisions_by_player", "newly_explored_cells_by_player", "newly_visible_cells_by_player", "allies_by_player", "shared_vision_by_player", "visibility_topology_dirty", "revision", "source_scan_generation", "path_dirty_by_player"]
 const SYSTEM_FIELDS := {
 	"gate_system": ["gate_ids", "policy_revision"],
-	"economy_system": ["resource_stockpiles_by_team", "population_by_team", "population_points_by_team", "population_reserved_by_team", "population_cap_by_team", "population_limit_by_team", "population_housing_by_team", "population_housing_enabled_by_team"],
+	"economy_system": ["resource_stockpiles_by_team", "resource_ledger_by_team", "population_by_team", "population_points_by_team", "population_reserved_by_team", "population_cap_by_team", "population_limit_by_team", "population_housing_by_team", "population_housing_enabled_by_team"],
 	"production_system": ["next_order_id", "last_production_failure", "last_research_failure", "last_research_message", "last_completed_research_id", "active_building_ids", "building_order_by_id", "next_building_order"],
 	"combat_system": ["projectiles", "resolved_projectiles"],
 	"technology_system": ["team_states", "revision_by_team"],
 	"player_registry": ["players", "relations"],
-	"ai_distress_system": ["next_sequence", "signals_by_target_id"],
+	"ai_distress_system": ["next_sequence", "signals_by_target_id", "team_intents"],
 	"transport_system": ["embarked_units", "last_failure"],
 	"trade_system": ["trade_goods_by_team", "pool_policies_by_team", "last_failure"],
 	"victory_system": ["rules", "allied_victory_enabled", "elapsed_seconds", "hold_seconds", "objective_summary", "tracked_objectives", "result"],
@@ -34,12 +35,16 @@ const SYSTEM_FIELDS := {
 	"terrain_elevation": ["vertex_levels", "river_shape"],
 }
 
-static func _capture_fields(owner, fields: Array) -> Dictionary:
+static func _capture_fields(owner, fields: Array, detached: bool = true) -> Dictionary:
 	var result := {}
 	for field in fields: result[field] = owner.get(field)
-	return result.duplicate(true)
+	if owner is Economy:
+		result["farm_reseed_queues_by_team"] = owner.farm_reseed_queues_by_team
+	return result.duplicate(true) if detached else result
 
 static func _restore_fields(owner, values: Dictionary, fields: Array) -> void:
+	if owner is Economy:
+		owner.farm_reseed_queues_by_team = values.get("farm_reseed_queues_by_team", {}).duplicate(true)
 	for field in fields:
 		if field == "river_shape" and not values.has(field):
 			owner.set(field, {})
@@ -83,14 +88,17 @@ static func _restore_runtime(runtime: Dictionary, world, controller, entities: D
 	wildlife.cached_due_wildlife.clear()
 	for bucket in saved["due"]: wildlife.cached_due_wildlife.append(_entity_refs(bucket, entities))
 
-static func capture(world, controller, definition: Dictionary, map: Dictionary) -> Dictionary:
+# detached=false is a temporary read view: the caller must exclusively own
+# the frozen world until synchronous encoding finishes. Async/manual snapshots
+# retain the default detached copies.
+static func capture(world, controller, definition: Dictionary, map: Dictionary, detached: bool = true) -> Dictionary:
 	var systems := {}
-	for name in SYSTEM_FIELDS: systems[name] = _capture_fields(world.get(name), SYSTEM_FIELDS[name])
+	for name in SYSTEM_FIELDS: systems[name] = _capture_fields(world.get(name), SYSTEM_FIELDS[name], detached)
 	var indices := {}
 	for name in LIST_INDICES:
 		indices[name] = []
 		for entity in world.get(name): indices[name].append(int(entity["id"]))
-	var fog := _capture_fields(world.fog_of_war, FOG_FIELDS)
+	var fog := _capture_fields(world.fog_of_war, FOG_FIELDS, detached)
 	fog["sources"] = {}
 	for key in world.fog_of_war.vision_sources:
 		var source: Dictionary = world.fog_of_war.vision_sources[key].duplicate(true)
@@ -100,14 +108,17 @@ static func capture(world, controller, definition: Dictionary, map: Dictionary) 
 	var knowledge := {}
 	for team in world.movement_system.knowledge.entries:
 		var entry: Dictionary = world.movement_system.knowledge.entries[team]
-		var grid := _capture_fields(entry["grid"], GRID_FIELDS)
+		var grid := _capture_fields(entry["grid"], GRID_FIELDS, detached)
 		grid["learned"] = entry["grid"].learned.duplicate()
 		knowledge[team] = {"grid": grid, "source_revision": entry["source_revision"], "fog_revision": entry.get("fog_revision", -1), "gate_revision": entry.get("gate_revision", -1)}
-	var world_state := _capture_fields(world, WORLD_FIELDS)
+	var world_state := _capture_fields(world, WORLD_FIELDS, detached)
+	if not detached:
+		world_state["units"] = world.units.duplicate(false)
+		for index in range(world.units.size()): world_state["units"][index] = world.units[index].duplicate(false)
 	for unit in world_state["units"]:
 		unit.erase("_formation_path_cache")
 		unit.erase("formation_steering_target")
-	return {"version": VERSION, "match_statistics": world.match_statistics.state(), "runtime": _capture_runtime(world, controller), "observation_memory": {"buildings": world.last_known_buildings_by_player.duplicate(true), "resources": world.known_resource_memory_state()}, "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
+	return {"version": VERSION, "match_statistics": world.match_statistics.state(), "runtime": _capture_runtime(world, controller), "observation_memory": {"buildings": world.last_known_buildings_by_player.duplicate(true), "resources": world.known_resource_memory_state()}, "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS, detached), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
 
 static func _digest(bytes: PackedByteArray) -> String:
 	var hashing := HashingContext.new()
@@ -171,6 +182,37 @@ static func validate(data: Dictionary) -> bool:
 		for field in SYSTEM_FIELDS[system]:
 			if system == "terrain_elevation" and field == "river_shape": continue # Optional in checkpoints predating curved river banks.
 			if not data["systems"][system].has(field): return false
+	var farm_reserves: Variant = data["systems"]["economy_system"].get("farm_reseed_queues_by_team", {})
+	var intents: Variant=data["systems"]["ai_distress_system"].get("team_intents")
+	if not intents is Dictionary or intents.size()>16: return false
+	for sender in intents:
+		if not sender is int or int(sender)<=0 or not intents[sender] is Dictionary: return false
+		var intent: Dictionary=intents[sender]
+		if int(intent.get("sender",-1))!=sender or int(intent.get("recipient",0))<=0 or String(intent.get("kind","")) not in ["cover","attack","resource","transport"]: return false
+		if not intent.get("position") is Vector2 or not Vector2(intent["position"]).is_finite() or float(intent.get("remaining_seconds",-1))<0.0 or float(intent.get("remaining_seconds",-1))>30.0: return false
+	var ledgers: Variant = data["systems"]["economy_system"].get("resource_ledger_by_team")
+	if not ledgers is Dictionary or ledgers.size() > 16: return false
+	for owner in ledgers:
+		if not owner is int or int(owner) <= 0 or not ledgers[owner] is Dictionary: return false
+		var ledger: Dictionary = ledgers[owner]
+		if not ledger.get("sequence") is int or int(ledger["sequence"]) < 0: return false
+		var categories: Variant=ledger.get("categories",{})
+		if not categories is Dictionary or categories.size()>Economy.LEDGER_CATEGORIES.size(): return false
+		for category in categories:
+			if category not in Economy.LEDGER_CATEGORIES or not categories[category] is Array or categories[category].size()!=4: return false
+			for amount in categories[category]:
+				if not amount is int or int(amount)<0: return false
+		for field in ["income","spent","refund","other_in","other_out"]:
+			if not ledger.get(field) is Array or ledger[field].size() != 4: return false
+			for amount in ledger[field]:
+				if not amount is int or int(amount) < 0: return false
+	if not farm_reserves is Dictionary: return false
+	for team in farm_reserves:
+		if not team is int or int(team) <= 0 or not farm_reserves[team] is Array or farm_reserves[team].size() > 40: return false
+		for cost in farm_reserves[team]:
+			if not cost is Dictionary: return false
+			for resource in cost:
+				if not resource is int or int(resource) not in [0,1,2,3] or not cost[resource] is int or int(cost[resource]) < 0: return false
 	for section in [["grid", GRID_FIELDS], ["fog", FOG_FIELDS]]:
 		for field in section[1]:
 			if not data[section[0]].has(field): return false
@@ -237,6 +279,8 @@ static func restore(data: Dictionary, world, controller) -> bool:
 			if entities.has(id): list.append(entities[id])
 	for building in world.buildings:
 		building["components"]["production"]["queue"] = building["production_queue"]
+		if preload("res://scripts/tower_garrison.gd").is_tower(building):
+			preload("res://scripts/tower_garrison.gd").configure(building["components"])
 	world.building_navigation_cells_by_id.clear()
 	for building in world.buildings:
 		world.building_navigation_cells_by_id[int(building["id"])] = world._building_navigation_cells(building)

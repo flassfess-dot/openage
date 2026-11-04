@@ -45,7 +45,7 @@ static func strength(force: Array, opponents: Array = [], pair_limit: int = 64) 
 		var hp := maxf(0.0, float(actor.get("hp", data.get("max_hp", 1.0))))
 		if bool(actor.get("health_unknown", false)):
 			hp = float(data.get("max_hp", 1.0))
-		total += sqrt(hp * maxf(0.0, damage)) * (1.0 + minf(12.0, float(data.get("range", 0.0))) * 0.035)
+		total += sqrt(hp * maxf(0.0, damage)) * (1.0 + minf(12.0, float(data.get("range", 0.0))) * 0.035) * maxi(1,int(actor.get("belief_count",1)))
 	return total
 
 
@@ -62,3 +62,21 @@ static func counter_score(candidate: Dictionary, enemies: Array, own: Array) -> 
 	if not enemies.is_empty():
 		incoming /= float(mini(enemies.size(), 32))
 	return score / (1.0 + incoming * 0.05) / (1.0 + float(same) * 0.06)
+
+static func strategic_sample(enemies: Array,limit: int) -> Array:
+	var buckets: Dictionary={}
+	for actor in enemies:
+		var role:="support" if "converter" in actor.get("behavior_tags",[]) or "healer" in actor.get("behavior_tags",[]) else "siege" if float(profile(actor).get("blast_range",0.0))>0.0 else "ranged" if float(profile(actor).get("range",0.0))>2.0 else "melee"
+		var key:=role+":"+String(actor.get("kind",""))
+		if not buckets.has(key): buckets[key]=[]
+		buckets[key].append(actor)
+	var keys: Array=buckets.keys(); keys.sort()
+	var result: Array=[]; var offset:=0
+	while result.size()<limit:
+		var found:=false
+		for key in keys:
+			if offset<buckets[key].size(): result.append(buckets[key][offset]); found=true
+			if result.size()>=limit: break
+		if not found: break
+		offset+=1
+	return result

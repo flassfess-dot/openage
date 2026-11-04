@@ -1,0 +1,95 @@
+{
+  "status": "CURRENT_NATIVE_COMPONENT6_PASSED_FINAL_NATIVE_REPEAT_PENDING",
+  "cases": 6,
+  "results": [
+    {
+      "teams": 4,
+      "mode": "live",
+      "tick": 1200,
+      "repaired_hp": 200.0,
+      "repair_wood": 30,
+      "trips": 7,
+      "gold": 203,
+      "world_hash": "60141dffd303eb4395fb924bc9db9ad7d5d18a6b1116acec97b6c059e64f9d88",
+      "checkpoint": {}
+    },
+    {
+      "teams": 4,
+      "mode": "saved",
+      "tick": 1200,
+      "repaired_hp": 200.0,
+      "repair_wood": 30,
+      "trips": 7,
+      "gold": 203,
+      "world_hash": "60141dffd303eb4395fb924bc9db9ad7d5d18a6b1116acec97b6c059e64f9d88",
+      "checkpoint": {
+        "exact_world_ai": true,
+        "file_sha256": "a2c4e06c7facceb1e5f00ddab3989774f35dda839df3856d507dd251c7279f42",
+        "repair_progress": 12.0000001788139,
+        "tick": 60,
+        "trade_stage": "to_home",
+        "trade_task": "trade"
+      }
+    },
+    {
+      "teams": 4,
+      "mode": "replay",
+      "tick": 1200,
+      "repaired_hp": 200.0,
+      "repair_wood": 30,
+      "trips": 7,
+      "gold": 203,
+      "world_hash": "60141dffd303eb4395fb924bc9db9ad7d5d18a6b1116acec97b6c059e64f9d88",
+      "checkpoint": {}
+    },
+    {
+      "teams": 8,
+      "mode": "live",
+      "tick": 1200,
+      "repaired_hp": 200.0,
+      "repair_wood": 30,
+      "trips": 7,
+      "gold": 203,
+      "world_hash": "f3b7c0359ae810a6fc66d1161d870cc477c6177d5989e79ff179189a6fd93ae6",
+      "checkpoint": {}
+    },
+    {
+      "teams": 8,
+      "mode": "saved",
+      "tick": 1200,
+      "repaired_hp": 200.0,
+      "repair_wood": 30,
+      "trips": 7,
+      "gold": 203,
+      "world_hash": "f3b7c0359ae810a6fc66d1161d870cc477c6177d5989e79ff179189a6fd93ae6",
+      "checkpoint": {
+        "exact_world_ai": true,
+        "file_sha256": "b215ece56006d35878cddf27abe5c6c143b715f08d349d307fee89eac5fbe3a7",
+        "repair_progress": 12.0000001788139,
+        "tick": 60,
+        "trade_stage": "to_home",
+        "trade_task": "trade"
+      }
+    },
+    {
+      "teams": 8,
+      "mode": "replay",
+      "tick": 1200,
+      "repaired_hp": 200.0,
+      "repair_wood": 30,
+      "trips": 7,
+      "gold": 203,
+      "world_hash": "f3b7c0359ae810a6fc66d1161d870cc477c6177d5989e79ff179189a6fd93ae6",
+      "checkpoint": {}
+    }
+  ],
+  "source_fingerprint": "b70a2066bdcc7b7e693fc1c7c93c2200e776d59696d8a3a0da989da3c6487e17",
+  "native_sha256": "0ff22cb00b5a6dec20e4b58899d0093abd24b0c7ff75cf95d07bf362272e5839",
+  "probe_sha256": "aa6489342594799993de13f57d2776e39e713603feb10d6ade71e08fbd6e0682",
+  "driver_sha256": "9652359bbf75dd5f1969cc9d6db18065ed86646311d53ffe063e61696994343a",
+  "evidence_sha256": "4756d9d5b7800eecdca085ebeecd698d065b22922a84109af970b7621a3c3ed5",
+  "scope": "Six controlled component executions:2v2/4v4 each live, real-file save continuation and command replay. Actual allied repair and completed trade voyages; normal commands from legal observations. No independently running full strategic AI, strength, FPS or human-rating claim.",
+  "current_gameplay_source_changed": false,
+  "final_release_verified": false,
+  "limitation": "Actual editor/native controlled component tests under concurrent arena load. Full-policy multiplayer soaks, final-native repeat and final artifact verification remain separate mandatory checks."
+}

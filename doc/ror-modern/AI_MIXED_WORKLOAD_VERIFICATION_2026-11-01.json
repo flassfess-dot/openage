@@ -1,0 +1,318 @@
+{
+  "status": "PRIVATE_FUNCTIONAL_QUALIFIED_FINAL_RELEASE_MATRIX_PENDING",
+  "changed_gameplay": false,
+  "current_desktop_artifact_changed": false,
+  "original_fixture": {
+    "teams": 2,
+    "units_per_team": 500,
+    "side": 192,
+    "ticks": 100,
+    "events": {
+      "command_accepted": 36,
+      "entity_created": 6,
+      "formation_state_changed": 10,
+      "foundation_placed": 6,
+      "task_changed": 671
+    },
+    "evidence_sha256": "e191407ebea4e42f6d8a1b9c2a71c44633495aed1369a1cb3ae863cae1e234d5"
+  },
+  "revised_fixture": {
+    "per_team": {
+      "gatherers": 100,
+      "marchers": 100,
+      "contact_combatants": 16,
+      "initial_idle": 284
+    },
+    "resources": "Ten ordinary trees and ten ordinary berry bushes per team. Workers use normal gathering; paired armies receive ordinary attack orders.",
+    "all_active_stress": "484 marching units and16 contact combatants per team; gathering is not required for the explicitly separate stress cases.",
+    "script_sha256": "7ed8d3c2c4b347226833a24d9ea8c41730349821a06c41ae1adad960321b9b2f"
+  },
+  "checks": [
+    {
+      "algorithm": "baseline_v1",
+      "teams": 2,
+      "side": 96,
+      "units_per_team": 500,
+      "ticks": 100,
+      "threaded": false,
+      "passed": true,
+      "events": {
+        "attack": 69,
+        "command_accepted": 156,
+        "damage": 61,
+        "entity_created": 47,
+        "formation_state_changed": 20,
+        "foundation_placed": 4,
+        "hit": 61,
+        "projectile_impact": 41,
+        "resource_gathered": 264,
+        "target_acquired": 78,
+        "task_changed": 572,
+        "tree_felled": 20
+      },
+      "workload": {
+        "combatants": 32,
+        "gatherers": 200,
+        "idle": 568,
+        "marchers": 200,
+        "moved_marchers": 200
+      },
+      "report_sha256": "a53198e63c0a87b967a117ecb1c1e106fa604a54024657e6cc3978560113cf62"
+    },
+    {
+      "algorithm": "baseline_v1",
+      "teams": 2,
+      "side": 96,
+      "units_per_team": 500,
+      "ticks": 100,
+      "threaded": true,
+      "passed": true,
+      "events": {
+        "attack": 69,
+        "command_accepted": 156,
+        "damage": 61,
+        "entity_created": 47,
+        "formation_state_changed": 20,
+        "foundation_placed": 4,
+        "hit": 61,
+        "projectile_impact": 41,
+        "resource_gathered": 264,
+        "target_acquired": 78,
+        "task_changed": 572,
+        "tree_felled": 20
+      },
+      "workload": {
+        "combatants": 32,
+        "gatherers": 200,
+        "idle": 568,
+        "marchers": 200,
+        "moved_marchers": 200
+      },
+      "report_sha256": "fc8ae1c153e5a6361daf145fa275f1bc72389f9ef8f30576660ac09167a36972"
+    },
+    {
+      "algorithm": "competitive_v2",
+      "teams": 2,
+      "side": 96,
+      "units_per_team": 500,
+      "ticks": 100,
+      "threaded": false,
+      "passed": true,
+      "events": {
+        "attack": 20,
+        "command_accepted": 80,
+        "damage": 14,
+        "entity_created": 23,
+        "formation_state_changed": 23,
+        "foundation_placed": 3,
+        "hit": 14,
+        "projectile_impact": 19,
+        "resource_gathered": 261,
+        "target_acquired": 51,
+        "task_changed": 712,
+        "tree_felled": 19
+      },
+      "workload": {
+        "combatants": 32,
+        "gatherers": 200,
+        "idle": 568,
+        "marchers": 200,
+        "moved_marchers": 194
+      },
+      "report_sha256": "c2e8f13c3764c190605e56bcb26b8db9a71ce07bfb7c4784a81676f08f48592c"
+    },
+    {
+      "algorithm": "competitive_v2",
+      "teams": 2,
+      "side": 96,
+      "units_per_team": 500,
+      "ticks": 100,
+      "threaded": true,
+      "passed": true,
+      "events": {
+        "attack": 20,
+        "command_accepted": 80,
+        "damage": 14,
+        "entity_created": 23,
+        "formation_state_changed": 23,
+        "foundation_placed": 3,
+        "hit": 14,
+        "projectile_impact": 19,
+        "resource_gathered": 261,
+        "target_acquired": 51,
+        "task_changed": 712,
+        "tree_felled": 19
+      },
+      "workload": {
+        "combatants": 32,
+        "gatherers": 200,
+        "idle": 568,
+        "marchers": 200,
+        "moved_marchers": 194
+      },
+      "report_sha256": "de5fe2c730cd00f200f5edb5aac40e41e9215a7a62e695ddfff904e378cd0e92"
+    },
+    {
+      "algorithm": "baseline_v1",
+      "teams": 2,
+      "side": 192,
+      "units_per_team": 500,
+      "ticks": 100,
+      "threaded": false,
+      "passed": true,
+      "events": {
+        "attack": 61,
+        "command_accepted": 120,
+        "damage": 59,
+        "entity_created": 39,
+        "formation_state_changed": 20,
+        "foundation_placed": 4,
+        "hit": 59,
+        "projectile_impact": 33,
+        "resource_gathered": 264,
+        "target_acquired": 46,
+        "task_changed": 541,
+        "tree_felled": 20
+      },
+      "workload": {
+        "combatants": 32,
+        "gatherers": 200,
+        "idle": 568,
+        "marchers": 200,
+        "moved_marchers": 199
+      },
+      "report_sha256": "53064dc404740de35de30a830bc8ab2d37c455bbfa0658f776e359d3b27c28d5"
+    },
+    {
+      "algorithm": "baseline_v1",
+      "teams": 2,
+      "side": 192,
+      "units_per_team": 500,
+      "ticks": 100,
+      "threaded": true,
+      "passed": true,
+      "events": {
+        "attack": 61,
+        "command_accepted": 120,
+        "damage": 59,
+        "entity_created": 39,
+        "formation_state_changed": 20,
+        "foundation_placed": 4,
+        "hit": 59,
+        "projectile_impact": 33,
+        "resource_gathered": 264,
+        "target_acquired": 46,
+        "task_changed": 541,
+        "tree_felled": 20
+      },
+      "workload": {
+        "combatants": 32,
+        "gatherers": 200,
+        "idle": 568,
+        "marchers": 200,
+        "moved_marchers": 199
+      },
+      "report_sha256": "ba47660f207a422981e70b3662f32ed04a5081d25ad55d53510842deefca59b3"
+    },
+    {
+      "algorithm": "competitive_v2",
+      "teams": 2,
+      "side": 192,
+      "units_per_team": 500,
+      "ticks": 100,
+      "threaded": false,
+      "passed": true,
+      "events": {
+        "attack": 16,
+        "command_accepted": 70,
+        "damage": 14,
+        "entity_created": 20,
+        "formation_state_changed": 18,
+        "foundation_placed": 6,
+        "hit": 14,
+        "projectile_impact": 13,
+        "resource_gathered": 261,
+        "target_acquired": 42,
+        "task_changed": 723,
+        "tree_felled": 18
+      },
+      "workload": {
+        "combatants": 32,
+        "gatherers": 200,
+        "idle": 568,
+        "marchers": 200,
+        "moved_marchers": 198
+      },
+      "report_sha256": "367bf01f90d61ece72b03fbbd8ddfdee1b78bc350e1e54da077164a2be2b7603"
+    },
+    {
+      "algorithm": "competitive_v2",
+      "teams": 2,
+      "side": 192,
+      "units_per_team": 500,
+      "ticks": 100,
+      "threaded": true,
+      "passed": true,
+      "events": {
+        "attack": 16,
+        "command_accepted": 70,
+        "damage": 14,
+        "entity_created": 20,
+        "formation_state_changed": 18,
+        "foundation_placed": 6,
+        "hit": 14,
+        "projectile_impact": 13,
+        "resource_gathered": 261,
+        "target_acquired": 42,
+        "task_changed": 723,
+        "tree_felled": 18
+      },
+      "workload": {
+        "combatants": 32,
+        "gatherers": 200,
+        "idle": 568,
+        "marchers": 200,
+        "moved_marchers": 198
+      },
+      "report_sha256": "a722ebe9152d4df79ed48652464110219233c2bcbd8b625a6de1f7476acd0df7"
+    }
+  ],
+  "paired_equality": [
+    {
+      "side": 96,
+      "algorithm": "baseline_v1",
+      "world_equal": true,
+      "ai_equal": true,
+      "events_equal": true
+    },
+    {
+      "side": 96,
+      "algorithm": "competitive_v2",
+      "world_equal": true,
+      "ai_equal": true,
+      "events_equal": true
+    },
+    {
+      "side": 192,
+      "algorithm": "baseline_v1",
+      "world_equal": true,
+      "ai_equal": true,
+      "events_equal": true
+    },
+    {
+      "side": 192,
+      "algorithm": "competitive_v2",
+      "world_equal": true,
+      "ai_equal": true,
+      "events_equal": true
+    }
+  ],
+  "python": {
+    "tests": 42,
+    "passed": true,
+    "evidence_sha256": "44cfc0c375598cfa203172f5d723e455ddf5eaf217cd342d056fe44653f7bf2d"
+  },
+  "acceptance": "All26 distinct configurations, actual attacks/damage/marching and normal-case harvesting,100 ticks,500 initial units per team and native Release identity are required. State and event equality is recomputed from sequential/threaded reports.",
+  "scope": "Only workload fixture changes; three previously qualified startup workflows reused with identical relevant source. Eight fresh native Editor functional checks under parallel arena load, actual combat/gather/march and exact sequential/threaded equality. Not isolated Release performance/FPS evidence.",
+  "limitation": "These eight private Editor/native functional checks ran under concurrent arena load. They do not measure isolated Release performance or rendered FPS. The full26 final-artifact matrix remains mandatory."
+}

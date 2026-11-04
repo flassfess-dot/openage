@@ -301,7 +301,7 @@ func _try_load_trade_goods(trader: Dictionary, target: Dictionary) -> bool:
 	var home: Variant = _resolve_home_dock(trader, target)
 	if home == null:
 		return false
-	world.economy_system.change_resource_amount(owner, input_resource, -amount)
+	world.economy_system.change_resource_amount(owner, input_resource, -amount,"trade_out")
 	trade_goods_by_team[target_team] = maxf(0.0, trade_goods(target_team) - float(amount))
 	var base_gold := TradeProfitPolicy.profit_between(Vector2(home.get("pos", Vector2.ZERO)), Vector2(target.get("pos", Vector2.ZERO)), world.map_size)
 	var profit_multiplier: float = float(world.technology_system.trade_profit_multiplier(owner))
@@ -328,7 +328,7 @@ func _deposit_gold(trader: Dictionary, home: Dictionary) -> void:
 	var gold := int(trade.get("cargo_gold", 0))
 	var output_resource := int(trade.get("output_resource_type_id", 3))
 	if gold > 0:
-		world.economy_system.change_resource_amount(int(trader.get("team", 0)), output_resource, gold)
+		world.economy_system.change_resource_amount(int(trader.get("team", 0)), output_resource, gold,"trade_in")
 	trade["cargo_goods"] = 0
 	trade["cargo_gold"] = 0
 	trade["trip_count"] = int(trade.get("trip_count", 0)) + 1

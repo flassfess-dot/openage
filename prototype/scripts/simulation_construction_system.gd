@@ -173,7 +173,7 @@ func _mutate_advance_repair(worker: Dictionary, target: Dictionary, requested_hp
 		var whole := ceili(total - 0.000001) if completes_target else floori(total + 0.000001)
 		fractions[resource_id] = 0.0 if completes_target else maxf(0.0, total - float(whole))
 		if whole > 0:
-			world.economy_system.change_resource_amount(payer, resource_id, -whole)
+			world.economy_system.change_resource_amount(payer, resource_id, -whole,"repair")
 			spent[resource_id] = whole
 	fractions_by_payer[payer] = fractions
 	world.set_entity_field(target, "repair_cost_fractions", fractions_by_payer)

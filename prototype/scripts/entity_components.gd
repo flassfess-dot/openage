@@ -249,6 +249,8 @@ static func for_building(entity_id: int, team: int, civilization_id: int, kind: 
 	components["movement"]["speed"] = 0.0
 	components["movement"]["domain"] = "static"
 	components["worker"]["enabled"] = false
+	if kind == "tower":
+		preload("res://scripts/tower_garrison.gd").configure(components)
 	return components
 
 

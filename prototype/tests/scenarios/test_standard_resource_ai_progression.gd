@@ -51,7 +51,7 @@ func _initialize() -> void:
 		controller.advance_frame(.05,1,2)
 	var complete_kinds: Array = world.get_buildings().filter(func(b):return b["team"] == 2 and b["state"] == "complete").map(func(b):return b["kind"])
 	check(world.get_current_age(2) >= 101, "AI completes Tool Age without free resources or prebuilt prerequisites")
-	check("barracks" in complete_kinds and "granary" in complete_kinds, "AI completes its own Stone Age prerequisites")
+	check(world.technology_system.direct_prerequisites_met(2, 101), "AI completes the authoritative alternative Stone Age prerequisites")
 	var wood_after_saving := false
 	var age_researched := false
 	for event in controller.events_after():

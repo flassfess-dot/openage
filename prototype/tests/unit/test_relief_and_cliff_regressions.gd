@@ -8,6 +8,9 @@ const Quality := preload("res://scripts/random_map_quality.gd")
 var failures: Array[String] = []
 func _initialize() -> void:
 	var settings := Settings.default_settings()
+	# CliffChain connection-piece contracts belong to the retained v3 recipe;
+	# v6 watersheds use their own cliff/river geometry regression suite.
+	settings["landscape_version"]=preload("res://scripts/random_map_natural_landscape.gd").VERSION
 	settings["map_size_id"] = "huge"
 	settings["map_type_id"] = "highlands"
 	var catalog = Catalog.new()

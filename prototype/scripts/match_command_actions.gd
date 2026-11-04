@@ -203,7 +203,7 @@ func issue_order(game, mouse: Vector2, direction_end: Variant = null, queue_orde
 			accepted_message = "Исцелить союзника"
 		"board":
 			command = RoRCommands.BoardCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
-			accepted_message = "Погрузиться в транспорт"
+			accepted_message = "Занять гарнизон башни" if bool(resolution.get("garrison", false)) else "Погрузиться в транспорт"
 		"trade":
 			command = RoRCommands.TradeCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
 			accepted_message = "Торговый маршрут назначен"
@@ -285,6 +285,11 @@ func issue_delete_context(game) -> void:
 func issue_unload_at_pointer(game, queue_order: bool = false) -> void:
 	if game.battle_over or game.local_spectator:
 		return
+	var towers = game.selected_entities().filter(func(entity): return preload("res://scripts/tower_garrison.gd").is_tower(entity) and int(entity.get("team", 0)) == game.local_player_team)
+	if not towers.is_empty():
+		for tower in towers:
+			issue_ungarrison(game, int(tower["id"]))
+		return
 	var transports = game.selected_units().filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)) and not unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).is_empty())
 	if transports.is_empty():
 		game.game_message = "Для высадки выберите транспорт с пассажирами"
@@ -304,6 +309,9 @@ func issue_unload_at_pointer(game, queue_order: bool = false) -> void:
 
 func issue_unit_action(game, action_name: String) -> void:
 	game.join_simulation_owner()
+	if action_name == "ungarrison":
+		game.issue_unload_at_pointer()
+		return
 	if action_name.begins_with("gate_"):
 		var gates = game.selected_entities().filter(func(entity): return String(entity.get("kind", "")) == "gate" and int(entity.get("team", 0)) == game.local_player_team)
 		if not gates.is_empty() and not game.battle_over:
@@ -349,6 +357,20 @@ func issue_unit_action(game, action_name: String) -> void:
 		_:
 			return
 	game.enqueue_with_feedback(command, message, "command:%s" % String(selected[0].get("kind", "")), null)
+
+
+func issue_ungarrison(game, building_id: int, passenger_id: int = -1) -> void:
+	game.join_simulation_owner()
+	if game.battle_over or game.local_spectator:
+		return
+	var tower = game.simulation_world.find_building(building_id)
+	if tower == null or int(tower.get("team", 0)) != game.local_player_team or not preload("res://scripts/tower_garrison.gd").is_tower(tower):
+		return
+	var ids: Array[int] = []
+	if passenger_id >= 0:
+		ids.append(passenger_id)
+	var command = RoRCommands.UnloadCommand.new(game.game_controller.tick_index + 1, [building_id], Vector2(tower["pos"]), ids)
+	game.enqueue_with_feedback(command, "Высадить бойца" if passenger_id >= 0 else "Высадить весь гарнизон", "", null)
 
 
 func repair_workers(game) -> Array:

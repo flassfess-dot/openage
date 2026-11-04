@@ -1,0 +1,1200 @@
+{
+  "schema_version": 1,
+  "plan_id": "ror-competitive-ai-2026-10-29",
+  "date": "2026-10-29",
+  "timezone": "Europe/Moscow",
+  "plan_document": "AI_COMPETITIVE_IMPLEMENTATION_PLAN_2026-10-29.md",
+  "planning_status": "executing",
+  "execution_status": "in_progress",
+  "run_id": "competitive-20261030",
+  "active_task": "AI10-02",
+  "completed_tasks": 40,
+  "total_tasks": 70,
+  "functional_gate": "R19_audited513_covered_with_test_only_correction; trace_sampler_private_unit_passed_physical_shipping_pending; selected_final_fresh_complete514plus_tools44plus_native23_and_actual_EXE_pending",
+  "quality_gate": "pending",
+  "human_strength_status": "HUMAN_UNMEASURED",
+  "runtime_versions_observed": {
+    "archive": 8,
+    "checkpoint": 4,
+    "replay": 5,
+    "initial_versions_recorded_in": "prototype/qa/ai-competitive/competitive-20261030/initial_manifest.json"
+  },
+  "experiment_limits": {
+    "max_tuning_generations": 3,
+    "candidates_per_generation": 8,
+    "paired_dev_cases_per_candidate": 8,
+    "max_tuning_dev_matches": 384,
+    "max_validation_finalists": 3,
+    "validation_matches_per_finalist": 32,
+    "max_tuning_validation_matches": 96,
+    "final_baseline_holdout_matches": 128,
+    "final_challenge_holdout_matches": 64,
+    "chosen_tuning_generations": 3,
+    "chosen_tuning_dev_matches": 384
+  },
+  "stages": [
+    {
+      "id": "AI00",
+      "title": "Исходная точка и защищённое продолжение",
+      "status": "passed",
+      "depends_on": [],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "passed",
+      "quality_gate": "passed",
+      "tasks": [
+        {
+          "id": "AI00-01",
+          "description": "Проверить инструкции, dirty status, инструменты и текущие форматы; сохранить перечень изменённых файлов, хеши кода/каталогов/native и аппаратный профиль.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/initial_manifest.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Исходная точка сохранена; продолжается AI00."
+        },
+        {
+          "id": "AI00-02",
+          "description": "Создать source bundle текущей AI-реализации с транзитивными зависимостями и исходные 20+ входов/выходов; реализовать baseline adapter и проверку его независимости.",
+          "status": "passed",
+          "evidence": [
+            "prototype/ai_baselines/v1/manifest.json",
+            "prototype/qa/ai-competitive/competitive-20261030/baseline_equivalence.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI00-03",
+          "description": "Перепроверить три исходных теста из аудита; для перехода возраста проверить фактическое дерево предпосылок вместо обязательного конкретного амбара. Сохранить tick, экономику и принятые команды.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Устаревшее требование гранария заменено проверкой авторитетных альтернативных prerequisites; исходный сбой сохранён."
+        },
+        {
+          "id": "AI00-04",
+          "description": "Подготовить единый локальный запускатель этапов, атомарный execution state, fingerprint артефактов, журнал и возобновление после прерывания. Проверить искусственным прерыванием без изменения игрового состояния.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/runner_tests.log",
+            "tools/ror-run-ai-plan.ps1"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI00-05",
+          "description": "Зафиксировать исходные functional failures и измерения существующих сценариев, связать каждый с владельцем. Исправить блокеры арены до изменения силы ИИ; полноценный strength baseline выполняется в AI01 после создания арены.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/initial_manifest.json",
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Перейти к AI01; подтверждённый исходный функциональный дефект — устаревшее ожидание fixture, два unit baseline passed."
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI01",
+      "title": "Арена, фиксированные соперники и диагностические метрики",
+      "status": "passed",
+      "depends_on": [
+        "AI00"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "passed",
+      "quality_gate": "passed",
+      "tasks": [
+        {
+          "id": "AI01-01",
+          "description": "Реализовать versioned case/result schema, материализацию карты, subject/opponent adapters и точный fingerprint всей сравнительной серии.",
+          "status": "passed",
+          "evidence": [
+            "prototype/tools/ai_arena.gd",
+            "tools/ai_competitive.py"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI01-02",
+          "description": "Добавить восемь фиксированных классов соперников с разными причинами успеха; убедиться, что они не вызывают живой subject-policy.",
+          "status": "passed",
+          "evidence": [
+            "prototype/ai_baselines/v1/manifest.json",
+            "prototype/scripts/ai_arena_opponent.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI01-03",
+          "description": "Развести победу, игровую ничью, STALLED, ошибку генерации, crash и инфраструктурный timeout; сохранять последний прогресс и диагностический checkpoint.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/process_failure_classification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/suite_coverage.json",
+            "prototype/tests/unit/test_ai_arena_progress.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Проверены реальные exit17 и watchdog2s, остановка дочернего процесса и прогресс по работе/движению; игровые пределы отдельно от crash/timeout."
+        },
+        {
+          "id": "AI01-04",
+          "description": "Добавить счётчики фактических доходов/расходов, TC/worker idle, housing block, запаса, потерь, конверсий, rejected commands, захвата и расчёта ИИ.",
+          "status": "passed",
+          "evidence": [
+            "prototype/tools/ai_arena_metrics.gd",
+            "prototype/qa/ai-competitive/competitive-20261030/arena/1bc9dda7248ddbec/summary.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI01-05",
+          "description": "Создать smoke/dev/validation/holdout/challenge_holdout manifest и проверить отсутствие пересечений/дубликатов; заморозить opponent hashes и оба итоговых набора.",
+          "status": "passed",
+          "evidence": [
+            "prototype/data/ai/arena/manifests/holdout.json",
+            "prototype/data/ai/arena/manifests/challenge_holdout.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI01-06",
+          "description": "Реализовать отчёт по парным случаям, seed-блокам, категориям и абляциям; смешивание различных engine/policy серий должно явно отклоняться.",
+          "status": "passed",
+          "evidence": [
+            "tools/ai_competitive.py",
+            "tools/tests/test_ai_competitive.py",
+            "prototype/qa/ai-competitive/competitive-20261030/canonical_statistics_before_r12_league.json",
+            "prototype/qa/ai-competitive/competitive-20261030/python-tests-r12-canonical-before-league.stdout.log"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Canonical statistics schema2 with sorted seed-block resampling installed before any R12 league.42 Python regressions, including16 result-order permutations, passed; actual Release/game unchanged. Final192 and interval/score quality still require the final frozen champion."
+        },
+        {
+          "id": "AI01-07",
+          "description": "Провести 12 калибровочных запусков, smoke и dev baseline; проверить повтор, resume, crash дочернего процесса и незавершённый файл результата.",
+          "status": "passed",
+          "evidence": [
+            "doc/ror-modern/AI_COMPETITIVE_ARENA_BASELINE_VERIFICATION_2026-11-02.json",
+            "prototype/qa/ai-competitive/competitive-20261030/quality-r19/baseline-completion/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/process_failure_classification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/quality-r21/reporting-tools/qualification.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        }
+      ],
+      "evidence": [
+        "doc/ror-modern/AI_COMPETITIVE_ARENA_BASELINE_VERIFICATION_2026-11-02.json"
+      ],
+      "gate_scope": "Infrastructure gate, full calibration/smoke/baseline and repeat/resume/failure handling. Final-policy quality and strength remain separate."
+    },
+    {
+      "id": "AI02",
+      "title": "Законные знания, экономика событий и карта регионов",
+      "status": "in_progress",
+      "depends_on": [
+        "AI01"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending_r11_privacy_regression",
+      "quality_gate": "source_scope_quality_gaps_and_pending_measurements",
+      "tasks": [
+        {
+          "id": "AI02-01",
+          "description": "Разделить собственные точные факты, видимые вражеские факты и предположения; добавить отрицательное наблюдение и тест на скрытые сущности/грузы/исследования.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype\\qa\\ai-competitive\\competitive-20261030\\tests\\results.json",
+            "prototype/scripts/ai_projectile_observation.gd",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation_privacy_discovery.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation-privacy-r11/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation_v11_promotion.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation_v12_promotion.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation-egress-r12-final-impacts/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/traffic-clearance-r12-v5/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/original-construction-access-r12-local-index/result.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation_v13_promotion.json",
+            "prototype/qa/ai-competitive/competitive-20261030/user-half-second-freeze-20261101/baseline_causal_comparison.json",
+            "prototype/qa/ai-competitive/competitive-20261030/user-half-second-freeze-20261101/private-final-full-impacts/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/user-half-second-freeze-20261101/final-root-cause-prequalification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/user-half-second-freeze-20261101/release-owner-r13-v1/report.json",
+            "prototype/qa/ai-competitive/competitive-20261030/camera_v14_promotion.json",
+            "prototype/qa/ai-competitive/competitive-20261030/user-half-second-freeze-20261101/current-native-r14-impacts/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/user-half-second-freeze-20261101/release-r14-frame-verification.json",
+            "doc/ror-modern/AI_DESKTOP_STALL_R19_VERIFICATION_2026-11-02.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Текущий desktop R19 проверен на исходной партии: static60/camera120, обычный owner/60FPS/изолированное автосохранение, регулярных полусекундных кадров нет; редкие задержки камеры остаются. Повторить обе проверки на выбранном финальном Release и завершить общую приёмку."
+        },
+        {
+          "id": "AI02-02",
+          "description": "Здания помнить до законного опровержения; мобильные силы хранить как устаревающие гипотезы с областью возможного перемещения по известным маршрутам. Устаревшая запись никогда не обновляет сама себя.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype/scripts/ai_belief_model.gd",
+            "prototype\\qa\\ai-competitive\\competitive-20261030\\tests\\results.json",
+            "doc/ror-modern/AI_COMPETITIVE_R18_CONTRACTS_VERIFICATION_2026-11-01.json",
+            "doc/ror-modern/AI_COMPETITIVE_R19_VERIFICATION_2026-11-01.json"
+          ],
+          "changed_files": [],
+          "unresolved": [
+            {
+              "kind": "final_acceptance_pending",
+              "description": "R18 implementation plus R19 negative-evidence correction passed current standard-native15 and actual EXE4. Current full513 is running; final selected-artifact quality and performance matrices remain pending."
+            }
+          ],
+          "next_action": "Граница R19 закрыта: все513 тестов покрыты полным запуском и проверенным исправленным повтором. Завершить ограниченный подбор; на выбранном финальном коде выполнить23 затронутых проверки, новый полный набор и соответствующие численные сценарии.",
+          "previous_source_scope_gap": [
+            {
+              "kind": "source_scope_quality_gap",
+              "description": "Mobile uncertainty is an aging speed-radius estimate, not an exact distribution over navigation routes. No hidden enemy army or private technologies are read.",
+              "sources": [
+                "prototype/scripts/ai_belief_model.gd"
+              ],
+              "source_sha256": {
+                "prototype/scripts/ai_belief_model.gd": "3e781da9b965372178602b6498517d6cb3d5f9a53e99fb1b7fafee1e3358f89f"
+              }
+            }
+          ]
+        },
+        {
+          "id": "AI02-03",
+          "description": "Вместо усечения по ID хранить до 1024 подробных записей с приоритетом важности и ограниченные агрегаты по региону/роли. Утрата подробной записи не должна стирать известную базу или целую армию.",
+          "status": "passed",
+          "evidence": [
+            "prototype\\qa\\ai-competitive\\competitive-20261030\\tests\\results.json",
+            "prototype/tests/unit/test_ai_competitive_knowledge.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI02-04",
+          "description": "Получать доход, стройрасход, ремонт, возврат, дань и повторный посев из собственных авторитетных событий с курсором exactly-once; не выводить весь доход из разницы stockpile.",
+          "status": "passed",
+          "evidence": [
+            "prototype\\qa\\ai-competitive\\competitive-20261030\\tests\\results.json",
+            "prototype/scripts/simulation_economy_system.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI02-05",
+          "description": "Создать инкрементальный граф известных регионов/проходов, ресурсов и риска; добавить строго видимые снаряды, свои cooldown и публичные цели победы. Доказать save/resume и отсутствие полного обхода карты на каждый приказ.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_region_model.gd",
+            "prototype/scripts/ai_projectile_observation.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI03",
+      "title": "Экономический план и эффективные открытия",
+      "status": "in_progress",
+      "depends_on": [
+        "AI02"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "source_scope_quality_gaps_and_pending_measurements",
+      "tasks": [
+        {
+          "id": "AI03-01",
+          "description": "Реализовать потребности во времени: производство, население, стройка, переход, улучшения, ремонт и запас посева. Резервы имеют цель, срок и условие освобождения.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_adaptive_economy.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI03-02",
+          "description": "Создать четыре семейства открытий: давление, быстрое развитие возраста, экономический рост и море. Шаг имеет предпосылки, стоимость, замену при недоступной технологии/стройке и аварийную ветку обороны.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        },
+        {
+          "id": "AI03-03",
+          "description": "Распределять работников по требуемому доходу и фактическому циклу сбора/сдачи; учитывать насыщение и стоимость переключения. Устранить голод производства и накопление ненужного ресурса.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/simulation_gathering_system.gd",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation_v12_promotion.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation-egress-r12-final-impacts/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/traffic-clearance-r12-v5/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/original-construction-access-r12-local-index/result.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Actual original-world road closures repaired by competitive safe placement and public clearance moves. Final same-champion economy controls and full-game worker/TC idle metrics remain required; private regressions do not establish the numeric idle targets."
+        },
+        {
+          "id": "AI03-04",
+          "description": "Выводить число работников, ферм и производителей из целевого выпуска и доступного населения; убрать ограничения 12 ферм/90 работников/30 поздних бойцов как универсальные стратегические потолки. Сохранить конечные защитные bounds, зависящие от population и карты.",
+          "status": "passed",
+          "evidence": [
+            "prototype\\qa\\ai-competitive\\competitive-20261030\\tests\\results.json",
+            "prototype/tests/unit/test_ai_competitive_macro.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI03-05",
+          "description": "Выбирать age-up и исследования по сроку отдачи/выгодному моменту и риску; поддержать цивилизационные цены и настоящие альтернативные предпосылки. Не останавливать рост на шести работниках автоматически.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_economy_production.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI03-06",
+          "description": "Выбирать базы/drop sites по будущему доходу, пути, насыщению, обороне и цене. Дополнительные строители назначаются по срочности и предельной отдаче; один фундамент оплачивается один раз.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype/scripts/ai_economy_construction.gd",
+            "prototype/scripts/ai_region_model.gd",
+            "doc/ror-modern/AI_COMPETITIVE_R18_CONTRACTS_VERIFICATION_2026-11-01.json",
+            "doc/ror-modern/AI_COMPETITIVE_R19_VERIFICATION_2026-11-01.json"
+          ],
+          "changed_files": [],
+          "unresolved": [
+            {
+              "kind": "final_acceptance_pending",
+              "description": "R18 implementation plus R19 negative-evidence correction passed current standard-native15 and actual EXE4. Current full513 is running; final selected-artifact quality and performance matrices remain pending."
+            }
+          ],
+          "next_action": "Граница R19 закрыта: все513 тестов покрыты полным запуском и проверенным исправленным повтором. Завершить ограниченный подбор; на выбранном финальном коде выполнить23 затронутых проверки, новый полный набор и соответствующие численные сценарии.",
+          "previous_source_scope_gap": [
+            {
+              "kind": "source_scope_quality_gap",
+              "description": "Expansion and deposit selection use bounded geometry/reachability, resource value and danger. Builder crew sizes are bounded heuristics rather than an explicit marginal-return optimizer.",
+              "sources": [
+                "prototype/scripts/ai_region_model.gd",
+                "prototype/scripts/ai_economy_construction.gd"
+              ],
+              "source_sha256": {
+                "prototype/scripts/ai_region_model.gd": "02e87c2ab1f5ba43ab8949ba6720294e70b36cb7d3a51632bc2e859aeef0fdda",
+                "prototype/scripts/ai_economy_construction.gd": "052fb81ca01f88afec1645142f6f286e1ff4254a6a41ef6c921b5a512b7764eb"
+              }
+            }
+          ]
+        },
+        {
+          "id": "AI03-07",
+          "description": "Провести контролируемые открытия всех 16 цивилизаций и pressure-response, сравнить с baseline, проверить истощение еды/леса, груз, потерю TC, отмену стройки и population 50/200/500.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI04",
+      "title": "Стратегический директор и планы из нескольких шагов",
+      "status": "in_progress",
+      "depends_on": [
+        "AI03"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "source_scope_quality_gaps_and_pending_measurements",
+      "tasks": [
+        {
+          "id": "AI04-01",
+          "description": "Описать цели: выжить, развить экономику, перейти в возраст, разведать, захватить ресурс/позицию, нанести рейд, осадить, высадиться, выполнить условие победы.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_plan_library.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI04-02",
+          "description": "Реализовать сравнение полезности и небольшой иерархический планировщик: готовые способы выполнения цели раскрываются в шаги, стоимость и риски сравниваются в пределах §4.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_strategy_director.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI04-03",
+          "description": "Выбор состава должен использовать наблюдённую и вероятную армию, ожидаемые улучшения, собственную производственную базу и цену переключения; агрегировать противников по ролям, а не первым ID.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype/scripts/ai_belief_model.gd",
+            "prototype/scripts/ai_combat_model.gd",
+            "prototype/scripts/ai_economy_production.gd",
+            "doc/ror-modern/AI_COMPETITIVE_R18_CONTRACTS_VERIFICATION_2026-11-01.json",
+            "doc/ror-modern/AI_COMPETITIVE_R19_VERIFICATION_2026-11-01.json"
+          ],
+          "changed_files": [],
+          "unresolved": [
+            {
+              "kind": "final_acceptance_pending",
+              "description": "R18 implementation plus R19 negative-evidence correction passed current standard-native15 and actual EXE4. Current full513 is running; final selected-artifact quality and performance matrices remain pending."
+            }
+          ],
+          "next_action": "Граница R19 закрыта: все513 тестов покрыты полным запуском и проверенным исправленным повтором. Завершить ограниченный подбор; на выбранном финальном коде выполнить23 затронутых проверки, новый полный набор и соответствующие численные сценарии.",
+          "previous_source_scope_gap": [
+            {
+              "kind": "source_scope_quality_gap",
+              "description": "Production counter choice uses sampled observed/remembered enemy profiles, own units, availability and cost. There is no calibrated probabilistic forecast of future enemy upgrades or a full economic switching-cost model.",
+              "sources": [
+                "prototype/scripts/ai_economy_production.gd",
+                "prototype/scripts/ai_combat_model.gd",
+                "prototype/scripts/ai_belief_model.gd"
+              ],
+              "source_sha256": {
+                "prototype/scripts/ai_economy_production.gd": "72d52b26c8d717671615623bae6a0dde2e055e7a37bcd1510e1fa2ce356c9539",
+                "prototype/scripts/ai_combat_model.gd": "bf962b2cecb955e5f8aeb21bafa01e4682ebea93250b8283dd6d8f6625c80a26",
+                "prototype/scripts/ai_belief_model.gd": "3e781da9b965372178602b6498517d6cb3d5f9a53e99fb1b7fafee1e3358f89f"
+              }
+            }
+          ]
+        },
+        {
+          "id": "AI04-04",
+          "description": "Ввести обязательства плана, гистерезис, условия отмены и переключение после разведданных/потерь. Не позволять одному дешёвому отвлечению бесконечно отменять всю экономику и наступление.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_strategy_director.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI04-05",
+          "description": "Проверить четыре разных открытия в полном матче, смену стратегии после обнаружения контрсостава и сохранение в середине плана; записать причины выбора и отвергнутые альтернативы.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI05",
+      "title": "Проверяемый прогноз столкновений",
+      "status": "passed",
+      "depends_on": [
+        "AI04"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "passed",
+      "quality_gate": "passed",
+      "tasks": [
+        {
+          "id": "AI05-01",
+          "description": "Подготовить независимый набор реальных боёв: ближний/дальний бой, броня/контры, проход, высота, осада, лечение, конверсия, флот и смешанные армии. Разделить fit и held-out seeds/расстановки.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/combat_benchmark.json",
+            "prototype/qa/ai-competitive/competitive-20261030/combat_equal_cost.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI05-02",
+          "description": "Дополнить быструю оценку временем сближения, доступным фронтом, высотой, эффективной дальностью, splash и ценностью поддержки. Использовать общие чистые операторы урона.",
+          "status": "passed",
+          "evidence": [
+            "prototype/scripts/ai_combat_predictor.gd",
+            "prototype\\qa\\ai-competitive\\competitive-20261030\\tests\\results.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI05-03",
+          "description": "Реализовать ограниченное приближённое проигрывание атаковать/удерживать/отступить/обойти. Будущее врага моделируется гипотезами; авторитетный скрытый мир не клонируется.",
+          "status": "passed",
+          "evidence": [
+            "prototype/scripts/ai_combat_predictor.gd",
+            "prototype\\qa\\ai-competitive\\competitive-20261030\\tests\\results.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI05-04",
+          "description": "Калибровать только на fit, измерять знак исхода, ошибку потерь и уверенность на held-out. При низкой уверенности использовать консервативный сценарий и разведку.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/forecast_calibration.json",
+            "prototype/qa/ai-competitive/competitive-20261030/forecast_formula_comparison.json",
+            "prototype/qa/ai-competitive/competitive-20261030/combat-final-visible-intents.process.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "48 фактических боёв на финальной проекции: heldout знак11/12 против9/12 исходной scalar-формулы; fit-only корректор сохранён выключенным. Исходная формула не предсказывает потери, поэтому baseline loss-MAE не определён."
+        },
+        {
+          "id": "AI05-05",
+          "description": "Подключить прогноз к вступлению в бой, отходу и выбору подкрепления; проверить фиксированный бюджет и одинаковый результат native/reference, если введён native kernel.",
+          "status": "passed",
+          "evidence": [
+            "prototype/scripts/ai_operations.gd",
+            "prototype/tests/unit/test_ai_combat_predictor.gd",
+            "prototype/qa/ai-competitive/competitive-20261030/suite_coverage.json",
+            "prototype/qa/ai-competitive/competitive-20261030/combat-final-visible-intents.process.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Прогноз подключён к отходу с ограниченной частотой и confidence guard; бюджет, неизменность входа и детерминизм проверены. Native kernel прогноза не вводился."
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI06",
+      "title": "Боевой контроллер и специализированное микро",
+      "status": "in_progress",
+      "depends_on": [
+        "AI05"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "pending",
+      "tasks": [
+        {
+          "id": "AI06-01",
+          "description": "Ввести распределение по боевым ролям, локальные отряды и единый арбитраж приказов с operations; собственный приказ не дублируется, срочный отход не перетирается старым планом.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_competitive_controller.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI06-02",
+          "description": "Стрелки: согласованные залпы, резерв ожидаемого урона уже выпущенных видимых собственных снарядов, отход между завершёнными выстрелами, сохранение дистанции без постоянной отмены атаки.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/qa/ai-competitive/competitive-20261030/combat_equal_cost.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI06-03",
+          "description": "Ближний бой: прикрытие стрелков/осады, перехват, распределение фронта, атака доступной цели; не гоняться всей группой за быстрым отвлекающим юнитом.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        },
+        {
+          "id": "AI06-04",
+          "description": "Осада: дальность, splash/риск своих потерь по действующим правилам, выбор стен/башен/скоплений, защищённая позиция, смена цели и огонь по земле только при доступной команде.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        },
+        {
+          "id": "AI06-05",
+          "description": "Жрецы: позиция за прикрытием, выбор лечения/конверсии по отдаче и риску, отмена бесперспективной конверсии и защита ценных юнитов.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        },
+        {
+          "id": "AI06-06",
+          "description": "Флот: приоритет боевых/транспортных целей, прикрытие погрузки, отход повреждённых кораблей на ремонт и сохранение выхода с берега.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        },
+        {
+          "id": "AI06-07",
+          "description": "Проверить равную стоимость армий, открытое поле/проходы/высоту, отсутствие выстрела в туман и будущий снаряд, людские reaction/action budgets, save/replay во время залпа и отхода; выполнить абляцию микро.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/combat_equal_cost.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI07",
+      "title": "Территория, разведка и согласованные операции",
+      "status": "in_progress",
+      "depends_on": [
+        "AI06"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "source_scope_quality_gaps_and_pending_measurements",
+      "tasks": [
+        {
+          "id": "AI07-01",
+          "description": "Создать назначение сил по потребности: домашняя защита, главная армия, рейд, осада, сопровождение и разведка. У отряда собственная цель и резерв сил, не общая цель домена для всех групп.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_operation_allocator.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI07-02",
+          "description": "Разведывать для конкретного решения: армия/технология/выход/ресурс/новая база. Оценивать ценность информации, риск и время; обновлять старые сведения о противнике.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype/scripts/ai_operations.gd",
+            "doc/ror-modern/AI_COMPETITIVE_R18_CONTRACTS_VERIFICATION_2026-11-01.json",
+            "doc/ror-modern/AI_COMPETITIVE_R19_VERIFICATION_2026-11-01.json"
+          ],
+          "changed_files": [],
+          "unresolved": [
+            {
+              "kind": "final_acceptance_pending",
+              "description": "R18 implementation plus R19 negative-evidence correction passed current standard-native15 and actual EXE4. Current full513 is running; final selected-artifact quality and performance matrices remain pending."
+            }
+          ],
+          "next_action": "Граница R19 закрыта: все513 тестов покрыты полным запуском и проверенным исправленным повтором. Завершить ограниченный подбор; на выбранном финальном коде выполнить23 затронутых проверки, новый полный набор и соответствующие численные сценарии.",
+          "previous_source_scope_gap": [
+            {
+              "kind": "source_scope_quality_gap",
+              "description": "Scout frontier ranking currently uses visit age, travel distance and known danger. It does not explicitly compute the expected value of learning an enemy technology or resolving a particular strategic decision.",
+              "sources": [
+                "prototype/scripts/ai_operations.gd"
+              ],
+              "source_sha256": {
+                "prototype/scripts/ai_operations.gd": "9f85dfed388213f50dc1478bc765f2a422f666c2a065341626480797766c17a4"
+              }
+            }
+          ]
+        },
+        {
+          "id": "AI07-03",
+          "description": "Ввести маршруты с оценкой риска и времени, удержание проходов, контроль ресурсных зон и выбор места следующей базы. Кратчайшая линия не считается безопасным маршрутом.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_region_model.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI07-04",
+          "description": "Поддержать сочетания «главная армия + рейд», оборонный резерв, сбор подкреплений, осаду и отход с преследованием; успех и отмена каждой операции наблюдаемы.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        },
+        {
+          "id": "AI07-05",
+          "description": "Доработать десант: состав/вместимость, погрузка, проверка маршрута и берега, сопровождение, высадка, новая волна, ремонт и потеря транспорта; владение грузом и заданиями не теряется.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/transport_checkpoint_private_qualification.json",
+            "tools/ai_transport_acceptance.py",
+            "tools/qa/ai_transport_two_waves.gd",
+            "doc/ror-modern/AI_TRANSPORT_REBOARDING_VERIFICATION_2026-11-01.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Revised filter passed physical before/after and five unchanged linked contracts; the first candidate was rejected for treating an unknown goal as known land. Promote only the revised R20b at the protected post-tuning boundary; fresh23/full final suite/current EXE, transport3, soaks and performance remain pending."
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI08",
+      "title": "Полнота механик и командная игра",
+      "status": "in_progress",
+      "depends_on": [
+        "AI07"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "pending",
+      "tasks": [
+        {
+          "id": "AI08-01",
+          "description": "Подключить оплачиваемый резерв повторного посева: целевой запас по числу ферм/сроку истощения/дереву, аварийное сокращение, отсутствие двойной оплаты.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_capability_planner.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI08-02",
+          "description": "Строить укрепления по проходам и угрозе: стены, ворота, башни, подходы/выходы и последующий ремонт; не запирать собственную экономику или союзный маршрут.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        },
+        {
+          "id": "AI08-03",
+          "description": "Использовать гарнизон башни через Board/Unload: ценность огня против мобильности, допустимые пассажиры, ограничение вместимости, высадка при смене задачи и риске разрушения.",
+          "status": "passed",
+          "evidence": [
+            "prototype/tests/integration/test_ai_tower_decisions.gd",
+            "prototype/tests/integration/test_ai_capability_commands.gd",
+            "prototype/qa/ai-competitive/competitive-20261030/suite_coverage.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реальные Board/Unload: ограничения пассажиров/вместимости, смена угрозы и эвакуация; выгрузка ограничена публичным радиусом4.5."
+        },
+        {
+          "id": "AI08-04",
+          "description": "Поддержать conquest, wonder, artifacts, ruins и score по фактически настроенным правилам: собственный план победы и противодействие видимой/публично объявленной угрозе. Внутренние таймеры чужой стороны не раскрываются автоматически.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация есть; завершаются обязательные сквозные измерения и матрица. Не считать критерием приёмки одно наличие кода."
+        },
+        {
+          "id": "AI08-05",
+          "description": "Ввести командные намерения «прикрыть/согласовать наступление/запросить ресурс/транспорт». Получатели проверяют свои законные знания и возможности; внутреннее сообщение не переносит скрытое состояние.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/tests/integration/test_ai_team_capabilities.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI08-06",
+          "description": "Проверить союзный транспорт/ремонт/торговлю, разрыв союза и смену владельца, помощь при натиске и специальные победы в реальных 2v2/4v4 сценариях с сохранением и повтором.",
+          "status": "in_progress",
+          "evidence": [
+            "doc/ror-modern/AI_TEAM_ECONOMY_VERIFICATION_2026-11-01.json",
+            "prototype/qa/ai-competitive/competitive-20261030/team-economy-acceptance/b19310996c1312f3/summary.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Союзный ремонт и торговля фактически прошли в2v2/4v4: шесть обычных/save/replay исполнений, точные команды и конечный мир. Повторить на окончательных исходниках/native, завершить реальные командные soaks и общую приёмку."
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI09",
+      "title": "Разнообразие, сложность и человечески правдоподобное управление",
+      "status": "in_progress",
+      "depends_on": [
+        "AI08"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "source_scope_quality_gaps_and_pending_measurements",
+      "tasks": [
+        {
+          "id": "AI09-01",
+          "description": "Сделать самостоятельные стили на одной библиотеке возможностей: давление, развитие, позиционная игра, рейды/море. Выбор учитывает карту/цивилизацию и сохранённый seeded RNG.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype/scripts/ai_macro_plan.gd",
+            "doc/ror-modern/AI_COMPETITIVE_R18_CONTRACTS_VERIFICATION_2026-11-01.json",
+            "doc/ror-modern/AI_COMPETITIVE_R19_VERIFICATION_2026-11-01.json"
+          ],
+          "changed_files": [],
+          "unresolved": [
+            {
+              "kind": "final_acceptance_pending",
+              "description": "R18 implementation plus R19 negative-evidence correction passed current standard-native15 and actual EXE4. Current full513 is running; final selected-artifact quality and performance matrices remain pending."
+            }
+          ],
+          "next_action": "Граница R19 закрыта: все513 тестов покрыты полным запуском и проверенным исправленным повтором. Завершить ограниченный подбор; на выбранном финальном коде выполнить23 затронутых проверки, новый полный набор и соответствующие численные сценарии.",
+          "previous_source_scope_gap": [
+            {
+              "kind": "source_scope_quality_gap",
+              "description": "Opening-family selection uses a deterministic seed/team formula. It does not weight the map or civilization when choosing that family; later macro and strategic decisions react to legal world facts. Actual20dev-seed selector proof covers40positions/all4families, not context-sensitive style choice or full first-command sequences.",
+              "sources": [
+                "prototype/scripts/ai_macro_plan.gd"
+              ],
+              "source_sha256": {
+                "prototype/scripts/ai_macro_plan.gd": "e266d69db3874e41712568f333da8d213c69208eab637c4cd80c6132224c8425"
+              }
+            }
+          ]
+        },
+        {
+          "id": "AI09-02",
+          "description": "Сохранить easy/standard/hard. Начальные reaction delays 12/8/4 такта и бюджеты 90/180/300 внешних команд в игровую минуту, burst 3/4/6; командный приказ группе считается одним действием, автоматическое поведение движка одинаково для людей и ИИ.",
+          "status": "passed",
+          "evidence": [
+            "prototype/tests/unit/test_ai_action_scheduler.gd",
+            "prototype\\qa\\ai-competitive\\competitive-20261030\\tests\\results.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI09-03",
+          "description": "Снижать сложность через глубину плана, точность оценки и ограничения внимания/реакции. Разнести реакцию и выдачу приказов, запретить обход бюджета сотней одиночных приказов в одном кадре.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/scripts/ai_action_scheduler.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI09-04",
+          "description": "Проверить разнообразие первых решений на 20 dev-seed, воспроизводимость одинакового seed, отсутствие всеведения и resource handicap, понятные debug-причины и сохранение token bucket после загрузки.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/tests/results.json",
+            "prototype/tests/unit/test_ai_competitive_strategy.gd"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI10",
+      "title": "Автоматическая настройка и подготовка обучаемой политики",
+      "status": "in_progress",
+      "depends_on": [
+        "AI09"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "pending",
+      "tasks": [
+        {
+          "id": "AI10-01",
+          "description": "Выделить до 24 действительно влияющих параметров с диапазонами и ограничениями; разработать воспроизводимый CPU-подбор и хранение всех кандидатов/оценок.",
+          "status": "passed",
+          "evidence": [
+            "tools/ai_tune.py"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Implemented and checked; broader quantitative acceptance is tracked separately."
+        },
+        {
+          "id": "AI10-02",
+          "description": "Выполнить максимум 3 поколения × 8 кандидатов × 8 paired dev-случаев = 384 партий; первые два поколения выбираются по dev, до 3 финалистов проверяются по 32 validation-партиям каждый.",
+          "status": "in_progress",
+          "evidence": [
+            "doc/ror-modern/AI_ARENA_CONCURRENCY_CALIBRATION_VERIFICATION_2026-11-02.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация подбора, лиги, экспорта и ranker готова; ожидается конечный эксперимент на текущем Release, затем независимая validation и абляции."
+        },
+        {
+          "id": "AI10-03",
+          "description": "Создать лигу baseline, прежних champion и специализированных соперников. Продвигать кандидата с улучшением score/устойчивости и без нарушений корректности; проверять абляцией, какие функции дали прирост.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Реализация подбора, лиги, экспорта и ranker готова; ожидается конечный эксперимент на текущем Release, затем независимая validation и абляции."
+        },
+        {
+          "id": "AI10-04",
+          "description": "Экспортировать признаки, законные кандидаты, выбранное действие и исход с provenance. При наличии человеческих реплеев подключить их через валидируемый адаптер; иначе использовать явно помеченные scripted/bot demonstrations. Реализовать компактный детерминированный линейный ranker без обязательного внешнего ML-runtime.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/arena-trace-sampling-r22/preparation.json",
+            "prototype/qa/ai-competitive/competitive-20261030/arena-trace-sampling-r22/stateless-unit-qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/arena-trace-sampling-r22/reporting-tools-qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/arena-trace-sampling-r22/supervisor-contract.json"
+          ],
+          "changed_files": [],
+          "unresolved": [
+            {
+              "kind": "pending_export_sampling_repair_verification",
+              "description": "Actual R19 trace reaches4096 prep-poll rows bytick7397 of22567 with43 unique policy inputs; final policy inputs omitted. Existing fitness is valid but demonstrations are an early prefix. Private director-timestamp collector passed stateless Godot tests; paired physical equality, protected source promotion and exact final shipping checks are pending.",
+              "planned_qualification": "prototype/qa/ai-competitive/competitive-20261030/arena-trace-sampling-r22/qualification.json",
+              "planned_shipping_qualification": "prototype/qa/ai-competitive/competitive-20261030/arena-trace-sampling-r22/shipping-final/qualification.json"
+            }
+          ],
+          "next_action": "После текущих3 поколений/validation/абляций выполнить4 парных диагностических запуска сборщика; при точном совпадении миров и команд перенести только проверенный evaluator и новый unit. Новый финальный полный набор включает514+ игровых скриптов и44+ Python-теста; проверить сборщик отдельно в настоящем финальном EXE. Старые R19-данные оставить исходным ограниченным префиксом."
+        },
+        {
+          "id": "AI10-05",
+          "description": "Сравнить ranker с ручной оценкой на validation; включать только при улучшении с сохранением бюджета. При отсутствии выигрыша оставить ranker готовым экспериментом, сохранить лучшую ручную политику; подготовить контракт внешнего learner и измеренную оценку пропускной способности будущего RL.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Завершить конечный fit/validation с честным указанием ограниченного раннего префикса R19; продвижение только по независимым игровым результатам. Новый сборщик исправляет последующий экспорт, старые данные не переписываются. Holdout/challenge не используются для fit."
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI11",
+      "title": "Производительность и сквозная устойчивость",
+      "status": "in_progress",
+      "depends_on": [
+        "AI10"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "pending",
+      "tasks": [
+        {
+          "id": "AI11-01",
+          "description": "Измерить захват, подготовку, расчёт по слоям, публикацию, долю ожиданий apply_tick, размер снимков/памяти и влияние на общий fixed tick. Разделить cold/warm и sequential/threaded режимы.",
+          "status": "in_progress",
+          "evidence": [
+            "doc/ror-modern/AI_MIXED_WORKLOAD_VERIFICATION_2026-11-01.json",
+            "prototype/qa/ai-competitive/competitive-20261030/diagnostic-harness-r21/workload-after/qualification.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Восемь проверок реального боя, добычи и марша, четыре пары точного совпадения прошли в частной копии. Выполнить обязательные26 конфигураций на окончательном Release в отдельном замере; эти функциональные проверки не подтверждают FPS."
+        },
+        {
+          "id": "AI11-02",
+          "description": "Проверить реалистичную смесь экономики, марша, боя и ожидания для 2/4/8 × 500, карту ×4 по площади; отдельно экстремальный all-active stress, без заявления 60 FPS по его результату.",
+          "status": "in_progress",
+          "evidence": [
+            "doc/ror-modern/AI_MIXED_WORKLOAD_VERIFICATION_2026-11-01.json",
+            "prototype/qa/ai-competitive/competitive-20261030/diagnostic-harness-r21/workload-after/qualification.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Восемь проверок реального боя, добычи и марша, четыре пары точного совпадения прошли в частной копии. Выполнить обязательные26 конфигураций на окончательном Release в отдельном замере; эти функциональные проверки не подтверждают FPS."
+        },
+        {
+          "id": "AI11-03",
+          "description": "Убрать доказанные hotspots: инкрементальные факты/регионы, кэширование, агрегация, ограниченный поиск; native переносить только измеренный чистый kernel с reference-паритетом. Не выбирать разные команды по wall-time worker.",
+          "status": "passed",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/traffic_heap_benchmark.json",
+            "prototype/qa/ai-competitive/competitive-20261030/traffic_heap_benchmark.process.json",
+            "prototype/qa/ai-competitive/competitive-20261030/suite_coverage.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation-privacy-r11/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation_v12_promotion.json",
+            "prototype/qa/ai-competitive/competitive-20261030/navigation-egress-r12-final-impacts/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/traffic-clearance-r12-v5/qualification.json",
+            "prototype/qa/ai-competitive/competitive-20261030/original-construction-access-r12-local-index/result.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "R12 new map-wide planning index (p95 27.757ms) replaced with local row extraction (p95 0.005ms preparation); full new traffic decision among4000 detached units p95 42.605 to15.768ms,20 isolated samples after5 warmups. Final actual-Release formal26/rendered E6 remains required."
+        },
+        {
+          "id": "AI11-04",
+          "description": "Пройти длительные land/coastal/islands/team матчи, save/resume в бою/погрузке/плане/ожидании задачи, replay и sequential/threaded equality; проверить отсутствие нарастающей памяти и повторяющихся stalls.",
+          "status": "in_progress",
+          "evidence": [
+            "prototype/qa/ai-competitive/competitive-20261030/transport_checkpoint_private_qualification.json",
+            "tools/ai_transport_acceptance.py",
+            "tools/qa/ai_transport_two_waves.gd",
+            "doc/ror-modern/AI_TRANSPORT_REBOARDING_VERIFICATION_2026-11-01.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Revised filter passed physical before/after and five unchanged linked contracts; the first candidate was rejected for treating an unknown goal as known land. Promote only the revised R20b at the protected post-tuning boundary; fresh23/full final suite/current EXE, transport3, soaks and performance remain pending."
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "AI12",
+      "title": "Итоговая оценка, Release и передача результата",
+      "status": "in_progress",
+      "depends_on": [
+        "AI11"
+      ],
+      "dependency_gate": "functional_contracts_passed",
+      "functional_gate": "pending",
+      "quality_gate": "pending",
+      "tasks": [
+        {
+          "id": "AI12-01",
+          "description": "Зафиксировать champion, все хеши и настройки; выполнить 128 holdout-партий против baseline и 64 challenge_holdout-партии ровно для этой версии. При изменении кода по найденной функциональной ошибке старые итоговые наборы становятся diagnostic, новая итоговая проверка получает новые замороженные наборы.",
+          "status": "pending",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        },
+        {
+          "id": "AI12-02",
+          "description": "Выполнить полный suite/cache validation на границе этапа и исправить относящиеся к изменению ошибки; после последней правки повторить только затронутые проверки и требуемую итоговую границу. Не заявлять full pass при наличии незакрытых падений.",
+          "status": "in_progress",
+          "evidence": [
+            "tools/ai_complete_suite.py",
+            "tools/ai_acceptance_checks.py",
+            "tools/publish_ai_acceptance.py",
+            "prototype/qa/ai-competitive/competitive-20261030/final-full-suite-request-20261102/qualification.json"
+          ],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "На выбранном финальном исходном коде после защищённого переноса исправлений выполнить новый полный514+ suite, все44+ Python-теста,15+ PowerShell-проверок и cache validation через tools/ai_complete_suite.py. Дополнительно проверить новый журнал в2 настоящих EXE-диагностиках; затем все прежние Release/нагрузочные/сохранения/итоговые сценарии."
+        },
+        {
+          "id": "AI12-03",
+          "description": "Собрать настоящий Windows Release имеющимся pipeline, проверить версии EXE/PCK/native; сохранить пакет и manifest в отдельный каталог результата, не подменять пользовательскую установленную игру.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Исходная граница и новые исправления проверены; повторить окончательные проверки выбранной политики и именно распакованного EXE."
+        },
+        {
+          "id": "AI12-04",
+          "description": "Проверить готовый EXE: land и islands, продолжение сохранения во время боя, микро, высадка, завершение/перезапуск матча, отсутствие ошибок и реальное применение champion-policy. Сохранить журналы и наглядные доказательства из пакета.",
+          "status": "in_progress",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": "Исходная граница и новые исправления проверены; повторить окончательные проверки выбранной политики и именно распакованного EXE."
+        },
+        {
+          "id": "AI12-05",
+          "description": "Обновить AI contract/README, оформить достигнутые метрики, абляции, дефекты и пределы; записать итоговый статус задач и команды воспроизведения. Человеческую оценку пометить отдельно.",
+          "status": "pending",
+          "evidence": [],
+          "changed_files": [],
+          "unresolved": [],
+          "next_action": null
+        }
+      ],
+      "evidence": []
+    }
+  ],
+  "evidence": [],
+  "unresolved": [
+    {
+      "kind": "source_scope_review",
+      "tasks": [
+        "AI07-02",
+        "AI04-03",
+        "AI03-06",
+        "AI02-02",
+        "AI09-01"
+      ],
+      "scope": "Known algorithmic simplifications; not runtime failures or final measured results."
+    },
+    {
+      "kind": "user_reported_periodic_simulation_holds",
+      "tasks": [
+        "AI02-01"
+      ],
+      "scope": "Cause reproduced on desktop-shortcut R12 autosave; R13 final private24 and causal capture reduction passed. Standard graphical symptom verification still pending."
+    }
+  ],
+  "next_action": "Finish standard R13 Release and isolate ordinary-owner graphical replay of the actual user autosave; compare simulation holds, not only FPS. Then verify actual EXE startup/save/load, fresh current-source513 and continue finite both-side league/tuning, controls/performance/soaks/final192, honest70task audit, commit/push and extracted final ZIP. R12 full run intentionally stopped405PASS0FAIL; no R12 league started.",
+  "plan_sha256": "eeb9a0c21897dd77449ae73283608cf5a3f6f1334531cc6885fb04b192f0a402",
+  "runtime_versions_current": {
+    "archive": 8,
+    "checkpoint": 4,
+    "replay": 5
+  },
+  "parallel_verification": [
+    "R11 exact native Release: four actual EXE headless/rendered land/islands startup and save-load checks passed; loaded-world images inspected.",
+    "R11 full511 is still running, no final full-suite claim yet; unchanged runtime source boundary.",
+    "R11 exact-source explicit competitive combat and pending-plan save/resume passed; source0/saved1/apply8, one real command, ten pending-plan checks.",
+    "R11 own12 calibration complete; candidateSmoke24 running; tuning and final holdout/challenge have not started.",
+    "Private AI-only two-wave transport cleanup passed four causal comparisons with exact legacy parity; guarded promotion after league before champion freeze."
+  ],
+  "invalidated_series": [
+    "3a81f593f9f54d22",
+    "9188fb733dc559d2"
+  ],
+  "updated_local": "2026-11-01T00:49:24+03:00",
+  "periodic_stall_verification": "AI_PERIODIC_STALL_VERIFICATION_2026-11-01.json",
+  "implementation_contract_verification": "AI_COMPETITIVE_R19_VERIFICATION_2026-11-01.json"
+}

@@ -101,6 +101,15 @@ function Copy-RoRReleaseRuntime {
     New-Item -ItemType Directory -Force -Path (Join-Path $DistributionRoot "legal\MIT") | Out-Null
     Copy-Item -LiteralPath (Join-Path $RepositoryRoot "legal\MIT\godot-cpp.md") -Destination (Join-Path $DistributionRoot "legal\MIT\godot-cpp.md") -Force
     Copy-Item -LiteralPath (Join-Path $ProjectRoot "README.md") -Destination (Join-Path $DistributionRoot "README.md") -Force
+    $gameIcon = Join-Path $DistributionRoot "Rise of Rome.ico"
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot "assets\app\icon.ico") -Destination $gameIcon -Force
+    $shortcutShell = New-Object -ComObject WScript.Shell
+    $gameShortcut = $shortcutShell.CreateShortcut((Join-Path $DistributionRoot "Rise of Rome.lnk"))
+    $gameShortcut.TargetPath = Join-Path $DistributionRoot "Rise of Rome Prototype.exe"
+    $gameShortcut.WorkingDirectory = $DistributionRoot
+    $gameShortcut.IconLocation = "$gameIcon,0"
+    $gameShortcut.Description = "Rise of Rome"
+    $gameShortcut.Save()
 }
 
 function Assert-RoRGodotStep {

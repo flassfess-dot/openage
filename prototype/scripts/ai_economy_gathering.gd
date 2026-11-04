@@ -197,7 +197,10 @@ static func gather(
 		var current: Dictionary = by_id.get(int(worker.get("resource_id", -1)), {})
 		var domain := String(worker.get("movement_domain", "land"))
 		var current_type := int(current.get("resource_type_id", -1))
-		if not current.is_empty() and int(type_load.get(current_type, 0)) <= float(quotas.get(current_type, 0.0)) + 0.5 and state.danger(Vector2(current.get("pos", Vector2.ZERO)), int(snapshot.get("tick", 0)), policy, domain) <= float(policy.get("maximum_economic_danger", 8.0)): continue
+		var active_current := String(worker.get("task", "idle")) == "gather" and not current.is_empty()
+		var current_failed: bool = policy.get("failed_gather_targets", {}).get(worker_id, {}).has(int(current.get("id", -1)))
+		var current_cooling: bool = state.cooldowns.has("gather:%d:%d" % [worker_id, int(current.get("id", -1))])
+		if active_current and not current_failed and not current_cooling and int(type_load.get(current_type, 0)) <= float(quotas.get(current_type, 0.0)) + 0.5 and state.danger(Vector2(current.get("pos", Vector2.ZERO)), int(snapshot.get("tick", 0)), policy, domain) <= float(policy.get("maximum_economic_danger", 8.0)): continue
 		var best: Dictionary = {}
 		var score := -INF
 		var current_score := -INF
@@ -225,7 +228,7 @@ static func gather(
 			for resource in candidates:
 				# The adaptive blacklist owns retry lifetime. A completed order must
 				# not permanently veto the resource after its stored failure expires.
-				if policy.get("failed_gather_targets", {}).get(worker_id, {}).has(int(resource.get("id", -1))) or not Rules.resource_has_reachable_approach(resource, worker, reachable):
+				if policy.get("failed_gather_targets", {}).get(worker_id, {}).has(int(resource.get("id", -1))) or state.cooldowns.has("gather:%d:%d" % [worker_id, int(resource.get("id", -1))]) or not Rules.resource_has_reachable_approach(resource, worker, reachable):
 					continue
 				var position := Vector2(resource.get("pos", Vector2.ZERO))
 				var danger: float = state.danger(position, int(snapshot.get("tick", 0)), policy, domain)
@@ -240,7 +243,7 @@ static func gather(
 					drop_distance = 12.0
 				var resource_id := int(resource.get("id", -1))
 				var assigned := maxi(
-					0, int(saturation.get(resource_id, 0)) - (1 if resource_id == int(current.get("id", -2)) else 0)
+					0, int(saturation.get(resource_id, 0)) - (1 if active_current and resource_id == int(current.get("id", -2)) else 0)
 				)
 				var candidate_score := (
 					20.0
@@ -256,18 +259,18 @@ static func gather(
 				if candidate_score > score:
 					best = resource
 					score = candidate_score
-		if best.is_empty() or int(best["id"]) == int(current.get("id", -2)):
+		if best.is_empty() or (active_current and int(best["id"]) == int(current.get("id", -2))):
 			continue
-		if not current.is_empty() and score < current_score + float(policy.get("gather_inertia", 12.0)):
+		if active_current and score < current_score + float(policy.get("gather_inertia", 12.0)):
 			continue
-		if not current.is_empty():
+		if active_current:
 			saturation[int(current["id"])] = maxi(0, int(saturation.get(int(current["id"]), 0)) - 1)
 		saturation[int(best["id"])] = int(saturation.get(int(best["id"]), 0)) + 1
 		var command = Commands.GatherCommand.new(tick, [worker_id], int(best["id"]))
 		command.params["_ai_feedback"] = {"key": "gather:%d:%d" % [worker_id, int(best["id"])], "cost": {}}
 		if not state.cooldowns.has(command.params["_ai_feedback"]["key"]):
 			result.append(command)
-			if current_type >= 0: type_load[current_type] = maxi(0, int(type_load.get(current_type, 0)) - 1)
+			if active_current and current_type >= 0: type_load[current_type] = maxi(0, int(type_load.get(current_type, 0)) - 1)
 			var selected_type := int(best.get("resource_type_id", -1))
 			type_load[selected_type] = int(type_load.get(selected_type, 0)) + 1
 			reserved[worker_id] = true

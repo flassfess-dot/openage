@@ -146,8 +146,9 @@ func _test_transition_mesh() -> void:
 	var mesh: ArrayMesh = canvas.terrain_mesh
 	canvas.set_view_state(1.5, Vector2(30, 20), Vector2(640, 480), 1)
 	check(canvas.terrain_mesh == mesh, "camera movement and zoom reuse world geometry")
+	var generation: int=canvas.mesh_generation
 	canvas.set_view_state(1.5, Vector2(30, 20), Vector2(640, 480), 2)
-	check(canvas.terrain_mesh != mesh, "changed terrain revision rebuilds geometry")
+	check(canvas.mesh_generation>generation and canvas.terrain_revision==2, "changed terrain revision rebuilds geometry, permitting ArrayMesh buffer reuse")
 	canvas.free()
 
 

@@ -37,6 +37,8 @@ var cache_hits: int = 0
 var route_cache_revision: int = -1
 var performance_probe: Variant = null
 var native_enabled: bool = true
+static var native_world_smoothing_default := true
+var native_world_smoothing_enabled := native_world_smoothing_default
 var native_region_grouping_enabled := true
 var native_available: bool = false
 var native_kernels: Dictionary = {}
@@ -556,18 +558,22 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		cache_hits += 1
 		var cached_path: Array[Vector2] = []
 		cached_path.assign(cache[key])
+		if performance_probe != null: performance_probe.observe_microseconds("navigation.world_cache_hit", Time.get_ticks_usec() - started)
 		return _finish_path_observation(started, cached_path, true)
 	# Keys include exact world-space endpoints. In a long, otherwise static
 	# match most routes are unique; topology revision alone cannot bound them.
 	# Keep the last full cache until after its final possible hit.
 	_trim_geometry_cache("world")
+	var stage_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var goal := nearest_walkable(requested_goal, movement_domain, restriction_id, clearance_radius)
+	if performance_probe != null: performance_probe.observe_microseconds("navigation.world_endpoint", Time.get_ticks_usec() - stage_started)
 	if goal.x < 0:
 		cache[key] = []
 		_record_geometry("world", key, [], start, requested_goal, clearance_radius)
 		return _finish_path_observation(started, [], false)
 	var smoothed: Array[Vector2i]
 	var direct_path := false
+	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	if uses_native_kernel():
 		var native_result := _find_native_smoothed_cell_path(start, goal, movement_domain, restriction_id, clearance_radius)
 		smoothed = native_result["path"]
@@ -581,12 +587,14 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 			smoothed = [cells[0], cells[cells.size() - 1]]
 		else:
 			smoothed = smooth_cells(cells, movement_domain, restriction_id, clearance_radius)
+	if performance_probe != null: performance_probe.observe_microseconds("navigation.world_cell_route", Time.get_ticks_usec() - stage_started)
 	if smoothed.is_empty():
 		cache[key] = []
 		_record_geometry("world", key, [], start, requested_goal, clearance_radius)
 		return _finish_path_observation(started, [], false)
 	if direct_path and performance_probe != null:
 		performance_probe.increment("navigation.direct_path_hits")
+	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	var result: Array[Vector2] = []
 	for index in range(1, smoothed.size()):
 		var cell: Vector2i = smoothed[index]
@@ -607,11 +615,14 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	if not result.is_empty() and not start_world.is_equal_approx(start_center) and not is_segment_walkable(start_world, result[0], clearance_radius, movement_domain, restriction_id):
 		result.push_front(start_center)
 	if not result.is_empty() and not _world_route_is_clear(start_world, result, clearance_radius, movement_domain, restriction_id):
+		var swept_started := Time.get_ticks_usec() if performance_probe != null else 0
 		result = _swept_world_route(start_world, result.back(), start, goal, clearance_radius, movement_domain, restriction_id)
+		if performance_probe != null: performance_probe.observe_microseconds("navigation.world_swept", Time.get_ticks_usec() - swept_started)
 	cache[key] = result.duplicate()
 	_record_geometry("world", key, result, start, requested_goal, clearance_radius)
 	# Opening a closer endpoint can occur outside the previous route bounds.
 	geometry_metadata["world"][key]["global"] = goal != requested_goal
+	if performance_probe != null: performance_probe.observe_microseconds("navigation.world_finish", Time.get_ticks_usec() - stage_started)
 	return _finish_path_observation(started, result, false)
 
 
@@ -639,6 +650,12 @@ func _swept_world_route(origin: Vector2, destination: Vector2, start: Vector2i, 
 	for index in range(1, cells.size()): candidates.append(Vector2(cells[index]) + Vector2(0.5, 0.5))
 	if candidates.is_empty() or not candidates.back().is_equal_approx(destination): candidates.append(destination)
 	var result: Array[Vector2] = []
+	if native_world_smoothing_enabled and uses_native_kernel():
+		var kernel = _native_kernel_for(domain, restriction)
+		if kernel.has_method("smooth_swept_world_path"):
+			var packed: PackedVector2Array = kernel.smooth_swept_world_path(origin, PackedVector2Array(candidates), radius, start_center)
+			for point in packed: result.append(point)
+			return result
 	var cursor := origin
 	var first := 0
 	if not is_position_walkable(origin, radius, domain, restriction) and candidates[0].is_equal_approx(start_center):

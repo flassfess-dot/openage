@@ -32,10 +32,10 @@ func _initialize() -> void:
 			ctx["terrain"][last.y * 32 + last.x] = 22
 			check(not Decorations.fits(spec, variant, position, ctx), "full footprint cannot spill into deep water")
 			ctx["terrain"][last.y * 32 + last.x] = int(spec["placement"]["materials"][0])
-			ctx["levels"][(last.y + 1) * 33 + last.x + 1] = 1
-			check(not Decorations.fits(spec, variant, position, ctx), "stamp cannot cross a terrace edge")
+			ctx["levels"][(last.y + 1) * 33 + last.x + 1] = int(spec["placement"].get("max_slope",0))+1
+			check(not Decorations.fits(spec, variant, position, ctx), "stamp rejects a terrace exceeding its declared slope allowance")
 			check(not Decorations.fits(spec, variant, Vector2(-0.5, 4), ctx), "map boundary is enforced")
-	check(variants == 105, "105 allowed decoration variants have placement rules and source art")
+	check(variants == 115, "115 allowed decoration variants, including shoreline additions, have placement rules and source art")
 	for key in ["ror_stone_dirt_trail", "ror_stone_grass_trail", "overgrown_trail"]:
 		check(Decorations.palette().filter(func(spec): return spec["key"] == key).is_empty(), "excluded road family has no generation rule: " + key)
 	_test_dry_biome_population()
@@ -54,7 +54,7 @@ func _initialize() -> void:
 	check(field.query(Rect2i(0, 0, 20, 20)).size() == 1, "wide decal is not returned repeatedly")
 	check(field.query(Rect2i(20, 20, 2, 2)).is_empty(), "offscreen decal is culled")
 	for failure in failures: push_error(failure)
-	if failures.is_empty(): print("Decoration palette passed: 105 allowed variants, source art, habitats, complete footprints, layers and camera culling")
+	if failures.is_empty(): print("Decoration palette passed: 115 allowed variants, source art, habitats, complete footprints, layers and camera culling")
 	quit(0 if failures.is_empty() else 1)
 
 func fixture(spec: Dictionary) -> Dictionary:

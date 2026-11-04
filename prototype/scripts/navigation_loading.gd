@@ -11,6 +11,7 @@ var complete := true
 var match_players: Array = []
 var pending_ai_teams: Array[int] = []
 var prepare_build_topology := true
+var prepare_ai_views := true
 
 func is_loading() -> bool:
 	return not complete
@@ -105,8 +106,15 @@ func poll(world) -> bool:
 	# its first decision (two consecutive pauses in a three-player save).
 	if not pending_ai_teams.is_empty():
 		var team := pending_ai_teams[0]
-		var navigation_ready: bool = world.ai_navigation_knowledge.prepare_snapshot(world, world.get_fog_of_war(), team, 2048, 0)
-		var resources_ready: bool = world.prepare_known_ai_resource_snapshot(team)
+		var navigation_ready := true
+		var resources_ready := true
+		if prepare_ai_views:
+			navigation_ready = world.ai_navigation_knowledge.prepare_snapshot(world, world.get_fog_of_war(), team, 2048, 0)
+			resources_ready = world.prepare_known_ai_resource_snapshot(team)
+		else:
+			# Recovery follows recorded commands. It needs durable legal memory,
+			# not AI navigation targets or immutable planner resource publications.
+			world.get_known_resources(team)
 		if navigation_ready and resources_ready:
 			if prepare_build_topology: BuildSites.prepare_topology(world, team)
 			var warmed := {}

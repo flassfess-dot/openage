@@ -18,6 +18,10 @@ func _initialize() -> void:
 	test_surface_components_survive_equivalent_discovery()
 	test_surface_components_survive_occupant_changes()
 	test_observed_elevation_and_slopes()
+	test_published_navigation_privacy()
+	test_published_hidden_obstacle_memory()
+	test_published_navigation_checkpoint_memory()
+	test_native_surface_parity()
 	for failure in failures:
 		push_error(failure)
 	print("Fog-aware navigation: %d failures" % failures.size())
@@ -209,3 +213,124 @@ func test_surface_components_survive_occupant_changes() -> void:
 	planner = knowledge.planner(world, 1)
 	check(not planner.grid.occupied_cells.has(cell), "visible removed obstacle releases remembered occupancy")
 	check(planner.grid.surface_revision == surface_revision and is_same(planner.grid.surface_component_cache.get("land:-1"), components), "removing an occupant retains terrain-only component caches")
+
+
+func privacy_fixture(barrier: bool):
+	var world = World.new(Vector2i(16, 16))
+	world.navigation_grid.configure_terrain(func(cell): return "water" if barrier and cell.x == 8 else "grass")
+	world.add_unit(1, "villager", Vector2(2.5, 8.5), false)
+	world.fog_of_war.ensure_player(1)
+	for y in range(6, 11):
+		for x in range(0, 6): world.fog_of_war.reveal_explored_cell(1, Vector2i(x, y))
+		for x in range(11, 16): world.fog_of_war.reveal_explored_cell(1, Vector2i(x, y))
+	return world
+
+
+func test_published_navigation_privacy() -> void:
+	const Knowledge = preload("res://scripts/ai_navigation_knowledge.gd")
+	var first = privacy_fixture(false)
+	var second = privacy_fixture(true)
+	for budgeted in [false, true]:
+		var publications: Array = []
+		for world in [first, second]:
+			var navigation = Knowledge.new()
+			if budgeted:
+				var ready := false
+				for unused in range(100):
+					if navigation.prepare_snapshot(world, world.fog_of_war, 1, 17, 0):
+						ready = true
+						break
+				check(ready, "privacy fixture completes budgeted preparation")
+			publications.append(navigation.snapshot(world, world.fog_of_war, 1))
+		check(publications[0] == publications[1], "hidden geography cannot alter full or budgeted navigation")
+		check(Vector2(12.5, 8.5) in publications[1]["reachable"]["land"], "unknown crossing remains optimistic until observed")
+	# Discovering the complete barrier must then change the legal answer.
+	for y in range(16): second.fog_of_war.reveal_explored_cell(1, Vector2i(8, y))
+	var after: Dictionary = second.ai_navigation_knowledge.snapshot(second, second.fog_of_war, 1)
+	check(Vector2(12.5, 8.5) not in after["reachable"]["land"], "observed barrier separates the known land components")
+	first.shutdown_derived_state()
+	second.shutdown_derived_state()
+
+
+func test_published_hidden_obstacle_memory() -> void:
+	var world = privacy_fixture(false)
+	var navigation = world.ai_navigation_knowledge
+	var fog = world.fog_of_war
+	var cell := Vector2i(12, 8)
+	var before: Dictionary = navigation.snapshot(world, fog, 1)
+	world.navigation_grid.occupy([cell], "building", 9901)
+	var hidden: Dictionary = navigation.snapshot(world, fog, 1)
+	check(hidden == before, "hidden obstacle creation does not alter incremental published navigation")
+	fog.states_by_player[1][cell.y * 16 + cell.x] = Fog.VISIBLE
+	fog.path_dirty_by_player[1][cell.y * 16 + cell.x] = true
+	fog.revision += 1
+	var visible: Dictionary = navigation.snapshot(world, fog, 1)
+	check(Vector2(12.5, 8.5) not in visible["land"], "visible obstacle updates legal published walkability")
+	fog.states_by_player[1][cell.y * 16 + cell.x] = Fog.EXPLORED
+	world.navigation_grid.release_occupant([cell], "building", 9901)
+	check(navigation.snapshot(world, fog, 1) == visible, "unseen obstacle removal retains the remembered publication")
+	world.shutdown_derived_state()
+
+
+func test_native_surface_parity() -> void:
+	const Grid = preload("res://scripts/navigation_grid.gd")
+	const KnownGrid = preload("res://scripts/navigation_knowledge_grid.gd")
+	check(ClassDB.class_exists("RoRReadModelKernel"), "surface component native kernel is packaged")
+	check(Grid.mask_kernel != null and Grid.mask_kernel.has_method("surface_components"), "native surface component producer is present")
+	for knowledge in [false, true]:
+		for dimensions in [Vector2i(1, 1), Vector2i(9, 7), Vector2i(32, 22)]:
+			var grid = KnownGrid.new(dimensions) if knowledge else Grid.new(dimensions)
+			for y in range(dimensions.y):
+				for x in range(dimensions.x):
+					var cell := Vector2i(x, y)
+					if knowledge and (x + 3 * y) % 5 == 0: continue
+					grid.terrain_cells[cell] = ["grass", "water", "shallows", "void"][(x + 2 * y) % 4]
+					grid.terrain_ids[cell] = (x + 2 * y) % 4
+					if knowledge: grid.learned[y * dimensions.x + x] = 1
+			grid.terrain_restrictions = [{"accessible_damage_multiplier": [1.0, 0.0, 0.05, 0.5]}]
+			grid.occupied_cells[Vector2i.ZERO] = [{"category": "building", "id": 1}]
+			for domain in ["land", "water", "amphibious"]:
+				for restriction in [-1, 0, 5]:
+					grid.native_masks_enabled = false
+					var reference: Dictionary = grid._build_surface_components(domain, restriction)
+					grid.native_masks_enabled = true
+					var native: Dictionary = grid._build_surface_components(domain, restriction)
+					check(var_to_bytes(native) == var_to_bytes(reference), "native surface labels and BFS serialization match reference (%s %s %s %d)" % [knowledge, dimensions, domain, restriction])
+					var packed: Variant = grid._native_surface_component_labels(domain, restriction)
+					var points: Array[Vector2] = []
+					var previously: Array[Vector2] = []
+					var reachable: Dictionary = {}
+					var expected_changes := PackedInt32Array()
+					for value in reference.values():
+						if int(value) % 2 == 0: reachable[int(value)] = true
+					for y in range(dimensions.y):
+						for x in range(dimensions.x):
+							var point := Vector2(x + 0.5, y + 0.5)
+							points.append(point)
+							var included := (x + y) % 2 == 0
+							if included: previously.append(point)
+							if included != reachable.has(int(reference.get(Vector2i(x, y), -1))): expected_changes.append(y * dimensions.x + x)
+					for table in [reference, {"labels": packed}]:
+						check(Grid.mask_kernel.surface_reachability_changes(points, previously, table, reachable, dimensions.x) == expected_changes, "native reachability delta exactly matches every old/new membership including blocked terrain")
+					check(packed is PackedInt32Array and packed.size() == dimensions.x * dimensions.y, "native compact surface labels cover the same map")
+					for y in range(dimensions.y):
+						for x in range(dimensions.x):
+							check(packed[y * dimensions.x + x] == int(reference.get(Vector2i(x, y), -1)), "compact labels preserve every reference component ID and inaccessible cell")
+
+
+func test_published_navigation_checkpoint_memory() -> void:
+	const Checkpoint = preload("res://scripts/game_checkpoint.gd")
+	var world = privacy_fixture(true)
+	var controller = Controller.new(world)
+	var before: Dictionary = world.ai_navigation_knowledge.snapshot(world, world.fog_of_war, 1)
+	world.navigation_grid.set_terrain(Vector2i(12, 8), "water")
+	check(world.ai_navigation_knowledge.snapshot(world, world.fog_of_war, 1) == before, "hidden known terrain mutation retains remembered navigation")
+	var packed: Dictionary = Checkpoint.pack(Checkpoint.capture(world, controller, {}, {"size": world.map_size}))
+	var data: Dictionary = Checkpoint.unpack(packed)
+	var restored = World.new(world.map_size)
+	var resumed = Controller.new(restored)
+	check(not data.is_empty() and Checkpoint.restore(data, restored, resumed), "navigation privacy checkpoint restores through the durable boundary")
+	var after: Dictionary = restored.ai_navigation_knowledge.snapshot(restored, restored.fog_of_war, 1)
+	check(after == before, "restoring knowledge cannot reveal hidden terrain or obstacle changes")
+	world.shutdown_derived_state()
+	restored.shutdown_derived_state()

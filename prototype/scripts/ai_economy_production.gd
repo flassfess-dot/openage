@@ -3,9 +3,12 @@ extends RefCounted
 const Commands := preload("res://scripts/commands.gd")
 const Combat := preload("res://scripts/ai_combat_model.gd")
 const Common := preload("res://scripts/ai_economy_common.gd")
+const Roles := preload("res://scripts/ai_micro_controller.gd")
+const ProductionForecast := preload("res://scripts/ai_production_forecast.gd")
 
 static func producer_rank(kind: String, policy: Dictionary, workers: int) -> int:
 	if kind == "town_center": return 0 if (not bool(policy.get("defending", false)) and not bool(policy.get("army_priority", false))) or workers < 6 else 2
+	if bool(policy.get("prefer_screen",false)): return 1 if kind in ["barracks","stable","academy"] else 3
 	return 1 if kind == String(policy.get("primary_producer", "barracks")) else 3
 
 
@@ -14,18 +17,30 @@ static func preferred_train(
 ) -> Dictionary:
 	var best: Dictionary = {}
 	var best_score := -INF
-	var enemies: Array = state.enemies(int(snapshot.get("tick", 0)), policy, true).slice(
-		0, int(policy.get("combat_sample_budget", 32))
-	)
-	for option in options:
+	var best_forecast:Dictionary={}
+	var enemies: Array = []
+	if not bool(policy.get("competitive",false)):enemies=state.enemies(int(snapshot.get("tick",0)),policy,true).slice(0,int(policy.get("combat_sample_budget",32)))
+	var forecast:Dictionary={}
+	if bool(policy.get("competitive",false)):
+		forecast=policy.get("_production_forecast",{})
+		if forecast.is_empty():forecast=ProductionForecast.context(state.enemies(int(snapshot.get("tick",0)),policy),snapshot,policy)
+	var choices: Array=options
+	if bool(policy.get("prefer_screen",false)) and producer_kind not in ["town_center","dock"]:
+		var screening: Array=options.filter(func(option):
+			var tags: Array=option.get("behavior_tags",[])
+			var profile: Dictionary=option.get("ai_profile",{})
+			return "worker" not in tags and "naval" not in tags and "transport" not in tags and "converter" not in tags and "healer" not in tags and bool(profile.get("enabled","combatant" in tags)) and float(profile.get("range",0.0))<=2.0)
+		if not screening.is_empty(): choices=screening
+	for option in choices:
 		var kind := String(option.get("kind", ""))
 		var tags: Array = option.get("behavior_tags", [])
 		var count := units.filter(func(u): return String(u.get("kind", "")) == kind).size()
 		var score := -INF
+		var forecast_audit:Dictionary={}
 		if "worker" in tags:
 			var water := kind == "fishing_boat"
 			var target := int(policy.get("water_worker_target" if water else "land_worker_target", 8))
-			if not water and bool(policy.get("saving_age", false)):
+			if not water and bool(policy.get("saving_age", false)) and not bool(policy.get("competitive",false)):
 				target = mini(target, int(policy.get("minimum_workers_before_age_up", 6)))
 			if bool(policy.get("defending", false)) and Common.army_count(units) < int(policy.get("minimum_attack_group_size", 3)) and not water:
 				target = mini(target, int(policy.get("minimum_workers_before_age_up", 6)))
@@ -34,8 +49,7 @@ static func preferred_train(
 		elif "transport" in tags or bool(option.get("ai_profile", {}).get("transport", false)):
 			if (
 				count < 1
-				and String(state.goal.get("type", "")) == "attack"
-				and bool(state.goal.get("needs_transport", false))
+				and ((String(state.goal.get("type", "")) in ["attack","secure"] and bool(state.goal.get("needs_transport", false))) or (bool(policy.get("competitive",false)) and snapshot.get("team_intents",[]).any(func(intent): return String(intent.get("kind",""))=="transport" and int(intent.get("sender",-1)) in snapshot.get("player_state",{}).get("mutual_allies",[]))))
 			):
 				score = 90.0
 		elif "trader" in tags:
@@ -58,10 +72,11 @@ static func preferred_train(
 				score = 45.0 + float(army_size) * 0.5
 		elif "combatant" in tags or bool(option.get("ai_profile", {}).get("enabled", false)):
 			var army_target := int(policy.get("army_target", 9999))
-			if bool(policy.get("saving_age", false)): army_target = mini(army_target, int(policy.get("minimum_attack_group_size", 3)))
+			if bool(policy.get("saving_age", false)): army_target = mini(army_target, int(policy.get("age_defender_minimum",policy.get("minimum_attack_group_size", 3))))
 			if Common.army_count(units) >= army_target: continue
 			var candidate := {
 				"kind": kind,
+				"behavior_tags": tags,
 				"hp": option.get("ai_profile", {}).get("max_hp", 1.0),
 				"ai_profile": option.get("ai_profile", {}),
 				"combat_enabled": true
@@ -69,7 +84,12 @@ static func preferred_train(
 			var total_cost := 0.0
 			for value in option.get("cost", {}).values():
 				total_cost += maxf(0.0, float(value))
-			score = Combat.counter_score(candidate, enemies, units) * 200.0 / maxf(30.0, total_cost)
+			if bool(policy.get("competitive",false)):
+				var logistics:=ProductionForecast.logistics(option,units,snapshot,state,producer_kind,float(forecast["horizon"]),forecast["infrastructure"])
+				score=ProductionForecast.counter_score(candidate,forecast,units)*200.0/maxf(30.0,total_cost)*float(logistics["multiplier"])
+				forecast_audit={"kind":kind,"sample":forecast["records"].size(),"expected_upgrade_scenarios":forecast["expected_upgrade_scenarios"],"hypothesis_only":true,"logistics":logistics}
+			else:score = Combat.counter_score(candidate, enemies, units) * 200.0 / maxf(30.0, total_cost)
+			if bool(policy.get("prefer_siege",false)) and "naval" not in tags and Roles.siege_role(candidate): score *= 1.5
 			if String(state.goal.get("type", "")) == "defend":
 				score *= 2.0
 			if producer_kind == "dock" and count < int(policy.get("minimum_naval_escort", 2)):
@@ -82,6 +102,10 @@ static func preferred_train(
 			best = option.duplicate()
 			best["ai_score"] = score
 			best_score = score
+			best_forecast=forecast_audit
+	if bool(policy.get("competitive",false)):
+		if not best_forecast.is_empty():state.metrics["production_forecast"]=best_forecast
+		else:state.metrics.erase("production_forecast")
 	return best
 
 
@@ -146,6 +170,9 @@ static func age_intent(
 
 
 static func plan_production(snapshot: Dictionary, tick: int, team: int, policy: Dictionary, state, budget, reserved: Dictionary, result: Array, units: Array, buildings: Array, workers: Array, memoized_production_enabled: bool) -> void:
+	if bool(policy.get("competitive",false)):
+		policy=policy.duplicate(false)
+		policy["_production_forecast"]=ProductionForecast.context(state.enemies(int(snapshot.get("tick",0)),policy),snapshot,policy)
 	var effective_units: Array = units.duplicate()
 	var production_choices: Dictionary = {}
 	var effective_version := 0

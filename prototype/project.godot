@@ -6,6 +6,8 @@ config_version=5
 [application]
 
 config/name="Rise of Rome — Formation Prototype"
+config/icon="res://assets/app/icon.svg"
+config/windows_native_icon="res://assets/app/icon.ico"
 run/main_scene="res://launcher.tscn"
 
 [autoload]

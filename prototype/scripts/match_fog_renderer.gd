@@ -7,6 +7,8 @@ const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 const ViewportCulling := preload("res://scripts/viewport_culling.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const FogPresentation := preload("res://scripts/fog_presentation.gd")
+const Elevation := preload("res://scripts/terrain_elevation.gd")
+var geometry_kernel: Variant = ClassDB.instantiate("RoRTerrainKernel") if ClassDB.class_exists("RoRTerrainKernel") else null
 const WORLD_FOG_GEOMETRY_CHUNK_SIZE := 16
 const WORLD_FOG_GEOMETRY_RETAIN_MARGIN := 1
 
@@ -125,11 +127,20 @@ func _prune_world_fog_geometry_cache(game, retained_bounds: Rect2i) -> int:
 
 
 func _build_world_fog_mesh(game, bounds: Rect2i) -> ArrayMesh:
-	# Geometry never depends on fog state. Chunks are created only as the camera
-	# reaches them and retained for the current viewport plus one surrounding
-	# ring, so exploration cannot grow a history of GPU objects.
-	if game._render_terrain() == null or bounds.size.x <= 0 or bounds.size.y <= 0:
-		return null
+	var arrays := _world_fog_arrays(game, bounds)
+	if arrays.is_empty(): return null
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+func _world_fog_arrays(game, bounds: Rect2i, use_native: bool = true) -> Array:
+	if game._render_terrain() == null or bounds.size.x <= 0 or bounds.size.y <= 0: return []
+	var elevation: Variant = game._render_terrain().terrain_elevation
+	if use_native and elevation is Elevation and geometry_kernel != null and geometry_kernel.has_method("build_fog_arrays"):
+		var levels: Dictionary = elevation.vertex_levels if elevation.nonzero_vertex_count > 0 else {}
+		var native: Array = geometry_kernel.build_fog_arrays(bounds, game.map_size, levels)
+		if not native.is_empty(): return native
 	var lattice_width = bounds.size.x + 1
 	var lattice_height = bounds.size.y + 1
 	var vertices = PackedVector3Array()
@@ -165,9 +176,7 @@ func _build_world_fog_mesh(game, bounds: Rect2i) -> ArrayMesh:
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh = ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	return mesh
+	return arrays
 
 
 func _sync_world_fog_texture(game, cells: Variant, fog_revision: int, probe: Variant = null) -> void:

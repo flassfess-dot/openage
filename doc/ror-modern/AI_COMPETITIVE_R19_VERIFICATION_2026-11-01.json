@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "status": "R19_STANDARD_RELEASE_AND_COMPLETE_COVERAGE_RESOLVED_512_PLUS_QUALIFIED_TEST_ONLY_1_QUALITY_PENDING",
+  "date": "2026-11-01",
+  "human_strength": "HUMAN_UNMEASURED",
+  "runtime_source_fingerprint": "a939c966005af7721cd0e41ff0721bcb6131d9c84594f993fd058a50fd6456b8",
+  "artifacts": {
+    "Rise of Rome Prototype.exe": "f6b5e6bf0c1031cff1c17a924cac26f0ddb1e07ff5669bc3db1e99273152322c",
+    "Rise of Rome Prototype.pck": "d202d3c8542371e0f71bc7a1e208339ff2a6b23a66e278a55ca8bf1231ec1b68",
+    "bin/ror_pathfinding.windows.template_release.x86_64.dll": "0ff22cb00b5a6dec20e4b58899d0093abd24b0c7ff75cf95d07bf362272e5839"
+  },
+  "checks": {
+    "current_standard_native_scripts": 15,
+    "all_current_impacts_passed": true,
+    "actual_release_scenarios": 4,
+    "all_actual_exe_passed": true,
+    "actual_rendered_images_viewed": 2,
+    "packed_files_audited": 51749,
+    "qa_save_tmp_paths_in_pack": 0,
+    "full513": {
+      "covered": 513,
+      "original_full_invocation": {
+        "passed": 512,
+        "failed": 1
+      },
+      "isolated_corrected_test_passed": true,
+      "native_and_reference_corrected_bound_passed": true,
+      "runtime_code_changed": false,
+      "one_uninterrupted_clean513_claim": false,
+      "reason": "The same radius-one observer movement discovers three cells. The test now bounds their actual immediate frontier and each of four isolated one-cell edits, instead of obsolete cumulative10."
+    }
+  },
+  "negative_evidence_correction": {
+    "reproduced_before": true,
+    "passed_after": true,
+    "same_test_before_after": true,
+    "possible_return_after_fog": true,
+    "sighting_health_and_ttl_unchanged": true,
+    "old_optional_state_compatible": true,
+    "private_impacts_passed": 6
+  },
+  "scope": "Extends the bounded R18 contracts. A visible empty origin is excluded only for that legal observation, rather than forever. Current standard-built native15 and actual EXE4 passed; complete test/quality/performance acceptance remains pending.",
+  "local_evidence_sha256": {
+    "standard_native_impacts": "002f0535e7224c6ef3d5c920e96f0d91a77daee4c50e05a4e33d999eb1b8aeac",
+    "actual_exe4": "2a6c68d25f9fefe7c4b571f87bed1f2e0a0fc6d7c905c36d2dbb8bb7ad460e88",
+    "visual_review": "6dd3a67b8d147100879c0447e5b8be456d0c08113d3ec098d8a9db99edb0fe43",
+    "pack_inclusion": "ff38830d509207bce891d13977a5bf8a2dc3ff59def9cc0f05635aec691bfea4",
+    "negative_before": "a4a55949106758aab0e5055e4236d08827825ea5d4fc110b97fba010881abcfe",
+    "negative_after": "dad9297704f865da11557f39dd84153a5a4e9aee23a90ab31a057a077c8786eb",
+    "original_full_result": "ba62ee4be1d17b666d6c08afd8aded22e535f87b0e75b34ba2e04932c4b7170e",
+    "resolved_acceptance_boundary": "e9644aa9a9adbba98c25c019f359c701864a7797daaa999edd235fc9b35a5904",
+    "official_corrected_test": "9b6a9613dd7789608981b4393ba42201a658007cd43341c71520d72ae5d87924",
+    "resolved_coverage": "e1eb2b84a5408c45b49140356101cd77146630b81557bef11f99209eebbacc0f"
+  },
+  "remaining": "Finite tuning/validation is running on unchanged R19 artifacts; selected final-native23 impacts; controlled economy/combat/transport/save/diversity; isolated formal26/rendered/user-save performance; seven72000ticksoaks; unseen final128+64; human data; final commit/push/ZIP and extracted EXE.",
+  "current_desktop_frame_pair": {
+    "receipt": "AI_DESKTOP_STALL_R19_VERIFICATION_2026-11-02.json",
+    "receipt_sha256": "bcc758b1f6b22fc331d6d9e496380694690c7db9ae4e380230284bd424dac9ad",
+    "actual_source_artifacts_match": true,
+    "images_viewed": true,
+    "scope": "Actual original-user-save static60/camera120, isolated from arena, legacy policy. Final champion/full-load26 measurements remain pending."
+  }
+}

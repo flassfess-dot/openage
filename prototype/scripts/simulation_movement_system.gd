@@ -13,6 +13,7 @@ const Journal := preload("res://scripts/entity_change_journal.gd")
 
 var knowledge := NavigationKnowledge.new()
 var native_integration_enabled := true
+var native_local_traffic_enabled := true
 var integration_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 var collision_cursor := -1
 var collision_epoch := -1
@@ -275,7 +276,7 @@ func move_unit(unit: Dictionary, delta: float) -> bool:
 			if probe != null:
 				simulation_world.movement_integration_microseconds += Time.get_ticks_usec() - movement_phase_started
 			return false
-	if group != null and recovery_action.is_empty() and int(unit["stuck_ticks"]) in [60, 180, 360, 720]:
+	if (group != null or String(unit["task"])=="gather") and recovery_action.is_empty() and int(unit["stuck_ticks"]) in [60, 180, 360, 720]:
 		# Deployment changes as earlier ranks take their homes. Retry the local
 		# body detour at a bounded set of later checkpoints, not every fixed tick.
 		_try_work_traffic_detour(unit, planner)
@@ -294,6 +295,20 @@ func _try_work_traffic_detour(unit: Dictionary, planner) -> bool:
 	var restriction := int(unit["terrain_restriction"])
 	var neighbors: Array = simulation_world.query_units_near(origin, maxf(4.0, radius * 6.0)).filter(func(other): return int(other["id"]) != int(unit["id"]) and String(other.get("movement_domain", "land")) == domain and float(other.get("hp", 0.0)) > 0.0)
 	if neighbors.is_empty(): return false
+	var yielding:=false
+	if String(unit["task"])=="gather":
+		var own_returning:=String(unit.get("gather_stage",""))=="returning"
+		for other in neighbors:
+			if int(other.get("team",0))!=int(unit["team"]) or String(other.get("task",""))!="gather" or String(other.get("gather_stage",""))=="harvesting" or other.get("path",[]).is_empty(): continue
+			var other_returning:=String(other.get("gather_stage",""))=="returning"
+			if (other_returning and not own_returning) or (other_returning==own_returning and int(unit["id"])>int(other["id"])): yielding=true; break
+	if String(unit["task"])=="gather" and _try_local_work_route(unit,planner,neighbors): return true
+	var tail_obstacles: Array=neighbors
+	if yielding:
+		# A carrier/older worker has right of way. The first retreat/side step
+		# must clear every body, while its future return route may cross the
+		# current position of the peer that will pass through the freed lane.
+		tail_obstacles=neighbors.filter(func(other): return int(other.get("team",0))!=int(unit["team"]) or String(other.get("task",""))!="gather" or String(other.get("gather_stage",""))=="harvesting" or other.get("path",[]).is_empty())
 	# Static A* cannot see working units. Repeating the same route through them
 	# strands loaded boats and workers. Try a bounded local detour whose whole
 	# route clears the nearby bodies, without changing the gather/deposit goal.
@@ -310,7 +325,7 @@ func _try_work_traffic_detour(unit: Dictionary, planner) -> bool:
 		var cursor := point
 		var clear := true
 		for waypoint in route:
-			if not _work_segment_clear(unit, cursor, waypoint, neighbors):
+			if not _work_segment_clear(unit, cursor, waypoint, tail_obstacles):
 				clear = false
 				break
 			cursor = waypoint
@@ -324,10 +339,102 @@ func _try_work_traffic_detour(unit: Dictionary, planner) -> bool:
 	return false
 
 
+static func _traffic_before(left: Array,right: Array) -> bool:
+	if not is_equal_approx(float(left[2]),float(right[2])): return float(left[2])<float(right[2])
+	var a:=Vector2i(left[0]); var b:=Vector2i(right[0])
+	return a.y<b.y if a.y!=b.y else a.x<b.x
+
+static func _traffic_push(heap: Array,entry: Array) -> void:
+	heap.append(entry)
+	var index:=heap.size()-1
+	while index>0:
+		var parent: int=(index-1)/2
+		if not _traffic_before(entry,heap[parent]): break
+		heap[index]=heap[parent]; index=parent
+	heap[index]=entry
+
+static func _traffic_pop(heap: Array) -> Array:
+	var result: Array=heap[0]
+	var tail: Array=heap.pop_back()
+	if heap.is_empty(): return result
+	var index:=0
+	while index*2+1<heap.size():
+		var child:=index*2+1
+		if child+1<heap.size() and _traffic_before(heap[child+1],heap[child]): child+=1
+		if not _traffic_before(heap[child],tail): break
+		heap[index]=heap[child]; index=child
+	heap[index]=tail
+	return result
+
+func _try_local_work_route(unit: Dictionary,planner,neighbors: Array) -> bool:
+	# Search only the immediate traffic neighbourhood. Static A* alone routes
+	# through harvesting bodies; one straight detour waypoint cannot get around
+	# a concave group of workers in a forest/mineral passage.
+	var origin:=Vector2(unit["pos"]); var destination:=Vector2(unit["destination"])
+	var radius:=float(unit["footprint_radius"]); var domain:=String(unit["movement_domain"]); var restriction:=int(unit["terrain_restriction"])
+	var goal:=destination
+	if origin.distance_to(goal)>5.0:
+		var leg:=Vector2(unit["target"])-origin
+		if leg.length()<0.2: return false
+		goal=origin+leg.normalized()*minf(5.0,leg.length())
+	var probe: Variant=world.tick_pipeline.performance_probe
+	var started:=Time.get_ticks_usec() if probe!=null else 0
+	var local: Array[Vector2]=[]
+	var native_used:=false
+	if native_local_traffic_enabled and planner.uses_native_kernel():
+		var kernel=planner._native_kernel_for(domain,restriction)
+		if kernel.has_method("find_local_traffic_path"):
+			native_used=true
+			for point in kernel.find_local_traffic_path(origin,goal,radius,float(unit.get("minimum_clearance",0.06)),neighbors): local.append(point)
+	if not native_used: local=_local_work_path_reference(unit,planner,neighbors,goal)
+	if probe!=null: probe.observe_microseconds("navigation.local_traffic.search",Time.get_ticks_usec()-started)
+	if local.is_empty(): return false
+	if goal.distance_squared_to(destination)>0.0001:
+		# Every local candidate uses this same tail and frozen geometry. If it
+		# fails, repeating it at each candidate cannot produce a valid route.
+		var tail: Array[Vector2]=planner.find_path(goal,destination,domain,restriction,radius)
+		if tail.is_empty() or tail.back().distance_squared_to(destination)>0.0144: return false
+		local.append_array(tail)
+	var prepared: Dictionary=world.navigation_service.register_resolved_path(int(unit["id"]),origin,destination,local,domain,restriction,"work_traffic_local",radius)
+	if assign_unit_destination(unit,destination,false,false,prepared):
+		StuckRecovery.reset(unit); world.set_entity_field(unit,"diagnostic_reason","work_traffic_local"); return true
+	return false
+
+
+func _local_work_path_reference(unit: Dictionary,planner,neighbors: Array,goal: Vector2) -> Array[Vector2]:
+	var origin:=Vector2(unit["pos"])
+	var radius:=float(unit["footprint_radius"]); var domain:=String(unit["movement_domain"]); var restriction:=int(unit["terrain_restriction"])
+	var step:=maxf(0.5,radius)
+	var open: Array=[[Vector2i.ZERO,0.0,origin.distance_to(goal)]]; var previous: Dictionary={}; var costs: Dictionary={Vector2i.ZERO:0.0}; var expanded:=0
+	var directions: Array=[Vector2i(1,0),Vector2i(0,1),Vector2i(-1,0),Vector2i(0,-1),Vector2i(1,1),Vector2i(-1,1),Vector2i(-1,-1),Vector2i(1,-1)]
+	while not open.is_empty() and expanded<256:
+		var entry:=_traffic_pop(open)
+		var cell:=Vector2i(entry[0])
+		# Improved cells receive a new immutable heap entry. An obsolete entry
+		# does not spend the same 256-expansion budget a second time.
+		if float(entry[1])!=float(costs[cell]): continue
+		var point:=origin+Vector2(cell)*step; expanded+=1
+		if cell!=Vector2i.ZERO and point.distance_to(goal)<=1.5 and planner.is_segment_walkable(point,goal,radius,domain,restriction) and _work_segment_clear(unit,point,goal,neighbors):
+			var local: Array[Vector2]=[goal]
+			var cursor:=cell
+			while cursor!=Vector2i.ZERO:
+				local.push_front(origin+Vector2(cursor)*step); cursor=previous[cursor]
+			return local
+		for direction in directions:
+			var next: Vector2i=cell+direction
+			if abs(next.x)>12 or abs(next.y)>12: continue
+			var candidate:=origin+Vector2(next)*step; var cost:=float(costs[cell])+Vector2(direction).length()*step
+			if costs.has(next) and float(costs[next])<=cost: continue
+			if not planner.is_segment_walkable(point,candidate,radius,domain,restriction) or not _work_segment_clear(unit,point,candidate,neighbors): continue
+			costs[next]=cost; previous[next]=cell
+			_traffic_push(open,[next,cost,cost+candidate.distance_to(goal)])
+	return []
+
+
 func _work_segment_clear(unit: Dictionary, start: Vector2, finish: Vector2, neighbors: Array) -> bool:
 	for other in neighbors:
 		var center := Vector2(other["pos"])
-		var separation := float(unit["footprint_radius"]) + float(other["footprint_radius"]) + 0.03
+		var separation := float(unit["footprint_radius"]) + float(other["footprint_radius"]) + maxf(float(unit.get("minimum_clearance",0.06)),float(other.get("minimum_clearance",0.06)))
 		# A previously touching body may retreat, but must not penetrate farther.
 		var minimum := minf(separation * separation, start.distance_squared_to(center))
 		if center.distance_squared_to(Geometry2D.get_closest_point_to_segment(center, start, finish)) < minimum - 0.0001: return false

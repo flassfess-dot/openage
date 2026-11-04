@@ -10,8 +10,15 @@ var done := false
 var stopping := false
 var request: Array = []
 var result: Dictionary = {}
-const CAPTURE_BUDGET_USEC := 64000
-const ADVANCE_BUDGET_USEC := 32000
+# Return ownership to presentation between observation portions instead of
+# keeping one source boundary for a 50-100 ms batch. Individual producers are
+# still atomic, so this is a latency ceiling rather than a correctness timeout.
+const CAPTURE_BUDGET_USEC := 8000
+const ADVANCE_BUDGET_USEC := 16000
+const MAX_CATCHUP_BUDGET_USEC := 32000
+const MAX_PREPARATION_PORTIONS := 4
+var cooperative_preparation_enabled := true
+var catchup_budget_enabled := true
 
 func submit(controller, runtime, delta: float, player: int, enemy: int, frame: int) -> bool:
 	if pending: return false
@@ -66,9 +73,30 @@ func _run() -> void:
 		runtime.render_frame_override = int(job[5])
 		runtime.capture_budget_override = CAPTURE_BUDGET_USEC
 		runtime.decisions.preparation_budget_usec = CAPTURE_BUDGET_USEC
-		controller.frame_simulation_budget_usec = ADVANCE_BUDGET_USEC
+		# The render thread keeps its retained snapshot while we own the world.
+		# A bounded larger window lets an overdue simulation perform two cheap
+		# steps instead of losing another render frame after each individual tick.
+		var owed_seconds: float = controller.accumulator_seconds + minf(0.25, maxf(0.0, float(job[2]))) * controller.get_speed_multiplier()
+		var request_budget: int = MAX_CATCHUP_BUDGET_USEC if catchup_budget_enabled and owed_seconds >= controller.FIXED_STEP_SECONDS * 2.0 else ADVANCE_BUDGET_USEC
+		controller.frame_simulation_budget_usec = request_budget
 		controller.yield_ready_tick_for_presentation = false
+		var started := Time.get_ticks_usec()
+		var source_tick: int = controller.tick_index
 		var message: String = controller.advance_frame(float(job[2]), int(job[3]), int(job[4]))
+		# A partial read capture has not advanced the source tick. Use the rest
+		# of this ownership window instead of waiting for another rendered frame
+		# between every small portion. Elapsed game time is submitted only once.
+		var portions := 1
+		while cooperative_preparation_enabled and portions < MAX_PREPARATION_PORTIONS and controller.tick_index == source_tick and controller.preparation_waiting and runtime.decisions.active and not runtime.decisions.is_prepared() and String(runtime.error).is_empty():
+			var remaining := request_budget - (Time.get_ticks_usec() - started)
+			if remaining <= 0: break
+			runtime.capture_budget_override = mini(CAPTURE_BUDGET_USEC, remaining)
+			runtime.decisions.preparation_usec_left = runtime.capture_budget_override
+			message = controller.advance_frame(0.0, int(job[3]), int(job[4]))
+			portions += 1
+		if controller.performance_probe != null:
+			controller.performance_probe.observe_microseconds("owner.request", Time.get_ticks_usec() - started)
+			controller.performance_probe.increment("owner.preparation_extra_portions", portions - 1)
 		runtime.render_frame_override = previous_frame
 		runtime.capture_budget_override = previous_capture
 		runtime.decisions.preparation_budget_usec = previous_preparation

@@ -3,6 +3,7 @@ const World := preload("res://scripts/simulation_world.gd")
 const Catalog := preload("res://scripts/resource_catalog.gd")
 const Probe := preload("res://scripts/performance_probe.gd")
 const Replay := preload("res://scripts/replay_system.gd")
+const Footprint := preload("res://scripts/footprint.gd")
 var failures: Array[String] = []
 func check(value: bool, message: String) -> void:
 	if not value: failures.append(message)
@@ -46,6 +47,27 @@ func _run() -> void:
 	check(world.get_cached_local_build_sites(1, ["house"], 40, 1200, 2, 12, preferred, ["house"]) == world.get_local_build_sites(1, ["house"], 2, 12, preferred, ["house"]), "strict preferred order")
 	world.units[1]["pos"] = Vector2(18.5, 10.5)
 	check(world.get_cached_local_build_sites(1, ["house"], 60, 1200, 4) == world.get_local_build_sites(1, ["house"], 4), "moving obstruction invalidates result")
+	world.grant_technology(1,101); world.grant_technology(1,11)
+	var gate_site:=Vector2(12,16)
+	var gate_cells: Array=Footprint.building(world.building_placement_stats("gate",0),gate_site)["occupied_cells"]
+	var wall_id:=200
+	for cell in gate_cells:
+		world.add_building(wall_id,"wall",Vector2(cell)+Vector2(0.5,0.5),1); wall_id+=1
+	var enemy_gate_site:=Vector2(18,14)
+	for cell in Footprint.building(world.building_placement_stats("gate",0),enemy_gate_site)["occupied_cells"]:
+		world.add_building(wall_id,"wall",Vector2(cell)+Vector2(0.5,0.5),2); wall_id+=1
+	world.update_fog_of_war()
+	var gate_preferred:={"gate":[gate_site,enemy_gate_site]}
+	var expected_gate: Dictionary=world.get_local_build_sites(1,["gate","house"],4,12,gate_preferred,["gate"])
+	if gate_site not in expected_gate.get("gate",[]):
+		print("GATE_SITE_DIAGNOSTIC expected=",expected_gate," legal=",world.can_place_foundation(1,"gate",gate_site)," failure=",world.last_build_failure," replaced=",world.gate_system.replacement_wall_ids(1,gate_site,0)," gate_cells=",gate_cells," walls=",world.get_buildings().map(func(b): return [b["id"],b["kind"],b["state"],b["occupied_cells"]]))
+	check(gate_site in expected_gate.get("gate",[]),"completed own walls may be replaced by a legal gate")
+	check(enemy_gate_site not in expected_gate.get("gate",[]),"foreign walls remain non-replaceable")
+	for threaded in [false,true]:
+		world.task_coordinator.enabled=threaded
+		world.local_build_site_cache.clear()
+		var actual_gate: Dictionary=world.get_cached_local_build_sites(1,["gate","house"],70,1200,4,12,gate_preferred,["gate"])
+		check(actual_gate==expected_gate,"isolated gate placement preserves observer wall-replacement semantics, threaded=%s" % threaded)
 	world.fog_of_war.reset()
 	check(world.get_cached_local_build_sites(1, ["house", "dock"], 80, 1200).is_empty(), "unknown terrain never leaks sites")
 	world.task_coordinator.shutdown()

@@ -1,0 +1,223 @@
+{
+  "schema_version": 1,
+  "suite": "smoke",
+  "rows": [
+    {
+      "id": "smoke-000",
+      "opponent": "baseline",
+      "civilizations": [
+        1,
+        9
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2000001,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "smoke-001",
+      "opponent": "rush",
+      "civilizations": [
+        2,
+        16
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2001010,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "smoke-002",
+      "opponent": "ranged",
+      "civilizations": [
+        3,
+        7
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2002019,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "smoke-003",
+      "opponent": "boom",
+      "civilizations": [
+        4,
+        14
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 2003028,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "smoke-004",
+      "opponent": "turtle",
+      "civilizations": [
+        5,
+        5
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2004037,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "smoke-005",
+      "opponent": "raid",
+      "civilizations": [
+        6,
+        12
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2005046,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "smoke-006",
+      "opponent": "siege",
+      "civilizations": [
+        7,
+        3
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2006055,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "smoke-007",
+      "opponent": "naval",
+      "civilizations": [
+        8,
+        10
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 2007064,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "smoke-008",
+      "opponent": "baseline",
+      "civilizations": [
+        9,
+        1
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2008073,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "smoke-009",
+      "opponent": "rush",
+      "civilizations": [
+        10,
+        8
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2009082,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "smoke-010",
+      "opponent": "ranged",
+      "civilizations": [
+        11,
+        15
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 2010091,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "smoke-011",
+      "opponent": "boom",
+      "civilizations": [
+        12,
+        6
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 2011100,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    }
+  ],
+  "paired_positions": true
+}

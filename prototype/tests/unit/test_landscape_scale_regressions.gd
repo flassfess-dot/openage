@@ -7,6 +7,7 @@ const Settings := preload("res://scripts/skirmish_settings.gd")
 const RenderWorld := preload("res://scripts/render_world.gd")
 const RenderItem := preload("res://scripts/render_item.gd")
 const Decorations := preload("res://scripts/random_map_decorations.gd")
+const NaturalLandscape := preload("res://scripts/random_map_natural_landscape.gd")
 
 var failures: Array[String] = []
 var rows: Array = []
@@ -102,6 +103,9 @@ func _test_height_independent_ecology() -> void:
 func _test_sparse_stones() -> void:
 	for profile in ["grasslands", "highlands", "coastal"]:
 		var settings := Settings.default_settings()
+		# This regression measures the legacy v3 sparse-stone area budget. V6
+		# river deposits have separate placement rules and dedicated river tests.
+		settings["landscape_version"]=NaturalLandscape.VERSION
 		settings["map_type_id"] = profile
 		var built := Settings.build(settings)
 		check(built.get("valid", false), "density fixture is playable: %s %s" % [profile, built.get("errors", [])])

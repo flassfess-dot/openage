@@ -27,6 +27,20 @@ static func cells(start: Vector2i, finish: Vector2i, maximum_segments: int = 0) 
 	return result
 
 
+static func preview_key(world, team: int, start: Vector2, finish: Vector2) -> String:
+	var mobiles: Array = []
+	var bounds := Rect2(start, Vector2.ZERO).expand(finish).grow(1.5)
+	var candidates: Array = world.get_units() if world.spatial_sync_system.roster_dirty else world.query_units_near(bounds.get_center(), bounds.size.length() * 0.5)
+	for unit in candidates:
+		if float(unit.get("hp", 0)) > 0 and not bool(unit.get("removed", false)) and bounds.grow(float(unit.get("footprint_radius", 0.3))).has_point(Vector2(unit["pos"])):
+			mobiles.append([int(unit["id"]), unit["pos"], unit.get("footprint_radius", 0.3)])
+	mobiles.sort_custom(func(a,b): return a[0] < b[0])
+	var budget: Array = []
+	for resource in world.building_cost("wall", team):
+		budget.append([resource, world.get_resource_amount(team, int(resource))])
+	return str([start, finish, team, world.cache_epoch, world.technology_system.revision(team), world.navigation_grid.revision, world.get_fog_of_war().exploration_revision_for_player(team), hash(mobiles), hash(budget)])
+
+
 # Native SLP direction 0 follows world Y, direction 1 follows world X.
 # Only a straight pair keeps a panel; ends, corners and dense rows use a block.
 static func presentation_facing(mask: int) -> int:

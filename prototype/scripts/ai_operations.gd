@@ -1,9 +1,12 @@
 class_name RoRAiOperations
 extends RefCounted
+const ScoutInformation:=preload("res://scripts/ai_scout_information.gd")
 const Group := preload("res://scripts/source_ai_attack_group.gd")
 const Commands := preload("res://scripts/commands.gd")
 const Combat := preload("res://scripts/ai_combat_model.gd")
 const Economy := preload("res://scripts/ai_adaptive_economy.gd")
+const Predictor := preload("res://scripts/ai_combat_predictor.gd")
+const Allocator := preload("res://scripts/ai_operation_allocator.gd")
 var groups: Dictionary = {}
 var next_id := 1
 var scouts: Dictionary = {}
@@ -161,10 +164,12 @@ func plan(
 			claimed[int(actor["id"])] = true
 	ids = groups.keys()
 	ids.sort()
+	var allocated: Dictionary = Allocator.assignments(snapshot,groups,goal,policy,state,by_id,tick) if bool(policy.get("competitive",false)) else {}
 	for id in ids:
 		var operation: Dictionary = groups[id]
 		var group = operation["group"]
 		var operation_goal: Dictionary = goal.get("goals_by_domain", {}).get(String(group.movement_domain), goal)
+		if allocated.has(id): operation_goal=allocated[id]
 		var members: Array = []
 		var member_ids: Array[int] = []
 		for member_id in group.living_ids():
@@ -179,6 +184,16 @@ func plan(
 		for actor in members:
 			center += Vector2(actor.get("pos", Vector2.ZERO))
 		center /= float(members.size())
+		if String(operation_goal.get("type","")) in ["guard","secure"]:
+			var guard_position := Vector2(operation_goal.get("position",center))
+			if tick-int(operation.get("last_order_tick",-1000))>=80:
+				if center.distance_to(guard_position)>(1.5 if String(operation_goal.get("type",""))=="secure" else 4.0):
+					result.append(Commands.AttackMoveCommand.new(tick,member_ids,guard_position) if String(operation_goal.get("objective_category","")) in ["wonder","belief"] else Commands.FormationMoveCommand.new(tick,member_ids,guard_position,formation))
+				elif members.any(func(u): return String(u.get("task","")) not in ["idle","hold","attack"]):
+					result.append(Commands.HoldCommand.new(tick,member_ids))
+				operation["last_order_tick"]=tick
+			operation["phase"]=String(operation_goal.get("type","guard"))
+			continue
 		var enemies: Array = state.enemies(int(snapshot.get("tick", 0)), policy).filter(
 			func(e): return ( Vector2(e.get("pos", Vector2.ZERO)).distance_to(center) <= 12.0 + float(Combat.profile(e).get("range", 0.0)) )
 		)
@@ -197,6 +212,11 @@ func plan(
 				* float(enemy.get("confidence", 1.0))
 			)
 		var losing: bool = theirs > 0.0 and ours < theirs * float(policy.get("retreat_ratio", 0.75))
+		if bool(policy.get("competitive",false)) and bool(policy.get("combat_rollouts",true)) and not enemies.is_empty():
+			if tick-int(operation.get("forecast_tick",-1000))>=clampi(int(policy.get("combat_forecast_ticks",80)),40,160):
+				operation["forecast"] = Predictor.evaluate(members,enemies,["attack","hold","retreat"])
+				operation["forecast_tick"] = tick
+			if float(operation.get("forecast",{}).get("confidence",0.0))>=0.6 and float(operation.get("forecast",{}).get("attack_ratio",1.0))<0.65: losing=true
 		var depleted: bool = group.health_loss_percent >= float(policy.get("retreat_loss_percent", 45.0))
 		if (losing or depleted) and group.state not in [Group.RETREATING, Group.RECENTERING]:
 			group.transition(Group.RETREATING, "unfavourable_strength" if losing else "casualties", tick)
@@ -323,7 +343,10 @@ func _scout(
 	var navigation: Dictionary = snapshot.get("navigation", {})
 	if String(state.goal.get("type", "")) == "defend":
 		return result
-	var known_opponents: bool = not state.enemies(int(snapshot.get("tick", 0)), policy).is_empty()
+	var enemies:Array=state.enemies(int(snapshot.get("tick",0)),policy)
+	var known_opponents:bool=not enemies.is_empty()
+	var competitive:=bool(policy.get("competitive",false))
+	var questions:Array=ScoutInformation.interests(snapshot,state,policy,enemies) if competitive else []
 	for domain in ["land", "water"]:
 		var assignment: Dictionary = scouts.get(domain, {})
 		var actor: Dictionary = {}
@@ -367,25 +390,36 @@ func _scout(
 			if tick - int(assignment["order_tick"]) < int(policy.get("scout_interval_ticks", 160)): continue
 		var best: Variant = null
 		var best_score := -INF
+		var best_information:Dictionary={}
 		var stride := maxi(1, ceili(float(frontier.size()) / float(int(policy.get("scout_candidate_budget", 64)))))
 		for index in range(posmod(int(state.metrics["decisions"]), stride), frontier.size(), stride):
 			var point := Vector2(frontier[index])
 			var key: String = String(domain) + ":" + str(Vector2i(point) / 8)
 			var age := tick - int(state.scout_visits.get(key, -1200))
+			var risk:float=state.danger(point,int(snapshot.get("tick",0)),policy,domain)
+			if competitive and risk>float(policy.get("maximum_scout_danger",8.0)):continue
 			var score: float = (
 				float(age) * 0.02
 				- Vector2(actor.get("pos", Vector2.ZERO)).distance_to(point) * 0.5
-				- state.danger(point, int(snapshot.get("tick", 0)), policy, domain) * 6.0
+				- risk * 6.0
 			)
+			var information:Dictionary={}
+			if competitive:
+				information=ScoutInformation.evaluate(point,Vector2(actor.get("pos",Vector2.ZERO)),float(Combat.profile(actor).get("speed",0.8)),domain,questions,age)
+				score+=float(information["value"])
 			if score > best_score:
 				best = point
 				best_score = score
+				best_information=information
 		if best == null:
 			continue
 		var key: String = String(domain) + ":" + str(Vector2i(best) / 8)
 		state.scout_visits[key] = tick
 		assignment["target"] = Vector2(best)
 		assignment["order_tick"] = tick
+		if competitive:
+			assignment["information"]=best_information.duplicate(true)
+			state.metrics.get_or_add("scout_decisions",{})[domain]={"target":Vector2(best),"tick":tick,"questions":questions.size(),"information":best_information.duplicate(true)}
 		var travel_ticks := ceili(Vector2(actor.get("pos", Vector2.ZERO)).distance_to(Vector2(best)) * 20.0 / maxf(0.2, float(Combat.profile(actor).get("speed", 0.8))))
 		assignment["deadline_tick"] = tick + travel_ticks + int(policy.get("scout_interval_ticks", 160))
 		result.append(Commands.MoveCommand.new(tick, [int(actor["id"])], Vector2(best)))
@@ -437,6 +471,12 @@ func canonical_state() -> Dictionary:
 				"phase_tick": operation["phase_tick"]
 			}
 		)
+		if operation.has("forecast"):
+			records.back()["forecast"] = operation["forecast"].duplicate(true)
+			records.back()["forecast_tick"] = int(operation["forecast_tick"])
+		if operation.has("role"):
+			records.back()["role"]=String(operation["role"])
+			records.back()["allocated_goal"]=operation.get("allocated_goal",{}).duplicate(true)
 	return {"version": 1, "next_id": next_id, "groups": records, "scouts": scouts.duplicate(true)}
 
 
@@ -468,6 +508,13 @@ func restore_state(data: Dictionary, team: int) -> bool:
 			"last_order_tick": int(entry.get("last_order_tick", -1)),
 			"phase_tick": int(entry.get("phase_tick", 0))
 		}
+		if entry.has("forecast"):
+			if not entry["forecast"] is Dictionary: return false
+			groups[int(group.group_id)]["forecast"] = entry["forecast"].duplicate(true)
+			groups[int(group.group_id)]["forecast_tick"] = int(entry.get("forecast_tick",-1000))
+		if entry.has("role"):
+			groups[int(group.group_id)]["role"]=String(entry["role"])
+			groups[int(group.group_id)]["allocated_goal"]=entry.get("allocated_goal",{}).duplicate(true)
 		next_id = maxi(next_id, int(group.group_id) + 1)
 	next_id = maxi(next_id, int(data.get("next_id", 1)))
 	scouts = data.get("scouts", {}).duplicate(true)

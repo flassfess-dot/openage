@@ -61,6 +61,7 @@ func _run() -> void:
 	var shoal_request := NativeMesh.capture(coast_bounds,41721,coast,elevation,catalog.environment_pack,canvas.terrain_atlas_regions,canvas.terrain_atlas_size)
 	check(NativeMesh.build_request(kernel,shoal_request,4) == NativeMesh.build_request(kernel,shoal_request,16),"native bank ribbons do not move during refinement")
 	check(kernel.build_mesh(Rect2i(0, 0, 2, 2), PackedInt32Array(), PackedFloat32Array(), PackedInt32Array(), PackedFloat32Array(), 1).is_empty(), "malformed mesh input is rejected")
+	test_cached_capture(elevation, canvas, kernel, coast)
 	canvas.free()
 	finish()
 
@@ -99,3 +100,38 @@ func finish() -> void:
 	for failure in failures: push_error(failure)
 	if failures.is_empty(): print("Native terrain geometry matches reference: materials, coasts, seams, map boundaries and slopes")
 	quit(0 if failures.is_empty() else 1)
+
+
+func test_cached_capture(elevation, canvas, kernel, original_provider: Callable) -> void:
+	check(kernel.has_method("capture_cached_sample_arrays"), "native cached terrain packing is available")
+	var reference_cache: Dictionary = {}
+	var native_cache: Dictionary = {}
+	var changed: Dictionary = {}
+	var provider := func(cell): return int(changed[cell]) if changed.has(cell) else int(original_provider.call(cell))
+	var first: Dictionary = {}
+	var first_saved: Dictionary = {}
+	var retained_inputs: Array = []
+	var bounds_list := [Rect2i(190,190,4,4),Rect2i(190,190,4,4),Rect2i(192,188,5,6),Rect2i(0,0,3,3),Rect2i(0,0,3,3),Rect2i(0,0,3,3),Rect2i(190,190,4,4)]
+	for index in range(bounds_list.size()):
+		var bounds: Rect2i = bounds_list[index]
+		if index == 4:
+			var cell := Vector2i(1,1)
+			changed[cell] = 22
+			reference_cache["cells"].erase(cell)
+			canvas.native_sample_cache=native_cache
+			canvas._invalidate_terrain_cells([cell])
+		if index == 5:
+			elevation.set_vertex(Vector2i(1,1),3)
+			reference_cache.clear();native_cache.clear()
+		NativeMesh.native_cached_samples_enabled = false
+		var expected: Dictionary = NativeMesh.capture(bounds,41721,provider,elevation,canvas.resource_catalog.environment_pack,canvas.terrain_atlas_regions,canvas.terrain_atlas_size,{},reference_cache,kernel)
+		NativeMesh.native_cached_samples_enabled = true
+		var actual: Dictionary = NativeMesh.capture(bounds,41721,provider,elevation,canvas.resource_catalog.environment_pack,canvas.terrain_atlas_regions,canvas.terrain_atlas_size,{},native_cache,kernel)
+		for previous in retained_inputs: check(previous["input"]==previous["saved"],"cache invalidation and later captures preserve every already-issued worker input")
+		retained_inputs.append({"input":actual,"saved":actual.duplicate(true)})
+		check(var_to_bytes(actual)==var_to_bytes(expected), "native cached terrain request preserves every numeric sample in cold/warm/shifted/dirty/boundary case %d" % index)
+		check(native_cache.get("bounds")==bounds, "packed sample cache is scoped to the current request")
+		check(native_cache["cells"].size()==(bounds.size.x+2)*(bounds.size.y+2) and native_cache["heights"].size()==(bounds.size.x+1)*(bounds.size.y+1) and native_cache["frames"].size()==bounds.size.x*bounds.size.y,"sample cache remains bounded by current request")
+		if index == 0: first=actual;first_saved=actual.duplicate(true)
+	check(first==first_saved,"later camera requests cannot mutate a detached earlier terrain input")
+	NativeMesh.native_cached_samples_enabled = true

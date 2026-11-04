@@ -55,6 +55,8 @@ public:
     bool cells_connected(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
     PackedInt32Array corridor_widths(const TypedArray<Vector2i> &cells, int64_t maximum, double radius) const;
     bool is_segment_walkable(const Vector2 &start, const Vector2 &finish, double radius) const;
+    PackedVector2Array smooth_swept_world_path(const Vector2 &origin, const PackedVector2Array &candidates, double radius, const Vector2 &escape_center) const;
+    PackedVector2Array find_local_traffic_path(const Vector2 &origin, const Vector2 &goal, double radius, double clearance, const Array &blockers) const;
     PackedInt32Array direct_cell_path(const Vector2i &start, const Vector2i &goal, double radius) const;
     Vector2i nearest_walkable(const Vector2i &requested, double radius) const;
 
@@ -121,6 +123,7 @@ private:
     FrontierEntry frontier_pop();
     int64_t movement_bucket_key(int32_t x, int32_t y) const;
     bool position_walkable(const Vector2 &position, double radius) const;
+    bool segment_interior_walkable(const Vector2 &start, const Vector2 &finish, double radius) const;
     Vector2 walkable_alternative(int32_t unit_id, const Vector2 &desired, const Vector2 &position, double speed, double delta, double radius) const;
 };
 

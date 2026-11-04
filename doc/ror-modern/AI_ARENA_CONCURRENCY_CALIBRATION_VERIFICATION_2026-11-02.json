@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-02",
+  "status": "MATCHED_FRESH_CALIBRATION12_AND_ORIGINAL_TIMEOUT_RETRY_PASSED_TUNING_RUNNING",
+  "artifacts": {
+    "Rise of Rome Prototype.exe": "f6b5e6bf0c1031cff1c17a924cac26f0ddb1e07ff5669bc3db1e99273152322c",
+    "Rise of Rome Prototype.pck": "d202d3c8542371e0f71bc7a1e208339ff2a6b23a66e278a55ca8bf1231ec1b68",
+    "bin/ror_pathfinding.windows.template_release.x86_64.dll": "0ff22cb00b5a6dec20e4b58899d0093abd24b0c7ff75cf95d07bf362272e5839"
+  },
+  "historical_failed_attempt": {
+    "case": "dev-003-seat1",
+    "series": "606a83c1675c6b6e",
+    "status": "INFRA_TIMEOUT",
+    "tick": 66337,
+    "maximum_ticks": 72000,
+    "wall_seconds": 2790.674,
+    "watchdog_seconds": 2789,
+    "engine_errors": 0,
+    "kept_as_gameplay_win_loss_draw": false,
+    "historical_partial_tuning_complete_draws": 26,
+    "controlled_incomplete_attempts_preserved": 4
+  },
+  "old_calibration": {
+    "map_size_id": "compact",
+    "samples": 12,
+    "sample_case_ids": [
+      "smoke-000-seat1",
+      "smoke-000-seat2",
+      "smoke-001-seat1",
+      "smoke-001-seat2",
+      "smoke-002-seat1",
+      "smoke-002-seat2",
+      "smoke-003-seat1",
+      "smoke-003-seat2",
+      "smoke-004-seat1",
+      "smoke-004-seat2",
+      "smoke-005-seat1",
+      "smoke-005-seat2"
+    ],
+    "p95_seconds": 929.443,
+    "timeout_seconds": 2789,
+    "jobs": 2,
+    "source_release": {
+      "executable": "f6b5e6bf0c1031cff1c17a924cac26f0ddb1e07ff5669bc3db1e99273152322c",
+      "package": "d202d3c8542371e0f71bc7a1e208339ff2a6b23a66e278a55ca8bf1231ec1b68",
+      "native": "0ff22cb00b5a6dec20e4b58899d0093abd24b0c7ff75cf95d07bf362272e5839"
+    },
+    "source": "same exact Release, full games; six frozen smoke pairs; nearest-rank p95"
+  },
+  "matched_calibration": {
+    "map_size_id": "compact",
+    "samples": 12,
+    "sample_case_ids": [
+      "smoke-000-seat1",
+      "smoke-000-seat2",
+      "smoke-001-seat1",
+      "smoke-001-seat2",
+      "smoke-002-seat1",
+      "smoke-002-seat2",
+      "smoke-003-seat1",
+      "smoke-003-seat2",
+      "smoke-004-seat1",
+      "smoke-004-seat2",
+      "smoke-005-seat1",
+      "smoke-005-seat2"
+    ],
+    "p95_seconds": 1627.818,
+    "timeout_seconds": 3600,
+    "jobs": 4,
+    "source_release": {
+      "executable": "f6b5e6bf0c1031cff1c17a924cac26f0ddb1e07ff5669bc3db1e99273152322c",
+      "package": "d202d3c8542371e0f71bc7a1e208339ff2a6b23a66e278a55ca8bf1231ec1b68",
+      "native": "0ff22cb00b5a6dec20e4b58899d0093abd24b0c7ff75cf95d07bf362272e5839"
+    },
+    "source": "same exact Release, full games; six frozen smoke pairs; nearest-rank p95"
+  },
+  "fresh_results": {
+    "reports": 12,
+    "counts": {
+      "DRAW_TIME_LIMIT": 10,
+      "LOSS": 1,
+      "WIN": 1
+    },
+    "errors": 0,
+    "logical_inputs_and_map_bytes_equal": 12,
+    "outcomes_ticks_and_world_hashes_equal": 12,
+    "complete_exact_command_traces_equal": 12
+  },
+  "local_evidence": {
+    "matched_qualification_sha256": "22b1ff6e857d9223057e26a44e2aa4d20dde38f55d2117fb3d1202505330efcf",
+    "strict_command_repeats_sha256": "cfac9ce568965a794954fce49cd3732a6aa03990e0f7df2855ac90d3d22a360b",
+    "preserved_quiescence_sha256": "1c7e7d55f0b67ff1e7913d985ef32d9a9d6c5e63d747770c0533917d96c6a3e2",
+    "state_boundary_sha256": "29e95d97c86266ee6ce8fa9958d485a50964b0e7f1cc3027288147326bd0928e",
+    "original_timeout_retry_qualification_sha256": "9015d0d37612b6080158a3684c0efce52bacc0aa8fec95ed6973415baab58e13"
+  },
+  "unchanged": [
+    "Formula min(3600,max(300,ceil(3*p95)))",
+    "Same exact R19 artifacts and game rules",
+    "Full36000/72000tickhorizons and frozen cases",
+    "3generations/384logicaldev/max96validation/32ablations",
+    "4globalgameprocesses; final graphics measurements isolated",
+    "No final128/64 holdout consumed"
+  ],
+  "limits": "The original real timeout remains visible. Fresh12 baseline games calibrate actual4-process concurrency, not AI strength. The same timed-out policy case then completed normally in the renewed tuning series, with its entire old command sequence preserved as an exact prefix. Old66k and newfinal hashes refer to different ticks. Full bounded tuning and final independent cohorts remain separate requirements.",
+  "original_timeout_retry": {
+    "new_series": "4c4f1380cbad597e",
+    "new_status": "DRAW_TIME_LIMIT",
+    "new_tick": 72000,
+    "new_wall_seconds": 2438.62,
+    "new_timeout_seconds": 3600,
+    "logical_game_input_equal": true,
+    "old_complete_recorded_command_prefix_equal": true,
+    "prefix_commands": 14057,
+    "prefix_canonical_json_sha256": "e7a0ef9a53d2014cfc36544866c14b6f4ef19708967ab719f8a13317f3786e09"
+  }
+}

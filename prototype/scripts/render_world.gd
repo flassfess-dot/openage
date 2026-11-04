@@ -15,6 +15,10 @@ const AMBIENT_TRAVEL_TICKS := 160
 const AMBIENT_WANDER_RADIUS := 8.0
 const AMBIENT_MIN_WAYPOINT_RADIUS := 5.0
 const AMBIENT_HASH_MODULUS := 2_147_483_647
+# Normal fixed-step interpolation remains in [0, 1]. The simulation owner may
+# supply a short bounded extrapolation while an immutable AI observation pins
+# the next source tick. Keep a defensive ceiling for non-main callers too.
+const MAX_INTERPOLATION_ALPHA := 5.0
 
 # These Gaia decorations are flat source artwork. Keeping the compatibility
 # mapping here also fixes already packed scenarios produced by older importers.
@@ -108,7 +112,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	rally_drawables = []
 	current_projection_origin = world_to_screen.call(Vector2.ZERO)
 	if world_source is Dictionary and not world_source.has("resources"): cached_sprite_scale = sprite_scale
-	var alpha := clampf(interpolation_alpha, 0.0, 1.0)
+	var alpha := clampf(interpolation_alpha, 0.0, MAX_INTERPOLATION_ALPHA)
 	var preview_id_lookup: Variant = _id_lookup(preview_ids)
 	var selected_id_lookup: Variant = _id_lookup(selected_ids)
 	var from_snapshot := world_source is Dictionary
@@ -288,7 +292,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, unit):
 					continue
 				var previous_position: Vector2 = unit.get("previous_pos", unit["pos"])
-				var render_position: Vector2 = previous_position.lerp(unit["pos"], alpha)
+				var render_position: Vector2 = previous_position.lerp(unit["pos"], minf(alpha, float(unit.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA))))
 				var unit_screen: Vector2 = world_to_screen.call(render_position)
 				var unit_sort_screen := unit_screen
 				var depth_offset := _unit_building_depth_offset(render_position, unit_screen.y, cached_building_depth_index, world_to_screen)
@@ -848,7 +852,7 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 	# for one published presentation revision. Between fixed simulation ticks only
 	# interpolation changes, so update anchors in place instead of rebuilding the
 	# complete render queue and resolving every sprite again.
-	var alpha := clampf(interpolation_alpha, 0.0, 1.0)
+	var alpha := clampf(interpolation_alpha, 0.0, MAX_INTERPOLATION_ALPHA)
 	var moved := force_resort
 	if not is_same(cached_refresh_input, drawables) or projection_changed:
 		cached_refresh_input = drawables
@@ -877,7 +881,7 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 			position = ambient_actor_position(data, ambient_tick)
 			data["movement_direction"] = ambient_actor_direction(data, ambient_tick)
 		elif _is_interpolated_drawable(kind, data):
-			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), alpha)
+			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), minf(alpha, float(data.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA))))
 		if position == null:
 			# Static drawables keep their world anchor; their screen position only
 			# changes with the camera, and the affine pan/zoom projection preserves

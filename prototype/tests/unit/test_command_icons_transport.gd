@@ -32,7 +32,7 @@ func _initialize() -> void:
 	var ids: Array[int] = [int(ship["id"])]
 	var initial := model.build_update(Snapshot.with_queries(world, 0, 1), ids, "RECTANGLE")
 	var action := unload_action(initial["model"])
-	check(not action.is_empty() and not action["enabled"] and action["icon_id"] == 5, "empty transport displays its disabled unload icon")
+	check(not action.is_empty() and not action["enabled"] and action["icon_id"] == 1, "empty transport displays the original outward-arrow unload icon")
 	check(initial["model"]["commands"].all(func(command): return command.get("id") not in ["attack_move", "stance"]), "unarmed transport shows applicable commands")
 	ship["components"]["cargo"]["passenger_ids"] = [123]
 	ship["components"]["cargo"]["count"] = 1

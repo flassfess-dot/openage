@@ -10,11 +10,11 @@ const COAST_NEIGHBOR_DISTANCE_SQUARED: float = 2.26
 
 
 static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, formation_name: String = "RECTANGLE", reserved_unit_ids: Dictionary = {}) -> Array:
-	if int(snapshot.get("observer_team", -1)) != team or String(goal.get("type", "wait")) != "attack" or String(goal.get("target_domain", "land")) != "land":
+	if int(snapshot.get("observer_team", -1)) != team or String(goal.get("type", "wait")) not in (["attack","secure"] if bool(goal.get("competitive",false)) else ["attack"]) or String(goal.get("target_domain", "land")) != "land":
 		return []
 	var allies: Array = snapshot.get("player_state", {}).get("mutual_allies", snapshot.get("player_state", {}).get("allies", [team]))
 	var own_units: Array = snapshot.get("units", []).filter(func(entity): return int(entity.get("team", 0)) == team and float(entity.get("hp", 0.0)) > 0.0)
-	var transports: Array = snapshot.get("units", []).filter(func(entity): return int(entity.get("team", 0)) in allies and float(entity.get("hp", 0.0)) > 0.0 and bool(entity.get("components", {}).get("cargo", {}).get("enabled", false)) and String(entity.get("task", "idle")) in ["idle", "hold"] and (int(entity.get("team", 0)) == team or bool(entity.get("components", {}).get("cargo", {}).get("allow_allied", true))))
+	var transports: Array = snapshot.get("units", []).filter(func(entity): return int(entity.get("team", 0)) in allies and float(entity.get("hp", 0.0)) > 0.0 and String(entity.get("movement_domain","land"))=="water" and bool(entity.get("components", {}).get("cargo", {}).get("enabled", false)) and ((bool(goal.get("competitive",false)) and int(entity.get("team",0))!=team) or String(entity.get("task", "idle")) in ["idle", "hold"]) and (int(entity.get("team", 0)) == team or bool(entity.get("components", {}).get("cargo", {}).get("allow_allied", true))))
 	if bool(goal.get("adaptive_strategy", false)):
 		var live_ids: Dictionary = {}
 		for unit in own_units: live_ids[int(unit["id"])] = true
@@ -24,12 +24,19 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 		return []
 	var navigation: Dictionary = snapshot.get("navigation", {})
 	var target_land := _known_land_component(Vector2(goal.get("position", Vector2.ZERO)), navigation)
-	var has_off_target_assault := own_units.any(func(entity): return String(entity.get("movement_domain", "land")) == "land" and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", [])) and not target_land.has(Vector2i(Vector2(entity.get("pos", Vector2.ZERO)))))
+	var has_off_target_assault := own_units.any(func(entity): return String(entity.get("movement_domain", "land")) == "land" and (not bool(goal.get("competitive",false)) or not bool(entity.get("components",{}).get("worker",{}).get("enabled",false))) and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", [])) and not target_land.has(Vector2i(Vector2(entity.get("pos", Vector2.ZERO)))))
+	# Arrived troops keep their land task while a reinforcement wave unloads.
+	# The nearest known component is only a landing-search hypothesis if the goal is unexplored.
+	var target_land_identified := target_land.has(Vector2i(Vector2(goal.get("position",Vector2.ZERO))))
+	var exclude_target_land := (bool(goal.get("competitive",false)) and target_land_identified) or has_off_target_assault
 	var passengers: Array = own_units.filter(func(entity):
-		return not reserved_unit_ids.has(int(entity.get("id", -1))) and String(entity.get("movement_domain", "land")) == "land" and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", []) or int(entity.get("scenario_object_id", -1)) >= 0) and String(entity.get("task", "idle")) in ["idle", "hold"] and (not has_off_target_assault or not target_land.has(Vector2i(Vector2(entity.get("pos", Vector2.ZERO)))))
+		return not reserved_unit_ids.has(int(entity.get("id", -1))) and String(entity.get("movement_domain", "land")) == "land" and (bool(entity.get("combat_enabled", false)) or "combatant" in entity.get("behavior_tags", []) or int(entity.get("scenario_object_id", -1)) >= 0) and String(entity.get("task", "idle")) in ["idle", "hold"] and (not exclude_target_land or not target_land.has(Vector2i(Vector2(entity.get("pos", Vector2.ZERO)))))
 	)
 	if bool(goal.get("adaptive_strategy", false)):
 		passengers = passengers.filter(func(u): return not bool(u.get("components", {}).get("worker", {}).get("enabled", false)))
+		if bool(goal.get("competitive",false)):
+			for unit in own_units:
+				if ("healer" in unit.get("behavior_tags",[]) or "converter" in unit.get("behavior_tags",[])) and String(unit.get("task","idle")) in ["idle","hold"] and not reserved_unit_ids.has(int(unit["id"])) and unit not in passengers and (not target_land_identified or not target_land.has(Vector2i(Vector2(unit.get("pos",Vector2.ZERO))))): passengers.append(unit)
 	passengers.append_array(snapshot.get("units", []).filter(func(entity): return int(entity.get("team", -1)) == 0 and float(entity.get("hp", 0.0)) > 0.0 and String(entity.get("movement_domain", "land")) == "land" and "capturable" in entity.get("behavior_tags", []) and not reserved_unit_ids.has(int(entity.get("id", -1)))))
 	transports.sort_custom(func(left, right):
 		var left_own := int(left.get("team", 0)) == team
@@ -42,6 +49,7 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 	var target_landing: Variant = null
 	for transport_value in transports:
 		var transport: Dictionary = transport_value
+		if reserved_unit_ids.has(int(transport["id"])): continue
 		# Let accepted boarding approaches complete before sailing or restaging.
 		if own_units.any(func(unit): return String(unit.get("task", "")) == "board" and int(unit.get("target_id", -1)) == int(transport["id"])):
 			continue
@@ -49,6 +57,15 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 		var cargo_ids: Array = cargo.get("passenger_ids", [])
 		var own_transport := int(transport.get("team", 0)) == team
 		var occupied := cargo_ids.size() if own_transport else int(cargo.get("count", -1))
+		if own_transport and bool(goal.get("competitive",false)) and float(transport.get("hp",0.0))<float(transport.get("max_hp",1.0))*0.3:
+			var home:=Vector2(goal.get("home",Vector2(transport.get("pos",Vector2.ZERO))))
+			var safe: Variant=_landing_near(home,navigation,_known_land_component(home,navigation))
+			if safe is Vector2:
+				if occupied>0 and Vector2(transport["pos"]).distance_to(safe)<=MAX_UNLOAD_DISTANCE: result.append(Commands.UnloadCommand.new(tick,[int(transport["id"])],safe))
+				else:
+					var approach: Variant=_water_approach(safe,transport,navigation)
+					if approach is Vector2 and Vector2(transport["pos"]).distance_to(approach)>2.0: result.append(Commands.MoveCommand.new(tick,[int(transport["id"])],approach))
+			continue
 		var expedition: Dictionary = {}
 		if bool(goal.get("adaptive_strategy", false)) and own_transport:
 			var transport_id := int(transport["id"])
@@ -58,6 +75,15 @@ static func plan(snapshot: Dictionary, tick: int, team: int, goal: Dictionary, f
 				expedition["phase"] = "loading"
 				expedition["load_tick"] = tick
 		if occupied < 0:
+			# Foreign cargo contents remain private. A competitive player may try
+			# boarding one owned troop, exactly as a human issuing BoardCommand.
+			# The ordinary command validator decides capacity; no hidden count is
+			# inferred from the transport or inserted into the observation.
+			if bool(goal.get("competitive",false)) and not own_transport:
+				var candidate: Array=passengers.filter(func(p): return int(p.get("team",0))==team and not committed_passengers.has(int(p["id"])) and Vector2(p.get("pos",Vector2.ZERO)).distance_to(Vector2(transport.get("pos",Vector2.ZERO)))<=MAX_UNLOAD_DISTANCE)
+				if not candidate.is_empty():
+					var passenger_id:=int(candidate[0]["id"]); committed_passengers[passenger_id]=true
+					result.append(Commands.BoardCommand.new(tick,[passenger_id],int(transport["id"])))
 			continue
 		if occupied == 0 or not own_transport:
 			var capacity := maxi(0, int(cargo.get("capacity", 0)) - occupied)

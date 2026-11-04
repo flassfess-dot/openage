@@ -20,6 +20,9 @@ func _run() -> void:
 	var codec := Replay.new()
 	for team in [1, 2]:
 		var definition := {"team": team, "ai": {"economic_interval_ticks": 5, "military_interval_ticks": 7, "formation": "WEDGE"}}
+		if "--competitive" in OS.get_cmdline_user_args():
+			definition["ai"]=preload("res://scripts/skirmish_ai_policy.gd").resolve()
+			definition["ai"]["algorithm_version"]="competitive_v2"
 		var ai := Ai.new(definition)
 		var snapshot := {"observer_team": team, "map_size": Vector2i(24, 24), "player_state": {"team": team, "allies": [team]}, "units": [{"id": team * 10, "team": team, "kind": "villager", "hp": 25.0, "pos": Vector2(4, 4), "task": "idle", "movement_domain": "land", "components": {"worker": {"enabled": true}, "movement": {"domain": "land"}}}], "buildings": [], "resources": [{"id": 80, "kind": "berries", "pos": Vector2(5, 4), "amount": 100}]}
 		var input := Task.capture(ai, snapshot, 1)

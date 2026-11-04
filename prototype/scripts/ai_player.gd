@@ -16,6 +16,7 @@ const StrategyState := preload("res://scripts/ai_strategy_state.gd")
 const AdaptiveEconomy := preload("res://scripts/ai_adaptive_economy.gd")
 const PlanBudget := preload("res://scripts/ai_plan_budget.gd")
 const Operations := preload("res://scripts/ai_operations.gd")
+const CompetitiveController := preload("res://scripts/ai_competitive_controller.gd")
 
 var team: int
 var enabled: bool
@@ -51,6 +52,7 @@ var failed_gather_seen: Dictionary = {}
 var last_gather_topology: Variant = null
 var planning_metrics: Dictionary = {}
 var economic_resource_index: Variant = null
+var competitive_controller: Variant = null
 
 
 func _init(player_definition: Dictionary) -> void:
@@ -89,6 +91,13 @@ func _init(player_definition: Dictionary) -> void:
 	var normalized := economic_policy
 	economic_policy = settings.duplicate(true)
 	economic_policy.merge(normalized, true)
+	economic_policy["competitive"] = String(settings.get("algorithm_version","legacy_adaptive_v1")) == "competitive_v2" and profile != "source_campaign_v1"
+	if bool(economic_policy["competitive"]):
+		economic_policy.merge(settings.get("competitive_parameters",{}),false)
+		economic_policy["capabilities"]=["legal_observation","adaptive_economy","operations","belief_regions","income_ledger","strategic_plans","combat_rollouts","role_micro","action_budget","farm_reserve","garrison","team_intents"]
+		competitive_controller = CompetitiveController.new()
+		military_interval = 4
+		economic_interval = 20
 	source_contract = player_definition.get("source_ai", {}).duplicate(true)
 	source_city_plan = SourceCityPlan.new(team)
 
@@ -179,6 +188,17 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 		return filtered
 	if bool(economic_policy.get("adaptive_strategy", false)):
 		result.append_array(_collect_adaptive(snapshot, next_tick, navigation_reserved))
+		if competitive_controller != null:
+			var admission_started := Time.get_ticks_usec()
+			var eligible: Array=[]
+			for command in result:
+				if not command.params.has("_ai_feedback"):
+					command.params["_ai_feedback"]={"key":"competitive:"+String(command.command_type())+":"+str(command.unit_ids)+":"+str(command.params),"cost":{}}
+				if not strategy.cooldowns.has(String(command.params["_ai_feedback"].get("key",""))): eligible.append(command)
+			result=eligible
+			result=competitive_controller.actions.admit(result,next_tick,economic_policy,strategy,operations)
+			competitive_controller.micro.record_sent(result,next_tick)
+			planning_metrics["admission"]=Time.get_ticks_usec()-admission_started
 		return result
 	var skirmish_reserved_ids: Dictionary = navigation_reserved
 	if last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval:
@@ -230,6 +250,8 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 
 
 func _collect_adaptive(snapshot: Dictionary, next_tick: int, reserved: Dictionary) -> Array:
+	if competitive_controller != null:
+		return competitive_controller.plan(self,snapshot,next_tick,reserved)
 	var started := Time.get_ticks_usec()
 	strategy.observe(snapshot, team, economic_policy)
 	var goal: Dictionary = strategy.choose_goal(snapshot, team, economic_policy, decision_index)
@@ -361,7 +383,7 @@ func _remember_failed_gather_targets(snapshot: Dictionary) -> void:
 		if int(unit.get("team", 0)) != team:
 			continue
 		var order: Dictionary = unit.get("components", {}).get("order", {})
-		if String(order.get("type", "")) != "gather" or not bool(order.get("completed", false)) or String(order.get("completion_reason", "")) not in ["no_approach_slot", "no_path", "local_blocked"]:
+		if String(order.get("type", "")) != "gather" or not bool(order.get("completed", false)) or String(order.get("completion_reason", "")) not in ["no_approach_slot", "no_path", "local_blocked", "local_obstacle"]:
 			continue
 		var target_id := int(order.get("target_entity_id", -1))
 		if target_id < 0:
@@ -411,6 +433,16 @@ func _target_threatens_owned_position(snapshot: Dictionary, target_position: Vec
 				return true
 	return false
 
+
+func decision_options(target_tick: int) -> Dictionary:
+	var options := presentation_options()
+	if competitive_controller != null and last_economic_tick >= 0 and target_tick-last_economic_tick < economic_interval:
+		options["tactical_only"] = true
+		options["include_navigation"] = target_tick-int(competitive_controller.last_operation_tick)>=10
+		options["requested_build_site_kinds"] = []
+		options["planning_technology_ids"] = []
+		options["include_worker_command_options"] = false
+	return options
 
 func presentation_options() -> Dictionary:
 	if profile == "source_campaign_v1":
@@ -471,8 +503,28 @@ func presentation_options() -> Dictionary:
 	var known_positions: Dictionary = {}
 	if bool(economic_policy.get("adaptive_strategy", false)):
 		for id in strategy.memory: known_positions[int(id)] = strategy.memory[id]["entity"].get("pos", Vector2.ZERO)
-	return {
+		for record in strategy.belief_regions.values():
+			var actor: Dictionary=record["entry"]["entity"]
+			known_positions[int(actor.get("id",-1))]=actor.get("pos",Vector2.ZERO)
+	var skirmish_preferred_sites: Dictionary = {}
+	if competitive_controller != null and strategy.goal.has("expansion_position"):
+		skirmish_preferred_sites["town_center"] = [Vector2(strategy.goal["expansion_position"])]
+	var requested_kinds: Array=economic_policy.get("construction_priorities", []).duplicate()
+	if competitive_controller != null:
+		for kind in ["tower","gate","wall","wonder"]:
+			if kind not in requested_kinds: requested_kinds.append(kind)
+		var home:=Vector2(strategy.goal.get("home",Vector2.ZERO)); var target:=Vector2(strategy.goal.get("position",home))
+		var forward:=(target-home).normalized()
+		if forward.length_squared()>0.5:
+			var choke:=home+forward*7.0
+			skirmish_preferred_sites["tower"]=[choke-forward*2.0]
+			skirmish_preferred_sites["gate"]=[choke]
+			# Short flanks leave the gate axis and both external ends open. The
+			# regular placement validator still checks slopes and approach slots.
+			skirmish_preferred_sites["wall"]=[choke+forward.orthogonal()*3.0,choke-forward.orthogonal()*3.0]
+	var skirmish_options := {
 		"ai_memory_positions": known_positions,
+		"include_ai_projectiles": competitive_controller != null,
 		"compact_entities": true,
 		"include_navigation": true,
 		"include_build_sites": false,
@@ -480,7 +532,7 @@ func presentation_options() -> Dictionary:
 		"include_projectiles": false,
 		"include_scenario": false,
 		"include_worker_command_options": false,
-		"requested_build_site_kinds": economic_policy.get("construction_priorities", []).duplicate(),
+		"requested_build_site_kinds": requested_kinds,
 		"build_site_filter": Callable(self, "_construction_site_kinds"),
 		"build_site_filter_navigation": true,
 		"build_site_candidate_filter": Callable() if bool(economic_policy.get("adaptive_strategy", false)) else Callable(self, "_has_usable_build_site"),
@@ -491,9 +543,12 @@ func presentation_options() -> Dictionary:
 		"recover_abandoned_foundations_only": true,
 		"planning_technology_ids": economic_policy.get("age_advance_technology_ids", []).duplicate(),
 		"maximum_build_sites_per_kind": 12,
+		"preferred_build_sites": skirmish_preferred_sites,
 		"build_site_search_radius": 12,
 		"minimum_structure_gap": float(economic_policy.get("minimum_structure_gap", 0.0)),
 	}
+	if competitive_controller!=null: skirmish_options["include_builder_productivity"]=true
+	return skirmish_options
 
 
 func _source_construction_site_kinds(kinds: Array, units: Array, buildings: Array, player_state: Dictionary) -> Array:
@@ -542,7 +597,7 @@ func canonical_state() -> Dictionary:
 		var resource_ids: Array = failed_gather_targets[worker_id].keys()
 		resource_ids.sort()
 		failed_gathers.append({"worker_id": int(worker_id), "resource_ids": resource_ids})
-	return {
+	var result := {
 		"team": team,
 		"enabled": enabled,
 		"profile": profile,
@@ -565,9 +620,14 @@ func canonical_state() -> Dictionary:
 		"failed_gather_seen": failed_gather_seen.duplicate(true),
 		"source_city_plan": source_city_plan.canonical_state() if source_city_plan != null else {},
 	}
+	if competitive_controller != null: result["competitive_controller"] = competitive_controller.canonical_state()
+	return result
 
 
 func restore_state(data: Dictionary) -> bool:
+	if competitive_controller != null:
+		if not data.get("adaptive_strategy") is Dictionary or not data.get("adaptive_operations") is Dictionary: return false
+		if not data.get("competitive_controller") is Dictionary or not competitive_controller.restore_state(data["competitive_controller"]): return false
 	if data.has("adaptive_strategy") and not strategy.restore_state(data["adaptive_strategy"]): return false
 	if data.has("adaptive_operations") and not operations.restore_state(data["adaptive_operations"], team): return false
 	failed_gather_expiry = data.get("failed_gather_expiry", {}).duplicate(true)

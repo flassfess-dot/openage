@@ -61,6 +61,8 @@ Assert-True ((Get-Content -LiteralPath $taskTemplate -Raw).Trim() -eq "release")
 $taskProject = Join-Path $taskFixture "prototype"
 $taskDistribution = Join-Path $taskFixture "dist"
 New-Item -ItemType Directory -Force -Path $taskProject, (Join-Path $taskFixture "legal\MIT") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $taskProject "assets\app") | Out-Null
+Copy-Item -LiteralPath (Join-Path $taskRepository "prototype\assets\app\icon.ico") -Destination (Join-Path $taskProject "assets\app\icon.ico")
 Set-Content -LiteralPath (Join-Path $taskProject "README.md") -Value "fixture readme"
 Set-Content -LiteralPath (Join-Path $taskFixture "legal\MIT\godot-cpp.md") -Value "fixture license"
 $taskNative = Join-Path $taskFixture "native.dll"
@@ -69,6 +71,7 @@ Copy-RoRReleaseRuntime -RepositoryRoot $taskFixture -ProjectRoot $taskProject -D
 $taskPackagedNative = Join-Path $taskDistribution "bin\ror_pathfinding.windows.template_release.x86_64.dll"
 Assert-True ((Get-ArtifactSha256 $taskNative) -eq (Get-ArtifactSha256 $taskPackagedNative)) "Packaged DLL matches the build output"
 Assert-True (Test-Path -LiteralPath (Join-Path $taskDistribution "legal\MIT\godot-cpp.md")) "Runtime license is retained"
+Assert-True (Test-Path -LiteralPath (Join-Path $taskDistribution "Rise of Rome.ico")) "Application icon is retained"
 $taskApplication = Join-Path $taskDistribution "game.exe"
 $taskPackage = Join-Path $taskDistribution "game.pck"
 Copy-Item -LiteralPath $taskTemplate -Destination $taskApplication

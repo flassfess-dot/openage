@@ -4,6 +4,7 @@ const Rules := preload("res://scripts/ai_economy_rules.gd")
 const Combat := preload("res://scripts/ai_combat_model.gd")
 const Common := preload("res://scripts/ai_economy_common.gd")
 const Production := preload("res://scripts/ai_economy_production.gd")
+const MacroPlan := preload("res://scripts/ai_macro_plan.gd")
 
 static func policy_for(snapshot: Dictionary, team: int, base: Dictionary, state) -> Dictionary:
 	var policy := base.duplicate(true)
@@ -112,6 +113,7 @@ static func policy_for(snapshot: Dictionary, team: int, base: Dictionary, state)
 		priorities.push_front("town_center")
 	policy["construction_priorities"] = priorities
 	policy["desired_stock"] = forecast(snapshot, units, buildings, policy, state)
+	if bool(base.get("competitive",false)): policy = MacroPlan.adapt(policy,snapshot,state)
 	return policy
 
 

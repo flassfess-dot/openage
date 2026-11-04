@@ -374,7 +374,10 @@ func is_world_rect_walkable_for(minimum: Vector2, maximum: Vector2, margin: floa
 
 
 func occupants(cell: Vector2i) -> Array:
-	return occupied_cells.get(cell, []).duplicate(true)
+	var records: Variant=occupied_cells.get(cell, [])
+	# Detached navigation tasks retain opaque boolean blockers rather than
+	# entity records. Such a blocker must stay occupied and non-replaceable.
+	return records.duplicate(true) if records is Array else [{"category":"opaque","id":-1}]
 
 
 func can_build(cells: Array) -> bool:
@@ -391,6 +394,8 @@ func can_build_for(cells: Array, movement_domain: String = "land", restriction_i
 			return false
 		if occupied_cells.has(cell):
 			if replaced_building_ids.is_empty():
+				return false
+			if not occupied_cells[cell] is Array:
 				return false
 			for occupant in occupied_cells[cell]:
 				if String(occupant.get("category", "")) != "building" or not replaced_building_ids.has(int(occupant.get("id", -1))):
@@ -418,11 +423,33 @@ func surface_component_id(cell: Vector2i, movement_domain: String = "land", rest
 		return -1
 	var key := "%s:%d" % [movement_domain, restriction_id]
 	if not surface_component_cache.has(key):
-		surface_component_cache[key] = _build_surface_components(movement_domain, restriction_id)
-	return int(surface_component_cache[key].get(cell, -1))
+		surface_component_cache[key] = _build_surface_component_cache(movement_domain, restriction_id)
+	var components: Dictionary = surface_component_cache[key]
+	if components.has("labels"):
+		return int(components["labels"][cell.y * size.x + cell.x])
+	return int(components.get(cell, -1))
+
+
+# Keep the compatibility Dictionary cache and invalidation lifecycle. Native live
+# queries store a compact label buffer; loading/reference publications may still
+# install the original cell Dictionary under the same configuration key.
+func _build_surface_component_cache(domain: String, restriction_id: int) -> Dictionary:
+	var labels: Variant = _native_surface_component_labels(domain, restriction_id)
+	if labels is PackedInt32Array and labels.size() == size.x * size.y:
+		return {"labels": labels}
+	return _build_surface_components(domain, restriction_id)
+
+
+func _native_surface_component_labels(domain: String, restriction_id: int) -> Variant:
+	if native_masks_enabled and mask_kernel != null and mask_kernel.has_method("surface_component_labels"):
+		return mask_kernel.surface_component_labels(size, terrain_cells, terrain_ids, terrain_restrictions, PackedByteArray(), false, domain, restriction_id)
+	return null
 
 
 func _build_surface_components(movement_domain: String, restriction_id: int) -> Dictionary:
+	var native: Variant = _native_surface_components(movement_domain, restriction_id)
+	if native is Dictionary:
+		return native
 	var result: Dictionary = {}
 	var next_component_id := 0
 	for y in range(size.y):
@@ -454,6 +481,12 @@ func can_place(cells: Array, movement_domain: String, restriction_id: int = -1) 
 		if not is_walkable_for(cell, movement_domain, restriction_id):
 			return false
 	return true
+
+
+func _native_surface_components(domain: String, restriction_id: int) -> Variant:
+	if native_masks_enabled and mask_kernel != null and mask_kernel.has_method("surface_components"):
+		return mask_kernel.surface_components(size, terrain_cells, terrain_ids, terrain_restrictions, PackedByteArray(), false, domain, restriction_id)
+	return null
 
 
 func native_walkability_mask(domain: String, restriction_id: int, probe: Variant = null) -> PackedByteArray:

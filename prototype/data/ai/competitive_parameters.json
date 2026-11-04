@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "algorithm_version": "competitive_v2",
+  "runtime": {"micro_enabled": true, "combat_rollouts": true, "micro_actor_budget": 48, "micro_repeat_ticks": 20, "plan_inertia": 8.0, "reaction_ticks": 4, "commands_per_minute": 300, "command_burst": 6, "ranker_enabled": false},
+  "openings": {
+    "pressure": {"workers": 14, "age_workers": 10, "age_defenders": 3},
+    "fast_age": {"workers": 18, "age_workers": 10, "age_defenders": 1},
+    "growth": {"workers": 24, "age_workers": 20, "age_defenders": 1},
+    "naval": {"workers": 18, "age_workers": 14, "age_defenders": 2}
+  },
+  "difficulty": {
+    "easy": {"reaction_ticks": 12, "commands_per_minute": 90, "command_burst": 3, "micro_actor_budget": 16, "strategy_interval_ticks": 160, "operation_interval_ticks": 20, "micro_repeat_ticks": 32, "combat_rollouts": false},
+    "standard": {"reaction_ticks": 8, "commands_per_minute": 180, "command_burst": 4, "micro_actor_budget": 32, "strategy_interval_ticks": 80, "operation_interval_ticks": 10, "combat_forecast_ticks": 80},
+    "hard": {"reaction_ticks": 4, "commands_per_minute": 300, "command_burst": 6, "micro_actor_budget": 48, "strategy_interval_ticks": 40, "operation_interval_ticks": 10, "combat_forecast_ticks": 40}
+  }
+}

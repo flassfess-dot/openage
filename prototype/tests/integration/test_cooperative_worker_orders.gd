@@ -21,6 +21,9 @@ func _initialize() -> void:
 	verify_neighboring_berry_slots(catalog)
 	verify_depleted_cluster_handoff(catalog)
 	verify_shared_construction(catalog)
+	verify_builder_rate_projection(catalog)
+	verify_ai_crew_single_cost(catalog)
+	verify_ai_existing_crew(catalog)
 	verify_independent_workers_join_existing_foundation(catalog)
 	verify_completed_builder_handoff(catalog)
 	verify_generated_shared_gather(catalog, "berries")
@@ -139,6 +142,8 @@ func verify_independent_workers_join_existing_foundation(catalog) -> void:
 	var first: Dictionary = world.add_unit(1, "villager", Vector2(8.5, 13.5), false)
 	var second: Dictionary = world.add_unit(1, "villager", Vector2(8.5, 15.5), false)
 	world.update_fog_of_war()
+	var before_wood:int=world.economy_system.get_resource_amount(1,1)
+	var cost:Dictionary=world.building_cost("house",1)
 	var foundation: Variant = world.assign_command_build([first], "house", Vector2(11.5, 14.5))
 	var joined: Variant = world.assign_command_build([second], "house", Vector2(11.5, 14.5))
 	if foundation == null or joined == null:
@@ -146,6 +151,8 @@ func verify_independent_workers_join_existing_foundation(catalog) -> void:
 		return
 	if int(joined.get("id", -1)) != int(foundation.get("id", -1)):
 		failures.append("second selection created a different project instead of joining foundation %d" % int(foundation.get("id", -1)))
+	if world.economy_system.get_resource_amount(1,1)!=before_wood-int(cost.get(1,0)):
+		failures.append("joining a paid foundation charged a second construction cost")
 	if [first, second].any(func(worker): return int(worker.get("target_building_id", -1)) != int(foundation.get("id", -1)) or String(worker.get("task", "")) != "build"):
 		failures.append("construction assignment depends on the workers having shared an earlier selection group; %s" % worker_diagnostics([first, second]))
 
@@ -296,5 +303,143 @@ func worker_diagnostics(workers: Array) -> String:
 	var details: Array[String] = []
 	for worker_value in workers:
 		var worker: Dictionary = worker_value
-		details.append("id%d task=%s cycles=%d pos=%s slot=%s path=%s reason=%s" % [int(worker.get("id", -1)), worker.get("task", ""), int(worker.get("gather_cycles", 0)), str(worker.get("pos", Vector2.ZERO)), str(worker.get("resource_approach_slot", worker.get("building_approach_slot", null))), worker.get("path_status", ""), worker.get("diagnostic_reason", "")])
+		details.append("id%d task=%s cycles=%d pos=%s slot=%s path=%s reason=%s stage=%s leg=%s destination=%s velocity=%s stuck=%s retries=%s watch=%s" % [int(worker.get("id", -1)), worker.get("task", ""), int(worker.get("gather_cycles", 0)), str(worker.get("pos", Vector2.ZERO)), str(worker.get("resource_approach_slot", worker.get("building_approach_slot", null))), worker.get("path_status", ""), worker.get("diagnostic_reason", ""),worker.get("gather_stage",""),str(worker.get("target")),str(worker.get("destination")),str(worker.get("actual_velocity")),str(worker.get("stuck_ticks")),str(worker.get("work_recovery_attempts",0)),str(worker.get("navigation_progress",{}))])
 	return "; ".join(details)
+
+
+func verify_builder_rate_projection(catalog) -> void:
+	var queries=preload("res://scripts/simulation_observation_queries.gd")
+	var world=fixture(catalog)
+	world.set_resource_amount(1,1,1000)
+	var first:Dictionary=world.add_unit(1,"villager",Vector2(9.5,13.5),false)
+	var second:Dictionary=world.add_unit(1,"villager",Vector2(9.5,15.5),false)
+	var enemy:Dictionary=world.add_unit(2,"villager",Vector2(18.5,14.5),false)
+	var berries:Dictionary=world.add_resource("berries",Vector2(7.5,13.5),100)
+	world.assign_command_gather([first],int(berries["id"]))
+	var role:Dictionary=world.worker_role_system.profile_for_task(first,"build")
+	var role_id:=int(role.get("role_source_unit_id",-1))
+	if role_id<0:failures.append("builder role missing in productivity fixture");world.shutdown_derived_state();return
+	var base_rate:float=world.worker_role_system.expected_task_work_rate(first,"build")
+	var technology=world.technology_system
+	technology.catalog=technology.catalog.duplicate(false)
+	technology.catalog["effect_bundles"]=technology.catalog.get("effect_bundles",{}).duplicate(false)
+	technology.catalog["effect_bundles"]["900001"]={"commands":[{"type_id":5,"attr_a":role_id,"attr_b":-1,"attr_c":13,"attr_d":1.25},{"type_id":4,"attr_a":role_id,"attr_b":-1,"attr_c":13,"attr_d":0.2}]}
+	technology.apply_effect_bundle(1,900001)
+	var own_rate:float=world.worker_role_system.expected_task_work_rate(first,"build")
+	if not is_equal_approx(own_rate,base_rate*1.25+0.2):failures.append("own builder technology modifiers were omitted from the forecast")
+	technology.apply_effect_bundle(2,900001)
+	if not is_equal_approx(world.worker_role_system.expected_task_work_rate(first,"build"),own_rate):failures.append("foreign builder technology contaminated the own forecast")
+	world.update_fog_of_war()
+	var input:={"tick":0,"observer_team":1,"units":[first,second,enemy],"buildings":[],"resources":[]}
+	var options:={"include_navigation":false,"include_build_sites":false,"include_worker_command_options":false,"include_builder_productivity":true}
+	var before:=var_to_bytes([first,second,enemy])
+	var projected:Dictionary=queries.enrich(world,input,options)
+	if var_to_bytes([first,second,enemy])!=before:failures.append("future builder productivity query changed an authoritative worker")
+	var expected:Dictionary={}
+	for row in projected["units"]:
+		if int(row["team"])==1:
+			if not row.has("construction_work_rate"):failures.append("owned builder productivity was not projected")
+			else:expected[int(row["id"])]=float(row["construction_work_rate"])
+		elif row.has("construction_work_rate"):failures.append("builder productivity exposed a foreign worker's private role")
+	var legacy_options:Dictionary=options.duplicate(true);legacy_options.erase("include_builder_productivity")
+	if queries.enrich(world,input,legacy_options)["units"].any(func(row):return row.has("construction_work_rate")):failures.append("legacy observation gained builder-only metadata")
+	var tactical:Dictionary=input.duplicate(false);tactical["tactical_only"]=true
+	if queries.enrich(world,tactical,options)["units"].any(func(row):return row.has("construction_work_rate")):failures.append("tactical-only capture performed economic builder projection")
+	var foundation:Variant=world.assign_command_build([first,second],"house",Vector2(11.5,14.5))
+	if foundation==null:failures.append("builder projection fixture foundation rejected");return
+	var rate:=0.0
+	for worker in [first,second]:
+		var actual:=float(worker["components"]["worker"]["work_rate"])
+		if not expected.has(int(worker["id"])) or not is_equal_approx(actual,float(expected[int(worker["id"])])):failures.append("predicted builder role rate disagrees with actual assignment")
+		rate+=actual
+	var progress:=float(foundation["construction_progress"])
+	world.update_units(0.05,1,2)
+	var delta:=float(foundation["construction_progress"])-progress
+	var predicted_delta:=0.05*rate/float(foundation["construction_required"])
+	if not is_equal_approx(delta,predicted_delta):failures.append("crew additive work forecast disagrees with authoritative construction progress: %f vs %f" % [delta,predicted_delta])
+	world.shutdown_derived_state()
+
+
+func verify_ai_crew_single_cost(catalog) -> void:
+	var queries=preload("res://scripts/simulation_observation_queries.gd")
+	var construction=preload("res://scripts/ai_economy_construction.gd")
+	var state=preload("res://scripts/ai_strategy_state.gd").new()
+	var budget_type=preload("res://scripts/ai_plan_budget.gd")
+	var snapshot_type=preload("res://scripts/simulation_snapshot.gd")
+	var world=fixture(catalog)
+	world.set_resource_amount(1,1,1000)
+	var first:Dictionary=world.add_unit(1,"villager",Vector2(9.5,13.5),false)
+	var second:Dictionary=world.add_unit(1,"villager",Vector2(9.5,15.5),false)
+	world.set_population_housing(1,2)
+	world.update_fog_of_war()
+	var snapshot:={"tick":0,"observer_team":1,"units":[first,second],"buildings":[],"resources":[],"navigation":{},"player_state":snapshot_type.presentation_player_state(world,1)}
+	snapshot=queries.enrich(world,snapshot,{"include_navigation":false,"include_build_sites":false,"include_builder_productivity":true})
+	# This controlled flat fixture supplies its legal site after the optional
+	# site producer has been disabled; enrich intentionally clears that root.
+	snapshot["build_sites"]={"house":[Vector2(11.5,14.5)]}
+	snapshot=preload("res://scripts/isolated_task_data.gd").capture_frozen(snapshot)
+	if snapshot.is_empty():failures.append("AI crew fixture snapshot was not detached");world.shutdown_derived_state();return
+	var budget=budget_type.new(snapshot["player_state"],[])
+	var policy:={"competitive":true,"building_limits":{"house":1},"maximum_foundations":2,"housing_buffer":3,"minimum_structure_gap":0.0}
+	var commands: Array=[]
+	var reserved: Dictionary={}
+	var before:=var_to_bytes(snapshot)
+	construction.construct(snapshot,1,1,policy,state,budget,reserved,commands,["house"],true,false,null)
+	if var_to_bytes(snapshot)!=before:failures.append("AI crew planning changed its legal snapshot")
+	if commands.size()!=1 or commands[0].unit_ids.size()!=2:
+		print("AI_CREW_DIAGNOSTIC ",JSON.stringify({"commands":commands.map(func(c):return {"type":c.command_type(),"ids":c.unit_ids}),"sites":snapshot.get("build_sites",{}),"workers":snapshot["units"].map(func(w):return {"team":w.get("team"),"hp":w.get("hp"),"task":w.get("task"),"domain":w.get("movement_domain"),"worker":w.get("components",{}).get("worker",{})}),"player":snapshot["player_state"],"metrics":state.metrics,"budget":budget.remaining}))
+		failures.append("AI blocked-housing plan did not choose one shared two-worker project")
+		world.shutdown_derived_state();return
+	var cost:Dictionary=world.building_cost("house",1)
+	if int(budget.remaining[1])!=1000-int(cost.get(1,0)):failures.append("AI crew budget charged the foundation per worker")
+	var controller:=GameController.new(world)
+	controller.enqueue_command(commands[0],true,1)
+	controller.advance_frame(0.05,1,2)
+	if var_to_bytes(snapshot)!=before:failures.append("ordinary build execution changed the captured AI input")
+	var foundations:Array=world.get_buildings().filter(func(b):return String(b.get("kind",""))=="house" and String(b.get("state",""))=="foundation")
+	if not bool(controller.get_command_result(commands[0].sequence_id).get("accepted",false)) or foundations.size()!=1 or world.economy_system.get_resource_amount(1,1)!=1000-int(cost.get(1,0)):failures.append("AI crew command did not create one normally paid foundation through the controller")
+	world.shutdown_derived_state()
+
+
+func verify_ai_existing_crew(catalog) -> void:
+	var queries=preload("res://scripts/simulation_observation_queries.gd")
+	var construction=preload("res://scripts/ai_economy_construction.gd")
+	var state=preload("res://scripts/ai_strategy_state.gd").new()
+	var budget_type=preload("res://scripts/ai_plan_budget.gd")
+	var snapshot_type=preload("res://scripts/simulation_snapshot.gd")
+	var data=preload("res://scripts/isolated_task_data.gd")
+	var world=fixture(catalog)
+	world.set_resource_amount(1,1,1000)
+	var first:Dictionary=world.add_unit(1,"villager",Vector2(9.5,13.5),false)
+	var second:Dictionary=world.add_unit(1,"villager",Vector2(9.5,15.5),false)
+	world.set_population_housing(1,2);world.update_fog_of_war()
+	var foundation:Variant=world.assign_command_build([first],"house",Vector2(11.5,14.5))
+	if foundation==null:failures.append("existing AI crew fixture rejected");return
+	var paid_stock:int=world.economy_system.get_resource_amount(1,1)
+	var snapshot:={"tick":0,"observer_team":1,"units":[first,second],"buildings":[foundation],"resources":[],"navigation":{"unit_regions":{int(first["id"]):1,int(second["id"]):1}},"player_state":snapshot_type.presentation_player_state(world,1)}
+	snapshot=queries.enrich(world,snapshot,{"include_navigation":false,"include_build_sites":false,"include_builder_productivity":true,"recover_abandoned_foundations_only":true})
+	snapshot["navigation"]={"unit_regions":{int(first["id"]):1,int(second["id"]):1}}
+	snapshot=data.capture_frozen(snapshot)
+	var policy:={"competitive":true,"maximum_foundations":2}
+	var commands: Array=[]
+	var budget=budget_type.new(snapshot["player_state"],snapshot["buildings"])
+	construction.resume_foundations(snapshot,1,policy,state,budget,{},commands,snapshot["buildings"],snapshot["units"],snapshot["units"])
+	if commands.size()!=1 or commands[0].unit_ids!=[int(second["id"])]:failures.append("active foundation ROI did not add only the new helper")
+	if int(budget.remaining[1])!=paid_stock:failures.append("active crew reserved another foundation price")
+	var reserved:Dictionary={};reserved[int(second["id"])]=true
+	var blocked: Array=[]
+	construction.resume_foundations(snapshot,1,policy,state,budget,reserved,blocked,snapshot["buildings"],snapshot["units"],snapshot["units"])
+	if not blocked.is_empty():failures.append("active crew stole a reserved helper")
+	var disconnected:Dictionary=snapshot.duplicate(true)
+	disconnected["navigation"]["unit_regions"][int(second["id"])]=2
+	blocked=[]
+	construction.resume_foundations(disconnected,1,policy,state,budget,{},blocked,disconnected["buildings"],disconnected["units"],disconnected["units"])
+	if not blocked.is_empty():failures.append("active crew recruited a worker from a known disconnected component")
+	if commands.size()==1:
+		var before:=var_to_bytes(snapshot)
+		var controller:=GameController.new(world)
+		controller.enqueue_command(commands[0],true,1);controller.advance_frame(0.05,1,2)
+		if not bool(controller.get_command_result(commands[0].sequence_id).get("accepted",false)) or world.get_buildings().size()!=1 or world.economy_system.get_resource_amount(1,1)!=paid_stock:failures.append("active helper did not join the already paid project")
+		if int(first.get("target_building_id",-1))!=int(foundation["id"]) or int(second.get("target_building_id",-1))!=int(foundation["id"]):failures.append("active crew lost construction ownership")
+		if var_to_bytes(snapshot)!=before:failures.append("active crew execution changed retained input")
+	world.shutdown_derived_state()

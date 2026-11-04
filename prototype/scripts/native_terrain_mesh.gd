@@ -4,6 +4,7 @@ extends RefCounted
 const Terrain := preload("res://scripts/environment_terrain.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const RiverSurface := preload("res://scripts/random_map_river_surface.gd")
+static var native_cached_samples_enabled := true
 
 # Capture each terrain/height sample once, instead of crossing the script and
 # dictionary boundary for every vertex of every material layer. The native
@@ -33,49 +34,10 @@ static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pa
 			1.0 if imported else 0.0, uv_origin.x, uv_origin.y, uv_size.x, uv_size.y,
 		]))
 	var samples: Dictionary = sample_cache if sample_cache is Dictionary else {}
-	var prior_cells: Dictionary = samples.get("cells", {})
-	var prior_heights: Dictionary = samples.get("heights", {})
-	var prior_frames: Dictionary = samples.get("frames", {})
-	var next_cells: Dictionary = {}
-	var next_heights: Dictionary = {}
-	var next_frames: Dictionary = {}
-	var cells := PackedInt32Array()
-	cells.resize((bounds.size.x + 2) * (bounds.size.y + 2))
-	var index := 0
-	for y in range(bounds.position.y - 1, bounds.end.y + 1):
-		for x in range(bounds.position.x - 1, bounds.end.x + 1):
-			var cell := Vector2i(x, y)
-			var slot := int(prior_cells.get(cell, -2))
-			if slot == -2:
-				var id := int(provider.call(cell))
-				slot = -1 if id < 0 else int(slots[Terrain._material_id(id, pack)])
-			cells[index] = slot
-			next_cells[cell] = slot
-			index += 1
-	var heights := PackedFloat32Array()
-	heights.resize((bounds.size.x + 1) * (bounds.size.y + 1))
-	index = 0
-	for y in range(bounds.position.y, bounds.end.y + 1):
-		for x in range(bounds.position.x, bounds.end.x + 1):
-			var cell := Vector2i(x, y)
-			var height: float = float(prior_heights[cell]) if prior_heights.has(cell) else elevation.vertex_elevation(cell)
-			heights[index] = height
-			next_heights[cell] = height
-			index += 1
-	var frames := PackedInt32Array()
-	frames.resize(bounds.size.x * bounds.size.y)
-	index = 0
-	for y in range(bounds.position.y, bounds.end.y):
-		for x in range(bounds.position.x, bounds.end.x):
-			var cell := Vector2i(x, y)
-			var frame := int(prior_frames.get(cell, -1))
-			if frame < 0: frame = TerrainRules.tile_variant(cell, "terrain", seed, 9)
-			frames[index] = frame
-			next_frames[cell] = frame
-			index += 1
-	samples["cells"] = next_cells
-	samples["heights"] = next_heights
-	samples["frames"] = next_frames
+	var captured := _capture_samples(bounds, seed, provider, elevation, pack, slots, samples, capture_kernel)
+	var cells: PackedInt32Array = captured["cells"]
+	var heights: PackedFloat32Array = captured["heights"]
+	var frames: PackedInt32Array = captured["frames"]
 	var river := PackedFloat32Array()
 	if not elevation.river_shape.is_empty():
 		river.append_array(PackedFloat32Array([slots[0],slots[1004],slots[1],slots[4],slots[1005],slots[22]]))
@@ -132,3 +94,81 @@ func run() -> void:
 		result_chunks = kernel.split_mesh_arrays(result, 16384)
 		timings["split_us"] = Time.get_ticks_usec()-started
 		if not result_chunks.is_empty(): result = []
+
+
+static func _capture_samples(bounds: Rect2i, seed: int, provider: Callable, elevation, pack, slots: Dictionary, samples: Dictionary, kernel: Variant) -> Dictionary:
+	if native_cached_samples_enabled and kernel != null and kernel.has_method("capture_cached_sample_arrays"):
+		var state: Dictionary = kernel.capture_cached_sample_arrays(bounds, samples)
+		if not state.is_empty():
+			var cells: PackedInt32Array = state["cells"]
+			var heights: PackedFloat32Array = state["heights"]
+			var frames: PackedInt32Array = state["frames"]
+			# Sample only missing strips/invalidated cells in script. Native code
+			# packs retained scalar samples and prunes the cache to this request.
+			for value in state["missing_cells"]:
+				var cell := Vector2i(value)
+				var id := int(provider.call(cell))
+				var slot := -1 if id < 0 else int(slots[Terrain._material_id(id, pack)])
+				cells[(cell.y - bounds.position.y + 1) * (bounds.size.x + 2) + cell.x - bounds.position.x + 1] = slot
+			for value in state["missing_heights"]:
+				var cell := Vector2i(value)
+				var height: float = elevation.vertex_elevation(cell)
+				heights[(cell.y - bounds.position.y) * (bounds.size.x + 1) + cell.x - bounds.position.x] = height
+			for value in state["missing_frames"]:
+				var cell := Vector2i(value)
+				var frame := TerrainRules.tile_variant(cell, "terrain", seed, 9)
+				frames[(cell.y - bounds.position.y) * bounds.size.x + cell.x - bounds.position.x] = frame
+			samples["bounds"] = bounds
+			samples["cells"] = cells
+			samples["heights"] = heights
+			samples["frames"] = frames
+			return {"cells": cells, "heights": heights, "frames": frames}
+	if not samples.get("cells", {}) is Dictionary: samples.clear()
+	return _capture_samples_reference(bounds, seed, provider, elevation, pack, slots, samples)
+
+
+static func _capture_samples_reference(bounds: Rect2i, seed: int, provider: Callable, elevation, pack, slots: Dictionary, samples: Dictionary) -> Dictionary:
+	var prior_cells: Dictionary = samples.get("cells", {})
+	var prior_heights: Dictionary = samples.get("heights", {})
+	var prior_frames: Dictionary = samples.get("frames", {})
+	var next_cells: Dictionary = {}
+	var next_heights: Dictionary = {}
+	var next_frames: Dictionary = {}
+	var cells := PackedInt32Array()
+	cells.resize((bounds.size.x + 2) * (bounds.size.y + 2))
+	var index := 0
+	for y in range(bounds.position.y - 1, bounds.end.y + 1):
+		for x in range(bounds.position.x - 1, bounds.end.x + 1):
+			var cell := Vector2i(x, y)
+			var slot := int(prior_cells.get(cell, -2))
+			if slot == -2:
+				var id := int(provider.call(cell))
+				slot = -1 if id < 0 else int(slots[Terrain._material_id(id, pack)])
+			cells[index] = slot
+			next_cells[cell] = slot
+			index += 1
+	var heights := PackedFloat32Array()
+	heights.resize((bounds.size.x + 1) * (bounds.size.y + 1))
+	index = 0
+	for y in range(bounds.position.y, bounds.end.y + 1):
+		for x in range(bounds.position.x, bounds.end.x + 1):
+			var cell := Vector2i(x, y)
+			var height: float = float(prior_heights[cell]) if prior_heights.has(cell) else elevation.vertex_elevation(cell)
+			heights[index] = height
+			next_heights[cell] = height
+			index += 1
+	var frames := PackedInt32Array()
+	frames.resize(bounds.size.x * bounds.size.y)
+	index = 0
+	for y in range(bounds.position.y, bounds.end.y):
+		for x in range(bounds.position.x, bounds.end.x):
+			var cell := Vector2i(x, y)
+			var frame := int(prior_frames.get(cell, -1))
+			if frame < 0: frame = TerrainRules.tile_variant(cell, "terrain", seed, 9)
+			frames[index] = frame
+			next_frames[cell] = frame
+			index += 1
+	samples["cells"] = next_cells
+	samples["heights"] = next_heights
+	samples["frames"] = next_frames
+	return {"cells": cells, "heights": heights, "frames": frames}

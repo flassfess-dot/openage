@@ -2,7 +2,7 @@ class_name RoREntityReadContract
 extends RefCounted
 
 const Data := preload("res://scripts/isolated_task_data.gd")
-const SCHEMA_VERSION := 3
+const SCHEMA_VERSION := 4
 const RENDER_SCHEMA_KEY := "_ror_render_schema"
 # One schema for one-shot and retained projections. No live entity borrowing.
 const RENDER_FIELDS := [
@@ -23,10 +23,18 @@ const RENDER_FIELDS := [
 	"target_building_id", "resource_id", "formation_forward", "preferred_formation", "formation_group_id", "carried_amount", "construction_progress"]
 const AI_FIELDS := [
 	"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
-	"pos", "hp", "max_hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
+	"pos", "elevation", "hp", "max_hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
 	"resource_type_id", "harvestable", "footprint_radius", "rally_point", "attack_range",
-	"projectile_id", "blast_range", "acquisition_range",
-	"reachable_builder_ids",
+	"projectile_id", "blast_range", "acquisition_range", "category", "completed", "active",
+	"reachable_builder_ids", "carried_amount", "carried_resource_type_id",
+]
+# Visible actors do not disclose an enemy's destinations or command targets.
+# Pass the field list to both backends, avoiding a full source-dictionary copy.
+const VISIBLE_AI_FIELDS := [
+	"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
+	"pos", "elevation", "hp", "max_hp", "state", "movement_domain", "combat_enabled", "amount",
+	"resource_type_id", "harvestable", "footprint_radius", "attack_range",
+	"projectile_id", "blast_range", "acquisition_range", "category", "completed", "active",
 ]
 const CONTROL_FIELDS := [
 	"stance", "attack_damage", "attack_range", "attack_range_min", "attack_period",
@@ -140,12 +148,13 @@ static func ai(entity: Dictionary, observer_team: int = 0, previous: Dictionary 
 		if native_kernel == null:
 			native_kernel = ClassDB.instantiate("RoRReadModelKernel")
 		if native_kernel.has_method("project_ai"):
-			return native_kernel.project_ai(entity, previous, observer_team, AI_FIELDS, ARRAY_FIELDS, PRIVATE_TRADE_FIELDS)
+			var fields = AI_FIELDS if observer_team<=0 or int(entity.get("team",0))==observer_team else VISIBLE_AI_FIELDS
+			return native_kernel.project_ai(entity, previous, observer_team, fields, ARRAY_FIELDS, PRIVATE_TRADE_FIELDS)
 	return ai_reference(entity, observer_team, previous)
 
 static func ai_reference(entity: Dictionary, observer_team: int = 0, previous: Dictionary = {}) -> Dictionary:
 	var result: Dictionary = {}
-	for key in AI_FIELDS:
+	for key in (AI_FIELDS if observer_team<=0 or int(entity.get("team",0))==observer_team else VISIBLE_AI_FIELDS):
 		if entity.has(key):
 			result[key] = Data.copy(entity[key])
 	if observer_team <= 0 or int(entity.get("team", 0)) == observer_team:

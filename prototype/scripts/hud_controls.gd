@@ -16,6 +16,8 @@ signal research_requested(technology_id: int, building_id: int)
 signal cancel_production_requested(building_id: int, queue_index: int)
 signal trade_resource_requested(resource_type_id: int)
 signal unit_action_requested(action_name: String)
+signal ungarrison_requested(building_id: int, passenger_id: int)
+signal farm_reserve_requested(building_id: int, amount: int)
 
 const HUD_HEIGHT: float = InterfaceLayout.BOTTOM_HEIGHT
 const FORMATIONS := [
@@ -67,6 +69,7 @@ func _init() -> void:
 	add_child(status_panel)
 	status_panel.cancel_requested.connect(func(building_id: int, queue_index: int): cancel_production_requested.emit(building_id, queue_index))
 	status_panel.building_selected.connect(func(building_id: int): building_selected.emit(building_id))
+	status_panel.ungarrison_requested.connect(func(building_id: int, passenger_id: int): ungarrison_requested.emit(building_id, passenger_id))
 
 
 func _notification(what: int) -> void:
@@ -213,7 +216,7 @@ func set_view_model(model: Dictionary) -> void:
 		match String(command.get("type", "")):
 			"formation": formation_commands[String(command.get("id", ""))] = command
 			"build": build_commands.append(command)
-			"train", "research", "trade_resource", "unit_action":
+			"train", "research", "trade_resource", "unit_action", "farm_reserve":
 				if not (String(selection.get("category", "")) == "building" and String(command.get("type", "")) == "unit_action" and String(command.get("id", "")) == "stop"):
 					active_train_commands.append(command)
 	if build_commands.is_empty():
@@ -284,9 +287,12 @@ func set_view_model(model: Dictionary) -> void:
 			description += " · В очереди: %d" % queue_count
 			if String(command.get("type", "")) == "train":
 				description += " · ПКМ: отменить одного"
+			elif String(command.get("type", "")) == "farm_reserve":
+				description += " · ПКМ: отменить посев"
 		if not hotkey.is_empty():
 			description += " · %s" % hotkey
-		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else description
+		var unavailable := reason_text(String(command.get("reason", ""))) if button.disabled else ""
+		button.tooltip_text = description + ("\n" + unavailable if not unavailable.is_empty() else "")
 	layout_controls()
 
 
@@ -479,6 +485,9 @@ func _on_action_pressed(index: int) -> void:
 			for request_index in range(training_batch_size(command, Input.is_key_pressed(KEY_SHIFT))):
 				train_requested.emit(String(command.get("id", "")), int(command.get("building_id", -1)))
 		"research": research_requested.emit(int(command.get("technology_id", -1)), int(command.get("building_id", -1)))
+		"farm_reserve":
+			for iteration in range(5 if Input.is_key_pressed(KEY_SHIFT) else 1):
+				farm_reserve_requested.emit(int(command["building_id"]), int(command["amount"]))
 		"cancel_production": cancel_production_requested.emit(int(command.get("building_id", -1)), int(command.get("queue_index", 0)))
 		"trade_resource": trade_resource_requested.emit(int(command.get("resource_type_id", -1)))
 		"unit_action": unit_action_requested.emit(String(command.get("id", "")))
@@ -503,6 +512,13 @@ func _on_action_gui_input(event: InputEvent, index: int) -> void:
 	if index < 0 or index >= active_train_commands.size():
 		return
 	var command: Dictionary = active_train_commands[index]
+	if bool(current_model.get("read_only", false)):
+		return
+	if String(command.get("type", "")) == "farm_reserve" and int(command.get("amount", 0)) > 0:
+		for iteration in range(mini(int(command.get("queue_count", 0)), 5 if mouse_event.shift_pressed else 1)):
+			farm_reserve_requested.emit(int(command["building_id"]), -1)
+		if is_inside_tree(): train_buttons[index].accept_event()
+		return
 	if String(command.get("type", "")) != "train" or int(command.get("cancel_queue_index", -1)) < 0 or bool(current_model.get("read_only", false)):
 		return
 	cancel_production_requested.emit(int(command.get("building_id", -1)), int(command.get("cancel_queue_index", -1)))
@@ -523,6 +539,8 @@ static func reason_text(reason: String) -> String:
 		"building_busy": "Здание занято производством",
 		"unit_unavailable": "Юнит ещё не открыт",
 		"building_unavailable": "Здание ещё не открыто",
+		"farm_reserve_full": "В запасе уже 40 посевов",
+		"farm_reserve_empty": "Запасных посевов нет",
 		"invalid_production_building": "Здание не может производить этот юнит",
 	}.get(reason, reason))
 

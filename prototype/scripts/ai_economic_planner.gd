@@ -33,7 +33,7 @@ static func construction_site_kinds(kinds: Array, units: Array, buildings: Array
 	var age_intent := _age_advance_intent(complete, player_state, policy, land_workers.size(), 0)
 	if age_intent.has("command"):
 		return []
-	var naval_scout_pending := _naval_scout_pending(own_units, complete, navigation)
+	var naval_scout_pending := not bool(policy.get("competitive",false)) and _naval_scout_pending(own_units, complete, navigation)
 	var result: Array = []
 	for kind in kinds:
 		if naval_scout_pending and kind not in ["house", "dock"]:

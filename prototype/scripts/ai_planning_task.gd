@@ -2,6 +2,7 @@ class_name RoRAiPlanningTask
 extends RefCounted
 
 const AiPlayer := preload("res://scripts/ai_player.gd")
+const AiFactory := preload("res://scripts/ai_player_factory.gd")
 const Replay := preload("res://scripts/replay_system.gd")
 const BuildSites := preload("res://scripts/build_site_task.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
@@ -79,8 +80,10 @@ static func run(input: Dictionary, executor: Variant = null) -> Dictionary:
 	var phase_started := Time.get_ticks_usec()
 	var metrics := {"placement": 0, "placement_context": 0, "placement_search": 0, "demand": 0}
 	var navigation_probe: Variant = BuildSites.Pathfinder.PerformanceProbe.new(2048) if executor != null and executor.trace_navigation else null
-	var ai := AiPlayer.new(input["definition"])
-	if executor != null: ai.economic_resource_index = executor.resource_index
+	var ai = AiFactory.create(input["definition"])
+	if ai==null: return {"valid":false,"error":"ai_algorithm_unsupported"}
+	if executor != null and String(input["definition"].get("ai", {}).get("algorithm_version", "")) != "baseline_v1":
+		ai.economic_resource_index = executor.resource_index
 	if not ai.restore_state(input["state"]):
 		return {"valid": false}
 	metrics["restore"] = Time.get_ticks_usec() - phase_started
@@ -122,7 +125,7 @@ static func run(input: Dictionary, executor: Variant = null) -> Dictionary:
 		snapshot["_economy_reachable_cells"] = executor.reachable_lookup(snapshot.get("navigation", {}))
 	metrics["reachability"] = Time.get_ticks_usec() - phase_started
 	phase_started = Time.get_ticks_usec()
-	var commands := ai.collect_commands(snapshot, int(input["tick"]))
+	var commands: Array = ai.collect_commands(snapshot, int(input["tick"]))
 	metrics["planning"] = Time.get_ticks_usec() - phase_started
 	for stage in ai.planning_metrics: metrics["plan." + stage] = ai.planning_metrics[stage]
 	phase_started = Time.get_ticks_usec()

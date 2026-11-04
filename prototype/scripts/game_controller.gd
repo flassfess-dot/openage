@@ -281,6 +281,12 @@ func _dispatch_command(command) -> Dictionary:
 			rejection_reason = _apply_return_resources(command)
 		"board":
 			rejection_reason = _apply_board(command)
+		"farm_reserve":
+			var granary = simulation_world.find_building(int(command.unit_ids[0])) if command.unit_ids.size() == 1 else null
+			if granary == null or (int(command.issuer_id) > 0 and int(granary.get("team", 0)) != int(command.issuer_id)):
+				rejection_reason = "invalid_production_building"
+			else:
+				rejection_reason = preload("res://scripts/farm_reseed.gd").change(simulation_world, granary, int(command.params.get("amount", 0)))
 		"unload":
 			rejection_reason = _apply_unload(command)
 		"set_trade_resource":
@@ -293,6 +299,17 @@ func _dispatch_command(command) -> Dictionary:
 			rejection_reason = _apply_repair(command)
 		"tribute":
 			rejection_reason = _apply_tribute(command)
+		"team_intent":
+			var recipient := int(command.params.get("target_team",-1))
+			var kind := String(command.params.get("intent",""))
+			var position := Vector2(command.params.get("target",Vector2.INF))
+			if int(command.issuer_id)<=0 or recipient==int(command.issuer_id) or not simulation_world.are_teams_allied(int(command.issuer_id),recipient) or not simulation_world.are_teams_allied(recipient,int(command.issuer_id)):
+				rejection_reason="tribute_requires_ally"
+			elif kind not in ["cover","attack","resource","transport"] or not position.is_finite() or simulation_world.get_fog_of_war().state_at_world(int(command.issuer_id),position)==0 or int(command.params.get("resource_type_id",0)) not in [0,1,2,3] or int(command.params.get("amount",0))<0 or int(command.params.get("amount",0))>1000:
+				rejection_reason="invalid_team_intent"
+			else:
+				simulation_world.ai_distress_system.team_intents[int(command.issuer_id)]={"sender":int(command.issuer_id),"recipient":recipient,"kind":kind,"position":position,"resource_type_id":int(command.params.get("resource_type_id",0)),"amount":int(command.params.get("amount",0)),"remaining_seconds":30.0}
+				rejection_reason=""
 		"set_rally_point":
 			rejection_reason = _apply_set_rally_point(command)
 		"train":
@@ -690,7 +707,7 @@ func _apply_board(command) -> String:
 				passengers.append(artifact)
 	if passengers.is_empty():
 		return "no_eligible_passengers"
-	var transport = simulation_world.find_unit(int(command.transport_id))
+	var transport = simulation_world.find_combat_target(int(command.transport_id))
 	if transport == null or (int(command.issuer_id) > 0 and not simulation_world.are_teams_allied(int(command.issuer_id), int(transport.get("team", 0)))):
 		return "invalid_transport"
 	var rejection: String = simulation_world.transport_system.assign_board_order(passengers, transport)
@@ -700,7 +717,7 @@ func _apply_board(command) -> String:
 
 
 func _apply_unload(command) -> String:
-	var transports := _units_for_ids(command.unit_ids, command.issuer_id)
+	var transports := _combat_entities_for_ids(command.unit_ids, command.issuer_id)
 	if transports.is_empty():
 		return "invalid_transport"
 	var rejection: String = simulation_world.transport_system.assign_unload_order(transports, command.target, command.passenger_ids)
@@ -791,15 +808,17 @@ func _apply_wall_line(command, workers: Array) -> String:
 	var plan: Dictionary = simulation_world.plan_wall_line(team, cells)
 	var foundation_ids: Array = []
 	var rejection := "build_rejected"
+	simulation_world.begin_bulk_load()
 	for entry in plan["entries"]:
 		if not bool(entry["valid"]):
 			rejection = String(entry["reason"])
 			continue
 		if String(entry["status"]) == "existing":
 			continue
-		var foundation = simulation_world.find_building(int(entry["building_id"])) if String(entry["status"]) == "reuse" else simulation_world.place_foundation(team, "wall", entry["position"])
+		var foundation = simulation_world.find_building(int(entry["building_id"])) if String(entry["status"]) == "reuse" else simulation_world.foundation_system.reserve_planned_wall(team, entry["position"])
 		if foundation != null:
 			foundation_ids.append(int(foundation["id"]))
+	simulation_world.end_bulk_load(false)
 	if foundation_ids.is_empty():
 		return "" if plan["entries"].any(func(entry): return String(entry["status"]) == "existing") else rejection
 	if queued:
@@ -816,6 +835,18 @@ func _apply_wall_line(command, workers: Array) -> String:
 
 func _start_planned_wall_line(command, workers: Array, ids: Array) -> String:
 	var pending := ids.duplicate()
+	if pending.size() > 1 and not workers.is_empty():
+		var first = simulation_world.find_building(int(pending.front()))
+		var last = simulation_world.find_building(int(pending.back()))
+		if first != null and last != null:
+			var worker_center := Vector2.ZERO
+			for worker in workers:
+				worker_center += Vector2(worker["pos"])
+			worker_center /= float(workers.size())
+			# Start at the work front nearest the builders, rather
+			# than walking the entire line to the mouse-down end first.
+			if worker_center.distance_squared_to(Vector2(last["pos"])) < worker_center.distance_squared_to(Vector2(first["pos"])):
+				pending.reverse()
 	while not pending.is_empty():
 		var foundation = simulation_world.find_building(int(pending.pop_front()))
 		if foundation == null or float(foundation.get("hp", 0.0)) <= 0.0 or String(foundation.get("state", "")) != "foundation" or String(foundation.get("kind", "")) != "wall" or int(foundation.get("team", 0)) != int(workers[0].get("team", 0)):
@@ -1449,7 +1480,7 @@ func _clear_unit_formation(unit: Dictionary) -> void:
 	unit.erase("_formation_path_cache")
 	simulation_world.set_entity_field(unit, "cohesion_speed_scale", 1.0)
 
-func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> String:
+func advance_frame(frame_delta: float, player_team: int, enemy_team: int, maximum_steps: int = MAX_STEPS_PER_FRAME) -> String:
 	if paused or simulation_world == null:
 		return simulation_world.get_last_battle_message() if simulation_world != null else ""
 
@@ -1469,7 +1500,7 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int) -> Str
 	var frame_budget := frame_simulation_budget_usec
 	_render_deadline_usec = frame_started + frame_budget
 	var steps := 0
-	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < MAX_STEPS_PER_FRAME:
+	while accumulator_seconds + 0.000001 >= FIXED_STEP_SECONDS and steps < clampi(maximum_steps,1,MAX_STEPS_PER_FRAME):
 		# Complete at least one whole tick, then return time to input/rendering.
 		if steps > 0 and Time.get_ticks_usec() - frame_started >= frame_budget:
 			break

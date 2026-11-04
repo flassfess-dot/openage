@@ -14,6 +14,15 @@ static func wait_for_ready(tree: SceneTree, game: Node, timeout_msec: int = 3000
 	if game.has_method("join_simulation_owner"): game.join_simulation_owner()
 	return true
 
+# Canonical comparisons need an exact fixed-tick boundary. A rendered frame
+# may legitimately drain several accumulated ticks after background work.
+static func advance_exact_to_tick(tree: SceneTree,controller,target_tick: int,player_team: int,enemy_team: int,timeout_msec: int=30000) -> bool:
+	var deadline:=Time.get_ticks_msec()+timeout_msec
+	while controller.tick_index<target_tick:
+		if Time.get_ticks_msec()>=deadline: return false
+		if not controller._run_fixed_tick(player_team,enemy_team): await tree.process_frame
+	return controller.tick_index==target_tick
+
 # Background preparation can yield without advancing a fixed tick. Tests must
 # measure simulated time, while allowing the frame loop to publish worker work.
 static func advance_to_tick(tree: SceneTree, controller, target_tick: int, player_team: int, enemy_team: int, timeout_msec: int = 30000) -> bool:

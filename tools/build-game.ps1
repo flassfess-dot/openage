@@ -49,12 +49,17 @@ $qaRoot = Join-Path $projectRoot "qa\dev-scripts"
 New-Item -ItemType Directory -Force -Path $qaRoot | Out-Null
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 
+$provenanceState = Join-Path $qaRoot "build-source-$timestamp.json"
+& python (Join-Path $PSScriptRoot "ai_build_manifest.py") begin --state $provenanceState
+if ($LASTEXITCODE -ne 0) { throw "Unable to freeze Release source manifest" }
 Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--import") -Description "Godot resource import" -GodotLogPath (Join-Path $qaRoot "build-godot-import-$timestamp.log")
 Invoke-GodotBuildStep -Arguments @("--headless", "--path", $projectRoot, "--export-release", "Windows Desktop", $application) -Description "Godot package export" -GodotLogPath (Join-Path $qaRoot "build-godot-export-$timestamp.log")
 
 Assert-ApplicationNotRunning
 Copy-RoRReleaseRuntime -RepositoryRoot $repositoryRoot -ProjectRoot $projectRoot -DistributionRoot $distributionRoot -NativeLibrary $nativeLibrary
 Get-RoRReleaseArtifacts -Application $application -Package $package -NativeLibrary (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -GodotApplication $godotApplication | Out-Null
+& python (Join-Path $PSScriptRoot "ai_build_manifest.py") finish --state $provenanceState --directory $distributionRoot
+if ($LASTEXITCODE -ne 0) { throw "Release source verification failed" }
 Write-Host "Release artifacts exported and copied: $application"
 if ($VerifyStartup) {
     try {

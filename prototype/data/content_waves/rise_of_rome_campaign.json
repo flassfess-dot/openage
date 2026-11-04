@@ -5,7 +5,7 @@
   "campaign_filename": "Расцвет Рима.cpx",
   "campaign_name": "Расцвет Рима",
   "campaign_sha256": "7b6d3630bb6a11c7ac68fd1f066299f61e07a998c25fe5c78b5dc3d3f47e181d",
-  "manifest_sha256": "bbce57ca3d1019fdbd26b47f8cb95be3f74220923272ed23630c6f1da6d5d8a8",
+  "manifest_sha256": "b2d2919d4ba4a0b86cf0fa0a749f7100ada363e83b64fc02382393fe22371503",
   "runtime_catalog_cache_key": "ceb3fcbf2658bfa7dee85a567dd51392cccac64d0a13862deaae5457682bb685",
   "gate_contract": {
     "launcher_required_zero_gaps": [

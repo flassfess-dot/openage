@@ -83,6 +83,9 @@ var map_reserved_foundation_cells: Dictionary = {}
 var forest_resource_counts: Dictionary = {}
 const MAX_TERRAIN_CHANGE_HISTORY := 256
 var cache_epoch := 0
+const MAX_POPULATION_COST_ENTRIES := 128
+var population_cost_cache_enabled := true
+var population_cost_cache: Dictionary = {}
 var entity_changes: EntityChangeJournal:
 	get:
 		return entity_mutations.entity_changes
@@ -502,7 +505,7 @@ func set_alliance(first_team: int, second_team: int, allied: bool = true) -> voi
 		_reveal_allied_town_centers(first_team, second_team)
 		_reveal_allied_town_centers(second_team, first_team)
 	if not allied:
-		for transport in units:
+		for transport in units + buildings:
 			if transport_system.is_transport(transport) and int(transport.get("team", 0)) in [first_team, second_team]:
 				transport_system.reconcile_ownership(transport)
 	if not is_bulk_loading():
@@ -522,7 +525,7 @@ func set_diplomacy_relation(source_team: int, target_team: int, relation: String
 	if relation == PlayerRegistry.ALLY:
 		_reveal_allied_town_centers(source_team, target_team)
 	if relation != PlayerRegistry.ALLY:
-		for transport in units:
+		for transport in units + buildings:
 			if transport_system.is_transport(transport) and int(transport.get("team", 0)) in [source_team, target_team]:
 				transport_system.reconcile_ownership(transport)
 	if not is_bulk_loading():
@@ -647,7 +650,7 @@ func begin_bulk_load() -> void:
 	bulk_load_depth += 1
 
 
-func end_bulk_load() -> void:
+func end_bulk_load(rebuild_grid: bool = true) -> void:
 	if bulk_load_depth <= 0:
 		push_error("end_bulk_load called without matching begin_bulk_load")
 		return
@@ -655,8 +658,9 @@ func end_bulk_load() -> void:
 	if bulk_load_depth > 0:
 		return
 	refresh_building_connectivity()
-	rebuild_spatial_index()
-	pathfinder.prepare_native_kernels_for_units(units)
+	if rebuild_grid:
+		rebuild_spatial_index()
+		pathfinder.prepare_native_kernels_for_units(units)
 	update_fog_of_war()
 
 
@@ -2397,8 +2401,8 @@ func pay_tribute(sender_team: int, recipient_team: int, resource_type_id: int, a
 	var received := clampi(floori(float(amount) * (1.0 - tax) + 0.000001), 0, amount)
 	# Validate everything before either balance is changed; the two mutations
 	# and one fog-neutral event form one deterministic simulation transaction.
-	economy_system.change_resource_amount(sender_team, resource_type_id, -amount)
-	economy_system.change_resource_amount(recipient_team, resource_type_id, received)
+	economy_system.change_resource_amount(sender_team, resource_type_id, -amount,"tribute_out")
+	economy_system.change_resource_amount(recipient_team, resource_type_id, received,"tribute_in")
 	_emit_domain_event("tribute_paid", {
 		"sender_team": sender_team,
 		"recipient_team": recipient_team,
@@ -2451,7 +2455,7 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 	player_registry.ensure(new_team, int(civilization_by_team.get(new_team, 13)))
 	set_entity_field(entity, "team", new_team)
 	track_conquest_entity(entity)
-	if not is_building and transport_system.is_transport(entity):
+	if transport_system.is_transport(entity):
 		transport_system.reconcile_ownership(entity)
 	set_entity_field(entity, "selected", false)
 	var owner_history: Array = entity.get("owner_history", [old_team]).duplicate()
@@ -2591,6 +2595,19 @@ func unit_population_cost(kind: String, team: int) -> int:
 
 
 func unit_population_points_cost(kind: String, team: int) -> int:
+	if not population_cost_cache_enabled: return _uncached_unit_population_points_cost(kind, team)
+	var key := [team, kind]
+	var signature := [cache_epoch, data_repository.revision, technology_system.revision(team), civilization_by_team.get(team, 13)]
+	var entry: Dictionary = population_cost_cache.get(key, {})
+	if entry.get("signature") != signature:
+		entry = {"signature": signature, "points": _uncached_unit_population_points_cost(kind, team)}
+		if not population_cost_cache.has(key) and population_cost_cache.size() >= MAX_POPULATION_COST_ENTRIES:
+			population_cost_cache.erase(population_cost_cache.keys()[0])
+		population_cost_cache[key] = entry
+	return int(entry["points"])
+
+
+func _uncached_unit_population_points_cost(kind: String, team: int) -> int:
 	var source := object_record_for(kind, team)
 	var source_id := int(source.get("unit_id", unit_stats(kind).get("unit_id", -1)))
 	var probe := {
@@ -2683,8 +2700,8 @@ func can_afford_resource_cost(team: int, cost: Dictionary) -> bool:
 	return economy_system.can_afford(team, cost)
 
 
-func spend_resource_cost(team: int, cost: Dictionary) -> void:
-	economy_system.spend(team, cost)
+func spend_resource_cost(team: int, cost: Dictionary, reason: String = "spend") -> void:
+	economy_system.spend(team, cost,reason)
 
 
 func refund_resource_cost(team: int, cost: Dictionary) -> void:
@@ -3520,6 +3537,7 @@ func erase_entity_field(entity: Dictionary, field: String) -> void:
 	entity_mutations.erase_entity_field(self, entity, field)
 
 func shutdown_derived_state() -> void:
+	population_cost_cache.clear()
 	task_coordinator.shutdown()
 	entity_read_index.clear()
 	unit_activity_registry.clear()

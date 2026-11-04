@@ -5,6 +5,7 @@ const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const ObservationQueries := preload("res://scripts/simulation_observation_queries.gd")
 const ReadContract := preload("res://scripts/entity_read_contract.gd")
+const ProjectileObservation := preload("res://scripts/ai_projectile_observation.gd")
 
 # AI consumes legal simulation knowledge, not render state. Keep that projection
 # on its own lifecycle and retain compact entity records between decisions. The
@@ -61,11 +62,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 			continue
 		var unit_id := int(unit.get("id", -1))
 		var projected := _project_entity(cache["units"], unit, observer_team)
-		if int(unit.get("team", 0)) != observer_team and world.are_teams_allied(observer_team, int(unit.get("team", 0))):
-			projected["components"] = projected.get("components", {}).duplicate(true)
-			var allied_cargo: Dictionary = projected.get("components", {}).get("cargo", {})
-			if bool(allied_cargo.get("enabled", false)):
-				allied_cargo["count"] = unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).size()
+		# Alliance shares vision, not the transport's private cargo manifest/count.
 		units.append(projected)
 		seen_unit_ids[unit_id] = true
 	_prune_entity_cache(cache["units"], seen_unit_ids)
@@ -127,8 +124,10 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 				continue
 		var projected := _project_entity(cache["buildings"], knowledge, observer_team)
 		if not visible_now:
+			projected = projected.duplicate()
 			projected["last_known"] = true
 		else:
+			projected = projected.duplicate()
 			projected["target_domains"] = world.combat_target_domains(building)
 			if world.trade_system.is_trade_dock(building):
 				projected["trade"] = world.trade_system.presentation_for_dock(building)
@@ -152,6 +151,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 		if memory_state != 1:
 			continue
 		var projected_memory := _project_entity(cache["buildings"], memory, observer_team)
+		projected_memory = projected_memory.duplicate()
 		projected_memory["last_known"] = true
 		buildings.append(projected_memory)
 		seen_building_ids[missing_id] = true
@@ -167,19 +167,27 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 	stage_started = Time.get_ticks_usec() if probe != null else 0
 	var include_fog_cells := bool(options.get("include_fog_cells", false))
 	var presented_fog: Dictionary = SimulationSnapshot.presentation_fog(fog, observer_team) if include_fog_cells else {"observer_team": observer_team, "cells": []}
+	var tactical_projectiles: Array = []
+	if bool(options.get("include_ai_projectiles",false)):
+		for projectile in world.get_projectiles():
+			if _entity_visible(projectile,observer_team,observer_states,fog_map_size): tactical_projectiles.append(ProjectileObservation.project(projectile,observer_team))
+		tactical_projectiles = ProjectileObservation.select_visible(tactical_projectiles,units,observer_team)
 	_observe_stage(probe, prefix + ".state", stage_started)
 	return {
 		"format_version": SimulationSnapshot.FORMAT_VERSION,
 		"tick": tick,
+		"match_seed": world.simulation_seed,
+		"tactical_only": bool(options.get("tactical_only",false)),
 		"observer_team": observer_team,
 		"map_size": world.map_size,
 		"units": units,
 		"resources": resources,
 		"objectives": objectives,
 		"buildings": buildings,
-		"projectiles": [],
+		"projectiles": tactical_projectiles,
 		"overview": {"units": [], "resources": [], "buildings": []},
 		"ai_distress_signals": world.get_attack_distress_signals(observer_team),
+		"team_intents": world.ai_distress_system.intents_for_team(world,observer_team),
 		"navigation": {},
 		"build_sites": {},
 		"fog_revision": int(fog.revision_for_player(observer_team)),
@@ -190,6 +198,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 		"battle_over": bool(world.battle_over),
 		"battle_message": String(world.battle_message),
 		"match_result": world.get_victory_result(),
+		"victory_rules": world.victory_system.rules.duplicate(true),
 		"match_elapsed_seconds": float(world.victory_system.elapsed_seconds),
 		"scenario": {},
 	}
@@ -261,8 +270,10 @@ func _project_entity(entity_cache: Dictionary, source: Dictionary, observer_team
 			if not entity_cache.has(entity_id):
 				active_versions.erase(Vector2i(entity_id, 0))
 				active_versions.erase(Vector2i(entity_id, 1))
-	# Decorations belong to this observation and cannot mutate retained rows.
-	return immutable.duplicate()
+	# Retained records are immutable. Callers that add observation-local fields
+	# copy only those rows, instead of shallow-copying every moving actor twice
+	# (projection preparation and factual publication) on every AI decision.
+	return immutable
 
 
 func _remember_visible_building(memories: Dictionary, building_id: int, building: Dictionary) -> void:

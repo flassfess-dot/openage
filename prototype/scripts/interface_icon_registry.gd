@@ -19,7 +19,7 @@ const ASSET_NAMES := {
 # original glyphs for newer commands such as stances and ground fire.
 const COMMAND_GLYPHS := {
 	"repair": 0, "open_build_menu": 2, "stop": 3, "attack_move": 4,
-	"unload": 5, "delete": 10, "cancel_production": 10, "close_build_menu": 10, "hold": 12,
+	"unload": 1, "delete": 10, "cancel_production": 10, "close_build_menu": 10, "hold": 12,
 }
 const CUSTOM_COMMANDS := ["attack_ground", "aggressive", "defensive", "stand_ground", "passive"]
 
@@ -83,12 +83,12 @@ func texture(icon_kind: String, icon_id: int, team: int = 1) -> Texture2D:
 			if icon_kind == "gate":
 				texture_cache[gate_key] = load("res://assets/ui/gates/%s-p%d.png" % [GateCatalog.ICON_VARIANTS[icon_id], player])
 			else:
-				texture_cache[gate_key] = load("res://assets/ui/commands/%s.svg" % ["gate-auto", "gate-open", "gate-locked"][icon_id])
+				texture_cache[gate_key] = load("res://assets/ui/commands/%s.png" % ["gate-auto", "gate-open", "gate-locked"][icon_id])
 		return texture_cache[gate_key]
 	if icon_kind == "command_custom":
 		var custom_key := "custom:%d" % icon_id
 		if not texture_cache.has(custom_key):
-			texture_cache[custom_key] = load("res://assets/ui/commands/%s.svg" % CUSTOM_COMMANDS[icon_id])
+			texture_cache[custom_key] = load("res://assets/ui/commands/%s.png" % CUSTOM_COMMANDS[icon_id])
 		return texture_cache[custom_key]
 	var sheet_name := String(ASSET_NAMES[icon_kind])
 	var cache_key := "%s:%d:%d" % [sheet_name, icon_id, player]

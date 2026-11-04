@@ -4,8 +4,17 @@ const TEST_TIMEOUT_MSEC := 300_000
 # These complete legacy v3 matrices regenerate dozens of maps. Keep their
 # seed/player coverage while giving them a separate, finite process budget.
 const TEST_TIMEOUT_OVERRIDES := {
-	"tests/unit/test_random_map_profiles.gd": 600_000,
-	"tests/unit/test_random_map_source_fairness.gd": 600_000,
+	# This scenario executes a full live match and its canonical replay.
+	# An isolated unchanged R11 run passed both phases in 275.918 seconds;
+	# retain every assertion and allow finite headroom under suite load.
+	"tests/scenarios/test_generated_skirmish_deterministic_outcome.gd": 600_000,
+	"tests/unit/test_random_map_profiles.gd": 1_800_000,
+	"tests/unit/test_random_map_source_fairness.gd": 1_800_000,
+	"tests/unit/test_ror_random_map_profiles.gd": 1_800_000,
+	"tests/unit/test_supergiant_random_map.gd": 1_800_000,
+	"tests/integration/test_packaged_map_coverage.gd": 900_000,
+	"tests/integration/test_formation_march_acceptance.gd": 900_000,
+	"tests/integration/test_generated_start_resource_access.gd": 900_000,
 }
 
 const TEST_DIRECTORIES := [

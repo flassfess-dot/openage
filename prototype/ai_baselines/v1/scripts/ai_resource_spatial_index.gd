@@ -1,0 +1,164 @@
+class_name BaselineV1RoRAiResourceSpatialIndex
+extends RefCounted
+
+# AI resource selection does not need the simulation collision grid's very
+# small buckets. Coarser immutable buckets keep planner queries cheap while the
+# exact distance and entity-ID comparison below preserve deterministic choices.
+
+const CELL_SIZE := 8.0
+
+static var native_queries_enabled := true
+static var native_rebuild_enabled := true
+static var retained_rebuild_enabled := true
+const MAX_RETAINED_RESOURCES := 262144
+var native_enabled := true
+var native_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
+var bucket_lists_by_domain: Dictionary = {}
+var buckets_by_resource_type: Dictionary = {}
+var retained_input: Array = []
+var retained_configuration: Array = []
+var retained_index: Dictionary = {}
+
+
+func rebuild(resources: Array, movement_domains: Array, empty_domains_are_unrestricted: bool = true, index_by_type: bool = false) -> void:
+	if native_rebuild_enabled and native_enabled and native_kernel != null and native_kernel.has_method("build_resource_buckets"):
+		var configuration := [movement_domains, empty_domains_are_unrestricted, index_by_type]
+		if retained_rebuild_enabled and not retained_index.is_empty() and configuration == retained_configuration and native_kernel.has_method("refresh_resource_bucket_rows") and native_kernel.refresh_resource_bucket_rows(retained_index,retained_input,resources):
+			retained_input = resources.duplicate()
+			retained_input.make_read_only()
+			return
+		var index: Dictionary = native_kernel.build_resource_buckets(resources,movement_domains,empty_domains_are_unrestricted,index_by_type,CELL_SIZE)
+		bucket_lists_by_domain = index["lists"]
+		buckets_by_resource_type = index["types"]
+		if retained_rebuild_enabled and resources.size() <= MAX_RETAINED_RESOURCES:
+			retained_index = index
+			retained_configuration = configuration.duplicate(true)
+			retained_input = resources.duplicate()
+			retained_input.make_read_only()
+		else:
+			retained_index = {}; retained_input = []; retained_configuration = []
+		return
+	retained_index = {}; retained_input = []; retained_configuration = []
+	bucket_lists_by_domain.clear()
+	buckets_by_resource_type.clear()
+	var unique_domains: Dictionary = {}
+	for domain_value in movement_domains:
+		unique_domains[String(domain_value)] = true
+	var domains: Array = unique_domains.keys()
+	domains.sort()
+	var bucket_maps: Dictionary = {}
+	for domain in domains:
+		bucket_maps[domain] = {}
+	for resource_order in range(resources.size()):
+		var resource: Dictionary = resources[resource_order]
+		var allowed_domains: Array = resource.get("allowed_gatherer_domains", [])
+		for domain_value in domains:
+			var domain := String(domain_value)
+			if not allowed_domains.is_empty() and domain not in allowed_domains:
+				continue
+			if allowed_domains.is_empty() and not empty_domains_are_unrestricted and domain != "land":
+				continue
+			var cell := _cell(Vector2(resource.get("pos", Vector2.ZERO)))
+			var domain_buckets: Dictionary = bucket_maps[domain]
+			if not domain_buckets.has(cell):
+				domain_buckets[cell] = []
+			domain_buckets[cell].append({"resource": resource, "order": resource_order})
+	for domain_value in domains:
+		var domain := String(domain_value)
+		var bucket_list: Array = []
+		var domain_buckets: Dictionary = bucket_maps[domain]
+		for cell_value in domain_buckets.keys():
+			bucket_list.append({"cell": Vector2i(cell_value), "entries": domain_buckets[cell_value]})
+		bucket_list.sort_custom(func(left, right):
+			var left_cell: Vector2i = left["cell"]
+			var right_cell: Vector2i = right["cell"]
+			return left_cell.y < right_cell.y or (left_cell.y == right_cell.y and left_cell.x < right_cell.x)
+		)
+		bucket_lists_by_domain[domain] = bucket_list
+		if not index_by_type: continue
+		var typed: Dictionary = {}
+		for bucket in bucket_list:
+			var entries_by_type: Dictionary = {}
+			for entry in bucket["entries"]:
+				var type_id := int(entry["resource"].get("resource_type_id", -1))
+				if not entries_by_type.has(type_id): entries_by_type[type_id] = []
+				entries_by_type[type_id].append(entry)
+			for type_id in entries_by_type:
+				if not typed.has(type_id): typed[type_id] = []
+				entries_by_type[type_id].sort_custom(func(a, b): return int(a["resource"].get("id", -1)) < int(b["resource"].get("id", -1)))
+				typed[type_id].append({"cell": bucket["cell"], "entries": entries_by_type[type_id]})
+		buckets_by_resource_type[domain] = typed
+
+
+func nearest(position: Vector2, movement_domain: String) -> Variant:
+	var buckets: Array = bucket_lists_by_domain.get(movement_domain, [])
+	if buckets.is_empty():
+		return null
+	var nearest_bucket_index := 0
+	var nearest_bucket_distance := INF
+	for index in range(buckets.size()):
+		var lower_bound := _distance_squared_to_cell(position, buckets[index]["cell"])
+		if lower_bound < nearest_bucket_distance:
+			nearest_bucket_distance = lower_bound
+			nearest_bucket_index = index
+
+	var upper_bound_distance := INF
+	for entry_value in buckets[nearest_bucket_index]["entries"]:
+		var entry: Dictionary = entry_value
+		var resource: Dictionary = entry["resource"]
+		upper_bound_distance = minf(upper_bound_distance, position.distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO))))
+	var candidates: Array = []
+	for index in range(buckets.size()):
+		var lower_bound := _distance_squared_to_cell(position, buckets[index]["cell"])
+		if lower_bound > upper_bound_distance and not is_equal_approx(lower_bound, upper_bound_distance):
+			continue
+		candidates.append_array(buckets[index]["entries"])
+	# The legacy scan used snapshot resource order. Preserve that order before
+	# applying its approximate-distance tie rule so bucket layout cannot change a
+	# deterministic AI decision on nearly equidistant nodes.
+	candidates.sort_custom(func(left, right): return int(left["order"]) < int(right["order"]))
+	var best_resource: Variant = null
+	var best_distance := INF
+	var best_id := 2147483647
+	for entry_value in candidates:
+		var resource: Dictionary = entry_value["resource"]
+		var distance := position.distance_squared_to(Vector2(resource.get("pos", Vector2.ZERO)))
+		var resource_id := int(resource.get("id", -1))
+		if distance < best_distance - 0.000001 or (is_equal_approx(distance, best_distance) and resource_id < best_id):
+			best_resource = resource
+			best_distance = distance
+			best_id = resource_id
+	return best_resource
+
+
+static func _distance_squared_to_cell(position: Vector2, cell: Vector2i) -> float:
+	var minimum := Vector2(cell) * CELL_SIZE
+	var maximum := minimum + Vector2.ONE * CELL_SIZE
+	var delta_x := maxf(maxf(minimum.x - position.x, 0.0), position.x - maximum.x)
+	var delta_y := maxf(maxf(minimum.y - position.y, 0.0), position.y - maximum.y)
+	return delta_x * delta_x + delta_y * delta_y
+
+
+static func _cell(position: Vector2) -> Vector2i:
+	return Vector2i(floori(position.x / CELL_SIZE), floori(position.y / CELL_SIZE))
+
+# Bounded candidate query for adaptive worker allocation. The immutable index
+# includes every known resource; only each query's comparisons are bounded.
+func candidates(position: Vector2, domain: String, resource_type: int, maximum: int = 12) -> Array:
+	if native_queries_enabled and native_enabled and native_kernel != null and native_kernel.has_method("query_resource_candidates"):
+		return native_kernel.query_resource_candidates(buckets_by_resource_type.get(domain, {}).get(resource_type, []), position, resource_type, CELL_SIZE, maximum)
+	var buckets: Array = buckets_by_resource_type.get(domain, {}).get(resource_type, []).duplicate()
+	buckets.sort_custom(func(a, b):
+		var ad := _distance_squared_to_cell(position, a["cell"])
+		var bd := _distance_squared_to_cell(position, b["cell"])
+		return ad < bd if ad != bd else (a["cell"].y < b["cell"].y or (a["cell"].y == b["cell"].y and a["cell"].x < b["cell"].x)))
+	var result: Array = []
+	for bucket in buckets.slice(0, 16):
+		for entry in bucket["entries"].slice(0, 64):
+			var resource: Dictionary = entry["resource"]
+			if int(resource.get("resource_type_id", -1)) == resource_type: result.append(resource)
+	result.sort_custom(func(a, b):
+		var ad := position.distance_squared_to(Vector2(a.get("pos", Vector2.ZERO)))
+		var bd := position.distance_squared_to(Vector2(b.get("pos", Vector2.ZERO)))
+		return ad < bd if ad != bd else int(a.get("id", -1)) < int(b.get("id", -1)))
+	return result.slice(0, maxi(1, maximum))

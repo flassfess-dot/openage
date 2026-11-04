@@ -164,6 +164,9 @@ func test_completed_building_uses_live_cached_roster() -> void:
 	var awareness := CombatAwarenessSystem.new()
 	assert_equal(awareness.collect_commands(world, 1).size(), 0, "unfinished combat building remains inactive")
 	world.set_entity_field(tower, "state", "complete")
+	# A completed source begins contributing vision at the normal fog boundary.
+	# Keep the combat roster cached while publishing that changed visibility.
+	world.update_fog_of_war()
 	var completed_commands := awareness.collect_commands(world, 5)
 	assert_equal(completed_commands.size(), 1, "completed building activates without waiting for a roster refresh")
 	if not completed_commands.is_empty():

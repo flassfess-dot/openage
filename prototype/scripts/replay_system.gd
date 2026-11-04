@@ -3,7 +3,7 @@ extends RefCounted
 
 const Commands := preload("res://scripts/commands.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
-const FORMAT_VERSION: int = 4
+const FORMAT_VERSION: int = 5
 
 var native_encoding_enabled := true
 var encoding_kernel: Variant = null
@@ -187,6 +187,8 @@ func command_from_record(record: Dictionary):
 			command = Commands.ReturnResourcesCommand.new(tick, ids, int(params.get("target_building_id", -1)))
 		"board":
 			command = Commands.BoardCommand.new(tick, ids, int(params.get("transport_id", -1)))
+		"farm_reserve":
+			command = Commands.FarmReserveCommand.new(tick, ids, int(params.get("amount", 0)))
 		"unload":
 			var passenger_ids: Array[int] = []
 			for passenger_id in params.get("passenger_ids", []):
@@ -212,6 +214,8 @@ func command_from_record(record: Dictionary):
 			command = Commands.RepairCommand.new(tick, ids, int(params.get("target_building_id", -1)))
 		"tribute":
 			command = Commands.TributeCommand.new(tick, int(params.get("target_team", -1)), int(params.get("resource_type_id", -1)), int(params.get("amount", 0)))
+		"team_intent":
+			command = Commands.TeamIntentCommand.new(tick,int(params.get("target_team",-1)),String(params.get("intent","")),params.get("target",Vector2.ZERO),int(params.get("resource_type_id",0)),int(params.get("amount",0)))
 		"gate_mode":
 			command = Commands.GateModeCommand.new(tick, ids, String(params.get("mode", "auto")))
 		"stance":

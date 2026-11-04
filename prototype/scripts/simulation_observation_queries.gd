@@ -64,6 +64,12 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	var units: Array = []
 	var worker_options: Array = []
 	var worker_options_ready := false
+	var include_builder_productivity: bool=bool(options.get("include_builder_productivity",false)) and not bool(options.get("tactical_only",false)) and not bool(snapshot.get("tactical_only",false))
+	var builder_rates: Dictionary={}
+	if include_builder_productivity:
+		var build_cache: Dictionary=options.get("_ai_build_options_cache",{})
+		builder_rates=build_cache.get("builder_rates",{})
+		if options.has("_ai_build_options_cache"): build_cache["builder_rates"]=builder_rates
 	for row_value in ([] if keep_actors else snapshot.get("units", [])):
 		var row: Dictionary = row_value
 		if int(row.get("team", 0)) == team and (not restricted or command_ids.has(int(row.get("id", -1)))) and world.entity_is_worker(row):
@@ -75,6 +81,13 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 					worker_options = world.get_build_options(team)
 					worker_options_ready = true
 				row["command_options"] = {"build": worker_options}
+			if include_builder_productivity and String(row.get("movement_domain","land"))=="land":
+				var source_worker: Variant=world.find_unit(int(row.get("id",-1)))
+				if source_worker!=null:
+					var base_worker: Dictionary=source_worker.get("_worker_base_task",{}).get("worker_component",source_worker.get("components",{}).get("worker",{}))
+					var rate_key: String=String(source_worker.get("kind",""))+":"+str(float(base_worker.get("work_rate",1.0)))
+					if not builder_rates.has(rate_key): builder_rates[rate_key]=world.worker_role_system.expected_task_work_rate(source_worker,"build")
+					row["construction_work_rate"]=float(builder_rates[rate_key])
 			replacements[int(row.get("id", -1))] = row
 		if bool(options.get("include_ai_profiles", false)) and not row.has("ai_profile") and (not restricted or command_ids.has(int(row.get("id", -1)))):
 			row = row.duplicate()
@@ -91,9 +104,15 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 			if source != null:
 				row = row.duplicate()
 				row["builder_count"] = source.get("builders", {}).size()
-				if String(source.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(source, options.get("foundation_units", units))):
+				# Private own construction work is finer than visible HP/stages.
+				# Long builds can remain below the first HP threshold for minutes.
+				if String(source.get("state","complete"))=="foundation":
+					row["construction_progress"]=float(source.get("construction_progress",0.0))
+					if include_builder_productivity: row["construction_required"]=float(source.get("construction_required",1.0))
+				if not bool(options.get("tactical_only",false)) and String(source.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(source, options.get("foundation_units", units))):
 					row["reachable_builder_ids"] = world.reachable_builder_ids(source)
-				row["command_options"] = building_command_options(world,source,team,options,options.get("foundation_units",units),profile_cache)
+				if not bool(options.get("tactical_only",false)):
+					row["command_options"] = building_command_options(world,source,team,options,options.get("foundation_units",units),profile_cache)
 				if bool(options.get("include_ai_profiles", false)):
 					row["ai_drop_site"] = world.entity_has_behavior_tag(source, "drop_site")
 					var accepted: Array = []

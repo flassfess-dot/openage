@@ -1,5 +1,7 @@
 class_name RoRContextResolver
 
+const Garrison := preload("res://scripts/tower_garrison.gd")
+
 
 static func resolve(selected_units: Array, clicked_entity: Variant, ground_target: Vector2, player_team: int, allied_teams: Array = []) -> Dictionary:
 	if allied_teams.is_empty():
@@ -71,6 +73,8 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 					if only_converters:
 						return {"type": "convert", "target_id": int(clicked_entity["id"])}
 					return {"type": "attack", "target_id": int(clicked_entity["id"])}
+				if Garrison.is_tower(clicked_entity) and String(clicked_entity.get("state", "complete")) == "complete" and not selected_units.is_empty() and selected_units.all(func(unit): return Garrison.accepts(unit)):
+					return {"type": "board", "target_id": int(clicked_entity["id"]), "garrison": true}
 				if has_worker and bool(clicked_entity.get("harvestable", false)):
 					if int(clicked_entity.get("amount", 0)) > 0:
 						return {"type": "gather", "target_id": int(clicked_entity["id"])}

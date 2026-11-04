@@ -46,6 +46,18 @@ static func resolve(policy_id: String = "random_map_balanced", difficulty_id: St
 		"difficulty_id": difficulty_id,
 		"source_evidence": profile.get("source_evidence", {}).duplicate(true),
 	}, true)
+	runtime["algorithm_version"] = String(source.get("default_algorithm","legacy_adaptive_v1"))
+	if "--competitive-ai" in OS.get_cmdline_user_args(): runtime["algorithm_version"]="competitive_v2"
+	if String(runtime["algorithm_version"]) not in ["legacy_adaptive_v1","competitive_v2"]: errors.append("skirmish_ai_algorithm_unsupported")
+	runtime["capabilities"]=["legal_observation","adaptive_economy","operations"]
+	var competitive: Variant = JSON.parse_string(FileAccess.get_file_as_string("res://data/ai/competitive_parameters.json"))
+	if competitive is Dictionary and int(competitive.get("schema_version",0))==1:
+		var parameters: Dictionary = competitive.get("runtime",{}).duplicate(true)
+		parameters.merge(competitive.get("difficulty",{}).get(difficulty_id,{}),true)
+		parameters["opening_definitions"] = competitive.get("openings",{}).duplicate(true)
+		runtime["competitive_parameters"] = parameters
+		if String(runtime["algorithm_version"])=="competitive_v2": runtime.merge(parameters,true)
+		if String(runtime["algorithm_version"])=="competitive_v2": runtime["capabilities"].append_array(["belief_regions","income_ledger","strategic_plans","combat_rollouts","role_micro","action_budget","farm_reserve","garrison","team_intents"])
 	_validate_runtime(runtime, errors)
 	runtime["valid"] = errors.is_empty()
 	runtime["errors"] = errors

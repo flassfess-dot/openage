@@ -1,0 +1,343 @@
+{
+  "schema_version": 1,
+  "status": "IN_PROGRESS",
+  "generated_local": "2026-10-31 01:06:29.331649",
+  "human_strength": "HUMAN_UNMEASURED",
+  "source": {
+    "runtime_fingerprint": "ee6b1d44df33f02aee0efe7c153cb77c9c67b9bb3a27db4fb1321ca2a0239055",
+    "artifact_hashes": {
+      "Rise of Rome Prototype.exe": "f6b5e6bf0c1031cff1c17a924cac26f0ddb1e07ff5669bc3db1e99273152322c",
+      "Rise of Rome Prototype.pck": "d1d7d36bb72f5fc98ab5af598645d82772e9e031219c4e1d3e7e49601783239c",
+      "bin/ror_pathfinding.windows.template_release.x86_64.dll": "5002177698a290ea6af2882353064ede1ecb26cdfc0f4b3ba5fb08bee7904cc1"
+    },
+    "build_provenance": {
+      "path": ".tmp/ai-competitive/competitive-20261030/Release-micro-cache-v4/build-provenance.json",
+      "sha256": "2ecacf7be92b169d34156266705ff701a641aae5c1bc906fed68df1863e0921a"
+    }
+  },
+  "tests": {
+    "godot": {
+      "scope": "Resumed suite boundary plus explicit isolated reruns; not one uninterrupted clean run",
+      "discovered": 510,
+      "passed": 510,
+      "missing": [],
+      "unresolved_failures": [],
+      "all_discovered_covered": true
+    },
+    "coverage": {
+      "path": "prototype/qa/ai-competitive/competitive-20261030/suite_coverage.json",
+      "sha256": "5b66105d350df72153935a65eff9f4a9a63b345e4d8251c85922ca4c8bbb9797"
+    },
+    "python_passed": 17,
+    "python_log": {
+      "path": "prototype/qa/ai-competitive/competitive-20261030/python-tests-final.stdout.log",
+      "sha256": "fcf41f04f33ee85d70142dc4ed3db28ce803deeaa8207058c786f6b15def6905"
+    },
+    "powershell_log": {
+      "path": "prototype/qa/ai-competitive/competitive-20261030/final-build-helpers.stdout.log",
+      "sha256": "643cda3ac64f0dc0463df9708355785e93cd68641847fae50ac64514cb3c5e2f"
+    },
+    "cache": {
+      "errors": 0,
+      "warnings": 181
+    }
+  },
+  "combat": {
+    "schema_version": 1,
+    "benchmark_sha256": "f6193f6a59d4a1fa04847fec7463c79b5bf6c77ebc4fb02cc9ca2eee9dbece66",
+    "predictor_sha256": "524c05551ef0e5d3da034e55d8a967b3eb36ef9b6e0ebf8325ba8835e2968c1f",
+    "fit": {
+      "cases": 12,
+      "terminal_sign_accuracy": 0.8333333333333334,
+      "matched16s_retained_roster_hp_MAE": 0.16651116548957345,
+      "fit_only_corrected_MAE": 0.14564169834214824,
+      "confidence_bins": {
+        "0.85": {
+          "cases": 9,
+          "terminal_sign_accuracy": 0.8888888888888888,
+          "mean_hp_MAE": 0.1710990133829312
+        },
+        "0.5": {
+          "cases": 3,
+          "terminal_sign_accuracy": 0.6666666666666666,
+          "mean_hp_MAE": 0.1527476218095008
+        }
+      },
+      "baseline_scalar_sign_accuracy": 0.75
+    },
+    "heldout": {
+      "cases": 12,
+      "terminal_sign_accuracy": 0.9166666666666666,
+      "matched16s_retained_roster_hp_MAE": 0.1880564459917782,
+      "fit_only_corrected_MAE": 0.1705658622584826,
+      "confidence_bins": {
+        "0.85": {
+          "cases": 9,
+          "terminal_sign_accuracy": 0.8888888888888888,
+          "mean_hp_MAE": 0.20152711300747736
+        },
+        "0.5": {
+          "cases": 3,
+          "terminal_sign_accuracy": 1.0,
+          "mean_hp_MAE": 0.14764444494468076
+        }
+      },
+      "baseline_scalar_sign_accuracy": 0.75
+    },
+    "calibration": {
+      "kind": "shared bounded affine retained-HP correction, least squares on fit only",
+      "alpha": 0.8679809087142267,
+      "beta": -0.03254525858602597,
+      "enabled_in_runtime": false,
+      "reason": "offline candidate; small controlled set and separate game validation required before changing policy"
+    },
+    "field_contract": {
+      "terminal_outcome": "current team-owned HP including conversions, divided by original team starting HP",
+      "loss": "initial-roster retained HP at320ticks/16seconds or earlier completed battle; conversion counts as loss of initial ownership",
+      "legacy_own_remaining_enemy_remaining": "raw HP on original entity lists, independent of ownership; not used for corrected loss or sign acceptance"
+    },
+    "scope": "12fit+12heldout controlled non-micro battles; no human rating or broad statistical accuracy claim",
+    "privacy_recheck": {
+      "private_foreign_intent_keys": 0,
+      "cases": 48,
+      "outcomes_and_commands_identical_to_prior_benchmark": true,
+      "process_passed": true
+    },
+    "baseline_loss_comparison": "Original scalar strength has no predicted loss fraction; baseline loss MAE is undefined. Do not interpret rollout retained-HP MAE as improvement over a nonexistent old loss forecast.",
+    "micro_cache_parity": {
+      "cases": 48,
+      "fields": [
+        "actual_margin",
+        "own_lost",
+        "enemy_lost",
+        "issued",
+        "rejected",
+        "ticks",
+        "horizon_16_seconds"
+      ],
+      "equal": true,
+      "new_benchmark_sha256": "f6193f6a59d4a1fa04847fec7463c79b5bf6c77ebc4fb02cc9ca2eee9dbece66",
+      "previous_benchmark_sha256": "ee5f9839ed944917a58ca2345859cb11978ed2c7c8bc3b85f7f25dddca8f31fa",
+      "reachability_queries": 4608
+    }
+  },
+  "micro_reachability": {
+    "failures": [],
+    "rows": [
+      {
+        "candidate_us": 57853,
+        "equal": true,
+        "fixture": 0,
+        "queries": 1536,
+        "reference_us": 1155532,
+        "speedup": 19.9735882322438
+      },
+      {
+        "candidate_us": 62756,
+        "equal": true,
+        "fixture": 1,
+        "queries": 1536,
+        "reference_us": 855450,
+        "speedup": 13.6313659251705
+      },
+      {
+        "candidate_us": 54363,
+        "equal": true,
+        "fixture": 2,
+        "queries": 1536,
+        "reference_us": 729700,
+        "speedup": 13.4227323731214
+      }
+    ],
+    "scope": "exact query kernel, cache creation included,4608 queries; not total game FPS"
+  },
+  "micro_battle_parity": {
+    "cases": 48,
+    "fields": [
+      "actual_margin",
+      "own_lost",
+      "enemy_lost",
+      "issued",
+      "rejected",
+      "ticks",
+      "horizon_16_seconds"
+    ],
+    "equal": true,
+    "new_benchmark_sha256": "f6193f6a59d4a1fa04847fec7463c79b5bf6c77ebc4fb02cc9ca2eee9dbece66",
+    "previous_benchmark_sha256": "ee5f9839ed944917a58ca2345859cb11978ed2c7c8bc3b85f7f25dddca8f31fa",
+    "reachability_queries": 4608
+  },
+  "traffic_heap": {
+    "correct": true,
+    "rows": [
+      {
+        "microseconds": {
+          "heap": {
+            "count": 16,
+            "max": 1402,
+            "mean": 1115.0,
+            "over_100ms": 0,
+            "over_200ms": 0,
+            "over_50ms": 0,
+            "p50": 1045,
+            "p95": 1402,
+            "p99": 1402
+          },
+          "reference": {
+            "count": 16,
+            "max": 1935,
+            "mean": 1119.875,
+            "over_100ms": 0,
+            "over_200ms": 0,
+            "over_50ms": 0,
+            "p50": 944,
+            "p95": 1935,
+            "p99": 1935
+          }
+        },
+        "reachable": true,
+        "same_reachability": true,
+        "shape": "clear"
+      },
+      {
+        "microseconds": {
+          "heap": {
+            "count": 16,
+            "max": 19549,
+            "mean": 12830.8125,
+            "over_100ms": 0,
+            "over_200ms": 0,
+            "over_50ms": 0,
+            "p50": 12968,
+            "p95": 19549,
+            "p99": 19549
+          },
+          "reference": {
+            "count": 16,
+            "max": 47574,
+            "mean": 33505.5,
+            "over_100ms": 0,
+            "over_200ms": 0,
+            "over_50ms": 0,
+            "p50": 32539,
+            "p95": 47574,
+            "p99": 47574
+          }
+        },
+        "reachable": true,
+        "same_reachability": true,
+        "shape": "short_wall"
+      },
+      {
+        "microseconds": {
+          "heap": {
+            "count": 16,
+            "max": 44876,
+            "mean": 39552.5625,
+            "over_100ms": 0,
+            "over_200ms": 0,
+            "over_50ms": 0,
+            "p50": 39084,
+            "p95": 44876,
+            "p99": 44876
+          },
+          "reference": {
+            "count": 16,
+            "max": 114600,
+            "mean": 97776.1875,
+            "over_100ms": 6,
+            "over_200ms": 0,
+            "over_50ms": 16,
+            "p50": 97787,
+            "p95": 114600,
+            "p99": 114600
+          }
+        },
+        "reachable": false,
+        "same_reachability": true,
+        "shape": "long_wall"
+      }
+    ],
+    "scope": "same inputs and native geometry, old bounded sort versus heap; warm16 samples, limit256; not game FPS"
+  },
+  "controlled_openings": {},
+  "evaluation": [],
+  "performance": {},
+  "soaks": [],
+  "packaged_checks": {
+    "land": {
+      "passed": true,
+      "evidence": {
+        "path": "prototype/qa/ai-competitive/competitive-20261030/micro-core-release-land/report.json",
+        "sha256": "6ec298331f5574ac202c152051fb13667ee0f942a4b5db18198849c271059f37"
+      },
+      "algorithm_version": "competitive_v2",
+      "activated_policy_parameters": [
+        {
+          "attack_ratio": 1.15,
+          "forecast_seconds": 45.0,
+          "maximum_economic_danger": 8.0,
+          "micro_repeat_ticks": 20.0,
+          "minimum_naval_escort": 2.0,
+          "plan_inertia": 8.0,
+          "ranker_enabled": false,
+          "retreat_ratio": 0.75,
+          "worker_population_ratio": 0.45
+        }
+      ],
+      "render_wait_ms": null
+    },
+    "islands": {
+      "passed": true,
+      "evidence": {
+        "path": "prototype/qa/ai-competitive/competitive-20261030/micro-core-release-islands/report.json",
+        "sha256": "05be4fc7d97896824b07792e4f0f8803767ed4c18e1e8e36905579a2bc24e9a1"
+      },
+      "algorithm_version": "competitive_v2",
+      "activated_policy_parameters": [
+        {
+          "attack_ratio": 1.15,
+          "forecast_seconds": 45.0,
+          "maximum_economic_danger": 8.0,
+          "micro_repeat_ticks": 20.0,
+          "minimum_naval_escort": 2.0,
+          "plan_inertia": 8.0,
+          "ranker_enabled": false,
+          "retreat_ratio": 0.75,
+          "worker_population_ratio": 0.45
+        }
+      ],
+      "render_wait_ms": null
+    },
+    "render-land": {
+      "passed": true,
+      "evidence": {
+        "path": "prototype/qa/ai-competitive/competitive-20261030/micro-core-release-render-land/report.json",
+        "sha256": "d05e48debbd450b68e15942aed212a6ea6ce892c164cdb16e62814e7a4f2653f"
+      },
+      "algorithm_version": "competitive_v2",
+      "activated_policy_parameters": [
+        {
+          "attack_ratio": 1.15,
+          "forecast_seconds": 45.0,
+          "maximum_economic_danger": 8.0,
+          "micro_repeat_ticks": 20.0,
+          "minimum_naval_escort": 2.0,
+          "plan_inertia": 8.0,
+          "ranker_enabled": false,
+          "retreat_ratio": 0.75,
+          "worker_population_ratio": 0.45
+        }
+      ],
+      "render_wait_ms": null
+    }
+  },
+  "compatibility": {
+    "archive": 8,
+    "checkpoint": 4,
+    "replay": 5,
+    "read_contract": 4,
+    "previous_archive7": "explicitly unsupported; no migration; original user save preserved"
+  },
+  "scope": "Compact evidence; raw worlds, replays, private user save, machine usernames and per-unit observations are excluded. Detailed local files remain under prototype/qa/ai-competitive/competitive-20261030."
+}

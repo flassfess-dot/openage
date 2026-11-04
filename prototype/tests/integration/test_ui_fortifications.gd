@@ -1,0 +1,76 @@
+extends SceneTree
+const Catalog := preload("res://scripts/resource_catalog.gd")
+const World := preload("res://scripts/simulation_world.gd")
+const Commands := preload("res://scripts/commands.gd")
+const Controller := preload("res://scripts/game_controller.gd")
+const Snapshot := preload("res://scripts/simulation_snapshot.gd")
+const Model := preload("res://scripts/hud_view_model.gd")
+const Controls := preload("res://scripts/hud_controls.gd")
+const Walls := preload("res://scripts/wall_placement.gd")
+var failures: Array[String] = []
+func check(value: bool, message: String) -> void:
+	if not value: failures.append(message)
+func _initialize() -> void:
+	var catalog=Catalog.new()
+	catalog.load()
+	var world=World.new(Vector2i(40,40))
+	world.set_gamespec(catalog.gamespec_data)
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
+	world.set_graphics_catalog(catalog.graphics_catalog_data)
+	world.navigation_grid.configure_terrain(func(_cell):return "grass")
+	world.grant_technology(1,101)
+	world.grant_technology(1,11)
+	world.visibility_system.fog.ensure_player(1)
+	for y in range(40):
+		for x in range(40): world.visibility_system.fog.reveal_explored_cell(1,Vector2i(x,y))
+	for resource in range(4): world.set_resource_amount(1,resource,10000)
+	world.add_building(80,"tower",Vector2(20,20),1)
+	for axis in [0,1]:
+		for side in [-1,1]:
+			var position:=Vector2(20+side*3,20) if axis==0 else Vector2(20,20+side*3)
+			check(world.can_place_foundation(1,"gate",position,{"gate_axis":axis}),"gate touches the tower without a forced gap, axis=%d side=%d" % [axis,side])
+			var overlap:=Vector2(20+side*2,20) if axis==0 else Vector2(20,20+side*2)
+			check(not world.can_place_foundation(1,"gate",overlap,{"gate_axis":axis}),"actual tower/gate overlap remains forbidden")
+	var gate: Dictionary=world.add_building(81,"gate",Vector2(8,8),1,false,{"gate_axis":0})
+	for stage in range(4):
+		gate["construction_stage"]=stage
+		var info: Dictionary=catalog.building_frame_info(gate)
+		check(info.get("composite_parts",[]).size()>=4 and info["composite_parts"].all(func(part):return not part.has("gate_leaf")),"all four construction cells are shown without premature finished doors")
+	world.complete_foundation(gate)
+	check(catalog.building_frame_info(gate)["composite_parts"].any(func(part):return part.has("gate_leaf")),"complete gate has real wooden leaves")
+	var granary: Dictionary=world.add_building(82,"granary",Vector2(30,8),1)
+	for resource in range(4): world.set_resource_amount(1,resource,0)
+	var model=Model.new()
+	model.configure(catalog.runtime_catalog_data,catalog.localization,catalog.object_catalog_data)
+	var hud: Dictionary=model.build(Snapshot.with_queries(world,0,1),[82],"RECTANGLE")
+	var research: Array=hud["commands"].filter(func(action):return action.get("type")=="research")
+	check(not research.is_empty(),"fixture exposes actual research commands")
+	var controls=Controls.new()
+	controls.set_view_model(hud)
+	for index in range(controls.active_train_commands.size()):
+		var action: Dictionary=controls.active_train_commands[index]
+		if action.get("type")=="research":
+			var text: String=controls.train_buttons[index].tooltip_text
+			check(not action.get("cost_text","").is_empty() and text.contains(action["cost_text"]) and text.contains(action["label"]),"disabled research retains its name and complete resource price")
+	controls.free()
+	world.set_resource_amount(1,2,10000)
+	var worker: Dictionary=world.add_unit(1,"villager",Vector2(29.5,32),false)
+	var controller=Controller.new(world)
+	var command=Commands.BuildCommand.new(0,[int(worker["id"])],"wall",Vector2(8,30))
+	command.params["wall_cells"]=Walls.cells(Vector2i(8,30),Vector2i(29,30))
+	controller.enqueue_command(command,true,1)
+	controller.process_commands()
+	var target=world.find_building(int(worker.get("target_building_id",-1)))
+	check(target!=null and Vector2(target["pos"]).x==29,"builder starts at the nearby end instead of walking the whole wall first")
+	var key:=Walls.preview_key(world,1,Vector2(2,34),Vector2(25,34))
+	controller.tick_index+=5
+	check(key==Walls.preview_key(world,1,Vector2(2,34),Vector2(25,34)),"unchanged preview survives unrelated fixed ticks")
+	world.set_resource_amount(1,2,9000)
+	check(key!=Walls.preview_key(world,1,Vector2(2,34),Vector2(25,34)),"resource changes invalidate the preview budget")
+	key=Walls.preview_key(world,1,Vector2(2,34),Vector2(25,34))
+	world.grant_technology(1,13)
+	check(key!=Walls.preview_key(world,1,Vector2(2,34),Vector2(25,34)),"research invalidates the source graphics and price even with no existing wall to upgrade")
+	for failure in failures:push_error(failure)
+	print("UI fortifications: %d failures" % failures.size())
+	quit(0 if failures.is_empty() else 1)

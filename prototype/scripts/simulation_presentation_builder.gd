@@ -3,6 +3,7 @@ extends RefCounted
 # A short-lived builder owns a single projection, never retained across ticks.
 const EntityProjection := preload("res://scripts/simulation_presentation_projection.gd")
 const ReadContract := preload("res://scripts/entity_read_contract.gd")
+const Garrison := preload("res://scripts/tower_garrison.gd")
 
 var world: Variant
 var tick: int
@@ -369,6 +370,8 @@ func project_buildings() -> void:
 						projected_order["population_points_cost"] = world.unit_population_points_cost(String(projected_order.get("kind", "")), observer_team)
 			if observer_team > 0 and int(building.get("team", 0)) == observer_team and (not restrict_command_options or command_option_entity_lookup.has(int(building.get("id", -1)))):
 				presentation_building["builder_count"] = building.get("builders", {}).size()
+			if Garrison.is_tower(building) and (observer_team <= 0 or int(building.get("team", 0)) == observer_team) and (not restrict_command_options or command_option_entity_lookup.has(building_id)):
+				presentation_building["garrison"] = Garrison.presentation(world, building)
 			buildings.append(presentation_building)
 			if always_include_entity_lookup.has(building_id):
 				control_buildings.append(presentation_building)
@@ -402,6 +405,11 @@ func project_buildings() -> void:
 
 func project_projectiles() -> void:
 	projectiles = []
+	if bool(options.get("include_ai_projectiles",false)):
+		for projectile in world.get_projectiles():
+			if EntityProjection._entity_visible_to_observer(projectile, observer_team, observer_states, observer_allies, fog_map_size):
+				projectiles.append(preload("res://scripts/ai_projectile_observation.gd").project(projectile,observer_team))
+		return
 	if include_projectiles:
 		for projectile in world.get_projectiles():
 			if EntityProjection._entity_visible_to_observer(projectile, observer_team, observer_states, observer_allies, fog_map_size):
@@ -459,6 +467,7 @@ func compose() -> Dictionary:
 			"buildings": sorted_overview_buildings,
 		},
 		"ai_distress_signals": world.get_attack_distress_signals(observer_team) if observer_team > 0 else [],
+		"team_intents": world.ai_distress_system.intents_for_team(world,observer_team) if observer_team>0 else [],
 		"navigation": {},
 		"build_sites": {},
 		# Rendering only depends on this observer's grid. Enemy and neutral fog
@@ -471,6 +480,8 @@ func compose() -> Dictionary:
 		"battle_over": bool(world.battle_over),
 		"battle_message": String(world.battle_message),
 		"match_result": world.get_victory_result(),
+		"match_seed": world.simulation_seed,
+		"victory_rules": world.victory_system.rules.duplicate(true),
 		"match_elapsed_seconds": float(world.victory_system.elapsed_seconds),
 		"scenario": scenario,
 	}

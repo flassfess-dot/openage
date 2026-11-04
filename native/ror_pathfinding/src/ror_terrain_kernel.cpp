@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <vector>
+#include <limits>
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
@@ -51,6 +52,8 @@ Packed pack(const std::vector<Value> &values) {
 void RoRTerrainKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("build_mesh", "bounds", "cells", "heights", "frames", "materials", "seed", "maximum_subdivisions", "river"), &RoRTerrainKernel::build_mesh, DEFVAL(16), DEFVAL(PackedFloat32Array()));
     ClassDB::bind_method(D_METHOD("split_mesh_arrays", "arrays", "maximum_vertices"), &RoRTerrainKernel::split_mesh_arrays, DEFVAL(16384));
+    ClassDB::bind_method(D_METHOD("capture_cached_sample_arrays", "bounds", "cache"), &RoRTerrainKernel::capture_cached_sample_arrays);
+    ClassDB::bind_method(D_METHOD("build_fog_arrays", "bounds", "size", "levels"), &RoRTerrainKernel::build_fog_arrays);
     ClassDB::bind_method(D_METHOD("capture_river_samples", "bounds", "shape"), &RoRTerrainKernel::capture_river_samples);
 }
 
@@ -347,4 +350,84 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
     result["indices"] = pack<PackedInt32Array>(indices);
     return result;
 }
+
+Dictionary RoRTerrainKernel::capture_cached_sample_arrays(const Rect2i &bounds, const Dictionary &cache) const {
+    Dictionary result;
+    const int64_t w = bounds.size.x, h = bounds.size.y;
+    if (w <= 0 || h <= 0 || (w + 2) * (h + 2) > std::numeric_limits<int32_t>::max()) return result;
+    const Variant old_bounds_value = cache.get("bounds", Variant());
+    const Rect2i old_bounds = old_bounds_value.get_type() == Variant::RECT2I ? Rect2i(old_bounds_value) : Rect2i();
+    const Variant old_cells_value = cache.get("cells", Variant()), old_heights_value = cache.get("heights", Variant()), old_frames_value = cache.get("frames", Variant());
+    const PackedInt32Array old_cells = old_cells_value.get_type() == Variant::PACKED_INT32_ARRAY ? PackedInt32Array(old_cells_value) : PackedInt32Array();
+    const PackedFloat32Array old_heights = old_heights_value.get_type() == Variant::PACKED_FLOAT32_ARRAY ? PackedFloat32Array(old_heights_value) : PackedFloat32Array();
+    const PackedInt32Array old_frames = old_frames_value.get_type() == Variant::PACKED_INT32_ARRAY ? PackedInt32Array(old_frames_value) : PackedInt32Array();
+    const int64_t ow = old_bounds.size.x, oh = old_bounds.size.y;
+    const bool cell_cache = ow > 0 && oh > 0 && old_cells.size() == (ow+2)*(oh+2);
+    const bool height_cache = ow > 0 && oh > 0 && old_heights.size() == (ow+1)*(oh+1);
+    const bool frame_cache = ow > 0 && oh > 0 && old_frames.size() == ow*oh;
+    const Rect2i old_cell_bounds = old_bounds.grow(1), old_height_bounds(old_bounds.position, old_bounds.size+Vector2i(1,1));
+    const int32_t *oc = cell_cache ? old_cells.ptr() : nullptr, *of = frame_cache ? old_frames.ptr() : nullptr;
+    const float *ov = height_cache ? old_heights.ptr() : nullptr;
+    PackedInt32Array cells, frames; PackedFloat32Array heights;
+    cells.resize((w+2)*(h+2)); heights.resize((w+1)*(h+1)); frames.resize(w*h);
+    int32_t *c = cells.ptrw(), *f = frames.ptrw(); float *v = heights.ptrw();
+    Array missing_cells, missing_heights, missing_frames;
+    int64_t index = 0;
+    for (int64_t y=bounds.position.y-1; y<int64_t(bounds.position.y)+h+1; ++y) for (int64_t x=bounds.position.x-1; x<int64_t(bounds.position.x)+w+1; ++x) {
+        const Vector2i point(x,y);
+        const int32_t value = oc && old_cell_bounds.has_point(point) ? oc[(y-old_bounds.position.y+1)*(ow+2)+x-old_bounds.position.x+1] : -2;
+        c[index++] = value; if (value == -2) missing_cells.append(point);
+    }
+    index = 0;
+    for (int64_t y=bounds.position.y; y<=int64_t(bounds.position.y)+h; ++y) for (int64_t x=bounds.position.x; x<=int64_t(bounds.position.x)+w; ++x) {
+        const Vector2i point(x,y); const bool known = ov && old_height_bounds.has_point(point);
+        v[index++] = known ? ov[(y-old_bounds.position.y)*(ow+1)+x-old_bounds.position.x] : 0.0f;
+        if (!known) missing_heights.append(point);
+    }
+    index = 0;
+    for (int64_t y=bounds.position.y; y<int64_t(bounds.position.y)+h; ++y) for (int64_t x=bounds.position.x; x<int64_t(bounds.position.x)+w; ++x) {
+        const Vector2i point(x,y);
+        const int32_t value = of && old_bounds.has_point(point) ? of[(y-old_bounds.position.y)*ow+x-old_bounds.position.x] : -1;
+        f[index++] = value; if (value < 0) missing_frames.append(point);
+    }
+    result["cells"] = cells; result["heights"] = heights; result["frames"] = frames;
+    result["missing_cells"] = missing_cells; result["missing_heights"] = missing_heights; result["missing_frames"] = missing_frames;
+    return result;
+}
+
+Array RoRTerrainKernel::build_fog_arrays(const Rect2i &bounds, const Vector2i &size, const Dictionary &levels) const {
+    Array result;
+    const int64_t w = bounds.size.x, h = bounds.size.y;
+    if (w <= 0 || h <= 0 || size.x <= 0 || size.y <= 0 || (w + 1) * (h + 1) > std::numeric_limits<int32_t>::max() || w * h > std::numeric_limits<int32_t>::max() / 6) return result;
+    PackedVector3Array vertices; PackedVector2Array uvs; PackedInt32Array indices;
+    vertices.resize((w + 1) * (h + 1)); uvs.resize(vertices.size()); indices.resize(w * h * 6);
+    Vector3 *v = vertices.ptrw(); Vector2 *uv = uvs.ptrw(); int32_t *idx = indices.ptrw();
+    for (int64_t y = 0; y <= h; ++y) {
+        for (int64_t x = 0; x <= w; ++x) {
+            const Vector2 world(bounds.position.x + x, bounds.position.y + y);
+            const Vector2 clamped(std::clamp(double(world.x), 0.0, double(size.x) - 0.0001), std::clamp(double(world.y), 0.0, double(size.y) - 0.0001));
+            const Vector2i cell(int32_t(std::floor(clamped.x)), int32_t(std::floor(clamped.y)));
+            const Vector2 local = clamped - Vector2(cell);
+            const double a = int64_t(levels.get(cell, 0)), b = int64_t(levels.get(cell + Vector2i(1,0), 0));
+            const double c = int64_t(levels.get(cell + Vector2i(0,1), 0)), d = int64_t(levels.get(cell + Vector2i(1,1), 0));
+            const double top = a + (b - a) * double(local.x), bottom = c + (d - c) * double(local.x);
+            const double elevation = top + (bottom - top) * double(local.y);
+            const Vector2 projected = Vector2((world.x - world.y) * 32.0, (world.x + world.y) * 16.0) + Vector2(0.0, -elevation * 16.0);
+            const int64_t index = y * (w + 1) + x;
+            v[index] = Vector3(std::round(projected.x), std::round(projected.y), 0.0);
+            uv[index] = Vector2(std::clamp(double(world.x)/size.x, 0.5/size.x, 1.0-0.5/size.x), std::clamp(double(world.y)/size.y, 0.5/size.y, 1.0-0.5/size.y));
+        }
+    }
+    int64_t cursor = 0;
+    for (int64_t y = 0; y < h; ++y) {
+        for (int64_t x = 0; x < w; ++x) {
+            const int32_t tl = int32_t(y * (w + 1) + x), tr = tl + 1, bl = tl + int32_t(w + 1), br = bl + 1;
+            idx[cursor++] = tl; idx[cursor++] = tr; idx[cursor++] = br;
+            idx[cursor++] = tl; idx[cursor++] = br; idx[cursor++] = bl;
+        }
+    }
+    result.resize(ARRAY_MAX); result[ARRAY_VERTEX] = vertices; result[ARRAY_TEX_UV] = uvs; result[ARRAY_INDEX] = indices;
+    return result;
+}
+
 } // namespace godot

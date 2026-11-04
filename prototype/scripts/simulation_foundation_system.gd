@@ -20,12 +20,24 @@ func place_foundation(team: int, kind: String, position: Vector2, workers: Array
 	position = Coordinates.clamp_world(position, world.map_size)
 	if not world.can_place_foundation(team, kind, position, placement_options):
 		return null
+	return _commit_foundation(team, kind, position, workers, placement_options)
+
+
+# The wall command has just validated the whole ordered plan on this thread.
+# Its virtual footprints and resource budget already include preceding cells.
+func reserve_planned_wall(team: int, position: Vector2) -> Dictionary:
+	return _commit_foundation(team, "wall", position, [], {})
+
+
+func _commit_foundation(team: int, kind: String, position: Vector2, workers: Array, placement_options: Dictionary) -> Dictionary:
 	var cost: Dictionary = world.building_cost(kind, team)
-	world.spend_resource_cost(team, cost)
+	world.spend_resource_cost(team, cost,"construction")
 	if kind == "gate":
 		var replaced_walls: Dictionary = world.gate_system.replacement_wall_ids(team, position, int(placement_options.get("gate_axis", 0)))
 		world.gate_system.replace_wall_segments(replaced_walls)
 	var building: Dictionary = world.add_building(world.entity_id_sequence.next(), kind, position, team, false, placement_options)
+	if world.is_bulk_loading():
+		world.sync_building_navigation_occupancy(building)
 	world.set_entity_field(building, "reserved_cost", cost.duplicate(true))
 	world.assign_workers_to_building(workers, building, "build")
 	world.emit_domain_event("foundation_placed", {
@@ -108,7 +120,7 @@ func assign_command_build(selected: Array, kind: String, position: Vector2, plac
 	return foundation
 
 
-func reseed_harvestable_building(building: Dictionary, workers: Array = []) -> Variant:
+func reseed_harvestable_building(building: Dictionary, workers: Array = [], prepaid_cost: Variant = null) -> Variant:
 	world.last_build_failure = ""
 	if building == null or not bool(building.get("harvestable", false)) or String(building.get("state", "complete")) != "complete" or String(building.get("resource_state", "")) != "depleted" or float(building.get("hp", 0.0)) <= 0.0:
 		world.last_build_failure = "reseed_unavailable"
@@ -118,11 +130,12 @@ func reseed_harvestable_building(building: Dictionary, workers: Array = []) -> V
 	if required_technology_id >= 0 and not world.technology_system.is_researched(team, required_technology_id):
 		world.last_build_failure = "building_unavailable"
 		return null
-	var cost: Dictionary = world.building_cost(String(building.get("kind", "")), team)
-	if not world.can_afford_resource_cost(team, cost):
+	var cost: Dictionary = prepaid_cost.duplicate(true) if prepaid_cost is Dictionary else world.building_cost(String(building.get("kind", "")), team)
+	if prepaid_cost == null and not world.can_afford_resource_cost(team, cost):
 		world.last_build_failure = "insufficient_resources"
 		return null
-	world.spend_resource_cost(team, cost)
+	if prepaid_cost == null:
+		world.spend_resource_cost(team, cost,"reseed")
 	world.resource_approach_slots.erase(int(building.get("id", -1)))
 	world.set_entity_field(building, "reseed_from_depleted", true)
 	world.set_entity_field(building, "reseed_previous_max_amount", int(building.get("max_amount", 0)))

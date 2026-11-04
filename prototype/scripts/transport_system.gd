@@ -6,6 +6,8 @@ const EntityComponents := preload("res://scripts/entity_components.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const BoardingDetour := preload("res://scripts/boarding_detour.gd")
 const StuckRecovery := preload("res://scripts/stuck_recovery.gd")
+const Garrison := preload("res://scripts/tower_garrison.gd")
+const BuildingApproach := preload("res://scripts/building_approach_geometry.gd")
 
 const BOARDING_MARGIN: float = 1.25
 const MAX_UNLOAD_DISTANCE: float = 4.5
@@ -76,6 +78,7 @@ func board(passengers: Array, transport: Dictionary) -> String:
 		})
 	cargo["passenger_ids"] = passenger_ids
 	cargo["count"] = passenger_ids.size()
+	world.notify_entity_changed(transport)
 	world.rebuild_spatial_index()
 	world.update_fog_of_war()
 	return ""
@@ -84,15 +87,21 @@ func board(passengers: Array, transport: Dictionary) -> String:
 func validate_board(passengers: Array, transport: Variant, require_range: bool = true) -> String:
 	if transport == null or float(transport.get("hp", 0.0)) <= 0.0 or not is_transport(transport):
 		return "invalid_transport"
+	if Garrison.is_tower(transport) and String(transport.get("state", "")) != "complete":
+		return "garrison_unavailable"
 	if passengers.is_empty():
 		return "no_eligible_passengers"
 	var cargo: Dictionary = transport.get("components", {}).get("cargo", {})
 	var existing: Array = cargo.get("passenger_ids", [])
+	if Garrison.is_tower(transport) and existing.size() >= int(cargo.get("capacity", 0)):
+		return "garrison_full"
 	if require_range and existing.size() + passengers.size() > int(cargo.get("capacity", 0)):
 		return "transport_full"
 	var seen: Dictionary = {}
 	for passenger_value in passengers:
 		var passenger: Dictionary = passenger_value
+		if Garrison.is_tower(transport) and not Garrison.accepts(passenger):
+			return "garrison_requires_foot_unit"
 		var passenger_id := int(passenger.get("id", -1))
 		if passenger_id < 0 or seen.has(passenger_id) or embarked_units.has(passenger_id):
 			return "invalid_passenger"
@@ -128,7 +137,7 @@ func assign_board_order(passengers: Array, transport: Dictionary) -> String:
 			continue
 		var approach: Variant = _boarding_approach(passenger, transport)
 		if not approach is Vector2:
-			return "boarding_shore_unreachable"
+			return "garrison_unreachable" if Garrison.is_tower(transport) else "boarding_shore_unreachable"
 		plans.append({"passenger": passenger, "position": approach})
 	# Resolve the whole selection before replacing any existing order.
 	for passenger in ordered:
@@ -149,7 +158,7 @@ func is_in_boarding_range(passenger: Dictionary, transport: Dictionary) -> bool:
 
 
 func advance_board_order(passenger: Dictionary, delta: float, ready: Array) -> bool:
-	var transport: Variant = world.find_unit(int(passenger.get("target_id", -1)))
+	var transport: Variant = world.find_combat_target(int(passenger.get("target_id", -1)))
 	var rejection := validate_board([passenger], transport, false)
 	if not rejection.is_empty():
 		world.halt_unit(passenger, rejection)
@@ -216,7 +225,7 @@ func finish_boarding_tick(ready: Array) -> void:
 	transport_ids.sort()
 	for transport_id in transport_ids:
 		var passengers: Array = by_transport[transport_id]
-		var transport: Variant = world.find_unit(int(transport_id))
+		var transport: Variant = world.find_combat_target(int(transport_id))
 		var rejection := validate_board(passengers, transport, false)
 		if rejection.is_empty():
 			passengers.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
@@ -287,7 +296,7 @@ func unload(transports: Array, target: Vector2, requested_passenger_ids: Array =
 	var reserved: Array = []
 	for transport_value in ordered:
 		var transport: Dictionary = transport_value
-		if float(transport.get("hp", 0.0)) <= 0.0 or not is_transport(transport):
+		if (float(transport.get("hp", 0.0)) <= 0.0 and not Garrison.is_tower(transport)) or not is_transport(transport):
 			return "invalid_transport"
 		if Vector2(transport.get("pos", Vector2.ZERO)).distance_to(target) > MAX_UNLOAD_DISTANCE + 0.0001:
 			return "landing_too_far"
@@ -320,6 +329,10 @@ func unload(transports: Array, target: Vector2, requested_passenger_ids: Array =
 
 
 func assign_unload_order(transports: Array, target: Vector2, requested_ids: Array = []) -> String:
+	if transports.any(func(transport): return Garrison.is_tower(transport)):
+		if not transports.all(func(transport): return Garrison.is_tower(transport) and float(transport.get("hp", 0.0)) > 0.0):
+			return "invalid_transport"
+		return unload(transports, target, requested_ids)
 	# Direct commits remain atomic; orders may travel to a reachable shoreline.
 	var immediate := unload(transports, target, requested_ids)
 	if immediate != "landing_too_far":
@@ -515,7 +528,9 @@ func canonical_state() -> Array:
 
 func _landing_position(transport: Dictionary, passenger: Dictionary, target: Vector2, reserved: Array) -> Variant:
 	var candidates: Array[Vector2] = [Coordinates.clamp_world(target, world.map_size)]
-	for ring in range(1, 10):
+	if Garrison.is_tower(transport):
+		candidates = BuildingApproach.perimeter_candidates(passenger, transport, world.map_size)
+	for ring in range(1, 1 if Garrison.is_tower(transport) else 10):
 		var distance := float(ring) * 0.5
 		for offset in [Vector2(distance, 0), Vector2(0, distance), Vector2(-distance, 0), Vector2(0, -distance), Vector2(distance, distance), Vector2(-distance, distance), Vector2(-distance, -distance), Vector2(distance, -distance)]:
 			candidates.append(Coordinates.clamp_world(target + offset, world.map_size))
@@ -560,6 +575,7 @@ func _restore_passenger(transport: Dictionary, passenger: Dictionary, position: 
 	ids.erase(passenger_id)
 	cargo["passenger_ids"] = ids
 	cargo["count"] = ids.size()
+	world.notify_entity_changed(transport)
 	embarked_units.erase(passenger_id)
 	world.set_entity_field(passenger, "transported_by_id", -1)
 	world.set_entity_field(passenger, "cargo_state", "deployed")
@@ -589,3 +605,13 @@ func _restore_passenger(transport: Dictionary, passenger: Dictionary, position: 
 
 func _remove_active_unit(passenger_id: int) -> void:
 	world.detach_unit_for_transport(passenger_id)
+
+
+func evacuate_garrison(tower: Dictionary) -> void:
+	if not Garrison.is_tower(tower):
+		return
+	for id in tower["components"]["cargo"].get("passenger_ids", []).duplicate():
+		unload([tower], Vector2(tower["pos"]), [int(id)])
+	# A destroyed building must not retain invisible, orphaned occupants.
+	if passenger_count(tower) > 0:
+		destroy_cargo(tower)

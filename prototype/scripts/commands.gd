@@ -64,6 +64,21 @@ class MoveCommand extends Command:
 		return "move"
 
 
+class FarmReserveCommand extends Command:
+	func _init(command_tick: int, building_ids: Array[int], amount: int) -> void:
+		super(command_tick, building_ids, {"amount": amount})
+
+
+	func command_type() -> String:
+		return "farm_reserve"
+
+class TeamIntentCommand extends Command:
+	func _init(command_tick: int, recipient: int, intent: String, position: Vector2, resource: int = 0, amount: int = 0) -> void:
+		super(command_tick,[],{"target_team":recipient,"intent":intent,"target":position,"resource_type_id":resource,"amount":amount})
+	func command_type() -> String:
+		return "team_intent"
+
+
 class SetRallyPointCommand extends MoveCommand:
 	func command_type() -> String:
 		return "set_rally_point"

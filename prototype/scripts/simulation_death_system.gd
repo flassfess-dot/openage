@@ -132,6 +132,7 @@ func begin_building_destruction(building: Dictionary, source_context: Dictionary
 	EntityComponents.sync_dynamic(building)
 	world.refresh_building_connectivity()
 	world.sync_building_navigation_occupancy(building)
+	world.transport_system.evacuate_garrison(building)
 
 
 func advance_death(unit: Dictionary, delta: float) -> void:

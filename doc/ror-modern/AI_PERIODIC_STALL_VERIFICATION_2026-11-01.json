@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "scope": "Periodic simulation stall repair and actual R16 Release qualification. Separate from unfinished complete13stage/70task competitive-AI acceptance.",
+  "source_fingerprint": "27423f2fc0b0b8a8f437a0fd1c3df481820e43e2c3c985e3b407f2730383073e",
+  "artifacts": {
+    "Rise of Rome Prototype.exe": "f6b5e6bf0c1031cff1c17a924cac26f0ddb1e07ff5669bc3db1e99273152322c",
+    "Rise of Rome Prototype.pck": "d8f0a5fc0e419bd62cd31a74ba3ee18537e4115b8e6d4118c9f7103e64b8278d",
+    "bin/ror_pathfinding.windows.template_release.x86_64.dll": "25ed2c4733592549229d81e7fd03ba92c02cba43256eaebd343c43d77abb1773"
+  },
+  "original_user_save_sha256": "d434eed3035be128147a31e2bab26728532591953ddade422390654f068ce205",
+  "private_save_in_repository": false,
+  "targeted_game_tests": 42,
+  "targeted_game_tests_passed": 42,
+  "python_infrastructure_tests_passed": 42,
+  "actual_release_startup_scenarios": 4,
+  "actual_release_startup_passed": 4,
+  "cache_validation": {
+    "errors": 0,
+    "warnings": 181,
+    "issues_identical_to_previous_validation": true
+  },
+  "static_current_r16": {
+    "seconds": 60.0,
+    "resolution": [
+      2560,
+      1080
+    ],
+    "speed": 1.5,
+    "target_fps": 60,
+    "advancing_ticks": 1802,
+    "saved_tick": 7454,
+    "steady_frame_us": {
+      "count": 2691,
+      "max": 29493,
+      "mean": 16721.431066518,
+      "over_100ms": 0,
+      "over_200ms": 0,
+      "over_50ms": 0,
+      "p50": 16667,
+      "p95": 19750,
+      "p99": 22721
+    },
+    "simulation_pauses": {
+      "tick_gaps_us": {
+        "count": 1294,
+        "max": 117539,
+        "mean": 34761.0069551777,
+        "over_100ms": 11,
+        "over_200ms": 0,
+        "over_50ms": 69,
+        "p50": 33331,
+        "p95": 50043,
+        "p99": 99981
+      },
+      "total_wait_us": 2608426,
+      "waits_us": {
+        "count": 67,
+        "max": 66724,
+        "mean": 38931.7313432836,
+        "over_100ms": 0,
+        "over_200ms": 0,
+        "over_50ms": 19,
+        "p50": 33404,
+        "p95": 50052,
+        "p99": 66724
+      }
+    },
+    "peak_sampled_private_bytes_main_and_helper": 7696850944,
+    "report_sha256": "ed7ac9ed0780a3dc8c10ec714b885fdef040dfabb20fb80f794c67b2728ee358"
+  },
+  "camera_previous_r14_matched": {
+    "seconds": 120.0,
+    "resolution": [
+      2560,
+      1080
+    ],
+    "speed": 1.5,
+    "target_fps": 60,
+    "advancing_ticks": 3593,
+    "saved_tick": 7453,
+    "steady_frame_us": {
+      "count": 5500,
+      "max": 211792,
+      "mean": 19089.7667272727,
+      "over_100ms": 21,
+      "over_200ms": 1,
+      "over_50ms": 73,
+      "p50": 17083,
+      "p95": 27030,
+      "p99": 57347
+    },
+    "simulation_pauses": {
+      "tick_gaps_us": {
+        "count": 2759,
+        "max": 224955,
+        "mean": 38049.4918448713,
+        "over_100ms": 110,
+        "over_200ms": 4,
+        "over_50ms": 295,
+        "p50": 33805,
+        "p95": 88438,
+        "p99": 137437
+      },
+      "total_wait_us": 7622024,
+      "waits_us": {
+        "count": 158,
+        "max": 126975,
+        "mean": 48240.6582278481,
+        "over_100ms": 1,
+        "over_200ms": 0,
+        "over_50ms": 63,
+        "p50": 49040,
+        "p95": 67032,
+        "p99": 79868
+      }
+    },
+    "peak_sampled_private_bytes_main_and_helper": 8314372096,
+    "report_sha256": "ac83540ac6547e2291ca88b9d24425ebda2c990294be6718f4fcadd4840f7de6"
+  },
+  "camera_current_r16": {
+    "seconds": 120.0,
+    "resolution": [
+      2560,
+      1080
+    ],
+    "speed": 1.5,
+    "target_fps": 60,
+    "advancing_ticks": 3601,
+    "saved_tick": 7453,
+    "steady_frame_us": {
+      "count": 5201,
+      "max": 106440,
+      "mean": 20190.1022880215,
+      "over_100ms": 1,
+      "over_200ms": 0,
+      "over_50ms": 50,
+      "p50": 18804,
+      "p95": 29393,
+      "p99": 47736
+    },
+    "simulation_pauses": {
+      "tick_gaps_us": {
+        "count": 2841,
+        "max": 191027,
+        "mean": 36947.7571277719,
+        "over_100ms": 92,
+        "over_200ms": 0,
+        "over_50ms": 282,
+        "p50": 33344,
+        "p95": 83188,
+        "p99": 117975
+      },
+      "total_wait_us": 7501205,
+      "waits_us": {
+        "count": 158,
+        "max": 116945,
+        "mean": 47475.9810126582,
+        "over_100ms": 2,
+        "over_200ms": 0,
+        "over_50ms": 50,
+        "p50": 47247,
+        "p95": 63735,
+        "p99": 111016
+      }
+    },
+    "peak_sampled_private_bytes_main_and_helper": 8101355520,
+    "report_sha256": "e786bfed76b764ac80302478f9a1195e1346d363eede3ec2167e4d30382ac11e"
+  },
+  "camera_matching_scope": "Sequential actual Release, same untouched save, ordinary simulation owner, AI and autosave enabled, default60FPS/2560x1080/speed1.5, same wrapper including OS metrics, no stage probe or concurrent tests. Warmup15sec excluded from steady summaries.",
+  "primary_periodic_stall_repaired_in_measured_save": true,
+  "all_frame_spikes_resolved": false,
+  "human_strength": "HUMAN_UNMEASURED",
+  "full_current_513_suite": "pending",
+  "all13stages": "in_progress",
+  "rejected_pacing_experiment": {
+    "functional_tests_passed": 7,
+    "accepted": false,
+    "private_only": true,
+    "reason": "Actual camera frames worsened; shipping R16 keeps deliberate recovery pacing."
+  }
+}

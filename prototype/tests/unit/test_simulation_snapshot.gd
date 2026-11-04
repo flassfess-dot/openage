@@ -74,43 +74,75 @@ func test_builder_presentation_projection() -> void:
 func test_navigation_cache_tracks_local_changes() -> void:
 	var world = SimulationWorld.new(Vector2i(20, 20))
 	world.navigation_grid.configure_terrain(func(_cell): return "grass")
-	world.add_unit(1, "clubman", Vector2(3.5, 3.5), false)
+	var observer: Dictionary = world.add_unit(1, "clubman", Vector2(3.5, 3.5), false)
+	observer["components"]["vision"] = {"enabled":true,"range":1.0}
 	var fog = world.get_fog_of_war()
 	for y in range(2, 5):
 		for x in range(2, 5):
 			fog.reveal_explored_cell(1, Vector2i(x, y))
+	world.update_fog_of_war()
 	var probe = PerformanceProbe.new()
 	var options := {"include_build_sites": false, "include_fog_cells": false, "performance_probe": probe}
 	var first: Dictionary = SimulationSnapshot.with_queries(world, 1, 1, options)["navigation"]
 	assert_true(Vector2(4.5, 3.5) in first["frontier"]["land"], "initial navigation marks the explored boundary")
 	SimulationSnapshot.with_queries(world, 2, 1, options)
 	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "unchanged AI decision reuses its navigation cache")
-	fog.reveal_explored_cell(1, Vector2i(5, 3))
+	# Discovery and later obstruction updates require current legal vision.
+	world.set_entity_field(observer, "pos", Vector2(4.5, 3.5))
+	world.update_fog_of_war()
 	world.get_known_resources(1)
 	var expanded: Dictionary = SimulationSnapshot.with_queries(world, 3, 1, options)["navigation"]
 	assert_true(Vector2(5.5, 3.5) in expanded["land"], "navigation receives discoveries after resource knowledge consumes its own queue")
 	assert_true(Vector2(5.5, 3.5) in expanded["frontier"]["land"], "exploration refreshes the new fog boundary")
 	assert_true(navigation_row_major(expanded["land"]) and navigation_row_major(expanded["frontier"]["land"]), "incremental navigation keeps the original deterministic row-major order")
-	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "exploration updates only dirty navigation cells")
+	var expansion_rebuilds: int = int(probe.counters.get("ai.navigation.full_rebuilds", 0))
+	# Unknown terrain is optimistic for both domains. Discovering grass can
+	# change water connectivity and legitimately rebuild its legal topology.
+	assert_true(expansion_rebuilds <= 2, "one terrain discovery costs at most one legal topology rebuild")
+	# A radius-one source exposes a column of three cells here. Bound the
+	# actual discovery and its immediate frontier, rather than assuming one cell.
+	var local_discovery: Dictionary = {}
+	for point in expanded["land"]:
+		if point in first["land"]: continue
+		var cell := Vector2i(Vector2(point))
+		for offset in [Vector2i.ZERO, Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var neighbor: Vector2i = cell + offset
+			if neighbor.x >= 0 and neighbor.y >= 0 and neighbor.x < 20 and neighbor.y < 20:
+				local_discovery[neighbor] = true
+	assert_equal(expanded["land"].size() - first["land"].size(), 3, "legal observer movement discovers three cells")
+	var discovery_dirty := int(probe.counters.get("ai.navigation.dirty_cells", 0))
+	assert_true(discovery_dirty <= local_discovery.size(), "discovery refresh stays inside new cells and their immediate frontier")
+	var local_updates := discovery_dirty
 	world.navigation_grid.occupy([Vector2i(5, 3)], "static_obstruction", 900)
 	var blocked: Dictionary = SimulationSnapshot.with_queries(world, 4, 1, options)["navigation"]
+	assert_true(int(probe.counters.get("ai.navigation.dirty_cells", 0)) - local_updates <= 1, "local obstruction refresh is one cell")
+	local_updates = int(probe.counters.get("ai.navigation.dirty_cells", 0))
 	assert_true(Vector2(5.5, 3.5) not in blocked["land"], "local obstruction removes its navigation point")
-	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "local obstruction does not rebuild the complete map")
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), expansion_rebuilds, "local obstruction does not rebuild the complete map")
 	world.navigation_grid.release_occupant([Vector2i(5, 3)], "static_obstruction", 900)
 	var reopened: Dictionary = SimulationSnapshot.with_queries(world, 5, 1, options)["navigation"]
+	assert_true(int(probe.counters.get("ai.navigation.dirty_cells", 0)) - local_updates <= 1, "released obstruction refresh is one cell")
+	local_updates = int(probe.counters.get("ai.navigation.dirty_cells", 0))
 	assert_true(Vector2(5.5, 3.5) in reopened["land"], "released obstruction restores only its cell")
 	world.navigation_grid.set_terrain_id(Vector2i(4, 4), 10)
 	var forest_floor: Dictionary = SimulationSnapshot.with_queries(world, 6, 1, options)["navigation"]
+	assert_true(int(probe.counters.get("ai.navigation.dirty_cells", 0)) - local_updates <= 1, "terrain detail refresh is one cell")
+	local_updates = int(probe.counters.get("ai.navigation.dirty_cells", 0))
 	assert_true(Vector2(4.5, 4.5) in forest_floor["land"], "forest floor remains locally walkable")
-	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "forest terrain detail does not invalidate whole-map connectivity")
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), expansion_rebuilds, "forest terrain detail does not invalidate whole-map connectivity")
 	var before_distant_edit := int(world.navigation_grid.revision)
+	var local_observer: Dictionary = world.add_unit(1, "clubman", Vector2(2.5, 2.5), false)
+	local_observer["components"]["vision"] = {"enabled":true,"range":0.1}
+	world.update_fog_of_war()
 	world.navigation_grid.occupy([Vector2i(2, 2), Vector2i(18, 18)], "static_obstruction", 901)
 	assert_equal(world.navigation_grid.changed_cells_since(before_distant_edit).size(), 2, "distant edits retain exact changed cells instead of one map-wide rectangle")
 	var distant_edit: Dictionary = SimulationSnapshot.with_queries(world, 7, 1, options)["navigation"]
+	assert_true(int(probe.counters.get("ai.navigation.dirty_cells", 0)) - local_updates <= 1, "hidden distant edit does not expand the one visible-cell refresh")
+	local_updates = int(probe.counters.get("ai.navigation.dirty_cells", 0))
 	assert_true(Vector2(2.5, 2.5) not in distant_edit["land"], "exact delta updates the known obstruction")
 	assert_true(navigation_row_major(distant_edit["land"]), "removing a distant cell preserves navigation order")
-	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), 1, "distant local edits do not trigger a full rebuild")
-	assert_true(int(probe.counters.get("ai.navigation.dirty_cells", 0)) <= 10, "local changes touch only the revealed cell, boundary, and obstruction")
+	assert_equal(int(probe.counters.get("ai.navigation.full_rebuilds", 0)), expansion_rebuilds, "distant local edits do not trigger a full rebuild")
+	assert_true(local_updates <= local_discovery.size() + 4, "all updates stay within the real discovery frontier plus four single-cell changes")
 	world.reset_game(false)
 	assert_true(world.ai_navigation_knowledge.entries.is_empty(), "match reset discards derived navigation knowledge")
 
@@ -121,8 +153,11 @@ func test_navigation_cache_reachable_domain_switch() -> void:
 	var ship: Dictionary = world.add_unit(1, "clubman", Vector2(1.5, 3.5), false)
 	world.set_entity_field(ship, "movement_domain", "water")
 	var fog = world.get_fog_of_war()
-	for x in [1, 2, 8, 9]:
-		fog.reveal_explored_cell(1, Vector2i(x, 3))
+	# The separating land must be known. Four discovered water cells alone
+	# cannot establish a hidden barrier in an optimistic unknown map.
+	for y in range(8):
+		for x in range(12):
+			fog.reveal_explored_cell(1, Vector2i(x, y))
 	var probe = PerformanceProbe.new()
 	var options := {"include_build_sites": false, "include_fog_cells": false, "performance_probe": probe}
 	var first: Dictionary = SimulationSnapshot.with_queries(world, 1, 1, options)["navigation"]

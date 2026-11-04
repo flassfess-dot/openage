@@ -41,7 +41,7 @@ func foundation_preserves_structure_gap(team: int, kind: String, position: Vecto
 func known_foundation(team: int, kind: String, position: Vector2) -> bool:
 	# Advisory AI searches must not treat unknown parts of a footprint as empty.
 	# Check the observer's fog, never the hidden authoritative obstruction map.
-	var footprint := Footprint.building(world.unit_stats(kind), position)
+	var footprint := Footprint.building(world.building_placement_stats(kind), position)
 	for cell in footprint.get("occupied_cells", []):
 		if world.visibility_system.state_at_world(team, Vector2(cell) + Vector2(0.5, 0.5)) == FogOfWar.UNKNOWN:
 			return false
@@ -63,6 +63,11 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 	var footprint := Footprint.building(world.building_placement_stats(kind, int(placement_options.get("gate_axis", 0))), position)
 	var replaced_walls: Dictionary = world.gate_system.replacement_wall_ids(team, position, int(placement_options.get("gate_axis", 0))) if kind == "gate" else {}
 	var candidate_center := WallPlacement.masonry_center({"kind":kind,"pos":position,"footprint":footprint,"gate_axis":int(placement_options.get("gate_axis",0))})
+	var nearby_buildings: Array = world.get_buildings()
+	var nearby_units: Array = world.get_units()
+	if world.has_method("query_combat_entities_near") and not world.spatial_sync_system.roster_dirty:
+		nearby_buildings = world.spatial_index.query_circle(position, Vector2(footprint["half_size"]).length() + 1.0, "obstacle")
+		nearby_units = world.query_units_near(position, Vector2(footprint["half_size"]).length() + 1.0)
 	var placement: Dictionary = world.data_repository.runtime_metadata(kind).get("placement", {})
 	var placement_restriction := int(placement.get("terrain_restriction_id", -1))
 	var placement_domain := String(placement.get("domain", "land"))
@@ -72,11 +77,11 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 	if not foundation_has_required_domain_access(footprint, placement):
 		world.last_build_failure = "missing_domain_access"
 		return false
-	var has_native_structure_audit: bool = structure_audit_kernel != null and not structure_audit.is_empty()
+	var has_native_structure_audit: bool = structure_audit_kernel != null and not structure_audit.is_empty() and kind not in ["gate", "tower"]
 	if has_native_structure_audit and structure_audit_kernel.foundation_intersects_structures(footprint,candidate_center,structure_audit,replaced_walls):
 		world.last_build_failure = "blocked_or_sloped"
 		return false
-	for building_value in ([] if has_native_structure_audit else world.get_buildings()):
+	for building_value in ([] if has_native_structure_audit else nearby_buildings):
 		var building: Dictionary = building_value
 		if float(building.get("hp", 0.0)) <= 0.0:
 			continue
@@ -84,7 +89,10 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 			continue
 		var existing_half_size := Vector2(building.get("footprint", {}).get("obstruction_half_size", building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))))
 		var candidate_half_size := Vector2(footprint.get("obstruction_half_size", footprint.get("half_size", Vector2(0.5, 0.5))))
-		var delta := (WallPlacement.masonry_center(building) - candidate_center).abs()
+		var gate_tower_junction := (kind == "gate" and String(building.get("kind", "")) == "tower") or (kind == "tower" and String(building.get("kind", "")) == "gate")
+		# Towers use their full source footprint; a gate's half-tile artwork
+		# offset must not forbid a tangent fortification junction.
+		var delta := (Vector2(building["pos"]) - position).abs() if gate_tower_junction else (WallPlacement.masonry_center(building) - candidate_center).abs()
 		if delta.x < existing_half_size.x + candidate_half_size.x - 0.001 and delta.y < existing_half_size.y + candidate_half_size.y - 0.001:
 			world.last_build_failure = "blocked_or_sloped"
 			return false
@@ -104,7 +112,7 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 			var cell: Vector2i = cell_value
 			var cell_bounds := Rect2(Vector2(cell), Vector2.ONE)
 			occupied_bounds = cell_bounds if not occupied_bounds.has_area() else occupied_bounds.merge(cell_bounds)
-		for unit_value in world.get_units():
+		for unit_value in nearby_units:
 			var unit: Dictionary = unit_value
 			if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)):
 				continue
@@ -130,7 +138,7 @@ func can_place_foundation(team: int, kind: String, position: Vector2, mobile_occ
 		world.last_build_failure = "unexplored"
 		return false
 	var new_radius: float = Vector2(footprint.get("half_size", Vector2.ONE)).length()
-	for building_value in world.get_buildings():
+	for building_value in nearby_buildings:
 		var building: Dictionary = building_value
 		if int(building.get("team", 0)) == team or float(building.get("hp", 0.0)) <= 0.0:
 			continue
@@ -231,7 +239,7 @@ func foundation_has_required_domain_access(footprint: Dictionary, placement: Dic
 
 
 func worker_can_reach_foundation(worker: Dictionary, kind: String, position: Vector2) -> bool:
-	var footprint := Footprint.building(world.unit_stats(kind), position)
+	var footprint := Footprint.building(world.building_placement_stats(kind), position)
 	var occupied: Array = footprint.get("occupied_cells", [])
 	var preview := {"pos": position, "footprint": footprint}
 	var domain := String(worker.get("movement_domain", "land"))
@@ -269,6 +277,11 @@ func reachable_builder_ids(building: Dictionary) -> Array[int]:
 
 
 func cached_map_supports_foundation(kind: String, position: Vector2) -> bool:
+	# Gate legality depends on which whole walls this observer owns and can
+	# replace. A team-independent occupancy rejection would hide valid gates.
+	# The caller still checks known terrain, the full dynamic placement rules
+	# and a reachable builder before publishing any candidate.
+	if kind == "gate": return true
 	if site_map_source != world.navigation_grid or site_map_revision != int(world.navigation_grid.revision):
 		site_map_cache.clear()
 		site_footprint_profiles.clear()

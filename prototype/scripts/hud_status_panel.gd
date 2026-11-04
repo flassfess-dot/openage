@@ -8,6 +8,7 @@ const INK := Color("f4e6c7")
 
 signal cancel_requested(building_id: int, queue_index: int)
 signal building_selected(building_id: int)
+signal ungarrison_requested(building_id: int, passenger_id: int)
 
 var model: Dictionary = {}
 var layout: Dictionary = {}
@@ -38,6 +39,9 @@ var global_more: Button
 var global_popup: PopupMenu
 var global_entries: Array = []
 var visible_global_count := 0
+var garrison_title: Label
+var garrison_hint: Label
+var garrison_buttons: Array[Button] = []
 
 
 func _init() -> void:
@@ -88,6 +92,14 @@ func _init() -> void:
 	global_popup.add_theme_font_size_override("font_size", 14)
 	global_popup.id_pressed.connect(_select_global)
 	add_child(global_popup)
+	garrison_title = make_label(14, true)
+	garrison_hint = make_label(12, true)
+	garrison_title.tooltip_text = "Пешие стрелки усиливают залп башни. Нажмите портрет, чтобы высадить бойца."
+	for index in range(5):
+		var button := make_button(32)
+		button.pressed.connect(_ungarrison.bind(index))
+		garrison_buttons.append(button)
+		button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
 
 func configure(registry, interface_skin, requested_style: int) -> void:
@@ -108,7 +120,9 @@ func configure(registry, interface_skin, requested_style: int) -> void:
 		for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
 			production_frame.set_texture_margin(side, 4.0)
 	cancel_button.icon = skin.texture("hud_glyph_50721", 10)
-	for button in pending_buttons + global_buttons + [cancel_button, previous_button, next_button, global_more]:
+	for label in [garrison_title, garrison_hint]:
+		label.add_theme_color_override("font_color", skin.text_color(style_index))
+	for button in pending_buttons + global_buttons + garrison_buttons + [cancel_button, previous_button, next_button, global_more]:
 		style_button(button)
 	queue_redraw()
 
@@ -133,6 +147,8 @@ func set_view_model(value: Dictionary) -> void:
 	owner_label.text = String(leader.get("civilization_name", ""))
 	if category == "resource":
 		owner_label.text = "Осталось: %d" % int(leader.get("resource_amount", 0))
+	elif int(leader.get("farm_reserve_count", -1)) >= 0:
+		owner_label.text = "Запас ферм: %d" % int(leader["farm_reserve_count"])
 	elif bool(leader.get("show_population", false)):
 		owner_label.text = "%d/%d" % [int(leader.get("population_current", 0)), int(leader.get("population_cap", 0))]
 	elif int(leader.get("carried_amount", 0)) > 0:
@@ -210,6 +226,40 @@ func layout_contents() -> void:
 	layout_pending()
 	layout_global()
 	job_icon.visible = production_visible and not model.get("queue", []).is_empty() and _show_job_icon()
+	layout_garrison()
+
+
+func layout_garrison() -> void:
+	var garrison: Dictionary = model.get("garrison", {})
+	var show_garrison := not garrison.is_empty() and not layout.is_empty()
+	garrison_title.visible = show_garrison
+	garrison_hint.visible = show_garrison
+	for button in garrison_buttons:
+		button.visible = show_garrison
+	if not show_garrison:
+		return
+	var area: Rect2 = layout["production"]
+	var occupants: Array = garrison.get("units", [])
+	garrison_title.text = "Гарнизон %d/%d" % [occupants.size(), int(garrison.get("capacity", 5))]
+	garrison_hint.text = "Залп: %d · U — высадить всех" % (1 + int(garrison.get("extra_arrows", 0)))
+	garrison_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	place(garrison_title, Rect2(area.position + Vector2(8, 6), Vector2(area.size.x - 16, 22)))
+	place(garrison_hint, Rect2(area.position + Vector2(8, 82), Vector2(area.size.x - 16, 32)))
+	var side := minf(46.0, (area.size.x - 32.0) / 5.0)
+	for index in range(garrison_buttons.size()):
+		var button := garrison_buttons[index]
+		place(button, Rect2(area.position + Vector2(8 + index * (side + 4), 36), Vector2(side, side)))
+		var occupied := index < occupants.size()
+		button.disabled = not occupied or bool(model.get("read_only", false))
+		button.icon = icon_for(occupants[index]) if occupied else null
+		button.text = "" if occupied else "·"
+		button.tooltip_text = "%s · %d/%d ОЗ\nВысадить бойца" % [String(occupants[index].get("name", "")), roundi(float(occupants[index].get("hp", 0))), roundi(float(occupants[index].get("max_hp", 0)))] if occupied else "Свободное место"
+
+
+func _ungarrison(index: int) -> void:
+	var occupants: Array = model.get("garrison", {}).get("units", [])
+	if index < occupants.size() and not bool(model.get("read_only", false)):
+		ungarrison_requested.emit(context_id, int(occupants[index]["id"]))
 
 
 func layout_pending() -> void:
@@ -294,7 +344,8 @@ func _draw() -> void:
 			draw_rect(Rect2(health.position, Vector2(health.size.x * ratio, 4)), Color("58b340") if ratio > 0.5 else Color("d7a443"))
 	if production_visible:
 		var production: Rect2 = layout["production"]
-		draw_recess(production)
+		if model.get("garrison", {}).is_empty():
+			draw_recess(production)
 		var orders: Array = model.get("queue", [])
 		if not orders.is_empty():
 			var active: Dictionary = orders[0]

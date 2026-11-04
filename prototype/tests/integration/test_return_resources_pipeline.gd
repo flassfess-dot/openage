@@ -13,6 +13,7 @@ func _initialize() -> void:
 	catalog.load_generated_data()
 	test_explicit_return_and_resource_types(catalog)
 	test_automatic_return_skips_unreachable_depot(catalog)
+	test_automatic_return_reservation_lifecycle(catalog)
 	if failures.is_empty():
 		print("I8-006 return-resources integration tests passed")
 		quit(0)
@@ -106,9 +107,65 @@ func test_automatic_return_skips_unreachable_depot(catalog) -> void:
 	controller.advance_frame(0.05, 1, 2)
 	assert_true(bool(controller.get_command_result(command.sequence_id).get("accepted", false)), "automatic return accepts a reachable alternative depot")
 	assert_equal(worker["dropoff_id"], int(reachable["id"]), "a closer depot across an impassable river is skipped")
+	assert_equal(worker["target_building_id"], int(reachable["id"]), "automatic delivery retains the owner needed to release its approach")
 	assert_true(world.building_approach_slots.get(int(reachable["id"]), {}).has(int(worker["id"])), "the selected depot approach remains reserved")
 	for tick in range(1000):
 		controller.advance_frame(0.05, 1, 2)
 		if float(worker["carried_amount"]) <= 0.0: break
 	assert_equal(world.get_wood(), 7, "the carrier actually deposits at the alternative depot")
+	assert_true(not world.building_approach_slots.get(int(reachable["id"]), {}).has(int(worker["id"])), "completed automatic delivery releases its approach for another carrier")
 	world.task_coordinator.shutdown()
+
+
+func test_automatic_return_reservation_lifecycle(catalog) -> void:
+	var world = SimulationWorld.new(Vector2i(24,24))
+	world.set_gamespec(catalog.gamespec_data)
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
+	world.navigation_grid.configure_terrain(func(_cell): return "grass")
+	var depot: Dictionary = world.add_building(700,"town_center",Vector2(12.5,12.5),1)
+	var worker: Dictionary = world.add_unit(1,"villager",Vector2(6.5,6.5),false)
+	world.add_unit(2,"clubman",Vector2(22.5,22.5),false)["stance"] = "passive"
+	world.worker_role_system.apply(worker,world.worker_role_system.profile_for_resource_type(worker,1),false)
+	worker["carried_amount"] = 7.0
+	worker["carried_resource_type_id"] = 1
+	world.set_resource_amount(1,1,0)
+	world.update_fog_of_war()
+	var controller := GameController.new(world)
+	var command = Commands.ReturnResourcesCommand.new(1,[int(worker["id"])])
+	controller.enqueue_command(command,true,1)
+	controller.advance_frame(0.05,1,2)
+	assert_true(bool(controller.get_command_result(command.sequence_id).get("accepted",false)),"automatic delivery starts before an interruption")
+	var move = Commands.MoveCommand.new(controller.tick_index+1,[int(worker["id"])],Vector2(6.5,8.5))
+	controller.enqueue_command(move,true,1)
+	controller.advance_frame(0.05,1,2)
+	assert_true(bool(controller.get_command_result(move.sequence_id).get("accepted",false)),"ordinary move can interrupt a loaded return")
+	assert_true(not world.building_approach_slots.get(int(depot["id"]),{}).has(int(worker["id"])),"interrupting automatic delivery releases the old depot berth")
+	assert_equal(float(worker["carried_amount"]),7.0,"interrupting delivery preserves the carried cargo")
+	world.movement_system.stop_unit_motion(worker,false)
+	world.set_entity_field(worker,"task","idle")
+	world.set_entity_field(worker,"target_building_id",-1)
+	world.set_entity_field(worker,"dropoff_id",-1)
+	world.set_entity_field(worker,"building_approach_slot",null)
+	# Reproduce an older interrupted return: its owner field was lost, but the
+	# berth remains booked. Other carriers reserve every other legal approach.
+	var slots: Array[Vector2] = world.available_approach_slots(worker,world.building_perimeter_candidates(worker,depot),{},true)
+	assert_true(not slots.is_empty(),"orphan-recovery fixture has an accessible berth")
+	if slots.is_empty():
+		world.shutdown_derived_state()
+		return
+	var reservations: Dictionary = {int(worker["id"]):slots[0]}
+	for index in range(1,slots.size()): reservations[10000+index] = slots[index]
+	world.building_approach_slots[int(depot["id"])] = reservations
+	var other_reservations := reservations.size()-1
+	var retry = Commands.ReturnResourcesCommand.new(controller.tick_index+1,[int(worker["id"])])
+	controller.enqueue_command(retry,true,1)
+	controller.advance_frame(0.05,1,2)
+	assert_true(bool(controller.get_command_result(retry.sequence_id).get("accepted",false)),"a carrier can recover its own orphaned berth without stealing another carrier's slot")
+	for tick in range(600):
+		controller.advance_frame(0.05,1,2)
+		if float(worker["carried_amount"])<=0.0: break
+	assert_equal(world.get_wood(),7,"recovered return deposits the exact cargo once")
+	assert_equal(world.building_approach_slots.get(int(depot["id"]),{}).size(),other_reservations,"recovered delivery preserves every other carrier's reservation")
+	assert_true(not world.building_approach_slots.get(int(depot["id"]),{}).has(int(worker["id"])),"recovered delivery releases its own berth on completion")
+	world.shutdown_derived_state()

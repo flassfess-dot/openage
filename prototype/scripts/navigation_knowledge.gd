@@ -93,7 +93,11 @@ func _refresh(world, entry: Dictionary, indices: Array, initial: bool, team: int
 		var geometry_changed: bool = grid.elevation(cell) != source.elevation(cell) or grid.is_slope(cell) != source.is_slope(cell)
 		if terrain_changed or geometry_changed or grid.occupied_cells.get(cell, []) != occupants:
 			var previous_access: Array[bool] = []
+			var previous_land_access := false
+			var previous_water_access := false
 			if terrain_changed:
+				previous_land_access = grid.surface_accessible(cell, "land", -1)
+				previous_water_access = grid.surface_accessible(cell, "water", -1)
 				for configuration in surface_configurations:
 					previous_access.append(grid.surface_accessible(cell, String(configuration["domain"]), int(configuration["restriction"])))
 			grid.learned[index] = 1
@@ -102,7 +106,10 @@ func _refresh(world, entry: Dictionary, indices: Array, initial: bool, team: int
 			grid.elevation_cells[cell] = source.elevation(cell)
 			grid.slope_cells[cell] = source.is_slope(cell)
 			if terrain_changed:
-				surface_changed = true
+				# Terrain IDs may change only restricted configurations. Keep the
+				# unrestricted publication topology stable when land/water access
+				# is unchanged; the exact grid journal still invalidates path masks.
+				surface_changed = surface_changed or previous_land_access != grid.surface_accessible(cell, "land", -1) or previous_water_access != grid.surface_accessible(cell, "water", -1)
 				for configuration_index in range(surface_configurations.size()):
 					var configuration: Dictionary = surface_configurations[configuration_index]
 					if grid.surface_component_cache.has(configuration["key"]) and previous_access[configuration_index] != grid.surface_accessible(cell, String(configuration["domain"]), int(configuration["restriction"])):

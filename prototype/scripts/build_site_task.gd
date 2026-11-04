@@ -57,6 +57,7 @@ var technology_system := Technology.new()
 var visibility_system := Visibility.new()
 var tick_pipeline := ProbeOwner.new()
 var building_placement_system
+var gate_system
 var units: Array = []
 var buildings: Array = []
 var mobile_cells: Dictionary = {}
@@ -112,7 +113,7 @@ static func capture(world, team: int, kinds: Array) -> Dictionary:
 		var version := int(world.entity_changes.revision_for(id, 1 | 2 | 8 | 16 | 32 | 128))
 		var previous: Dictionary = cache["buildings"].get(id, {})
 		if int(previous.get("version", -1)) != version:
-			var row := {"id": id, "team": building.get("team", 0), "hp": building.get("hp", 0.0), "pos": building["pos"], "footprint": Data.copy(building.get("footprint", {})), "occupied_cells": Data.copy(building.get("occupied_cells", [])), "footprint_radius": building.get("footprint_radius", 1.0)}
+			var row := {"id": id, "team": building.get("team", 0), "hp": building.get("hp", 0.0), "kind": building.get("kind", ""), "state": building.get("state", "complete"), "pos": building["pos"], "footprint": Data.copy(building.get("footprint", {})), "occupied_cells": Data.copy(building.get("occupied_cells", [])), "footprint_radius": building.get("footprint_radius", 1.0)}
 			if not Data.freeze_detached(row, 0, false): return {}
 			previous = {"version": version, "row": row}
 			_retain_actor(cache, "buildings", id, previous)
@@ -126,7 +127,14 @@ static func capture(world, team: int, kinds: Array) -> Dictionary:
 		publication.make_read_only()
 		Data._retain_immutable(publication)
 	var planner = world.movement_system.knowledge.planner(world, team)
-	return {"navigation": capture_build_topology(world, cache, planner), "native_enabled": planner.native_enabled, "profiles": profiles, "configured": world.data_repository.is_configured(), "researched": researched, "workers": workers, "buildings": structures, "mobile_cells": mobile_cells, "fog": world.get_fog_of_war().states_by_player[team].duplicate()}
+	var wall_occupants: Dictionary={}
+	if "gate" in kinds:
+		for building in structures:
+			if int(building.get("team",0))!=team or String(building.get("kind",""))!="wall" or String(building.get("state",""))!="complete": continue
+			for cell in building.get("occupied_cells",[]):
+				wall_occupants[cell]=planner.grid.occupants(cell)
+		if not Data.freeze_detached(wall_occupants,0,false): return {}
+	return {"navigation": capture_build_topology(world, cache, planner), "gate_wall_occupants":wall_occupants, "native_enabled": planner.native_enabled, "profiles": profiles, "configured": world.data_repository.is_configured(), "researched": researched, "workers": workers, "buildings": structures, "mobile_cells": mobile_cells, "fog": world.get_fog_of_war().states_by_player[team].duplicate()}
 
 
 static func calculate_queries(base: Dictionary, queries: Array, coordinator, tick: int, source_planner = null, probe = null) -> Array:
@@ -253,8 +261,16 @@ static func run(input: Dictionary, private_planner = null, static_audits = null)
 	task.visibility_system.states = base["fog"]
 	task.units = base["workers"].duplicate()
 	task.buildings = base["buildings"]
+	# Preserve exact observed occupants only where an owned complete wall can
+	# legally be replaced. All other detached blockers remain opaque.
+	if String(input["kind"])=="gate":
+		for cell in base.get("gate_wall_occupants",{}):
+			if task.navigation_grid.occupied_cells.has(cell): task.navigation_grid.occupied_cells[cell]=base["gate_wall_occupants"][cell]
 	task.mobile_cells = base["mobile_cells"]
 	task.building_placement_system = Placement.new(task)
+	# The shared placement validator also checks legal wall replacement for
+	# gates. Bind it to the detached observer world, never the live simulation.
+	task.gate_system = GateSystem.new(task)
 	task.tick_pipeline.performance_probe = task.pathfinder.performance_probe
 	task.building_placement_system.page_cache = static_audits
 	if native_structure_audits_enabled and static_audits != null and static_audits.native_kernel != null and static_audits.native_kernel.has_method("foundation_intersects_structures"):
@@ -287,6 +303,11 @@ func unit_stats(kind: String) -> Dictionary:
 
 func get_buildings() -> Array:
 	return buildings
+
+func find_building(id: int) -> Variant:
+	for building in buildings:
+		if int(building.get("id",-1))==id: return building
+	return null
 
 func get_units() -> Array:
 	return units
@@ -463,7 +484,7 @@ static func prepare_topology(world, team: int) -> void:
 
 func worker_ring_cells(kind: String, center: Vector2i, radius: int, seen: Dictionary) -> Array:
 	var cache: Variant = building_placement_system.page_cache
-	if cache != null and cache.active and cache.native_kernel != null and cache.native_kernel.has_method("build_site_ring_cells"):
+	if kind!="gate" and cache != null and cache.active and cache.native_kernel != null and cache.native_kernel.has_method("build_site_ring_cells"):
 		if not building_placement_system.site_footprint_profiles.has(kind):
 			building_placement_system.cached_map_supports_foundation(kind,Vector2(center)+Vector2(0.5,0.5))
 		if not cache.profiles.has(kind): cache.prepare_kind(kind,building_placement_system.site_footprint_profiles[kind])

@@ -44,6 +44,9 @@ func run() -> void:
 	var canvas := Thumbnail.new()
 	viewport.add_child(canvas)
 	var directory := "res://assets/ui/gates"
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--output="):
+			directory = argument.trim_prefix("--output=")
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(directory))
 	for icon_id in range(GateCatalog.ICON_VARIANTS.size()):
 		var group := 0 if icon_id == 0 else (icon_id - 1) / 2

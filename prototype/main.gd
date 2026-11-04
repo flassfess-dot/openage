@@ -24,7 +24,16 @@ var owner_state: Dictionary = {}
 var owner_message := ""
 var owner_alpha_started := 0
 var owner_speed := 1.0
+var owner_prediction_continuity_enabled := true
+var owner_prediction_tail_enabled := true
+var owner_prediction_tick := -1
+var owner_prediction_tick_started := 0
+var owner_prediction_base := 0.0
+var owner_prediction_rate := -1.0
+var owner_prediction_limit := 1.0
+var owner_prediction_stopped := true
 var owner_formation_groups: Dictionary = {}
+const OWNER_PREDICTION_WINDOW_SECONDS := 0.1
 
 const RoRCommands = preload("res://scripts/commands.gd")
 const RenderWorld := preload("res://scripts/render_world.gd")
@@ -470,12 +479,42 @@ func _prepare_owner_presentation() -> void:
 	var geometry := minimap_geometry()
 	_minimap_resource_pixels(geometry["center"], geometry["scale"], geometry["rectangle"])
 	owner_state = simulation_frame_state()
-	owner_state["alpha"] = game_controller.get_interpolation_alpha()
-	owner_alpha_started = Time.get_ticks_usec()
-	owner_speed = game_controller.get_speed_multiplier()
+	var remainder: float = game_controller.get_interpolation_alpha()
+	_update_owner_prediction_anchor(int(owner_state["tick"]), remainder, game_controller.get_speed_multiplier(), Time.get_ticks_usec())
+	owner_state["alpha"] = remainder
+	if owner_prediction_tail_enabled:
+		var bounded_units := _bounded_prediction_units(presentation_snapshot.get("units", []))
+		if not is_same(bounded_units, presentation_snapshot.get("units", [])):
+			presentation_snapshot = presentation_snapshot.duplicate()
+			presentation_snapshot["units"] = bounded_units
 	owner_formation_groups = {}
 	for group_id in game_controller.formation_groups:
 		owner_formation_groups[group_id] = {"preferred_formation_type":game_controller.formation_groups[group_id].preferred_formation_type}
+
+func _bounded_prediction_units(source: Array) -> Array:
+	var result := source
+	for index in range(source.size()):
+		var row: Dictionary = source[index]
+		if int(row.get("team", 0)) != local_player_team: continue
+		var actor: Variant = simulation_world.find_unit(int(row.get("id", -1)))
+		if actor == null or int(actor.get("team", 0)) != local_player_team: continue
+		if bool(actor.get("formation_shared_motion", false)): continue
+		var path: Array = actor.get("path", [])
+		if path.is_empty() or int(actor.get("path_index", 0)) != path.size()-1: continue
+		var position := Vector2(row["pos"])
+		var step := position - Vector2(row.get("previous_pos", position))
+		var length := step.length()
+		if length <= 0.000001: continue
+		# A friendly unit's final waypoint is already known to its player. Lend
+		# only a scalar distance limit to rendering, never its live path/target.
+		var remaining := maxf(0.0, (Vector2(path.back())-position).dot(step/length))
+		var limit := minf(RenderWorld.MAX_INTERPOLATION_ALPHA, 1.0+remaining/length)
+		if is_same(result, source): result = source.duplicate()
+		var bounded_row := row.duplicate()
+		bounded_row["render_prediction_alpha_limit"] = limit
+		result[index] = bounded_row
+	return result
+
 
 func _refresh_render_terrain() -> void:
 	if not simulation_owner_enabled: return
@@ -488,7 +527,81 @@ func _refresh_render_terrain() -> void:
 	if terrain_canvas != null: terrain_canvas.simulation_world = render_terrain_view
 
 func _owner_interpolation_alpha() -> float:
-	return clampf(float(owner_state.get("alpha", 1.0)) + float(Time.get_ticks_usec() - owner_alpha_started) * 0.000001 * owner_speed / GameController.FIXED_STEP_SECONDS, 0.0, 1.0)
+	return _owner_interpolation_alpha_for_elapsed(float(Time.get_ticks_usec() - owner_alpha_started) * 0.000001)
+
+func _owner_interpolation_alpha_for_elapsed(elapsed_seconds: float) -> float:
+	# AI observation owns the exact source generation while it is captured. Keep
+	# moving actors visually continuous across that short barrier by extending
+	# their last confirmed velocity. Its distance never exceeds the existing
+	# 100 ms budget at requested game speed, even if actual tick cadence is
+	# slower. Turns/stops correct within that original distance ceiling.
+	var base_alpha := owner_prediction_base if owner_prediction_tick >= 0 else float(owner_state.get("alpha", 1.0))
+	var ticks_per_second := owner_prediction_rate if owner_prediction_rate >= 0.0 else owner_speed / GameController.FIXED_STEP_SECONDS
+	if owner_prediction_tail_enabled and owner_prediction_continuity_enabled and owner_prediction_tick >= 0:
+		# Keep the original distance ceiling (100 ms at requested game speed),
+		# rather than stopping abruptly after 100 ms of a slower real cadence.
+		# The short linear part is unchanged; the remaining distance is consumed
+		# with continuous, decaying velocity. Never extend the renderer's ceiling.
+		var distance_left := maxf(0.0, owner_prediction_limit - base_alpha)
+		if ticks_per_second <= 0.0 or distance_left <= 0.000001: return base_alpha
+		var elapsed := maxf(0.0, elapsed_seconds)
+		var linear_seconds := minf(OWNER_PREDICTION_WINDOW_SECONDS, distance_left / (2.0 * ticks_per_second))
+		var offset := minf(elapsed, linear_seconds) * ticks_per_second
+		if elapsed > linear_seconds:
+			var tail_distance := distance_left - linear_seconds * ticks_per_second
+			offset += tail_distance * (1.0 - exp(-ticks_per_second * (elapsed - linear_seconds) / tail_distance))
+		return minf(base_alpha + offset, owner_prediction_limit)
+	var prediction_seconds := clampf(elapsed_seconds, 0.0, OWNER_PREDICTION_WINDOW_SECONDS)
+	var alpha := maxf(0.0, base_alpha + prediction_seconds * ticks_per_second)
+	if not owner_prediction_continuity_enabled or owner_prediction_tick < 0: return alpha
+	# Slow authoritative progress must not repeatedly fling actors ahead at the
+	# requested game speed and snap them back on the next publication.
+	return minf(alpha, owner_prediction_limit)
+
+
+func _update_owner_prediction_anchor(tick: int, remainder: float, speed: float, now_usec: int) -> void:
+	var configured_rate := speed / GameController.FIXED_STEP_SECONDS
+	if not owner_prediction_continuity_enabled or owner_prediction_tick < 0 or tick < owner_prediction_tick or owner_prediction_stopped:
+		owner_prediction_tick = tick
+		owner_prediction_base = remainder
+		# One confirmed interval is enough to establish cadence. Predicting at
+		# full requested speed before that would overshoot a cold/slow first tick.
+		owner_prediction_rate = 0.0 if owner_prediction_continuity_enabled else configured_rate
+		owner_prediction_limit = maxf(remainder, 1.0)
+		owner_alpha_started = now_usec
+		owner_prediction_tick_started = now_usec
+		owner_speed = speed
+		owner_prediction_stopped = false
+		return
+	var elapsed := maxf(0.0, float(now_usec - owner_alpha_started) * 0.000001)
+	var displayed_alpha := _owner_interpolation_alpha_for_elapsed(elapsed)
+	if tick == owner_prediction_tick:
+		# A capture portion returned ownership, not a new pose. Keep its time
+		# origin; restarting at the debt remainder rewinds the same moving pair.
+		if not is_equal_approx(speed, owner_speed):
+			owner_prediction_rate = minf(configured_rate, owner_prediction_rate * speed / maxf(0.0001, owner_speed))
+			if owner_prediction_tail_enabled:
+				owner_prediction_base = displayed_alpha
+				owner_alpha_started = now_usec
+				owner_prediction_limit = maxf(displayed_alpha, minf(RenderWorld.MAX_INTERPOLATION_ALPHA, 1.0 + OWNER_PREDICTION_WINDOW_SECONDS * configured_rate))
+			else:
+				owner_prediction_base = displayed_alpha - minf(elapsed, OWNER_PREDICTION_WINDOW_SECONDS) * owner_prediction_rate
+				owner_prediction_limit = maxf(displayed_alpha, maxf(owner_prediction_base, 1.0 + OWNER_PREDICTION_WINDOW_SECONDS * owner_prediction_rate))
+		owner_speed = speed
+		return
+	var advanced := tick - owner_prediction_tick
+	var cadence_elapsed := maxf(0.000001, float(now_usec - owner_prediction_tick_started) * 0.000001)
+	var observed_rate := minf(configured_rate, float(advanced) / cadence_elapsed)
+	# React immediately to a slower simulation, then recover conservatively.
+	# This estimates presentation cadence only; fixed ticks and AI are unchanged.
+	owner_prediction_rate = observed_rate if owner_prediction_rate <= 0.0 or observed_rate < owner_prediction_rate else lerpf(owner_prediction_rate, observed_rate, 0.25)
+	owner_prediction_base = maxf(remainder, displayed_alpha - float(advanced))
+	var bounded_rate := configured_rate if owner_prediction_tail_enabled else owner_prediction_rate
+	owner_prediction_limit = maxf(owner_prediction_base, minf(RenderWorld.MAX_INTERPOLATION_ALPHA, 1.0 + OWNER_PREDICTION_WINDOW_SECONDS * bounded_rate))
+	owner_prediction_tick = tick
+	owner_prediction_tick_started = now_usec
+	owner_alpha_started = now_usec
+	owner_speed = speed
 
 func _process_owner_presentation(delta: float) -> void:
 	if resource_catalog != null: resource_catalog.unit_presentations.poll_background_loading()
@@ -581,6 +694,12 @@ func _ready() -> void:
 	hud_controls.cancel_production_requested.connect(cancel_production_from_hud)
 	hud_controls.trade_resource_requested.connect(set_trade_resource_from_hud)
 	hud_controls.unit_action_requested.connect(issue_unit_action)
+	hud_controls.ungarrison_requested.connect(func(building_id: int, passenger_id: int): command_actions.issue_ungarrison(self, building_id, passenger_id))
+	hud_controls.farm_reserve_requested.connect(func(building_id: int, amount: int):
+		join_simulation_owner()
+		if not battle_over and not local_spectator:
+			enqueue_with_feedback(RoRCommands.FarmReserveCommand.new(game_controller.tick_index + 1, [building_id], amount), "Запасной посев добавлен" if amount > 0 else "Запасной посев отменён", "", null)
+	)
 	hud_controls.building_selected.connect(select_hud_building)
 	top_bar_controls = TopBarControls.new()
 	add_child(top_bar_controls)
@@ -746,6 +865,9 @@ func reset_game() -> void:
 	join_simulation_owner()
 	render_terrain_view = null
 	owner_delta = 0.0
+	owner_prediction_tick = -1
+	owner_prediction_rate = -1.0
+	owner_prediction_stopped = true
 	owner_message = ""
 	autosave.shutdown()
 	PickingService.SelectionResolver.clear_hit_images()
@@ -840,6 +962,8 @@ func add_resource(kind: String, position: Vector2, amount: int) -> void:
 		return
 	simulation_world.add_resource(kind, position, amount)
 func _process(delta: float) -> void:
+	if not simulation_owner.pending and game_controller != null and game_controller.paused:
+		owner_prediction_stopped = true
 	owner_delta += delta
 	if simulation_owner.pending:
 		if not simulation_owner.ready():
@@ -1719,6 +1843,9 @@ func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
 	owner_delta = 0.0
 	owner_message = ""
 	simulation_world = restored_world
+	owner_prediction_tick = -1
+	owner_prediction_rate = -1.0
+	owner_prediction_stopped = true
 	game_controller = restored_controller
 	game_controller.set_command_result_limit(1024)
 	ai_observation_store.clear()
@@ -2212,15 +2339,7 @@ func sync_world_state(force: bool = true) -> void:
 	presentation_revision += 1
 	_sync_effect_snapshot()
 	presentation_snapshot["markers"] = match_definition.get("presentation_markers", [])
-	var visible_bounds := visible_tile_bounds()
-	var environment_bounds := Rect2i(visible_bounds.position - Vector2i(2, 2), visible_bounds.size + Vector2i(4, 4))
-	if not _tile_bounds_contains(cached_environment_bounds, environment_bounds):
-		cached_environment_bounds = _expanded_tile_bounds(environment_bounds, 6)
-		cached_environment_items = environment_presentation_field.query(cached_environment_bounds)
-		cached_environment_items.append_array(environment_presentation_field.mobile_items())
-		cached_environment_revision += 1
-	presentation_snapshot["environment"] = cached_environment_items
-	presentation_snapshot["environment_revision"] = cached_environment_revision
+	_sync_environment_snapshot(visible_tile_bounds(), probe)
 	if probe != null:
 		probe.observe_microseconds("presentation.sync.environment", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -2552,7 +2671,7 @@ func draw_build_placement_preview() -> void:
 	var center := Coordinates.clamp_world(screen_to_world(input_adapter.pointer_position).round(), map_size)
 	if pending_build_kind == "wall":
 		var start := Coordinates.clamp_world(screen_to_world(input_adapter.pointer.anchor).round(), map_size) if input_adapter.pointer.is_selecting() else center
-		var key := str([start, center, local_player_team, game_controller.tick_index, simulation_world.navigation_grid.revision])
+		var key := WallPlacement.preview_key(simulation_world, local_player_team, start, center)
 		if key != wall_placement_preview_key:
 			wall_placement_preview_key = key
 			wall_placement_preview = simulation_world.plan_wall_line(local_player_team, WallPlacement.cells(Vector2i(start), Vector2i(center)))
@@ -2659,6 +2778,21 @@ func _fog_state_at_cell(cells: Variant, cell: Vector2i) -> int:
 
 func _ensure_fog_slope_neighbor_cache() -> void:
 	fog_renderer._ensure_fog_slope_neighbor_cache(self)
+
+
+func _sync_environment_snapshot(visible_bounds: Rect2i, probe = null) -> void:
+	# The retained query is clipped to the map. Compare it with a request in
+	# the same domain, otherwise the two-tile sprite margin outside a map edge
+	# can never fit and the unchanged scenery is queried on every new tick.
+	var environment_bounds := Rect2i(visible_bounds.position - Vector2i(2, 2), visible_bounds.size + Vector2i(4, 4)).intersection(Rect2i(Vector2i.ZERO, map_size))
+	if not _tile_bounds_contains(cached_environment_bounds, environment_bounds):
+		cached_environment_bounds = _expanded_tile_bounds(environment_bounds, 6)
+		cached_environment_items = environment_presentation_field.query(cached_environment_bounds)
+		cached_environment_items.append_array(environment_presentation_field.mobile_items())
+		cached_environment_revision += 1
+		if probe != null: probe.increment("presentation.environment.queries")
+	presentation_snapshot["environment"] = cached_environment_items
+	presentation_snapshot["environment_revision"] = cached_environment_revision
 
 
 func _expanded_tile_bounds(bounds: Rect2i, margin: int) -> Rect2i:

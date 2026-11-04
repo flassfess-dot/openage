@@ -67,9 +67,13 @@ func verify_economy() -> void:
 	check(plan_economy(recovering).any(func(c): return c.command_type() == "train" and 10 in c.unit_ids), "essential worker recovery retains a worker at its exact civilization price")
 	input["player_state"]["food"] = 700
 	input["buildings"][0]["command_options"]["train"][0]["cost"] = {0: 50}
-	input["units"][0]["ai_profile"] = {"carried_amount": 10.0, "gather_stage": "none"}
+	input["units"][0]["ai_profile"] = {"carried_amount": 10.0, "carried_resource_type_id": 0, "delivery_drop_site_kinds": ["town_center", "granary"], "gather_stage": "none"}
 	commands = plan_economy(input)
 	check(commands.any(func(c): return c.command_type() == "return_resources" and 100 in c.unit_ids), "idle cargo is explicitly returned")
+	var unknown_cargo := input.duplicate(true)
+	unknown_cargo["units"][0]["ai_profile"].erase("carried_resource_type_id")
+	unknown_cargo["units"][0]["ai_profile"].erase("delivery_drop_site_kinds")
+	check(not plan_economy(unknown_cargo).any(func(c): return c.command_type() == "return_resources" and 100 in c.unit_ids), "cargo without a known resource type cannot prove a legal delivery")
 	input["units"][0]["task"] = "gather"
 	input["units"][0]["ai_profile"]["gather_stage"] = "returning"
 	commands = plan_economy(input)

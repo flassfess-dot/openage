@@ -49,7 +49,7 @@ func _initialize() -> void:
 	for _actor in range(96): world.add_unit(1, "villager", Vector2(9, 9), false)
 	var pending: Dictionary = preparation.capture(world, store, ai, 0, 8, null, 1)
 	check(bool(pending.get("pending", false)), "a bounded capture yields after its first actor portion")
-	check(int(preparation.captures[1]["projection"]["cursor"]) == Preparation.ACTORS_PER_PORTION and world.read_generation_pins == 1, "yielded observation retains its exact source and bounded cursor")
+	check(int(preparation.captures[1]["projection"]["cursor"]) == Preparation.PROJECTION_ACTORS_PER_PORTION and world.read_generation_pins == 1, "yielded observation retains its exact source and bounded cursor")
 	preparation.clear()
 	check(world.read_generation_pins == 0, "cancel releases an unfinished capture")
 	world.shutdown_derived_state()

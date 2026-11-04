@@ -1,6 +1,9 @@
 #include "ror_save_file_kernel.hpp"
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/classes/global_constants.hpp>
+#include <godot_cpp/classes/os.hpp>
+#include <vector>
+#include <cstring>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -11,6 +14,10 @@
 
 namespace godot {
 void RoRSaveFileKernel::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("background_process_supported"), &RoRSaveFileKernel::background_process_supported);
+    ClassDB::bind_method(D_METHOD("start_background_process", "application", "arguments"), &RoRSaveFileKernel::start_background_process);
+    ClassDB::bind_method(D_METHOD("background_process_running"), &RoRSaveFileKernel::background_process_running);
+    ClassDB::bind_method(D_METHOD("stop_background_process"), &RoRSaveFileKernel::stop_background_process);
     ClassDB::bind_method(D_METHOD("replace_atomic", "source", "destination"), &RoRSaveFileKernel::replace_atomic);
 }
 
@@ -28,3 +35,4 @@ int64_t RoRSaveFileKernel::replace_atomic(const String &source, const String &de
 #endif
 }
 }
+#include "autosave_process.inc"

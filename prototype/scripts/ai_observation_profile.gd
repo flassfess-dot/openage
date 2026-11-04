@@ -16,6 +16,7 @@ static func from_record(source: Dictionary, entity: Dictionary = {}) -> Dictiona
 		"period": float(entity.get("attack_period", combat.get("attack_period", 2.0))),
 		"range": float(entity.get("attack_range", combat.get("range_max", 0.0))),
 		"speed": float(entity.get("speed", source.get("speed", 0.0))),
+		"blast_range": float(entity.get("blast_range",combat.get("blast_range",0.0))),
 		"max_hp": float(entity.get("max_hp", source.get("health", 1.0))),
 		"enabled": bool(entity.get("combat_enabled", not combat.get("attacks", []).is_empty())),
 		"transport": bool(entity.get("components", {}).get("cargo", {}).get("enabled", false))
@@ -36,14 +37,42 @@ static func actor(world, row: Dictionary, team: int) -> Dictionary:
 		if actor_kernel == null: actor_kernel = ClassDB.instantiate("RoRReadModelKernel")
 		if actor_kernel.has_method("owned_ai_actor_profile"):
 			var prepared: Dictionary = actor_kernel.owned_ai_actor_profile(live)
-			if not prepared.is_empty(): return prepared
+			if not prepared.is_empty():
+				_owned_tactical(prepared,live,world)
+				return prepared
 	var source: Dictionary = world.object_record_by_id(int(row.get("source_unit_id", -1)), int(row.get("team", 0)))
 	var data := from_record(source, live if live is Dictionary else row)
 	if live is Dictionary:
+		_owned_tactical(data,live,world)
 		data["carried_amount"] = float(live.get("carried_amount", 0.0))
 		data["carried_resource_type_id"] = int(live.get("carried_resource_type_id", -1))
 		data["gather_stage"] = String(live.get("gather_stage", ""))
 	return data
+
+static func _owned_tactical(data: Dictionary, actor: Dictionary, world) -> void:
+	if String(actor.get("entity_type", "")) == "building":
+		data["footprint_half_size"] = Vector2(actor.get("footprint", {}).get("half_size", Vector2(0.5, 0.5)))
+	data["cooldown"] = float(actor.get("cooldown",0.0))
+	data["action_phase"] = String(actor.get("components",{}).get("order",{}).get("phase",""))
+	data["blast_range"] = float(actor.get("blast_range",actor.get("components",{}).get("combat",{}).get("blast_range",0.0)))
+	data["conversion"] = actor.get("components",{}).get("conversion",{}).duplicate(true)
+	var worker: Dictionary=actor.get("components",{}).get("worker",{})
+	if bool(worker.get("enabled",false)):
+		var allowed: Array=worker.get("drop_site_ids",[])
+		var delivery_allowed: Array = allowed
+		# ReturnResources restores a generic carrier's resource task before
+		# checking its depots. Publish that prospective own rule without
+		# applying a role or mutating reservations during observation.
+		if float(actor.get("carried_amount", 0.0)) > 0.0 and int(actor.get("worker_role_source_unit_id", -1)) < 0:
+			var delivery_role: Dictionary = world.worker_role_system.profile_for_resource_type(actor, int(actor.get("carried_resource_type_id", -1)))
+			var role_source: Dictionary = world.object_record_by_id(int(delivery_role.get("role_source_unit_id", -1)), int(actor.get("team", 0))) if int(delivery_role.get("role_source_unit_id", -1)) >= 0 else {}
+			if not role_source.is_empty(): delivery_allowed = role_source.get("resources", {}).get("drop_site_ids", allowed)
+		data["drop_site_kinds"]=[]
+		data["delivery_drop_site_kinds"]=[]
+		for kind in ["town_center","granary","storage_pit","dock"]:
+			var record: Dictionary=world.object_record_for(kind,int(actor.get("team",0)))
+			if allowed.any(func(id): return int(id)==int(record.get("unit_id",-2))): data["drop_site_kinds"].append(kind)
+			if delivery_allowed.any(func(id): return int(id)==int(record.get("unit_id",-2))): data["delivery_drop_site_kinds"].append(kind)
 
 
 static func decorate_options(world, options: Dictionary, team: int, units: Array, generation_cache: Variant = null) -> Dictionary:

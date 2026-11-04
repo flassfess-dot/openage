@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "algorithm_version": "baseline_v1",
+  "profiles": {
+    "baseline": {},
+    "rush": {
+      "land_worker_target": 6,
+      "worker_population_ratio": 0.35,
+      "attack_ratio": 0.85,
+      "minimum_attack_group_size": 2,
+      "initial_attack_delay_ticks": 0
+    },
+    "ranged": {
+      "opponent_role": "ranged",
+      "minimum_attack_group_size": 5,
+      "retreat_ratio": 0.95
+    },
+    "boom": {
+      "land_worker_target": 14,
+      "worker_population_ratio": 0.6,
+      "initial_attack_delay_ticks": 1200,
+      "economic_research_priority": 2.0
+    },
+    "turtle": {
+      "construction_priorities": [
+        "house",
+        "barracks",
+        "granary",
+        "storage_pit",
+        "tower",
+        "archery_range",
+        "farm",
+        "town_center"
+      ],
+      "building_limits": {
+        "house": 8,
+        "barracks": 1,
+        "granary": 1,
+        "storage_pit": 1,
+        "tower": 4,
+        "archery_range": 2,
+        "farm": 12,
+        "town_center": 3
+      },
+      "initial_attack_delay_ticks": 2400,
+      "enemy_response_distance": 30.0
+    },
+    "raid": {
+      "opponent_role": "raid",
+      "minimum_attack_group_size": 2,
+      "maximum_attack_group_size": 6,
+      "attack_ratio": 0.9
+    },
+    "siege": {
+      "opponent_role": "siege",
+      "land_worker_target": 12,
+      "minimum_attack_group_size": 6
+    },
+    "naval": {
+      "opponent_role": "naval",
+      "water_worker_target": 6,
+      "minimum_naval_escort": 3
+    }
+  }
+}

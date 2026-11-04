@@ -26,6 +26,7 @@ func _initialize() -> void:
 	runtime.configure(fast,controller,[],Decisions.new(),Store.new(),coordinator)
 	controller.set_before_fixed_tick(Callable(runtime,"queue_commands"))
 	var owner := Owner.new()
+	check(owner.CAPTURE_BUDGET_USEC <= 8000 and owner.ADVANCE_BUDGET_USEC <= controller.FRAME_SIMULATION_BUDGET_USEC,"owner returns long AI preparation to presentation in short bounded portions")
 	var replay := Replay.new()
 	for index in range(80):
 		if index % 16 == 0:

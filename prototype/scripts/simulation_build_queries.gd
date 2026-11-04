@@ -107,6 +107,8 @@ func _build_option_template(world, team: int, kind: String) -> Dictionary:
 		"cost": cost,
 		"duration": float(source.get("production", {}).get("creation_time", world.unit_stats(kind).get("creation_time", 0.0))),
 		"footprint_radius": maxf(option_half_size.x, option_half_size.y),
+		"navigation_obstruction_half_size": option_footprint["obstruction_half_size"],
+		"navigation_passable": int(source.get("geometry", {}).get("obstruction_type", world.unit_stats(kind).get("obstruction_type", 2))) == 0 or "passable" in world.unit_stats(kind).get("behavior_tags", []),
 	}
 
 

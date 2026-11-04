@@ -1,0 +1,871 @@
+{
+  "schema_version": 1,
+  "suite": "dev",
+  "rows": [
+    {
+      "id": "dev-000",
+      "opponent": "baseline",
+      "civilizations": [
+        1,
+        9
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3000001,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-001",
+      "opponent": "rush",
+      "civilizations": [
+        2,
+        16
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3001010,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-002",
+      "opponent": "ranged",
+      "civilizations": [
+        3,
+        7
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3002019,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-003",
+      "opponent": "boom",
+      "civilizations": [
+        4,
+        14
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3003028,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-004",
+      "opponent": "turtle",
+      "civilizations": [
+        5,
+        5
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3004037,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-005",
+      "opponent": "raid",
+      "civilizations": [
+        6,
+        12
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3005046,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-006",
+      "opponent": "siege",
+      "civilizations": [
+        7,
+        3
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3006055,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-007",
+      "opponent": "naval",
+      "civilizations": [
+        8,
+        10
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3007064,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-008",
+      "opponent": "baseline",
+      "civilizations": [
+        9,
+        1
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3008073,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-009",
+      "opponent": "rush",
+      "civilizations": [
+        10,
+        8
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3009082,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-010",
+      "opponent": "ranged",
+      "civilizations": [
+        11,
+        15
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3010091,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-011",
+      "opponent": "boom",
+      "civilizations": [
+        12,
+        6
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3011100,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-012",
+      "opponent": "turtle",
+      "civilizations": [
+        13,
+        13
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3012109,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-013",
+      "opponent": "raid",
+      "civilizations": [
+        14,
+        4
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3013118,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-014",
+      "opponent": "siege",
+      "civilizations": [
+        15,
+        11
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3014127,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-015",
+      "opponent": "naval",
+      "civilizations": [
+        16,
+        2
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3015136,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-016",
+      "opponent": "baseline",
+      "civilizations": [
+        1,
+        9
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3016145,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-017",
+      "opponent": "rush",
+      "civilizations": [
+        2,
+        16
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3017154,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-018",
+      "opponent": "ranged",
+      "civilizations": [
+        3,
+        7
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3018163,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-019",
+      "opponent": "boom",
+      "civilizations": [
+        4,
+        14
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3019172,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-020",
+      "opponent": "turtle",
+      "civilizations": [
+        5,
+        5
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3020181,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-021",
+      "opponent": "raid",
+      "civilizations": [
+        6,
+        12
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3021190,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-022",
+      "opponent": "siege",
+      "civilizations": [
+        7,
+        3
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3022199,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-023",
+      "opponent": "naval",
+      "civilizations": [
+        8,
+        10
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3023208,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-024",
+      "opponent": "baseline",
+      "civilizations": [
+        9,
+        1
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3024217,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-025",
+      "opponent": "rush",
+      "civilizations": [
+        10,
+        8
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3025226,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-026",
+      "opponent": "ranged",
+      "civilizations": [
+        11,
+        15
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3026235,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-027",
+      "opponent": "boom",
+      "civilizations": [
+        12,
+        6
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3027244,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-028",
+      "opponent": "turtle",
+      "civilizations": [
+        13,
+        13
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3028253,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-029",
+      "opponent": "raid",
+      "civilizations": [
+        14,
+        4
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3029262,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-030",
+      "opponent": "siege",
+      "civilizations": [
+        15,
+        11
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3030271,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-031",
+      "opponent": "naval",
+      "civilizations": [
+        16,
+        2
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3031280,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-032",
+      "opponent": "baseline",
+      "civilizations": [
+        1,
+        9
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3032289,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-033",
+      "opponent": "rush",
+      "civilizations": [
+        2,
+        16
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3033298,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-034",
+      "opponent": "ranged",
+      "civilizations": [
+        3,
+        7
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3034307,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-035",
+      "opponent": "boom",
+      "civilizations": [
+        4,
+        14
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3035316,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-036",
+      "opponent": "turtle",
+      "civilizations": [
+        5,
+        5
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3036325,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-037",
+      "opponent": "raid",
+      "civilizations": [
+        6,
+        12
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3037334,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-038",
+      "opponent": "siege",
+      "civilizations": [
+        7,
+        3
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3038343,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-039",
+      "opponent": "naval",
+      "civilizations": [
+        8,
+        10
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3039352,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-040",
+      "opponent": "baseline",
+      "civilizations": [
+        9,
+        1
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3040361,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-041",
+      "opponent": "rush",
+      "civilizations": [
+        10,
+        8
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3041370,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-042",
+      "opponent": "ranged",
+      "civilizations": [
+        11,
+        15
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3042379,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-043",
+      "opponent": "boom",
+      "civilizations": [
+        12,
+        6
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3043388,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-044",
+      "opponent": "turtle",
+      "civilizations": [
+        13,
+        13
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3044397,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "dev-045",
+      "opponent": "raid",
+      "civilizations": [
+        14,
+        4
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3045406,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "dev-046",
+      "opponent": "siege",
+      "civilizations": [
+        15,
+        11
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 3046415,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "dev-047",
+      "opponent": "naval",
+      "civilizations": [
+        16,
+        2
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 3047424,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    }
+  ],
+  "paired_positions": true
+}

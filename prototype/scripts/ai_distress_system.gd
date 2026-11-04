@@ -6,11 +6,13 @@ const MAX_ACTIVE_SIGNALS := 4096
 
 var next_sequence: int = 1
 var signals_by_target_id: Dictionary = {}
+var team_intents: Dictionary = {}
 
 
 func reset() -> void:
 	next_sequence = 1
 	signals_by_target_id.clear()
+	team_intents.clear()
 
 
 func record(attacker: Dictionary, target: Dictionary) -> void:
@@ -35,6 +37,9 @@ func record(attacker: Dictionary, target: Dictionary) -> void:
 
 func advance(context: Dictionary) -> void:
 	var delta := float(context.get("delta", 0.0))
+	for sender in team_intents.keys():
+		team_intents[sender]["remaining_seconds"]-=delta
+		if float(team_intents[sender]["remaining_seconds"])<=0.0: team_intents.erase(sender)
 	var expired: Array[int] = []
 	# Decay is independent per signal and erasure is deferred, so iteration
 	# order is irrelevant here; the previous full key sort was pure overhead.
@@ -67,7 +72,16 @@ func canonical_state() -> Dictionary:
 	return {
 		"next_sequence": next_sequence,
 		"signals": signals,
+		"team_intents": team_intents.duplicate(true),
 	}
+
+func intents_for_team(world,team: int) -> Array:
+	var result: Array=[]
+	var ids: Array=team_intents.keys(); ids.sort()
+	for sender in ids:
+		var intent: Dictionary=team_intents[sender]
+		if int(intent["recipient"])==team and world.are_teams_allied(team,int(sender)) and world.are_teams_allied(int(sender),team): result.append(intent.duplicate(true))
+	return result
 
 
 func _evict_oldest_if_needed() -> void:

@@ -12,6 +12,7 @@ func _initialize() -> void:
 	test_hidden_slope_boundary_does_not_cover_visible_overlap()
 	test_world_fog_mask_reuses_mesh_and_texture()
 	test_world_fog_geometry_cache_tracks_viewport()
+	test_native_fog_arrays_match_reference()
 
 	if failures.is_empty():
 		print("fog terrain boundary tests passed")
@@ -97,3 +98,27 @@ func assert_true(value: bool, context: String) -> void:
 func assert_equal(actual: Variant, expected: Variant, context: String) -> void:
 	if actual != expected:
 		failures.append("%s: expected %s, got %s" % [context, str(expected), str(actual)])
+
+
+class FogGeometryFixture extends RefCounted:
+	var map_size: Vector2i
+	var terrain_elevation
+	func _render_terrain(): return self
+
+func test_native_fog_arrays_match_reference() -> void:
+	var renderer = load("res://scripts/match_fog_renderer.gd").new()
+	assert_true(renderer.geometry_kernel != null and renderer.geometry_kernel.has_method("build_fog_arrays"),"native fog geometry kernel is present")
+	for dimensions in [Vector2i(1,1),Vector2i(17,13),Vector2i(400,400)]:
+		var game := FogGeometryFixture.new()
+		game.map_size=dimensions
+		game.terrain_elevation=load("res://scripts/terrain_elevation.gd").new(dimensions,false)
+		var span := Vector2i(mini(16,dimensions.x),mini(16,dimensions.y))
+		for bounds in [Rect2i(Vector2i.ZERO,span),Rect2i(dimensions-span,span)]:
+			for raised in [false,true]:
+				if raised:
+					for y in range(bounds.position.y,bounds.end.y+1):
+						for x in range(bounds.position.x,bounds.end.x+1):game.terrain_elevation.set_vertex(Vector2i(x,y),posmod(x+3*y,5))
+				var expected: Array=renderer._world_fog_arrays(game,bounds,false)
+				var actual: Array=renderer._world_fog_arrays(game,bounds,true)
+				assert_true(var_to_bytes(actual)==var_to_bytes(expected),"native fog preserves exact vertices, UVs, triangle order and pixel snapping at %s %s raised=%s" % [dimensions,bounds,raised])
+		assert_true(renderer._world_fog_arrays(game,Rect2i()).is_empty(),"empty fog geometry remains empty")

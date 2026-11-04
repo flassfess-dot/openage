@@ -1,4 +1,6 @@
 #include "ror_path_kernel.hpp"
+#include <godot_cpp/classes/geometry2d.hpp>
+#include <array>
 
 #include <algorithm>
 #include <cmath>
@@ -26,6 +28,8 @@ void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("corridor_widths", "cells", "maximum", "radius"), &RoRPathKernel::corridor_widths);
     ClassDB::bind_method(D_METHOD("is_position_walkable", "position", "radius"), &RoRPathKernel::position_walkable);
     ClassDB::bind_method(D_METHOD("is_segment_walkable", "start", "finish", "radius"), &RoRPathKernel::is_segment_walkable);
+    ClassDB::bind_method(D_METHOD("smooth_swept_world_path", "origin", "candidates", "radius", "escape_center"), &RoRPathKernel::smooth_swept_world_path);
+    ClassDB::bind_method(D_METHOD("find_local_traffic_path", "origin", "goal", "radius", "clearance", "blockers"), &RoRPathKernel::find_local_traffic_path);
     ClassDB::bind_method(D_METHOD("direct_cell_path", "start", "goal", "radius"), &RoRPathKernel::direct_cell_path);
     ClassDB::bind_method(D_METHOD("nearest_walkable", "requested", "radius"), &RoRPathKernel::nearest_walkable);
     ClassDB::bind_method(D_METHOD("create_search_context"), &RoRPathKernel::create_search_context);
@@ -1075,6 +1079,133 @@ Vector2i RoRPathKernel::nearest_walkable(const Vector2i &requested, double radiu
 
 bool RoRPathKernel::is_segment_walkable(const Vector2 &start, const Vector2 &finish, double radius) const {
     if (!position_walkable(start, radius) || !position_walkable(finish, radius)) return false;
+    return segment_interior_walkable(start, finish, radius);
+}
+
+PackedVector2Array RoRPathKernel::smooth_swept_world_path(const Vector2 &origin, const PackedVector2Array &candidates, double radius, const Vector2 &escape_center) const {
+    PackedVector2Array result;
+    if (candidates.is_empty()) return result;
+    Vector2 cursor = origin;
+    int64_t first = 0;
+    bool cursor_walkable = position_walkable(cursor, radius);
+    if (!cursor_walkable) {
+        if (!candidates[0].is_equal_approx(escape_center)) return result;
+        result.append(escape_center);
+        cursor = escape_center;
+        first = 1;
+        if (first < candidates.size()) cursor_walkable = position_walkable(cursor, radius);
+    }
+    // Endpoint validity is invariant during this synchronous query. Lazily
+    // inspect only candidates the original farthest-first loop would visit.
+    // 0 = untested, 1 = walkable, 2 = blocked. No records survive this call.
+    std::vector<uint8_t> endpoint_states(static_cast<size_t>(candidates.size()), 0);
+    while (first < candidates.size()) {
+        if (!cursor_walkable) return PackedVector2Array();
+        int64_t selected = -1;
+        for (int64_t index = candidates.size() - 1; index >= first; --index) {
+            auto &state = endpoint_states[static_cast<size_t>(index)];
+            if (!state) state = position_walkable(candidates[index], radius) ? 1 : 2;
+            if (state == 1 && segment_interior_walkable(cursor, candidates[index], radius)) {
+                selected = index;
+                break;
+            }
+        }
+        if (selected < 0) return PackedVector2Array();
+        cursor = candidates[selected];
+        result.append(cursor);
+        first = selected + 1;
+        cursor_walkable = true;
+    }
+    return result;
+}
+
+PackedVector2Array RoRPathKernel::find_local_traffic_path(const Vector2 &origin, const Vector2 &goal, double radius, double clearance, const Array &blockers) const {
+    struct Entry { Vector2i cell; double cost; double score; };
+    struct Body { Vector2 center; double separation_squared; };
+    std::vector<Body> bodies;
+    bodies.reserve(static_cast<size_t>(blockers.size()));
+    for (int64_t i = 0; i < blockers.size(); ++i) {
+        const Dictionary row = blockers[i];
+        const double separation = radius + double(row.get("footprint_radius", 0.3)) + std::max(clearance, double(row.get("minimum_clearance", 0.06)));
+        bodies.push_back({Vector2(row["pos"]), separation * separation});
+    }
+    Geometry2D *geometry = Geometry2D::get_singleton();
+    const auto clear = [&](const Vector2 &start, const Vector2 &finish) {
+        if (!is_segment_walkable(start, finish, radius)) return false;
+        for (const auto &body : bodies) {
+            const double minimum = std::min(body.separation_squared, double(start.distance_squared_to(body.center)));
+            const Vector2 closest = geometry->get_closest_point_to_segment(body.center, start, finish);
+            if (double(body.center.distance_squared_to(closest)) < minimum - 0.0001) return false;
+        }
+        return true;
+    };
+    const auto before = [](const Entry &left, const Entry &right) {
+        if (!Math::is_equal_approx(left.score, right.score)) return left.score < right.score;
+        return left.cell.y < right.cell.y || (left.cell.y == right.cell.y && left.cell.x < right.cell.x);
+    };
+    const auto index = [](const Vector2i &cell) { return (cell.y + 12) * 25 + cell.x + 12; };
+    std::array<double, 625> costs;
+    costs.fill(std::numeric_limits<double>::infinity());
+    std::array<Vector2i, 625> previous;
+    std::vector<Entry> open;
+    open.reserve(2049); // At most eight pushes for each of 256 expansions.
+    open.push_back({Vector2i(), 0.0, double(origin.distance_to(goal))});
+    costs[index(Vector2i())] = 0.0;
+    const double step = std::max(0.5, radius);
+    const Vector2i directions[] = {{1,0},{0,1},{-1,0},{0,-1},{1,1},{-1,1},{-1,-1},{1,-1}};
+    int expanded = 0;
+    while (!open.empty() && expanded < 256) {
+        const Entry entry = open.front();
+        const Entry tail = open.back();
+        open.pop_back();
+        if (!open.empty()) {
+            size_t slot = 0;
+            while (slot * 2 + 1 < open.size()) {
+                size_t child = slot * 2 + 1;
+                if (child + 1 < open.size() && before(open[child + 1], open[child])) ++child;
+                if (!before(open[child], tail)) break;
+                open[slot] = open[child]; slot = child;
+            }
+            open[slot] = tail;
+        }
+        const Vector2i cell = entry.cell;
+        if (entry.cost != costs[index(cell)]) continue;
+        const Vector2 point = origin + Vector2(cell) * step;
+        ++expanded;
+        if (cell != Vector2i() && point.distance_to(goal) <= 1.5 && clear(point, goal)) {
+            std::vector<Vector2> reversed;
+            reversed.push_back(goal);
+            Vector2i cursor = cell;
+            while (cursor != Vector2i()) {
+                reversed.push_back(origin + Vector2(cursor) * step);
+                cursor = previous[index(cursor)];
+            }
+            PackedVector2Array result;
+            for (auto it = reversed.rbegin(); it != reversed.rend(); ++it) result.append(*it);
+            return result;
+        }
+        for (const auto &direction : directions) {
+            const Vector2i next = cell + direction;
+            if (std::abs(next.x) > 12 || std::abs(next.y) > 12) continue;
+            const Vector2 candidate = origin + Vector2(next) * step;
+            const double cost = costs[index(cell)] + double(Vector2(direction).length()) * step;
+            if (costs[index(next)] <= cost || !clear(point, candidate)) continue;
+            costs[index(next)] = cost; previous[index(next)] = cell;
+            const Entry pushed = {next, cost, cost + double(candidate.distance_to(goal))};
+            open.push_back(pushed);
+            size_t slot = open.size() - 1;
+            while (slot > 0) {
+                const size_t parent = (slot - 1) / 2;
+                if (!before(pushed, open[parent])) break;
+                open[slot] = open[parent]; slot = parent;
+            }
+            open[slot] = pushed;
+        }
+    }
+    return PackedVector2Array();
+}
+
+bool RoRPathKernel::segment_interior_walkable(const Vector2 &start, const Vector2 &finish, double radius) const {
     const Vector2 delta = finish - start;
     const int steps = std::max(1, int(std::ceil(std::max(std::abs(double(delta.x)), std::abs(double(delta.y))))));
     const int margin = std::max(1, int(std::ceil(radius)));
@@ -1089,8 +1220,11 @@ bool RoRPathKernel::is_segment_walkable(const Vector2 &start, const Vector2 &fin
         const Vector2 center = start.lerp(finish, double(i) / steps).floor();
         for (int y = int(center.y) - margin; y <= int(center.y) + margin; ++y) {
             for (int x = int(center.x) - margin; x <= int(center.x) + margin; ++x) {
+                // Walkable cells need no geometric test or deduplication. Avoid
+                // allocating a hash node for every free cell along the sweep.
+                if (cell_walkable(x, y)) continue;
                 const uint64_t key = (uint64_t(uint32_t(x)) << 32) | uint32_t(y);
-                if (!visited.insert(key).second || cell_walkable(x, y)) continue;
+                if (!visited.insert(key).second) continue;
                 const Vector2 lower(x, y), upper(x + 1, y + 1);
                 double enter = 0, leave = 1;
                 for (int axis = 0; axis < 2; ++axis) {

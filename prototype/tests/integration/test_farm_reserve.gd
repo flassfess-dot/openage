@@ -1,0 +1,128 @@
+extends SceneTree
+const Catalog := preload("res://scripts/resource_catalog.gd")
+const World := preload("res://scripts/simulation_world.gd")
+const Controller := preload("res://scripts/game_controller.gd")
+const Commands := preload("res://scripts/commands.gd")
+const Checkpoint := preload("res://scripts/game_checkpoint.gd")
+const Replay := preload("res://scripts/replay_system.gd")
+const Snapshot := preload("res://scripts/simulation_snapshot.gd")
+const Model := preload("res://scripts/hud_view_model.gd")
+const Controls := preload("res://scripts/hud_controls.gd")
+var failures: Array[String] = []
+func check(value: bool, message: String) -> void:
+	if not value: failures.append(message)
+func command(controller, building_id: int, amount: int, issuer: int = 1) -> Dictionary:
+	var action = Commands.FarmReserveCommand.new(controller.tick_index,[building_id],amount)
+	controller.enqueue_command(action,true,issuer)
+	controller.process_commands()
+	return controller.get_command_result(action.sequence_id)
+func _initialize() -> void:
+	var catalog = Catalog.new()
+	catalog.load()
+	var world = World.new(Vector2i(32,32))
+	world.set_gamespec(catalog.gamespec_data)
+	world.set_object_catalog(catalog.object_catalog_data)
+	world.set_graphics_catalog(catalog.graphics_catalog_data)
+	world.set_runtime_catalog(catalog.runtime_catalog_data)
+	world.navigation_grid.configure_terrain(func(_cell):return "grass")
+	world.set_population_cap(1,100)
+	world.set_population_housing(1,100)
+	world.add_building(80,"granary",Vector2(10,10),1)
+	world.add_building(81,"market",Vector2(24,10),1)
+	world.add_building(82,"granary",Vector2(10,23),1)
+	var sentinel: Dictionary = world.add_unit(2,"clubman",Vector2(29,29),false)
+	sentinel["stance"] = "passive"
+	var farm: Dictionary = world.add_building(83,"farm",Vector2(14,15),1)
+	var farmer: Dictionary = world.add_unit(1,"villager",Vector2(12.5,15.5),false)
+	world.set_resource_amount(1,1,1000)
+	var controller = Controller.new(world)
+	controller.set_speed_multiplier(1.0)
+	var paid: int = world.building_cost("farm",1)[1]
+	check(command(controller,80,1).get("accepted",false),"granary queues a reserve")
+	check(world.get_resource_amount(1,1)==1000-paid,"reserve pays the civilization-adjusted farm cost immediately")
+	check(command(controller,82,1).get("accepted",false),"another granary shares the same reserve")
+	check(command(controller,80,-1).get("accepted",false) and world.get_resource_amount(1,1)==1000-paid,"cancel returns exactly one paid reserve")
+	check(not command(controller,80,1,2).get("accepted",false),"enemy cannot reserve from another player's granary")
+	var state := Checkpoint.unpack(Checkpoint.pack(Checkpoint.capture(world,controller,{}, {"size":world.map_size})))
+	check(state.get("systems",{}).get("economy_system",{}).get("farm_reseed_queues_by_team",{}).get(1,[]).size()==1,"checkpoint stores prepaid reserve costs")
+	var legacy := state.duplicate(true)
+	legacy["systems"]["economy_system"].erase("farm_reseed_queues_by_team")
+	check(Checkpoint.validate(legacy),"saves predating reserves remain valid")
+	var corrupt := state.duplicate(true)
+	corrupt["systems"]["economy_system"]["farm_reseed_queues_by_team"][1]=[{1:-60}]
+	check(not Checkpoint.validate(corrupt),"negative prepaid costs are rejected before restore")
+	world.economy_system.farm_reseed_queues_by_team.clear()
+	check(Checkpoint.restore(state,world,controller),"checkpoint restores reserve queue")
+	check(world.economy_system.farm_reseed_queues_by_team.get(1,[]).size()==1,"reserve survives restore")
+	farm=world.find_building(83)
+	farmer=world.find_unit(int(farmer["id"]))
+	farm["amount"]=1
+	world.update_resource_state(farm)
+	world.assign_command_gather([farmer],83)
+	world.set_resource_amount(1,1,0)
+	var reseeded := false
+	for frame in range(1800):
+		controller.advance_frame(0.05,1,2)
+		if String(farm.get("resource_state",""))=="available" and int(farm.get("amount",0))>1:
+			reseeded=true
+			break
+	check(reseeded,"farmer deposits final food, replants, completes construction and resumes a renewed farm")
+	check(world.economy_system.farm_reseed_queues_by_team.get(1,[]).is_empty(),"automatic replant consumes one reserve")
+	check(world.get_resource_amount(1,1)==0,"prepaid replant does not charge wood twice")
+	check(farmer["task"]=="gather" and int(farmer["resource_id"])==83,"farmer returns to the same farm")
+	var recorder := Replay.new()
+	recorder.begin(81)
+	var replay_command = Commands.FarmReserveCommand.new(3,[80],1)
+	replay_command.assign_envelope(1,9)
+	recorder.record_command(replay_command)
+	var loaded := Replay.new()
+	check(loaded.load_json(recorder.to_json()) and loaded.commands_through_tick(3)[0].command_type()=="farm_reserve","reserve command round-trips in replay")
+	world.set_resource_amount(1,1,10000)
+	for index in range(40): check(command(controller,80,1).get("accepted",false),"reserve slot %d is available" % (index+1))
+	var remaining := world.get_resource_amount(1,1)
+	check(not command(controller,80,1).get("accepted",false) and world.get_resource_amount(1,1)==remaining,"full reserve rejects payment beyond 40 slots")
+	for index in range(37): command(controller,82,-1)
+	farm["amount"]=1
+	world.update_resource_state(farm)
+	world.assign_command_gather([farmer],83)
+	var next_order=Commands.MoveCommand.new(controller.tick_index,[int(farmer["id"])],Vector2(26,25))
+	next_order.params["queue_order"]=true
+	controller.enqueue_command(next_order,true,1)
+	controller.process_commands()
+	for frame in range(1800):
+		controller.advance_frame(0.05,1,2)
+		if Vector2(farmer["pos"]).distance_to(Vector2(26,25))<0.75: break
+	check(Vector2(farmer["pos"]).distance_to(Vector2(26,25))<0.75 and world.economy_system.farm_reseed_queues_by_team.get(1,[]).size()==3,"the player's queued move takes priority over automatic reseeding")
+	world.set_resource_amount(1,1,0)
+	world.update_fog_of_war()
+	var model := Model.new()
+	model.configure(catalog.runtime_catalog_data,catalog.localization,catalog.object_catalog_data)
+	world.add_building(85,"granary",Vector2(6,27),1,false)
+	world.add_building(86,"granary",Vector2(13,10),2)
+	world.update_fog_of_war()
+	var unfinished_hud: Dictionary=model.build(Snapshot.with_queries(world,controller.tick_index,1),[85],"RECTANGLE")
+	check(not unfinished_hud["commands"].any(func(action):return action.get("type")=="farm_reserve"),"an unfinished granary does not offer reserve commands")
+	var enemy_hud: Dictionary=model.build(Snapshot.with_queries(world,controller.tick_index,1),[86],"RECTANGLE")
+	check(enemy_hud["selection"]["leader"].get("id")==86 and enemy_hud["selection"]["leader"].get("farm_reserve_count",-1)==-1 and enemy_hud["commands"].is_empty(),"enemy granary does not display our reserves or offer our commands")
+	var hud: Dictionary = model.build(Snapshot.with_queries(world,controller.tick_index,1),[80],"RECTANGLE")
+	check(hud["commands"].any(func(action):return action["id"]=="farm_reserve_add" and not action["enabled"] and not action.get("cost_text","").is_empty()),"granary exposes an unaffordable reserve with its price")
+	var controls := Controls.new()
+	controls.set_view_model(hud)
+	var cancellations: Array = []
+	controls.farm_reserve_requested.connect(func(building_id, amount):cancellations.append([building_id,amount]))
+	for index in range(controls.active_train_commands.size()):
+		if controls.active_train_commands[index]["id"]=="farm_reserve_add":
+			check(controls.train_buttons[index].tooltip_text.contains(str(paid)),"disabled tooltip retains cost")
+			var click := InputEventMouseButton.new()
+			click.button_index=MOUSE_BUTTON_RIGHT
+			click.pressed=true
+			controls._on_action_gui_input(click,index)
+			check(cancellations==[[80,-1]],"right-click cancels a reserve even when adding is unaffordable")
+			cancellations.clear()
+			click.shift_pressed=true
+			controls._on_action_gui_input(click,index)
+			check(cancellations.size()==3 and cancellations.all(func(value):return value==[80,-1]),"Shift-right-click cancels only the available reserve slots")
+	controls.free()
+	for failure in failures: push_error(failure)
+	print("Farm reserve: %d failures" % failures.size())
+	quit(0 if failures.is_empty() else 1)

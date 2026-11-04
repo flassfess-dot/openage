@@ -62,6 +62,9 @@ func adjacent_farms(catalog) -> void:
 	world.add_building(901, "market", Vector2(6, 16), 1)
 	world.add_unit(1, "villager", Vector2(17, 14), false)
 	world.add_unit(1, "villager", Vector2(22, 14), false)
+	# Test footprint tangency in known terrain. The southern farm center is
+	# outside the original pair's sight; fog rejection is a separate contract.
+	world.add_unit(1, "villager", Vector2(18, 23), false)
 	var first: Variant = world.place_foundation(1, "farm", Vector2(18, 17))
 	check(first != null, "farm fixture is placeable")
 	if first == null: return

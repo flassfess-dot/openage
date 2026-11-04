@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-02",
+  "status": "CURRENT_DESKTOP_R19_ORIGINAL_SAVE_PAIR_VERIFIED_FINAL_CHAMPION_REPEAT_PENDING",
+  "human_strength": "HUMAN_UNMEASURED",
+  "artifacts": {
+    "Rise of Rome Prototype.exe": "f6b5e6bf0c1031cff1c17a924cac26f0ddb1e07ff5669bc3db1e99273152322c",
+    "Rise of Rome Prototype.pck": "d202d3c8542371e0f71bc7a1e208339ff2a6b23a66e278a55ca8bf1231ec1b68",
+    "bin/ror_pathfinding.windows.template_release.x86_64.dll": "0ff22cb00b5a6dec20e4b58899d0093abd24b0c7ff75cf95d07bf362272e5839"
+  },
+  "conditions": {
+    "release": "Actual dist desktop shortcut target, R19",
+    "scenario": "Preserved original user archive; legacy adaptive AI retained",
+    "resolution": "2560x1080",
+    "speed": 1.5,
+    "frame_limit": 60,
+    "simulation_owner": true,
+    "profiling_probe": false,
+    "autosave": "Completed same-EXE isolated child, included in CPU/RAM sampling",
+    "other_arena_processes": 0,
+    "warmup_seconds": 15
+  },
+  "runs": [
+    {
+      "name": "release-owner-r19-static-v1",
+      "seconds": 60,
+      "ticks": 1803,
+      "saved_tick": 7454,
+      "steady_frame_us": {
+        "count": 2553,
+        "max": 32993,
+        "mean": 17628.9529964747,
+        "over_100ms": 0,
+        "over_200ms": 0,
+        "over_50ms": 0,
+        "p50": 16677,
+        "p95": 23813,
+        "p99": 26981
+      },
+      "simulation_pauses": {
+        "tick_gaps_us": {
+          "count": 1288,
+          "max": 117884,
+          "mean": 34930.1568322981,
+          "over_100ms": 10,
+          "over_200ms": 0,
+          "over_50ms": 77,
+          "p50": 33341,
+          "p95": 55718,
+          "p99": 99034
+        },
+        "total_wait_us": 2652392,
+        "waits_us": {
+          "count": 67,
+          "max": 63365,
+          "mean": 39587.9402985075,
+          "over_100ms": 0,
+          "over_200ms": 0,
+          "over_50ms": 13,
+          "p50": 39044,
+          "p95": 58844,
+          "p99": 63365
+        }
+      },
+      "peak_aggregate_private_bytes": 7766835200,
+      "report_sha256": "d6c8e84bd531a533c74b1c8b1dd8e87d8bc5d60862f29ba8fb68d7e0f187cbb8",
+      "invocation_sha256": "6e3c220a43bde2d8621e9dd82d31f31b90886bd4c13d2e34bed462139673d548",
+      "memory_sha256": "ed661fc409ffde1c13ea508450f4dc8020b122780e27fe24a87466224ca2c22c"
+    },
+    {
+      "name": "release-owner-r19-pan-v1",
+      "seconds": 120,
+      "ticks": 3602,
+      "saved_tick": 7454,
+      "steady_frame_us": {
+        "count": 5434,
+        "max": 93855,
+        "mean": 19322.6218255429,
+        "over_100ms": 0,
+        "over_200ms": 0,
+        "over_50ms": 40,
+        "p50": 17437,
+        "p95": 27942,
+        "p99": 43354
+      },
+      "simulation_pauses": {
+        "tick_gaps_us": {
+          "count": 2877,
+          "max": 162113,
+          "mean": 36490.2582551269,
+          "over_100ms": 66,
+          "over_200ms": 0,
+          "over_50ms": 267,
+          "p50": 33315,
+          "p95": 80857,
+          "p99": 117075
+        },
+        "total_wait_us": 7063061,
+        "waits_us": {
+          "count": 158,
+          "max": 143382,
+          "mean": 44702.917721519,
+          "over_100ms": 1,
+          "over_200ms": 0,
+          "over_50ms": 42,
+          "p50": 45783,
+          "p95": 65290,
+          "p99": 86222
+        }
+      },
+      "peak_aggregate_private_bytes": 8112627712,
+      "report_sha256": "7c1ef0e6ce39dc3fa2e9cfb9ff0a7842de2bc0c08242c7cbdc02163b0ecc9f76",
+      "invocation_sha256": "6830acb55d6bb64440e9171ca357eee8e55f133a91b28c73616720cff8be1924",
+      "memory_sha256": "b8919e6bbc700f5810209774976839473508064d6e8ba9f589352e0fdfb275fb"
+    }
+  ],
+  "images_viewed": true,
+  "local_receipts": {
+    "frame_pair_sha256": "44ce530e9026532caa05fa434ff800d6d43a6259df913370564efd893232d506",
+    "visual_review_sha256": "88b8b1b3684c7d2962f46328fff9adbe42afde3b656f5bef5928a035fd0ac061"
+  },
+  "interpretation": {
+    "periodic_half_second_frame_stalls_reproduced_after_fix": false,
+    "all_frame_spikes_resolved": false,
+    "scope": "Fresh current-artifact confirmation of the original freeze fix. Static60s has no steady frame over50ms; camera120s has40 frames over50ms, zero over100ms. Both sustain requested simulation speed and complete isolated autosave. Rare camera and simulation waits remain. These are neither competitive-policy strength nor full-load500-unit measurements, and the final selected Release needs its own exact-artifact repeats."
+  }
+}

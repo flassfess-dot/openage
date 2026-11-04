@@ -7,6 +7,7 @@ const EntityComponents := preload("res://scripts/entity_components.gd")
 const FormationCombat := preload("res://scripts/formation_combat.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const ProjectileMotion := preload("res://scripts/projectile_motion.gd")
+const Garrison := preload("res://scripts/tower_garrison.gd")
 
 var world_ref: WeakRef
 var world:
@@ -357,7 +358,9 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 			"ranged": int(unit.get("projectile_id", -1)) >= 0,
 		})
 	if int(unit.get("projectile_id", -1)) >= 0:
-		spawn_projectile(unit, enemy)
+		var count := 1 + Garrison.extra_arrows(world, unit)
+		for index in range(count):
+			spawn_projectile(unit, enemy, (float(index) - float(count - 1) * 0.5) * 0.14)
 	else:
 		var combat: Dictionary = unit.get("components", {}).get("combat", {})
 		var blast_range := maxf(0.0, float(combat.get("blast_range", unit.get("blast_range", 0.0))))
@@ -379,7 +382,7 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 	world.set_entity_field(unit, "last_damage", damage)
 
 
-func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
+func spawn_projectile(attacker: Dictionary, target: Dictionary, lateral_offset: float = 0.0) -> Dictionary:
 	var projectile_unit_id := int(attacker.get("projectile_id", -1))
 	var projectile_source: Dictionary = world.object_record_by_id(projectile_unit_id, int(attacker.get("team", 0)))
 	var projectile_entity_id: int = world.entity_id_sequence.next()
@@ -389,6 +392,9 @@ func spawn_projectile(attacker: Dictionary, target: Dictionary) -> Dictionary:
 	var accuracy := int(combat.get("accuracy", 100))
 	var weapon_offset: Array = combat.get("weapon_offset", [0.0, 0.0, 0.0])
 	var spawn := ProjectileMotion.spawn_position(attacker, target["pos"], weapon_offset)
+	if lateral_offset != 0.0:
+		var forward := (Vector2(target["pos"]) - Vector2(attacker["pos"])).normalized()
+		spawn += Vector2(-forward.y, forward.x) * lateral_offset
 	var ground_attack := bool(target.get("attack_ground", false))
 	var predictive_aim := bool(projectile_spec.get("smart_mode", false)) or bool(combat.get("ballistics", false))
 	var aim: Dictionary = {"position": Vector2(target["pos"]), "roll": 0, "accurate": true} if ground_attack else ProjectileMotion.aim_position(attacker, target, speed, predictive_aim, accuracy, projectile_entity_id)

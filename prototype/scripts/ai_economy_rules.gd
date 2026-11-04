@@ -2,6 +2,7 @@ extends RefCounted
 
 # Shared deterministic predicates and ranking rules for both economy planners.
 const Commands := preload("res://scripts/commands.gd")
+const Approach := preload("res://scripts/building_approach_geometry.gd")
 
 
 static func navigation_failure_rank(entity: Dictionary) -> int:
@@ -123,7 +124,7 @@ static func resource_previously_failed_for_worker(resource: Dictionary, worker: 
 	if failed_targets.get(int(worker.get("id", -1)), {}).has(int(resource.get("id", -2))):
 		return true
 	var order: Dictionary = worker.get("components", {}).get("order", {})
-	return String(order.get("type", "")) == "gather" and int(order.get("target_entity_id", -1)) == int(resource.get("id", -2)) and bool(order.get("completed", false)) and String(order.get("completion_reason", "")) in ["no_approach_slot", "no_path", "local_blocked"]
+	return String(order.get("type", "")) == "gather" and int(order.get("target_entity_id", -1)) == int(resource.get("id", -2)) and bool(order.get("completed", false)) and String(order.get("completion_reason", "")) in ["no_approach_slot", "no_path", "local_blocked", "local_obstacle"]
 
 
 static func resource_has_reachable_approach(resource: Dictionary, worker: Dictionary, reachable_by_domain: Dictionary) -> bool:
@@ -180,3 +181,58 @@ static func reachable_cells_by_domain(navigation: Dictionary, native_enabled: bo
 			cells[Vector2i(Vector2(value))] = true
 		result[domain] = cells
 	return result
+
+
+# A bounded search over the owner's explored navigation prevents repeated
+# deposits into a disconnected settlement. Exhausting the budget is unknown,
+# so the authoritative command still decides long or partially explored routes.
+static func has_known_deposit_route(worker: Dictionary, buildings: Array, snapshot: Dictionary) -> bool:
+	var profile: Dictionary = worker.get("ai_profile", {})
+	var type_id := int(profile.get("carried_resource_type_id", -1))
+	var allowed: Array = profile.get("delivery_drop_site_kinds", profile.get("drop_site_kinds", []))
+	var targets: Dictionary = {}
+	var compatible := false
+	for building in buildings:
+		if String(building.get("state", "complete")) != "complete" or float(building.get("hp", 0.0)) <= 0.0: continue
+		var kind := String(building.get("kind", ""))
+		if not bool(building.get("ai_drop_site", kind in ["town_center", "granary", "storage_pit", "dock"])): continue
+		if not allowed.is_empty():
+			if kind not in allowed: continue
+		elif type_id not in building.get("ai_drop_resources", [0, 1, 2, 3]): continue
+		compatible = true
+		var half_size: Variant = building.get("footprint", {}).get("half_size", building.get("ai_profile", {}).get("footprint_half_size"))
+		# Compact AI rows omit render footprints. Unknown dimensions cannot
+		# prove a depot disconnected; real own profiles provide the exact size.
+		if not half_size is Vector2: return true
+		var geometry := {"pos":building.get("pos", Vector2.ZERO), "footprint":{"half_size":half_size}}
+		for point in Approach.perimeter_candidates(worker, geometry, Vector2i(snapshot.get("map_size", Vector2i(256, 256)))):
+			targets[Vector2i(point.floor())] = true
+	if not compatible: return false
+	var domain := String(worker.get("movement_domain", "land"))
+	# Dock berths also use water-only fractional fallback slots. Let the
+	# authoritative deposit query choose those slots without a land-grid veto.
+	if domain == "water": return true
+	var navigation: Dictionary = snapshot.get("navigation", {})
+	if not navigation.has("frontier"): return true
+	var lookup: Dictionary = snapshot["_economy_reachable_cells"] if snapshot.has("_economy_reachable_cells") else reachable_cells_by_domain(navigation)
+	if not lookup.has(domain): return true
+	var cells: Dictionary = lookup[domain]
+	var origin := Vector2i(Vector2(worker.get("pos", Vector2.ZERO)).floor())
+	var queue: Array[Vector2i] = [origin]
+	var visited: Dictionary = {origin: true}
+	var cursor := 0
+	while cursor < queue.size() and cursor < 512:
+		var cell: Vector2i = queue[cursor]
+		cursor += 1
+		if targets.has(cell): return true
+		for offset in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var next: Vector2i = cell + offset
+			if cells.has(next) and not visited.has(next):
+				visited[next] = true
+				queue.append(next)
+	if cursor < queue.size(): return true
+	# A frontier is an unknown continuation, even after exhausting this
+	# learned component. Only a closed, fully known pocket can be vetoed.
+	for point in navigation.get("frontier", {}).get(domain, []):
+		if visited.has(Vector2i(Vector2(point).floor())): return true
+	return false

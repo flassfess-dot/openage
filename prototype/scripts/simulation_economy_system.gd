@@ -2,8 +2,11 @@ class_name RoRSimulationEconomySystem
 extends RefCounted
 
 const POPULATION_POINT_SCALE := 2
+const LEDGER_CATEGORIES := ["income","construction","production","research","repair","reseed","trade_in","trade_out","tribute_in","tribute_out","refund"]
 
 var resource_stockpiles_by_team: Dictionary = {}
+var resource_ledger_by_team: Dictionary = {}
+var farm_reseed_queues_by_team: Dictionary = {}
 var population_by_team: Dictionary = {}
 var population_points_by_team: Dictionary = {}
 var population_reserved_by_team: Dictionary = {}
@@ -15,6 +18,8 @@ var population_housing_enabled_by_team: Dictionary = {}
 
 func reset(default_food: int = 180, default_wood: int = 120) -> void:
 	resource_stockpiles_by_team.clear()
+	resource_ledger_by_team.clear()
+	farm_reseed_queues_by_team.clear()
 	population_by_team.clear()
 	population_points_by_team.clear()
 	population_reserved_by_team.clear()
@@ -36,9 +41,24 @@ func set_resource_amount(team: int, resource_id: int, amount: int) -> void:
 	resource_stockpiles_by_team[team][resource_id] = maxi(0, amount)
 
 
-func change_resource_amount(team: int, resource_id: int, delta: int) -> int:
-	var updated := get_resource_amount(team, resource_id) + delta
+func change_resource_amount(team: int, resource_id: int, delta: int, reason: String = "other") -> int:
+	var previous := get_resource_amount(team, resource_id)
+	var updated := previous + delta
 	set_resource_amount(team, resource_id, updated)
+	var applied := get_resource_amount(team, resource_id) - previous
+	if applied != 0 and resource_id >= 0 and resource_id < 4:
+		if not resource_ledger_by_team.has(team): resource_ledger_by_team[team] = {"sequence":0,"income":[0,0,0,0],"spent":[0,0,0,0],"refund":[0,0,0,0],"other_in":[0,0,0,0],"other_out":[0,0,0,0]}
+		var ledger: Dictionary = resource_ledger_by_team[team]
+		var field := "income" if reason == "income" and applied > 0 else "spent" if reason == "spend" and applied < 0 else "refund" if reason == "refund" and applied > 0 else "other_in" if applied > 0 else "other_out"
+		ledger[field][resource_id] += absi(applied)
+		if reason in LEDGER_CATEGORIES:
+			if not ledger.has("categories"): ledger["categories"]={}
+			if not ledger["categories"].has(reason): ledger["categories"][reason]=[0,0,0,0]
+			ledger["categories"][reason][resource_id]+=absi(applied)
+			if applied<0 and reason in ["construction","production","research","repair","reseed"]:
+				ledger["other_out"][resource_id]-=absi(applied)
+				ledger["spent"][resource_id]+=absi(applied)
+		ledger["sequence"] += 1
 	return get_resource_amount(team, resource_id)
 
 
@@ -49,14 +69,14 @@ func can_afford(team: int, cost: Dictionary) -> bool:
 	return true
 
 
-func spend(team: int, cost: Dictionary) -> void:
+func spend(team: int, cost: Dictionary, reason: String = "spend") -> void:
 	for resource_id in cost:
-		change_resource_amount(team, int(resource_id), -int(cost[resource_id]))
+		change_resource_amount(team, int(resource_id), -int(cost[resource_id]), reason)
 
 
 func refund(team: int, cost: Dictionary) -> void:
 	for resource_id in cost:
-		change_resource_amount(team, int(resource_id), int(cost[resource_id]))
+		change_resource_amount(team, int(resource_id), int(cost[resource_id]), "refund")
 
 
 func get_population(team: int) -> int:
@@ -147,6 +167,7 @@ func _sync_population_cap(team: int) -> void:
 func snapshot() -> Dictionary:
 	return {
 		"resource_stockpiles": resource_stockpiles_by_team.duplicate(true),
+		"resource_ledger": resource_ledger_by_team.duplicate(true),
 		"population": population_by_team.duplicate(true),
 		"population_points": population_points_by_team.duplicate(true),
 		"population_reserved": population_reserved_by_team.duplicate(true),

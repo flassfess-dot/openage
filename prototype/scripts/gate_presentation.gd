@@ -15,7 +15,7 @@ var cache: Dictionary = {}
 
 func prewarm_textures() -> void:
 	for group in range(GROUPS.size()):
-		if not textures.has(group): textures[group] = load("res://assets/gates/%s-leaves.png" % GROUPS[group])
+		if not textures.has(group): textures[group] = load("res://assets/gates/%s-door.png" % GROUPS[group])
 
 static func project(position: Vector2, height: float = 0.0) -> Vector2:
 	return Vector2((position.x-position.y)*32.0, (position.x+position.y)*16.0-height)
@@ -53,6 +53,15 @@ func frame_info(registry, building: Dictionary, player: int) -> Dictionary:
 		return cache[key]
 	var parts: Array = []
 	var occluders: Array = []
+	if foundation:
+		# One continuous four-tile site. Finished leaves cannot float between
+		# scaffolds while the masonry piers are still under construction.
+		for offset in [-1.5, -0.5, 0.5, 1.5]:
+			var construction: Dictionary = registry._frame_at(int(source.get("graphics", {}).get("construction", 77)), player, stage)
+			_add_sprite(parts, construction, origin + orient(Vector2(offset, 0), axis))
+		var construction_result := {"texture": null, "graphic_id": graphic, "composite_parts": parts, "gate_occluders": occluders}
+		cache[key] = construction_result
+		return construction_result
 	var base: Dictionary = registry._resolved_frame(graphic,player,2,0)
 	var profile: Dictionary = PROFILES[group]
 	var height: float = float(profile["height"])
@@ -87,13 +96,13 @@ func frame_info(registry, building: Dictionary, player: int) -> Dictionary:
 			parts.append(flag)
 	if not ruined and (not foundation or stage >= 2):
 		if not textures.has(group):
-			textures[group] = load("res://assets/gates/%s-leaves.png" % GROUPS[group])
+			textures[group] = load("res://assets/gates/%s-door.png" % GROUPS[group])
 		var texture: Texture2D = textures[group]
 		# Texture crop coordinates describe artwork, not masonry attachment
 		# points. Seat both hinges inside the inner faces of the 1x1 piers;
 		# swapping axes must keep the same physical overlap with the stone.
-		var left := Vector2(-1.25, 0.25)
-		var right := Vector2(1.25, 0.25)
+		var left := Vector2(-1.1, 0.25)
+		var right := Vector2(1.1, 0.25)
 		var length: float = right.x-left.x
 		var angle := float(pose)/7.0*PI*0.5
 		for side in [0,1]:
@@ -102,19 +111,11 @@ func frame_info(registry, building: Dictionary, player: int) -> Dictionary:
 			var direction := orient(local_direction,axis)
 			var end: Vector2 = hinge+direction*length*0.5
 			var front_normal := orient(Vector2(-local_direction.y,local_direction.x)*(1 if side == 0 else -1),axis)
-			var back: Vector2 = -front_normal*0.1875
-			var uv0: Vector2 = profile["left"]
-			var uv1 := uv0+Vector2((profile["right"].x-profile["left"].x)*0.5,(profile["right"].y-profile["left"].y)*0.5)
-			var h: float = float(profile["height"])
-			# The cutout contains a few pier/player-color texels outside the wood.
-			# Sample inside the slab; its top uses the clean upper wooden band.
-			var inset := (uv1-uv0)*0.05
-			var source_left := uv0+inset
-			var source_right := uv1-inset
-			var top_left := source_left-Vector2(0,h-1.5)
-			var top_right := source_right-Vector2(0,h-1.5)
-			var face_uv := PackedVector2Array([top_left,top_right,source_right-Vector2(0,1),source_left-Vector2(0,1)])
-			var top_uv := PackedVector2Array([top_left+Vector2(0,1),top_right+Vector2(0,1),top_right+Vector2(0,2),top_left+Vector2(0,2)])
+			var back: Vector2 = -front_normal*0.09
+			# Dedicated opaque material: no grass/player-color fringe sampled
+			# from an isometric cutout, and vertical planks in both orientations.
+			var face_uv := PackedVector2Array([Vector2(0,0), Vector2(63,0), Vector2(63,63), Vector2(0,63)])
+			var top_uv := PackedVector2Array([Vector2(0,2), Vector2(63,2), Vector2(63,5), Vector2(0,5)])
 			var shade := Color(0.82,0.82,0.82) if damage == 2 else Color.WHITE
 			var visible_front := front_normal.x+front_normal.y >= 0
 			var p0: Vector2 = hinge if visible_front else hinge+back

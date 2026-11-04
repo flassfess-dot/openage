@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$StartAt = "", [switch]$GameplayRegressions)
 
 $ErrorActionPreference = "Stop"
@@ -93,21 +93,29 @@ try {
     Write-LogLine ("COMMAND: {0} {1}" -f $godotApplication, ($arguments -join " "))
     $passed = 0
     $failed = 0
-    & $godotApplication @arguments 2>&1 | ForEach-Object {
-        $text = $_.ToString()
-        Write-LogLine ("test-suite: {0}" -f $text)
-        if ($text -match '^PASSED ') {
-            $passed += 1
-            $percent = 5 + [int](90 * (($passed + $failed) / [double]$testCount))
-            Write-Progress -Activity "Rise of Rome tests" -Status ("passed {0}/{1}" -f $passed, $testCount) -PercentComplete $percent
+    # Windows PowerShell 5.1 wraps native stderr in ErrorRecord objects.
+    # A failed child is evidence for the suite, not a reason to abandon every
+    # remaining test before the suite can print its complete result.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $godotApplication @arguments 2>&1 | ForEach-Object {
+            $text = $_.ToString()
+            Write-LogLine ("test-suite: {0}" -f $text)
+            if ($text -match '^PASSED ') {
+                $passed += 1
+                $percent = 5 + [int](90 * (($passed + $failed) / [double]$testCount))
+                Write-Progress -Activity "Rise of Rome tests" -Status ("passed {0}/{1}" -f $passed, $testCount) -PercentComplete $percent
+            }
+            elseif ($text -match '^(?:ERROR:\s*)?FAILED tests/') {
+                $failed += 1
+                $percent = 5 + [int](90 * (($passed + $failed) / [double]$testCount))
+                Write-Progress -Activity "Rise of Rome tests" -Status ("failed {0}, passed {1}" -f $failed, $passed) -PercentComplete $percent
+            }
         }
-        elseif ($text -match '^(?:ERROR:\s*)?FAILED tests/') {
-            $failed += 1
-            $percent = 5 + [int](90 * (($passed + $failed) / [double]$testCount))
-            Write-Progress -Activity "Rise of Rome tests" -Status ("failed {0}, passed {1}" -f $failed, $passed) -PercentComplete $percent
-        }
+        $exitCode = $LASTEXITCODE
     }
-    $exitCode = $LASTEXITCODE
+    finally { $ErrorActionPreference = $previousErrorActionPreference }
 
     if (Test-Path -LiteralPath $godotLog) {
         Write-LogLine "Godot engine log: $godotLog"

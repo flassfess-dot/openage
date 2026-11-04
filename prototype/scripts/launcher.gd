@@ -66,6 +66,10 @@ var _finishing_generation := false
 
 
 func _ready() -> void:
+	if "--background-autosave-worker" in OS.get_cmdline_user_args():
+		hide()
+		get_tree().root.add_child.call_deferred(load("res://scripts/autosave_process_worker.gd").new())
+		return
 	preload("res://scripts/rendering_configuration.gd").apply_window_presentation()
 	theme = AntiqueTheme.shared_theme()
 	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
@@ -112,6 +116,17 @@ func _ready() -> void:
 			var verifier = load(diagnostic[1]).new()
 			get_tree().root.add_child.call_deferred(verifier)
 			return
+	if "--ai-performance" in OS.get_cmdline_user_args() and not get_tree().has_meta("ai_performance_started"):
+		get_tree().set_meta("ai_performance_started",true)
+		hide()
+		get_tree().root.add_child.call_deferred(load("res://tools/ai_performance_runner.gd").new())
+		return
+	if "--ai-arena" in OS.get_cmdline_user_args() and not get_tree().has_meta("arena_started"):
+		get_tree().set_meta("arena_started",true)
+		hide()
+		var arena=load("res://tools/ai_arena_runner.gd").new()
+		get_tree().root.add_child.call_deferred(arena)
+		return
 	if "--verify-packaged-startup" in OS.get_cmdline_user_args() and not get_tree().has_meta("startup_verification_started"):
 		get_tree().set_meta("startup_verification_started", true)
 		var verifier = load("res://tests/manual/verify_packaged_startup.gd").new()

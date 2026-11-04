@@ -1,0 +1,1159 @@
+{
+  "schema_version": 1,
+  "suite": "holdout",
+  "rows": [
+    {
+      "id": "holdout-000",
+      "opponent": "baseline",
+      "civilizations": [
+        1,
+        9
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5000001,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-001",
+      "opponent": "baseline",
+      "civilizations": [
+        2,
+        16
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5001010,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-002",
+      "opponent": "baseline",
+      "civilizations": [
+        3,
+        7
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5002019,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-003",
+      "opponent": "baseline",
+      "civilizations": [
+        4,
+        14
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5003028,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-004",
+      "opponent": "baseline",
+      "civilizations": [
+        5,
+        5
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5004037,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-005",
+      "opponent": "baseline",
+      "civilizations": [
+        6,
+        12
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5005046,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-006",
+      "opponent": "baseline",
+      "civilizations": [
+        7,
+        3
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5006055,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-007",
+      "opponent": "baseline",
+      "civilizations": [
+        8,
+        10
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5007064,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-008",
+      "opponent": "baseline",
+      "civilizations": [
+        9,
+        1
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5008073,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-009",
+      "opponent": "baseline",
+      "civilizations": [
+        10,
+        8
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5009082,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-010",
+      "opponent": "baseline",
+      "civilizations": [
+        11,
+        15
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5010091,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-011",
+      "opponent": "baseline",
+      "civilizations": [
+        12,
+        6
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5011100,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-012",
+      "opponent": "baseline",
+      "civilizations": [
+        13,
+        13
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5012109,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-013",
+      "opponent": "baseline",
+      "civilizations": [
+        14,
+        4
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5013118,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-014",
+      "opponent": "baseline",
+      "civilizations": [
+        15,
+        11
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5014127,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-015",
+      "opponent": "baseline",
+      "civilizations": [
+        16,
+        2
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5015136,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-016",
+      "opponent": "baseline",
+      "civilizations": [
+        1,
+        9
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5016145,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-017",
+      "opponent": "baseline",
+      "civilizations": [
+        2,
+        16
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5017154,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-018",
+      "opponent": "baseline",
+      "civilizations": [
+        3,
+        7
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5018163,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-019",
+      "opponent": "baseline",
+      "civilizations": [
+        4,
+        14
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5019172,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-020",
+      "opponent": "baseline",
+      "civilizations": [
+        5,
+        5
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5020181,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-021",
+      "opponent": "baseline",
+      "civilizations": [
+        6,
+        12
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5021190,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-022",
+      "opponent": "baseline",
+      "civilizations": [
+        7,
+        3
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5022199,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-023",
+      "opponent": "baseline",
+      "civilizations": [
+        8,
+        10
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5023208,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-024",
+      "opponent": "baseline",
+      "civilizations": [
+        9,
+        1
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5024217,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-025",
+      "opponent": "baseline",
+      "civilizations": [
+        10,
+        8
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5025226,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-026",
+      "opponent": "baseline",
+      "civilizations": [
+        11,
+        15
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5026235,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-027",
+      "opponent": "baseline",
+      "civilizations": [
+        12,
+        6
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5027244,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-028",
+      "opponent": "baseline",
+      "civilizations": [
+        13,
+        13
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5028253,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-029",
+      "opponent": "baseline",
+      "civilizations": [
+        14,
+        4
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5029262,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-030",
+      "opponent": "baseline",
+      "civilizations": [
+        15,
+        11
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5030271,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-031",
+      "opponent": "baseline",
+      "civilizations": [
+        16,
+        2
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5031280,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-032",
+      "opponent": "baseline",
+      "civilizations": [
+        1,
+        9
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5032289,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-033",
+      "opponent": "baseline",
+      "civilizations": [
+        2,
+        16
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5033298,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-034",
+      "opponent": "baseline",
+      "civilizations": [
+        3,
+        7
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5034307,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-035",
+      "opponent": "baseline",
+      "civilizations": [
+        4,
+        14
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5035316,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-036",
+      "opponent": "baseline",
+      "civilizations": [
+        5,
+        5
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5036325,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-037",
+      "opponent": "baseline",
+      "civilizations": [
+        6,
+        12
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5037334,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-038",
+      "opponent": "baseline",
+      "civilizations": [
+        7,
+        3
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5038343,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-039",
+      "opponent": "baseline",
+      "civilizations": [
+        8,
+        10
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5039352,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-040",
+      "opponent": "baseline",
+      "civilizations": [
+        9,
+        1
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5040361,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-041",
+      "opponent": "baseline",
+      "civilizations": [
+        10,
+        8
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5041370,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-042",
+      "opponent": "baseline",
+      "civilizations": [
+        11,
+        15
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5042379,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-043",
+      "opponent": "baseline",
+      "civilizations": [
+        12,
+        6
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5043388,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-044",
+      "opponent": "baseline",
+      "civilizations": [
+        13,
+        13
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5044397,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-045",
+      "opponent": "baseline",
+      "civilizations": [
+        14,
+        4
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5045406,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-046",
+      "opponent": "baseline",
+      "civilizations": [
+        15,
+        11
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5046415,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-047",
+      "opponent": "baseline",
+      "civilizations": [
+        16,
+        2
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5047424,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-048",
+      "opponent": "baseline",
+      "civilizations": [
+        1,
+        9
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5048433,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-049",
+      "opponent": "baseline",
+      "civilizations": [
+        2,
+        16
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5049442,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-050",
+      "opponent": "baseline",
+      "civilizations": [
+        3,
+        7
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5050451,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-051",
+      "opponent": "baseline",
+      "civilizations": [
+        4,
+        14
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5051460,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-052",
+      "opponent": "baseline",
+      "civilizations": [
+        5,
+        5
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5052469,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-053",
+      "opponent": "baseline",
+      "civilizations": [
+        6,
+        12
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5053478,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-054",
+      "opponent": "baseline",
+      "civilizations": [
+        7,
+        3
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5054487,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-055",
+      "opponent": "baseline",
+      "civilizations": [
+        8,
+        10
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5055496,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-056",
+      "opponent": "baseline",
+      "civilizations": [
+        9,
+        1
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5056505,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-057",
+      "opponent": "baseline",
+      "civilizations": [
+        10,
+        8
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5057514,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-058",
+      "opponent": "baseline",
+      "civilizations": [
+        11,
+        15
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5058523,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-059",
+      "opponent": "baseline",
+      "civilizations": [
+        12,
+        6
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5059532,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-060",
+      "opponent": "baseline",
+      "civilizations": [
+        13,
+        13
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5060541,
+        "map_type_id": "grasslands",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    },
+    {
+      "id": "holdout-061",
+      "opponent": "baseline",
+      "civilizations": [
+        14,
+        4
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5061550,
+        "map_type_id": "narrows",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 200
+      }
+    },
+    {
+      "id": "holdout-062",
+      "opponent": "baseline",
+      "civilizations": [
+        15,
+        11
+      ],
+      "maximum_ticks": 36000,
+      "settings": {
+        "seed": 5062559,
+        "map_type_id": "coastal",
+        "map_size_id": "compact",
+        "resource_preset_id": "standard",
+        "starting_age_id": "bronze",
+        "ai_difficulty_id": "standard",
+        "population_limit": 500
+      }
+    },
+    {
+      "id": "holdout-063",
+      "opponent": "baseline",
+      "civilizations": [
+        16,
+        2
+      ],
+      "maximum_ticks": 72000,
+      "settings": {
+        "seed": 5063568,
+        "map_type_id": "islands",
+        "map_size_id": "compact",
+        "resource_preset_id": "high",
+        "starting_age_id": "stone",
+        "ai_difficulty_id": "standard",
+        "population_limit": 50
+      }
+    }
+  ],
+  "paired_positions": true
+}

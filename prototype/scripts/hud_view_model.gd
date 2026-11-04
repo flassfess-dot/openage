@@ -118,6 +118,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 		"global_queue": global_queue_model(snapshot, locale),
 		"commands": [],
 		"queue": [],
+		"garrison": {},
 		"battle_over": bool(snapshot.get("battle_over", false)),
 		"read_only": not disabled_reason.is_empty(),
 		"spectator": spectator,
@@ -127,6 +128,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 		model["read_only"] = true
 		model["global_queue"] = []
 		model["selection"]["leader"]["show_population"] = false
+		model["selection"]["leader"]["farm_reserve_count"] = -1
 		return model
 	var unit_count := selected.filter(func(entity): return _category(entity) == "unit").size()
 	if unit_count == selected.size() and unit_count > 0:
@@ -249,6 +251,29 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 			model["commands"].append({"type": "unit_action", "id": "gate_" + mode, "label": {"auto": "Автоматические ворота", "open": "Держать открытыми", "locked": "Запереть ворота"}[mode], "short_label": {"auto": "АВТО", "open": "ОТКРЫТЬ", "locked": "ЗАПЕРЕТЬ"}[mode], "icon_kind": "gate_mode", "icon_id": ["auto", "open", "locked"].find(mode), "enabled": disabled_reason.is_empty() and selected.all(func(gate): return String(gate.get("state", "")) == "complete"), "active": selected.all(func(gate): return String(gate.get("gate_mode", "auto")) == mode), "reason": disabled_reason})
 	if selected.size() == 1 and _category(selected[0]) == "building":
 		var building: Dictionary = selected[0]
+		if String(building.get("kind", "")) == "granary" and String(building.get("state", "")) == "complete" and bool(player_state.get("farm_reserve_available", false)):
+			var reserve_count := int(player_state.get("farm_reserve_count", 0))
+			var reserve_cost: Dictionary = player_state.get("farm_reserve_cost", {})
+			var affordable := reserve_cost.keys().all(func(id): return int(player_state.get(RESOURCE_NAMES.get(int(id), ""), 0)) >= int(reserve_cost[id]))
+			var farm_context := {"components": {"ownership": building.get("components", {}).get("ownership", {})}}
+			model["commands"].append({"type": "farm_reserve", "id": "farm_reserve_add", "amount": 1, "building_id": int(building["id"]), "label": "Зарезервировать повторный посев фермы", "icon_kind": _building_icon_kind(building), "icon_id": _icon_id_for_kind("farm", farm_context), "cost_text": _cost_text(reserve_cost), "queue_count": reserve_count, "enabled": affordable and reserve_count < 40 and disabled_reason.is_empty(), "reason": disabled_reason if not disabled_reason.is_empty() else "insufficient_resources" if not affordable else "farm_reserve_full" if reserve_count >= 40 else ""})
+			var cancel_reserve := {"type": "farm_reserve", "id": "farm_reserve_cancel", "amount": -1, "building_id": int(building["id"]), "label": "Отменить один запасной посев с возвратом ресурсов", "enabled": reserve_count > 0 and disabled_reason.is_empty(), "reason": disabled_reason if not disabled_reason.is_empty() else "farm_reserve_empty" if reserve_count == 0 else ""}
+			cancel_reserve.merge(IconRegistry.command_icon("cancel_production"))
+			model["commands"].append(cancel_reserve)
+		if building.has("garrison"):
+			var garrison: Dictionary = building["garrison"]
+			var occupants: Array = []
+			for unit in garrison.get("units", []):
+				var entry: Dictionary = unit.duplicate(true)
+				entry["name"] = _name_for_kind(String(unit.get("kind", "")), unit, locale)
+				entry["icon_kind"] = "unit"
+				entry["icon_id"] = _icon_id_for_kind(String(unit.get("kind", "")), unit)
+				entry["icon_team"] = int(unit.get("team", 1))
+				occupants.append(entry)
+			model["garrison"] = {"building_id": int(building["id"]), "capacity": int(garrison.get("capacity", 5)), "units": occupants, "extra_arrows": int(garrison.get("extra_arrows", 0))}
+			var action := {"type": "unit_action", "id": "ungarrison", "label": "Высадить весь гарнизон", "short_label": "ВЫСАДИТЬ", "hotkey": "U", "enabled": not occupants.is_empty() and disabled_reason.is_empty(), "reason": disabled_reason, "active": false}
+			action.merge(IconRegistry.command_icon("unload"))
+			model["commands"].append(action)
 		var production_queue: Array = building.get("production_queue", [])
 		for option_value in building.get("command_options", {}).get("train", []):
 			var option: Dictionary = option_value
@@ -363,6 +388,8 @@ func _input_signature(snapshot: Dictionary, selected: Array, formation_name: Str
 		int(player_state.get("population_cap", 0)),
 		int(player_state.get("kills", 0)),
 		int(player_state.get("age", 0)),
+		int(player_state.get("farm_reserve_count", 0)),
+		hash(player_state.get("farm_reserve_cost", {})),
 		String(player_state.get("status", "active")),
 		int(player_state.get("blocked_population_queues", 0)),
 	]
@@ -416,6 +443,7 @@ func _entity_input_signature(entity: Dictionary) -> int:
 		int(ownership.get("civilization_id", runtime_catalog.get("default_civilization_id", 13))),
 		bool(worker.get("enabled", false)),
 		bool(cargo.get("enabled", false)),
+		hash(entity.get("garrison", {})),
 		int(cargo.get("capacity", 0)),
 		hash(cargo.get("passenger_ids", [])),
 		hash(entity.get("behavior_tags", [])),
@@ -530,6 +558,7 @@ func _selection_model(selected: Array, player_state: Dictionary, locale: String)
 			"resource_maximum": int(leader.get("max_amount", 0)) if bool(leader.get("harvestable", false)) or category == "resource" else 0,
 			"resource_state": String(leader.get("resource_state", "")),
 			"show_population": category == "building" and kind == "house" and selected.size() == 1,
+			"farm_reserve_count": int(player_state.get("farm_reserve_count", 0)) if kind == "granary" else -1,
 			"population_current": int(player_state.get("population", 0)),
 			"population_cap": int(player_state.get("population_cap", 0)),
 			"conversion_enabled": bool(conversion.get("enabled", false)),
