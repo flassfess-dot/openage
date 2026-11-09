@@ -39,12 +39,18 @@ var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
 var building_icon_set_by_civilization: Dictionary = {}
 var localization
+var technology_description_cache: Dictionary = {}
+var grouped_signature_enabled := OS.get_environment("ROR_DIAGNOSTIC_GROUPED_HUD_SIGNATURE") != "0"
+var grouped_signature_calls := 0
+var profile_signature := "--profile-grouped-hud-signature" in OS.get_cmdline_user_args()
+var last_signature_us := 0
 
 
 func configure(runtime_data: Dictionary, localization_catalog, object_data: Dictionary = {}) -> void:
 	runtime_catalog = runtime_data
 	localization = localization_catalog
 	object_catalog = object_data
+	technology_description_cache.clear()
 	building_icon_set_by_civilization.clear()
 	for civilization_value in object_catalog.get("civilizations", []):
 		var civilization: Dictionary = civilization_value
@@ -60,7 +66,9 @@ func build(snapshot: Dictionary, selected_ids: Array[int], formation_name: Strin
 
 func build_update(snapshot: Dictionary, selected_ids: Array[int], formation_name: String, previous_signature: Variant = null, locale: String = "ru") -> Dictionary:
 	var selected := _selected_entities(snapshot, selected_ids)
+	var signature_started := Time.get_ticks_usec() if profile_signature else 0
 	var signature := _input_signature(snapshot, selected, formation_name, locale)
+	if profile_signature: last_signature_us = Time.get_ticks_usec() - signature_started
 	if previous_signature != null and int(previous_signature) == signature:
 		return {"changed": false, "signature": signature}
 	return {
@@ -99,6 +107,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 	var model := {
 		"tick": int(snapshot.get("tick", 0)),
 		"icon_team": observer_team,
+		"idle_worker_icon_id": _icon_id_for_kind("villager", {"team": observer_team}),
 		"resources": {
 			"wood": int(player_state.get("wood", 0)),
 			"food": int(player_state.get("food", 0)),
@@ -319,6 +328,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"technology_id": technology_id,
 				"building_id": int(building.get("id", -1)),
 				"label": _technology_name(technology_id, locale),
+				"description": _technology_description(technology_id, locale, building),
 				"icon_kind": "technology",
 				"icon_id": int(object_catalog.get("technologies", {}).get(String.num_int64(technology_id), {}).get("icon_id", -1)),
 				"cost": option.get("cost", {}).duplicate(true),
@@ -393,9 +403,64 @@ func _input_signature(snapshot: Dictionary, selected: Array, formation_name: Str
 		String(player_state.get("status", "active")),
 		int(player_state.get("blocked_population_queues", 0)),
 	]
-	for entity_value in selected:
-		values.append(_entity_input_signature(entity_value))
+	if grouped_signature_enabled:
+		values.append(_selection_input_signature(selected, int(snapshot.get("observer_team", player_state.get("team", 0)))))
+	else:
+		for entity_value in selected:
+			values.append(_entity_input_signature(entity_value))
 	return hash(values)
+
+
+func _selection_input_signature(selected: Array, observer_team: int) -> int:
+	grouped_signature_calls += 1
+	if selected.is_empty(): return hash([])
+	# The panel displays the leader's detailed statistics. Other members affect
+	# group capabilities and membership, not the leader's HP, armor or cargo.
+	# Hash exactly those group inputs instead of every combat table and queue.
+	var leader: Dictionary = selected[0]
+	var leader_kind := String(leader.get("kind", ""))
+	var leader_category := _category(leader)
+	var members: Array[int] = []
+	var homogeneous := true
+	var same_category := true
+	var unit_count := 0
+	var foreign := false
+	var all_transports := true
+	var any_combat := false
+	var loaded_transport := false
+	var ground_attackers := true
+	var traders := true
+	var all_gates := true
+	var complete_gates := true
+	var gate_modes: Dictionary = {}
+	var first_worker: Dictionary = {}
+	for entity_value in selected:
+		var entity: Dictionary = entity_value
+		var kind := String(entity.get("kind", ""))
+		var category := _category(entity)
+		var components: Dictionary = entity.get("components", {})
+		var cargo: Dictionary = components.get("cargo", {})
+		var combat: Dictionary = components.get("combat", {})
+		var transport := bool(cargo.get("enabled", false))
+		var combat_enabled := bool(entity.get("combat_enabled", false))
+		members.append(int(entity.get("id", -1)))
+		homogeneous = homogeneous and kind == leader_kind
+		same_category = same_category and category == leader_category
+		if category == "unit": unit_count += 1
+		foreign = foreign or (category != "resource" and int(entity.get("team", observer_team)) != observer_team)
+		all_transports = all_transports and transport
+		any_combat = any_combat or combat_enabled
+		loaded_transport = loaded_transport or (transport and not cargo.get("passenger_ids", []).is_empty())
+		ground_attackers = ground_attackers and combat_enabled and int(combat.get("projectile_id", -1)) >= 0 and float(combat.get("blast_range", 0.0)) > 0.0
+		traders = traders and bool(components.get("trade", {}).get("enabled", false))
+		all_gates = all_gates and kind == "gate"
+		if kind == "gate":
+			complete_gates = complete_gates and String(entity.get("state", "")) == "complete"
+			gate_modes[String(entity.get("gate_mode", "auto"))] = true
+		if first_worker.is_empty() and category == "unit" and _is_worker(entity) and String(entity.get("movement_domain", "land")) == "land": first_worker = entity
+	var leader_signature := _entity_input_signature(leader)
+	var worker_signature := 0 if first_worker.is_empty() or is_same(first_worker, leader) else _entity_input_signature(first_worker)
+	return hash([members, leader_signature, worker_signature, homogeneous, same_category, unit_count, foreign, all_transports, any_combat, loaded_transport, ground_attackers, traders, all_gates, complete_gates, gate_modes])
 
 
 func _entity_input_signature(entity: Dictionary) -> int:
@@ -674,6 +739,82 @@ func _technology_name(technology_id: int, locale: String) -> String:
 	return "%s %d" % ["Исследование" if locale == "ru" else "Research", technology_id]
 
 
+func _technology_description(technology_id: int, locale: String, building: Dictionary) -> String:
+	var civilization_id := int(building.get("components", {}).get("ownership", {}).get("civilization_id", 0))
+	var key := "%d:%d:%s" % [technology_id, civilization_id, locale]
+	if technology_description_cache.has(key):
+		return technology_description_cache[key]
+	var record: Dictionary = object_catalog.get("technologies", {}).get(str(technology_id), {})
+	var lines: PackedStringArray = []
+	var description_id := int(record.get("language", {}).get("description_id", -1))
+	if localization != null and description_id > 0:
+		var text := String(localization.text(description_id, locale)).strip_edges()
+		if not text.begins_with("["): lines.append(text)
+	# The original Russian localization mistranslates these effects (HP as
+	# attack/range, and shared sight as shared research). Follow the DAT rules.
+	if locale == "ru":
+		var corrections := {
+			21: "Удваивает здоровье жрецов, помогая им пережить нападение.",
+			34: "Увеличивает здоровье кавалерии, конных лучников, колесниц и всадников на верблюдах на 15%. Необходимо для боевых колесниц.",
+			112: "Ускоряет строительство на 33% и увеличивает здоровье зданий и стен на 20%.",
+			114: "Открывает общий обзор и исследованную карту союзников. Позволяет видеть происходящее у союзников.",
+		}
+		if corrections.has(technology_id): lines = PackedStringArray([corrections[technology_id]])
+	if technology_id in [101, 102, 103]:
+		lines.append("Открывает здания, войска и исследования следующей эпохи, доступные вашей цивилизации." if locale == "ru" else "Unlocks the next age's buildings, troops and technologies available to your civilization.")
+	var bundle: Dictionary = object_catalog.get("effect_bundles", {}).get(str(record.get("effect_bundle_id", -1)), {})
+	for effect in bundle.get("commands", []):
+		var type_id := int(effect.get("type_id", -1))
+		if type_id != 3 and not (type_id == 2 and int(effect.get("attr_b", 0)) == 1): continue
+		var new_id := int(effect.get("attr_b", -1)) if type_id == 3 else int(effect.get("attr_a", -1))
+		var source := _technology_object(new_id, civilization_id)
+		if source.is_empty(): continue
+		var name := String(localization.text(int(source.get("language", {}).get("name_id", -1)), locale)) if localization != null else ""
+		var is_building := int(source.get("unit_type", 0)) == 80
+		if type_id == 3:
+			lines.append("Улучшает существующие и новые объекты: %s." % name if locale == "ru" else "Upgrades existing and newly created objects to %s." % name)
+		else:
+			lines.append(("Позволяет строить: %s." if is_building else "Позволяет нанимать: %s.") % name if locale == "ru" else "Unlocks %s." % name)
+		# The imported unit help explains roles and special attacks omitted from
+		# short upgrade labels. Prefer the detailed encyclopedia entry.
+		if localization != null and not name.is_empty():
+			var strings: Dictionary = localization.languages.get(locale, {}).get("strings", {})
+			var help := ""
+			for string_id in strings:
+				var text := String(strings[string_id])
+				if int(string_id) >= 39000 and int(string_id) < 40000 and text.begins_with(name + " - ") and text.length() > help.length(): help = text
+			if not help.is_empty(): lines.append(help.substr(name.length() + 3))
+		var old := _technology_object(int(effect.get("attr_a", -1)), civilization_id) if type_id == 3 else {}
+		var stats: PackedStringArray = []
+		for stat in ["health", "range", "attack", "speed"]:
+			var value := _technology_stat(source, stat)
+			var before := _technology_stat(old, stat)
+			if value <= 0.0 or (not old.is_empty() and is_equal_approx(value, before)): continue
+			var label: String = String({"health": "Здоровье", "range": "Дальность", "attack": "Атака", "speed": "Скорость"}.get(stat)) if locale == "ru" else String(stat).capitalize()
+			stats.append("%s: %s%s" % [label, String.num(before, 2) + " → " if not old.is_empty() else "", String.num(value, 2)])
+		if not stats.is_empty(): lines.append(("Базовые параметры: " if locale == "ru" else "Base stats: ") + "; ".join(stats))
+	var result := "\n".join(lines)
+	technology_description_cache[key] = result
+	return result
+
+
+func _technology_object(unit_id: int, civilization_id: int) -> Dictionary:
+	var objects: Dictionary = object_catalog.get("objects", {})
+	return objects.get("%d:%d" % [civilization_id, unit_id], objects.get("0:%d" % unit_id, {}))
+
+
+func _technology_stat(source: Dictionary, stat: String) -> float:
+	match stat:
+		"health", "speed": return float(source.get(stat, 0.0))
+		"range": return float(source.get("combat", {}).get("range_max", 0.0))
+		"attack":
+			var damage := 0.0
+			for attack in source.get("combat", {}).get("attacks", []):
+				if int(attack.get("type_id", -1)) in [3, 4]: damage = maxf(damage, float(attack.get("amount", 0.0)))
+			return damage
+	return 0.0
+
+
 func _icon_id_for_kind(kind: String, entity: Dictionary) -> int:
 	if kind == "gate":
 		return GateCatalog.icon_id(int(entity.get("source_unit_id", 10072)), _building_icon_set(entity))
@@ -765,3 +906,4 @@ static func refresh_global_progress(model: Dictionary, snapshot: Dictionary) -> 
 		var order: Dictionary = heads.get(int(entry.get("building_id", -1)), {})
 		var duration := maxf(0.05, float(order.get("duration", 0.05)))
 		entry["progress"] = clampf(float(order.get("progress", 0)) / duration, 0, 1)
+		entry["remaining_seconds"] = maxf(0, duration - float(order.get("progress", 0)))

@@ -5,6 +5,7 @@ const PickingService := preload("res://scripts/picking_service.gd")
 const ResourcePresentationRegistry := preload("res://scripts/resource_presentation_registry.gd")
 const RenderItem := preload("res://scripts/render_item.gd")
 const SimulationSnapshot := preload("res://scripts/simulation_snapshot.gd")
+const ReadContract := preload("res://scripts/entity_read_contract.gd")
 const SpriteAtlas := preload("res://scripts/sprite_atlas.gd")
 var sprite_atlas := SpriteAtlas.new()
 var sprite_atlas_enabled := true
@@ -37,11 +38,18 @@ var cached_resource_signature: int = 0
 var cached_resource_drawables: Array = []
 var cached_resource_projection: Variant = null
 var cached_resource_records: Dictionary = {}
+var resource_record_archive: Dictionary = {}
+var resource_record_archive_bytes := 0
+var resource_record_archive_hits := 0
+var resource_record_warmups := 0
+const MAX_RESOURCE_RECORDS := 65536
+const MAX_RESOURCE_RECORD_BYTES := 256 * 1024 * 1024
 var cached_resource_raw_drawables: Array = []
 var cached_resource_input: Array = []
 var cached_resource_highlights: Array[int] = []
 var cached_resource_animated: Array = []
 var cached_sprite_scale := 0.0
+var camera_projection: Array = []
 var affine_static_projection := true
 var cached_resource_origin: Variant = null
 var cached_resource_scale := 0.0
@@ -54,10 +62,20 @@ var cached_environment_signature: int = 0
 var cached_environment_drawables: Array = []
 var cached_environment_signature_valid := false
 var cached_environment_records: Dictionary = {}
+var environment_record_archive_enabled := OS.get_environment("ROR_DIAGNOSTIC_ENVIRONMENT_ARCHIVE") != "0"
+var environment_record_archive: Dictionary = {}
+var environment_record_archive_bytes := 0
+var environment_record_archive_hits := 0
+var environment_record_warmups := 0
+var environment_record_prewarm_us := 0
+var environment_record_generation := 0
+const MAX_ENVIRONMENT_RECORDS := 65536
+const MAX_ENVIRONMENT_RECORD_BYTES := 512 * 1024 * 1024
 var cached_environment_revision := -1
 var cached_environment_animated: Array = []
 var cached_environment_projection: Variant = null
 var performance_probe: Variant = null
+var native_environment_signatures_enabled := true
 var cached_building_depth_index: Dictionary = {}
 var cached_building_records: Dictionary = {}
 var rally_drawables: Array = []
@@ -68,6 +86,10 @@ var current_projection_origin := Vector2.ZERO
 var cached_refresh_input: Array = []
 var cached_refresh_static: Array = []
 var cached_refresh_moving: Array = []
+var cached_refresh_interpolating: Array = []
+var stationary_interpolation_skip_enabled := true
+var native_static_sort_enabled := true
+var profile_static_sort_alternatives := "--profile-static-sort-alternatives" in OS.get_cmdline_user_args()
 var cached_refresh_ambient: Array = []
 var native_render_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 
@@ -83,11 +105,16 @@ func clear_caches() -> void:
 	cached_refresh_input = []
 	cached_refresh_static = []
 	cached_refresh_moving = []
+	cached_refresh_interpolating = []
 	cached_refresh_ambient = []
 	cached_resource_signature = 0
 	cached_resource_drawables.clear()
 	cached_resource_projection = null
 	cached_resource_records.clear()
+	resource_record_archive.clear()
+	resource_record_archive_bytes = 0
+	resource_record_archive_hits = 0
+	resource_record_warmups = 0
 	cached_resource_raw_drawables.clear()
 	cached_resource_input = []
 	cached_resource_highlights = []
@@ -101,12 +128,26 @@ func clear_caches() -> void:
 	cached_environment_drawables.clear()
 	cached_environment_signature_valid = false
 	cached_environment_records.clear()
+	clear_environment_record_archive()
 	cached_environment_revision = -1
 	cached_environment_animated.clear()
 	cached_environment_projection = null
 
 
+static func final_waypoint_prediction_limit(actor: Dictionary, row: Dictionary) -> float:
+	if actor.get("formation_shared_motion", false): return -1.0
+	var path: Array = actor.get("path", [])
+	if path.is_empty() or int(actor.get("path_index", 0)) != path.size() - 1: return -1.0
+	var position := Vector2(row["pos"])
+	var step := position - Vector2(row.get("previous_pos", position))
+	var length := step.length()
+	if length <= 0.000001: return -1.0
+	var remaining := maxf(0.0, (Vector2(path.back()) - position).dot(step / length))
+	return minf(MAX_INTERPOLATION_ALPHA, 1.0 + remaining / length)
+
+
 func create_world_drawables(world_source, world_to_screen: Callable, interpolation_alpha: float = 1.0, frame_info_provider: Callable = Callable(), preview_ids: Array[int] = [], observer_team: int = 0, selected_ids: Array[int] = [], sprite_scale: float = 0.0, viewport: Rect2 = Rect2()) -> Array:
+	sprite_atlas.performance_probe = performance_probe
 	var stage_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var drawables: Array = []
 	rally_drawables = []
@@ -140,10 +181,13 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	var source_environment: Array = world_source.get("environment", []) if from_snapshot else []
 	var source_units: Array = world_source.get("units", []) if from_snapshot else world_source.get_units()
 	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids + selected_ids, sprite_scale, world_source.get("resource_delta", {}), viewport) if from_snapshot and world_source.has("resources") else []
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.resources.snapshot", Time.get_ticks_usec() - stage_started)
+	var resource_clip_started := Time.get_ticks_usec() if performance_probe != null else 0
 	if viewport.has_area(): resource_drawables = _visible_static_drawables(resource_drawables, viewport, cached_resource_clip)
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.resources.clip", Time.get_ticks_usec() - resource_clip_started)
 	_observe_stage("resources", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
-	var environment_projection := _snapshot_environment_drawables(source_environment, world_to_screen, frame_info_provider, int(world_source.get("environment_revision", -1)), viewport) if from_snapshot and world_source.has("environment") else {"static": [], "animated": source_environment}
+	var environment_projection := _snapshot_environment_drawables(source_environment, world_to_screen, frame_info_provider, int(world_source.get("environment_revision", -1)), viewport, world_source.get("environment_projection", {})) if from_snapshot and world_source.has("environment") else {"static": [], "animated": source_environment}
 	var environment_drawables: Array = environment_projection["static"]
 	if viewport.has_area(): environment_drawables = _visible_static_drawables(environment_drawables, viewport, cached_environment_clip)
 	source_environment = environment_projection["animated"]
@@ -284,7 +328,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	_observe_stage("static_entities", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	if from_snapshot and native_render_kernel != null and native_render_kernel.has_method("create_unit_render_items"):
-		drawables.append_array(native_render_kernel.create_unit_render_items(source_units, world_to_screen, frame_info_provider, Callable(self, "team_color"), alpha, cached_building_depth_index, preview_ids, selected_ids))
+		drawables.append_array(native_render_kernel.create_unit_render_items(source_units, world_to_screen, frame_info_provider, Callable(self, "team_color"), alpha, cached_building_depth_index, preview_ids, selected_ids, camera_projection))
 	else:
 		for unit in source_units:
 			var death_phase := String(unit.get("death_phase", "alive"))
@@ -322,7 +366,16 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
 				if death_phase == "alive" and highlighted:
 					drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
-	if sprite_scale > 0.0 and native_render_kernel != null and native_render_kernel.has_method("cache_actor_sprites"): native_render_kernel.cache_actor_sprites(drawables, sprite_scale)
+	if sprite_scale > 0.0 and native_render_kernel != null:
+		if native_render_kernel.has_method("cache_actor_sprites_atlased"):
+			# Actors use the same bounded atlas/template cache as static sprites.
+			# Their old direct-texture path prevented adjacent units from batching.
+			if sprite_template_atlas != sprite_atlas_enabled:
+				sprite_template_cache = {"entries":{},"bytes":0}
+				sprite_template_atlas = sprite_atlas_enabled
+			native_render_kernel.cache_actor_sprites_atlased(drawables, sprite_scale, Callable(sprite_atlas,"texture_for") if sprite_atlas_enabled else Callable(), sprite_template_cache)
+		elif native_render_kernel.has_method("cache_actor_sprites"):
+			native_render_kernel.cache_actor_sprites(drawables, sprite_scale)
 	_observe_stage("units", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	drawables = native_render_kernel.sort_render_items(drawables) if native_render_kernel != null and native_render_kernel.has_method("sort_render_items") else _sort_drawables_by_layer(drawables)
@@ -350,7 +403,9 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	if not resource_drawables.is_empty():
 		result = _merge_sorted_drawables(result, resource_drawables)
 	_observe_stage("merge", stage_started)
+	var atlas_flush_started := Time.get_ticks_usec() if performance_probe != null else 0
 	sprite_atlas.flush()
+	_observe_stage("atlas_flush", atlas_flush_started)
 	return result
 
 
@@ -536,6 +591,63 @@ static func resource_layer(resource: Dictionary) -> int:
 	return RenderItem.Layer.UNIT_BUILDING
 
 
+static func _resource_visual_signature(resource: Dictionary, selected: bool) -> int:
+	return hash([resource.get("kind", ""), resource.get("pos", Vector2.ZERO), resource.get("elevation", 0.0), resource.get("depletion_stage", 0), resource.get("tree_phase", ""), resource.get("environment_asset", ""), resource.get("environment_variant", 0), resource.get("tree_condition", ""), resource.get("source_graphic_asset_name", ""), resource.get("source_depleted_asset_name", ""), resource.get("source_graphic_id", -1), resource.get("source_unit_id", -1), ResourcePresentationRegistry.is_carcass(resource), resource.get("source_frame", 0), int(resource.get("amount", 0)) > 0, selected])
+
+
+func _make_resource_record(resource: Dictionary, selected: bool, signature: int, animated: bool, fish: bool, world_to_screen: Callable, frame_info_provider: Callable) -> Dictionary:
+	var id := int(resource.get("id", -1))
+	var position: Vector2 = resource.get("pos", Vector2.ZERO)
+	var screen: Vector2 = world_to_screen.call(position)
+	var info := _frame_info(frame_info_provider, "resource", resource)
+	var elevation := float(resource.get("elevation", 0.0))
+	var items: Array = [RenderItem.create("resource", resource_layer(resource), position, screen, id, resource, info, elevation)]
+	_append_resource_shadow(items, resource, info, position, screen)
+	for item in items: item["clip_static_sprite"] = not animated
+	if selected: items.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, screen, id, resource, info, elevation, Color("d6bc63"), 1.0, 1))
+	return {"signature":signature,"drawables":items,"source":resource,"selected":selected,"animated":animated,"fish":fish}
+
+
+func _retain_resource_record(id: int, record: Dictionary) -> void:
+	if resource_record_archive.has(id): resource_record_archive_bytes -= int(resource_record_archive[id].get("archive_bytes", 0))
+	var weight: int = 512 + record["source"].size() * 48 + record["drawables"].size() * 1536
+	record["archive_bytes"] = weight
+	resource_record_archive[id] = record
+	resource_record_archive_bytes += weight
+	while resource_record_archive.size() > MAX_RESOURCE_RECORDS or resource_record_archive_bytes > MAX_RESOURCE_RECORD_BYTES:
+		var oldest: Variant
+		for key in resource_record_archive: oldest = key; break
+		resource_record_archive_bytes -= int(resource_record_archive[oldest].get("archive_bytes", 0))
+		resource_record_archive.erase(oldest)
+
+
+func prewarm_resource_records_async(resources: Array, world_to_screen: Callable, frame_info_provider: Callable, sprite_scale: float, tree: SceneTree, progress: Callable) -> void:
+	# A match-local, bounded visual cache. No live simulation dictionaries are
+	# retained, and these records enter drawing only through the legal snapshot.
+	cached_sprite_scale = sprite_scale
+	current_projection_origin = world_to_screen.call(Vector2.ZERO)
+	var pending: Array = []
+	var started := Time.get_ticks_usec()
+	for index in range(resources.size()):
+		var source: Dictionary = resources[index]
+		var animated := ResourcePresentationRegistry.is_carcass(source) or String(source.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS or String(source.get("tree_phase", "")) == "falling"
+		if not animated and (int(source.get("amount", 0)) > 0 or bool(source.get("visible_when_depleted", false))):
+			var resource: Dictionary = source if source.is_read_only() else ReadContract.render(source)
+			var record := _make_resource_record(resource, false, _resource_visual_signature(resource, false), false, false, world_to_screen, frame_info_provider)
+			_retain_resource_record(int(resource["id"]), record)
+			pending.append_array(record["drawables"])
+			resource_record_warmups += 1
+		if Time.get_ticks_usec() - started >= 2500:
+			_cache_sprite_batch(pending)
+			pending.clear()
+			if progress.is_valid(): progress.call(float(index + 1) / maxi(1, resources.size()))
+			await tree.process_frame
+			started = Time.get_ticks_usec()
+	if not pending.is_empty(): _cache_sprite_batch(pending)
+	sprite_atlas.flush()
+	if progress.is_valid(): progress.call(1.0)
+
+
 func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, frame_info_provider: Callable, preview_ids: Array[int], sprite_scale: float = 0.0, publication_delta: Dictionary = {}, viewport: Rect2 = Rect2()) -> Array:
 	var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
 	var scale_changed := cached_sprite_scale != sprite_scale
@@ -551,6 +663,7 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		_refresh_resource_animations(frame_info_provider)
 		if performance_probe != null: performance_probe.increment("presentation.resources.publications_reused")
 		return cached_resource_drawables
+	var resource_delta_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var highlights_changed := preview_ids != cached_resource_highlights
 	var delta: Dictionary = {}
 	# The legal-memory producer publishes an immutable delta with exact source
@@ -560,6 +673,8 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 	elif not highlights_changed and native_render_kernel != null and native_render_kernel.has_method("diff_resource_records"):
 		delta = native_render_kernel.diff_resource_records(cached_resource_input, resources)
 	var incremental := bool(delta.get("valid", false))
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.resources.diff", Time.get_ticks_usec() - resource_delta_started)
+	var resource_records_started := Time.get_ticks_usec() if performance_probe != null else 0
 	if performance_probe != null:
 		performance_probe.increment("presentation.resources.incremental" if incremental else "presentation.resources.full_scan")
 		performance_probe.increment("presentation.resources.records_scanned", delta["changed"].size() if incremental else resources.size())
@@ -578,6 +693,8 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 	var has_fish := false
 	var fish_changed := highlights_changed
 	var resolved := 0
+	var archived_drawables: Array = []
+	var fresh_drawables: Array = []
 	for resource_value in (delta["changed"] if incremental else resources):
 		var resource: Dictionary = resource_value
 		immutable_view = immutable_view and resource.is_read_only() and (not resource.has("behavior_tags") or resource["behavior_tags"].is_read_only())
@@ -589,14 +706,27 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var id := int(resource.get("id", -1))
 		var selected: bool = highlighted.has(id) and PickingService.resource_is_selectable(resource)
 		var previous: Dictionary = cached_resource_records.get(id, {})
+		var from_archive := previous.is_empty() and resource_record_archive.has(id)
+		if from_archive: previous = resource_record_archive[id]
 		var identical: bool = resource.is_read_only() and is_same(previous.get("source"), resource) and (not resource.has("behavior_tags") or resource["behavior_tags"].is_read_only())
 		var signature := int(previous.get("signature", 0))
 		if not identical or bool(previous.get("selected", false)) != selected:
-			signature = hash([resource.get("kind", ""), resource.get("pos", Vector2.ZERO), resource.get("elevation", 0.0), resource.get("depletion_stage", 0), resource.get("tree_phase", ""), resource.get("environment_asset", ""), resource.get("environment_variant", 0), resource.get("tree_condition", ""), resource.get("source_graphic_asset_name", ""), resource.get("source_depleted_asset_name", ""), resource.get("source_graphic_id", -1), resource.get("source_unit_id", -1), ResourcePresentationRegistry.is_carcass(resource), resource.get("source_frame", 0), int(resource.get("amount", 0)) > 0, selected])
+			signature = _resource_visual_signature(resource, selected)
 		var animated: bool = bool(previous.get("animated", false)) if identical else ResourcePresentationRegistry.is_carcass(resource) or String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS or String(resource.get("tree_phase", "")) == "falling"
 		var fish: bool = bool(previous.get("fish", false)) if identical else FishShoalSelection.is_fish(resource)
 		has_fish = has_fish or fish
 		if not previous.is_empty() and int(previous["signature"]) == signature:
+			if from_archive:
+				resource_record_archive_hits += 1
+				replaced[id] = true
+				if not identical:
+					for item in previous["drawables"]: item["data"] = resource
+					previous["source"] = resource
+				next_records[id] = previous
+				added.append_array(previous["drawables"])
+				archived_drawables.append_array(previous["drawables"])
+				fish_changed = fish_changed or fish
+				continue
 			if identical:
 				next_records[id] = previous
 				retained[id] = true
@@ -610,21 +740,18 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 			continue
 		fish_changed = fish_changed or fish or bool(previous.get("fish", false))
 		replaced[id] = true
-		var position: Vector2 = resource.get("pos", Vector2.ZERO)
-		var screen: Vector2 = world_to_screen.call(position)
-		var info := _frame_info(frame_info_provider, "resource", resource)
-		var elevation := float(resource.get("elevation", 0.0))
-		var items: Array = [RenderItem.create("resource", resource_layer(resource), position, screen, id, resource, info, elevation)]
-		_append_resource_shadow(items, resource, info, position, screen)
-		for item in items:
-			_cache_resource_sprite(item)
-			item["clip_static_sprite"] = not animated
-		if selected:
-			items.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, position, screen, id, resource, info, elevation, Color("d6bc63"), 1.0, 1))
-		next_records[id] = {"signature": signature, "drawables": items, "source": resource, "selected": selected, "animated": animated, "fish": fish}
+		var record := _make_resource_record(resource, selected, signature, animated, fish, world_to_screen, frame_info_provider)
+		var items: Array = record["drawables"]
+		next_records[id] = record
+		if not animated: _retain_resource_record(id, record)
 		added.append_array(items)
+		fresh_drawables.append_array(items)
 		resolved += 1
 
+	if not archived_drawables.is_empty(): _reproject_statics(archived_drawables, world_to_screen, Vector2.ZERO, 1.0)
+	if not fresh_drawables.is_empty(): _cache_sprite_batch(fresh_drawables)
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.resources.records", Time.get_ticks_usec() - resource_records_started)
+	var resource_assembly_started := Time.get_ticks_usec() if performance_probe != null else 0
 	cached_resource_input = resources if immutable_view else []
 	if not incremental or not added.is_empty() or not replaced.is_empty():
 		cached_resource_animated = []
@@ -640,11 +767,12 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 	if added.is_empty() and next_records.size() == cached_resource_records.size() and not fish_changed:
 		cached_resource_records = next_records
 		if performance_probe != null: performance_probe.increment("presentation.resources.frames_reused", next_records.size())
+		if performance_probe != null: performance_probe.observe_microseconds("presentation.resources.assembly", Time.get_ticks_usec() - resource_assembly_started)
 		return cached_resource_drawables
 	var kept: Array = []
 	for item in cached_resource_raw_drawables:
 		if (not replaced.has(int(item["stable_id"]))) if incremental else retained.has(int(item["stable_id"])): kept.append(item)
-	added.sort_custom(RenderItem.less)
+	added = _sort_static_items(added, "resources")
 	cached_resource_raw_drawables = _merge_static_items(kept, added)
 	# Retain only the current viewport's legal records. A single entering tree or
 	# depletion change never reloads all remaining resource frame descriptors.
@@ -667,11 +795,12 @@ func _snapshot_resource_drawables(resources: Array, world_to_screen: Callable, f
 		var grouped := FishShoalSelection.group_drawables(fish_items, preview_ids, world_to_screen)
 		for item in grouped:
 			if String(item["kind"]) == "selection": cached_resource_group_selections.append(item)
-		grouped.sort_custom(RenderItem.less)
+		grouped = _sort_static_items(grouped, "resource_groups")
 		cached_resource_drawables = _merge_static_items(other_items, grouped)
 	if performance_probe != null:
 		performance_probe.increment("presentation.resources.frames_resolved", resolved)
 		performance_probe.increment("presentation.resources.frames_reused", retained.size())
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.resources.assembly", Time.get_ticks_usec() - resource_assembly_started)
 	return cached_resource_drawables
 
 
@@ -722,9 +851,13 @@ func _visible_static_drawables(items: Array, viewport: Rect2, cache: Dictionary)
 	var result: Array = []
 	if _can_project_visible(viewport):
 		if not is_same(cache.get("prepared_source"), items):
+			var clip_prepare_started := Time.get_ticks_usec() if performance_probe != null else 0
 			cache["prepared"] = native_render_kernel.prepare_static_projection(items, current_projection_origin, cached_sprite_scale)
+			if performance_probe != null: performance_probe.observe_microseconds("presentation.static_clip.prepare", Time.get_ticks_usec() - clip_prepare_started)
 			cache["prepared_source"] = items
+		var clip_project_started := Time.get_ticks_usec() if performance_probe != null else 0
 		result = native_render_kernel.project_prepared_static_items(cache["prepared"], current_projection_origin, cached_sprite_scale, viewport)
+		if performance_probe != null: performance_probe.observe_microseconds("presentation.static_clip.project", Time.get_ticks_usec() - clip_project_started)
 		cache["source"] = items
 		cache["result"] = result
 		cache["key"] = key
@@ -742,6 +875,7 @@ func _visible_static_drawables(items: Array, viewport: Rect2, cache: Dictionary)
 
 
 func _refresh_resource_animations(provider: Callable) -> void:
+	var resource_animation_started := Time.get_ticks_usec() if performance_probe != null else 0
 	for record in cached_resource_animated:
 		var info := _frame_info(provider, "resource", record["source"])
 		for item in record["drawables"]:
@@ -750,9 +884,79 @@ func _refresh_resource_animations(provider: Callable) -> void:
 			item["frame"] = int(info.get("frame_index", 0))
 			item["hotspot"] = info.get("hotspot", Vector2.ZERO)
 			_cache_resource_sprite(item)
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.resources.animation_refresh", Time.get_ticks_usec() - resource_animation_started)
 
 
-func _snapshot_environment_drawables(environment_items: Array, world_to_screen: Callable, frame_info_provider: Callable, revision: int = -1, viewport: Rect2 = Rect2()) -> Dictionary:
+func clear_environment_record_archive() -> void:
+	environment_record_generation += 1
+	environment_record_archive.clear()
+	environment_record_archive_bytes = 0
+	environment_record_archive_hits = 0
+	environment_record_warmups = 0
+	environment_record_prewarm_us = 0
+
+func _retain_environment_record(id: int, record: Dictionary) -> void:
+	if not environment_record_archive_enabled: return
+	if environment_record_archive.has(id): environment_record_archive_bytes -= int(environment_record_archive[id]["archive_bytes"])
+	var weight := 2048
+	for mesh in record["drawable"]["frame_info"].get("shore_prepared_meshes", []):
+		if mesh != null: weight += int(mesh.get_meta("ror_geometry_bytes", 0))
+	record["archive_bytes"] = weight
+	environment_record_archive[id] = record
+	environment_record_archive_bytes += weight
+	while environment_record_archive.size() > MAX_ENVIRONMENT_RECORDS or environment_record_archive_bytes > MAX_ENVIRONMENT_RECORD_BYTES:
+		var oldest: Variant
+		for key in environment_record_archive: oldest = key; break
+		environment_record_archive_bytes -= int(environment_record_archive[oldest]["archive_bytes"])
+		environment_record_archive.erase(oldest)
+
+func prewarm_environment_records_async(items: Array, world_to_screen: Callable, frame_info_provider: Callable, sprite_scale: float, tree: SceneTree, progress: Callable) -> void:
+	if not environment_record_archive_enabled: return
+	clear_environment_record_archive()
+	var generation := environment_record_generation
+	cached_sprite_scale = sprite_scale
+	current_projection_origin = world_to_screen.call(Vector2.ZERO)
+	var pending: Array = []
+	var slice_started := Time.get_ticks_usec()
+	var work_started := slice_started
+	for index in range(items.size()):
+		if generation != environment_record_generation or not world_to_screen.is_valid(): return
+		var item: Dictionary = items[index]
+		if not bool(item.get("animated", false)) and not _is_ambient_actor(item):
+			var id := int(item.get("id", -1))
+			var position: Vector2 = item.get("position", Vector2.ZERO)
+			var info := _frame_info(frame_info_provider, "environment", item)
+			if info.has("shore_geometry"): info = preload("res://scripts/shoreline_presentation.gd").prepare_frame(info)
+			var drawable := RenderItem.create("environment", environment_layer(item), position, world_to_screen.call(position), id, item, info, float(item.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(info.get("graphic_layer", 0)) * 1000)
+			drawable["clip_static_sprite"] = true
+			_retain_environment_record(id, {"source":item,"signature":_environment_item_signature(item),"drawable":drawable})
+			pending.append(drawable)
+			environment_record_warmups += 1
+		if pending.size() >= 32 or Time.get_ticks_usec() - slice_started >= 2500:
+			_cache_sprite_batch(pending)
+			pending.clear()
+			environment_record_prewarm_us += Time.get_ticks_usec() - work_started
+			if progress.is_valid(): progress.call(float(index + 1) / float(maxi(1, items.size())))
+			await tree.process_frame
+			slice_started = Time.get_ticks_usec()
+			work_started = slice_started
+	if generation != environment_record_generation or not world_to_screen.is_valid(): return
+	if not pending.is_empty(): _cache_sprite_batch(pending)
+	sprite_atlas.flush()
+	environment_record_prewarm_us += Time.get_ticks_usec() - work_started
+	# The loading scene may have drawn an earlier query while preparation was
+	# yielding. Replace that query with prepared descriptors on the next draw.
+	cached_environment_records.clear()
+	cached_environment_drawables = []
+	cached_environment_signature_valid = false
+	cached_environment_revision = -1
+	cached_environment_clip.clear()
+	camera_cache_ready = false
+	if progress.is_valid(): progress.call(1.0)
+
+func _snapshot_environment_drawables(environment_items: Array, world_to_screen: Callable, frame_info_provider: Callable, revision: int = -1, viewport: Rect2 = Rect2(), signature_projection: Dictionary = {}) -> Dictionary:
+	var measured := performance_probe != null
+	var stage_started := Time.get_ticks_usec() if measured else 0
 	# Pan/zoom preserves depth order, but cached and newly entering items must
 	# share the current projection before merging with units and buildings.
 	var projection := hash([world_to_screen.call(Vector2.ZERO), world_to_screen.call(Vector2.ONE)])
@@ -766,25 +970,30 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 	# Avoid hashing every decoration again on all 20 simulation ticks.
 	if revision >= 0 and cached_environment_signature_valid and revision == cached_environment_revision:
 		return {"static": cached_environment_drawables, "animated": cached_environment_animated}
-	var animated: Array = []
-	var wanted: Dictionary = {}
-	var signature := 17
-	for item_value in environment_items:
-		var item: Dictionary = item_value
-		if bool(item.get("animated", false)):
-			animated.append(item)
-			continue
-		var item_id := int(item.get("id", -1))
-		var item_signature := hash([item_id, item.get("graphic_id", -1), item.get("asset_name", ""), item.get("position", Vector2.ZERO), item.get("source_frame", 0), item.get("presentation_layer", "scenery"), item.get("source_elevation", 0.0), item.get("source_unit_id", -1), item.get("cliff_screen_offset", Vector2.ZERO),item.get("mirrored",false),item.get("waterfall_screen_offset",Vector2.ZERO)])
-		wanted[item_id] = {"signature": item_signature, "item": item}
-		signature = signature * 31 + item_signature
+	if measured:
+		performance_probe.observe_microseconds("presentation.environment.projection", Time.get_ticks_usec() - stage_started)
+		stage_started = Time.get_ticks_usec()
+	# The field's configured rows are immutable for this map. Its exact query
+	# can carry cached row hashes; never reuse it for another source container.
+	var signatures: Dictionary = signature_projection["signatures"] if native_environment_signatures_enabled and signature_projection.has("signatures") and is_same(signature_projection.get("items"), environment_items) else _environment_signatures(environment_items)
+	var animated: Array = signatures["animated"]
+	var wanted: Dictionary = signatures["wanted"]
+	var signature: int = signatures["signature"]
 	cached_environment_revision = revision
 	cached_environment_animated = animated
+	if measured:
+		performance_probe.observe_microseconds("presentation.environment.signature", Time.get_ticks_usec() - stage_started)
 	if cached_environment_signature_valid and signature == cached_environment_signature:
 		return {"static": cached_environment_drawables, "animated": animated}
 	var retained: Dictionary = {}
 	var next_records: Dictionary = {}
 	var added: Array = []
+	var archived_drawables: Array = []
+	var frames_us := 0
+	var anchors_us := 0
+	var records_us := 0
+	var sprites_us := 0
+	stage_started = Time.get_ticks_usec() if measured else 0
 	for item_id in wanted:
 		var entry: Dictionary = wanted[item_id]
 		var item: Dictionary = entry["item"]
@@ -794,29 +1003,95 @@ func _snapshot_environment_drawables(environment_items: Array, world_to_screen: 
 			next_records[item_id] = previous
 			retained[item_id] = true
 			continue
+		var archived: Dictionary = environment_record_archive.get(item_id, {}) if environment_record_archive_enabled else {}
+		if not archived.is_empty() and int(archived["signature"]) == int(entry["signature"]) and is_same(archived.get("source"), item):
+			next_records[item_id] = archived
+			added.append(archived["drawable"])
+			archived_drawables.append(archived["drawable"])
+			environment_record_archive_hits += 1
+			continue
 		var position: Vector2 = item.get("position", Vector2.ZERO)
+		var item_started := Time.get_ticks_usec() if measured else 0
 		var frame_info := _frame_info(frame_info_provider, "environment", item)
-		var drawable := RenderItem.create("environment", environment_layer(item), position, world_to_screen.call(position), item_id, item, frame_info, float(item.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(frame_info.get("graphic_layer", 0)) * 1000)
+		if measured:
+			frames_us += Time.get_ticks_usec() - item_started
+			item_started = Time.get_ticks_usec()
+		var screen: Vector2 = world_to_screen.call(position)
+		if measured:
+			anchors_us += Time.get_ticks_usec() - item_started
+			item_started = Time.get_ticks_usec()
+		var drawable := RenderItem.create("environment", environment_layer(item), position, screen, item_id, item, frame_info, float(item.get("source_elevation", 0.0)), Color.WHITE, 1.0, int(frame_info.get("graphic_layer", 0)) * 1000)
+		if measured:
+			records_us += Time.get_ticks_usec() - item_started
+			item_started = Time.get_ticks_usec()
 		_cache_resource_sprite(drawable)
+		if measured: sprites_us += Time.get_ticks_usec() - item_started
 		drawable["clip_static_sprite"] = true
-		next_records[item_id] = {"signature": entry["signature"], "drawable": drawable}
+		next_records[item_id] = {"source":item,"signature": entry["signature"], "drawable": drawable}
+		_retain_environment_record(item_id, next_records[item_id])
 		added.append(drawable)
+	if not archived_drawables.is_empty(): _reproject_statics(archived_drawables, world_to_screen, Vector2.ZERO, 1.0)
+	if measured:
+		performance_probe.observe_microseconds("presentation.environment.resolve_total", Time.get_ticks_usec() - stage_started)
+		performance_probe.observe_microseconds("presentation.environment.frames", frames_us)
+		performance_probe.observe_microseconds("presentation.environment.anchors", anchors_us)
+		performance_probe.observe_microseconds("presentation.environment.records", records_us)
+		performance_probe.observe_microseconds("presentation.environment.sprites", sprites_us)
+		stage_started = Time.get_ticks_usec()
 	var kept: Array = []
 	for drawable_value in cached_environment_drawables:
 		var drawable: Dictionary = drawable_value
 		if retained.has(int(drawable["stable_id"])):
 			kept.append(drawable)
-	added.sort_custom(RenderItem.less)
+	added = _sort_static_items(added, "environment")
 	cached_environment_drawables = _merge_static_items(kept, added)
-	# Evict offscreen records: memory is bounded by the current query, not by
-	# how much of a supergiant map the player has visited.
+	# The active query stays small; a separately bounded match archive may
+	# retain immutable decoration geometry for camera re-entry.
 	cached_environment_records = next_records
 	cached_environment_signature = signature
 	cached_environment_signature_valid = true
 	if performance_probe != null:
+		performance_probe.observe_microseconds("presentation.environment.merge", Time.get_ticks_usec() - stage_started)
 		performance_probe.increment("presentation.environment.frames_resolved", added.size())
 		performance_probe.increment("presentation.environment.frames_reused", kept.size())
 	return {"static": cached_environment_drawables, "animated": animated}
+
+static func _environment_item_signature(item: Dictionary) -> int:
+	return hash([int(item.get("id", -1)), item.get("graphic_id", -1), item.get("asset_name", ""), item.get("position", Vector2.ZERO), item.get("source_frame", 0), item.get("presentation_layer", "scenery"), item.get("source_elevation", 0.0), item.get("source_unit_id", -1), item.get("cliff_screen_offset", Vector2.ZERO),item.get("mirrored",false),item.get("waterfall_screen_offset",Vector2.ZERO)])
+
+func _environment_signatures(items: Array) -> Dictionary:
+	var animated: Array = []
+	var wanted: Dictionary = {}
+	var signature := 17
+	for item_value in items:
+		var item: Dictionary = item_value
+		if bool(item.get("animated", false)):
+			animated.append(item)
+			continue
+		var item_id := int(item.get("id", -1))
+		var item_signature := _environment_item_signature(item)
+		wanted[item_id] = {"signature": item_signature, "item": item}
+		signature = signature * 31 + item_signature
+	return {"animated": animated, "wanted": wanted, "signature": signature}
+
+
+func _sort_static_items(items: Array, context: String) -> Array:
+	var native_available: bool = native_render_kernel != null and native_render_kernel.has_method("sort_render_items")
+	if profile_static_sort_alternatives and performance_probe != null and native_available:
+		# Measure both implementations on the same actual camera publication.
+		# Sorting only rearranges these private arrays; records remain shared.
+		var started := Time.get_ticks_usec()
+		var native_result: Array = native_render_kernel.sort_render_items(items)
+		performance_probe.observe_microseconds("presentation.static_sort.%s.native" % context, Time.get_ticks_usec() - started)
+		var script_result := items.duplicate()
+		started = Time.get_ticks_usec()
+		script_result.sort_custom(RenderItem.less)
+		performance_probe.observe_microseconds("presentation.static_sort.%s.script" % context, Time.get_ticks_usec() - started)
+		return native_result if native_static_sort_enabled else script_result
+	if native_static_sort_enabled and native_available: return native_render_kernel.sort_render_items(items)
+	items.sort_custom(RenderItem.less)
+	return items
+
 
 func merge_sorted_drawables(first: Array, second: Array) -> Array:
 	if native_render_kernel != null and native_render_kernel.has_method("merge_render_items"):
@@ -860,6 +1135,7 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 			var partition: Dictionary = native_render_kernel.partition_render_items(drawables)
 			cached_refresh_static = partition["static"]
 			cached_refresh_moving = partition["moving"]
+			cached_refresh_interpolating = partition.get("interpolating", cached_refresh_moving)
 			cached_refresh_ambient = partition.get("ambient", [])
 		else:
 			cached_refresh_static = []
@@ -867,9 +1143,13 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 			for item in drawables:
 				if _is_dynamic_drawable(String(item.get("kind", "")), item.get("data", {})): cached_refresh_moving.append(item)
 				else: cached_refresh_static.append(item)
+			cached_refresh_interpolating = cached_refresh_moving
 	var refresh_items: Array = drawables if projection_changed else cached_refresh_moving
 	if not projection_changed and native_render_kernel != null and native_render_kernel.has_method("refresh_interpolated_items"):
-		moved = bool(native_render_kernel.refresh_interpolated_items(cached_refresh_moving, world_to_screen, alpha, cached_building_depth_index, cached_sprite_scale)) or moved
+		# Camera refresh uses force_resort and must reproject every actor. During
+		# a fixed immutable publication only changing unit poses need interpolation.
+		var interpolation_items: Array = cached_refresh_moving if force_resort or not stationary_interpolation_skip_enabled else cached_refresh_interpolating
+		moved = bool(native_render_kernel.refresh_interpolated_items(interpolation_items, world_to_screen, alpha, cached_building_depth_index, cached_sprite_scale, camera_projection, force_resort)) or moved
 		refresh_items = cached_refresh_ambient
 	for drawable_value in refresh_items:
 		var drawable: Dictionary = drawable_value
@@ -931,7 +1211,11 @@ func _is_dynamic_drawable(kind: String, data: Dictionary) -> bool:
 
 func _frame_info(provider: Callable, kind: String, data: Variant) -> Dictionary:
 	if provider.is_valid():
+		var frame_info_started := Time.get_ticks_usec() if performance_probe != null else 0
 		var result: Variant = provider.call(kind, data)
+		if performance_probe != null: performance_probe.observe_microseconds("presentation.frame_info." + kind, Time.get_ticks_usec() - frame_info_started)
+		if performance_probe != null and kind == "resource" and Time.get_ticks_usec() - frame_info_started > 10000:
+			print("SLOW_RESOURCE_FRAME id=", data.get("id", -1), " kind=", data.get("kind", ""), " phase=", data.get("tree_phase", ""), " source=", data.get("source_graphic_asset_name", ""), " felled=", data.get("source_felled_asset_name", "graphic_636"), " depleted=", data.get("source_depleted_asset_name", ""), " resolved=", result.get("asset_name", "") if result is Dictionary else "", " us=", Time.get_ticks_usec() - frame_info_started)
 		if result is Dictionary:
 			return result
 	return {}

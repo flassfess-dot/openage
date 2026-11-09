@@ -66,6 +66,14 @@ def package(source,destination,archive=False):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--source',type=Path,default=ai.ROOT/'dist/Rise of Rome Prototype')
+    parser.add_argument('--source',type=Path)
     parser.add_argument('--destination',type=Path,required=True); parser.add_argument('--zip',action='store_true')
-    args=parser.parse_args(); package(args.source,args.destination,args.zip)
+    args=parser.parse_args()
+    if args.source is None:
+        dist = ai.ROOT / 'dist'
+        marker = dist / 'current-release.txt'
+        slot = marker.read_text(encoding='utf-8-sig').strip() if marker.exists() else 'primary'
+        if slot not in ('primary', 'alternate'):
+            parser.error(f'Unknown release slot in {marker}')
+        args.source = (dist if slot == 'primary' else dist / 'releases') / 'Rise of Rome Prototype'
+    package(args.source,args.destination,args.zip)

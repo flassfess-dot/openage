@@ -1,6 +1,7 @@
 extends Node
 const Autosave := preload("res://scripts/background_autosave.gd")
 const Channel := preload("res://scripts/autosave_process_channel.gd")
+const SeedTransport := preload("res://scripts/autosave_seed_transport.gd")
 var base := ""
 var nonce := ""
 var service
@@ -16,12 +17,18 @@ func run() -> void:
 		if arg.begins_with("--ipc-base="): base=arg.trim_prefix("--ipc-base=")
 	if not base.get_file().begins_with(".autosave-") or not base.ends_with(".pending"):
 		get_tree().quit(1);return
+	var profile_memory := "--profile-save-memory" in OS.get_cmdline_user_args()
+	if profile_memory: print("AUTOSAVE seed read begin")
 	var envelope := Channel.read_message(base+".seed")
-	if not envelope.get("seed") is Dictionary or String(envelope.get("nonce","")).is_empty():
+	if profile_memory: print("AUTOSAVE seed read end heap=", OS.get_static_memory_usage())
+	var seed := SeedTransport.decode(envelope)
+	if seed.is_empty() or String(envelope.get("nonce","")).is_empty():
 		get_tree().quit(1);return
 	nonce = envelope["nonce"]
 	service = Autosave.new()
-	service._seed = envelope["seed"]
+	service.defer_commit_to_parent = true
+	service._seed = seed
+	seed = {}
 	envelope = {}
 	service._stage = base
 	for record in service._seed["replay"].get("commands",[]): last_sequence=maxi(last_sequence,int(record.get("sequence_id",0)))
@@ -35,12 +42,27 @@ func run() -> void:
 
 func _relay() -> void:
 	var native=ClassDB.instantiate("RoRSaveFileKernel")
+	var read_deadline := 0
 	while not service._cancelled():
 		if FileAccess.file_exists(base+".job"):
-			var input := Channel.read_message(base+".job")
-			DirAccess.remove_absolute(base+".job")
+			var message := Channel.read_message_result(base+".job")
+			if not bool(message["valid"]):
+				if read_deadline == 0: read_deadline = Time.get_ticks_usec() + Channel.MESSAGE_READ_RETRY_USEC
+				if Time.get_ticks_usec() >= read_deadline:
+					relay_error="autosave_process_job_read:%s" % message["detail"];_stop_service();break
+				OS.delay_msec(25)
+				continue
+			var input: Dictionary = message["data"]
 			if String(input.get("ipc_nonce",""))!=nonce or not input.get("new_commands") is Array:
-				relay_error="autosave_process_invalid_job";_stop_service();break
+				relay_error="autosave_process_invalid_job:nonce_match=%s:commands_type=%d:size=%d" % [String(input.get("ipc_nonce","")) == nonce, typeof(input.get("new_commands")), int(message["size"])];_stop_service();break
+			var remove_error := DirAccess.remove_absolute(base+".job")
+			if remove_error != OK:
+				if read_deadline == 0: read_deadline = Time.get_ticks_usec() + Channel.MESSAGE_READ_RETRY_USEC
+				if Time.get_ticks_usec() >= read_deadline:
+					relay_error="autosave_process_job_remove:%d" % remove_error;_stop_service();break
+				OS.delay_msec(25)
+				continue
+			read_deadline = 0
 			var records: Array=[]
 			for record in input["new_commands"]:
 				if int(record.get("sequence_id",0))>last_sequence:

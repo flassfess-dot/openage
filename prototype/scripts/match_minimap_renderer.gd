@@ -20,6 +20,32 @@ var cached_minimap_fog_rectangle := Rect2()
 var cached_minimap_mesh_tick: int = -1
 var cached_minimap_mesh_rectangle := Rect2()
 var minimap_resource_index := MinimapResourceIndex.new()
+var attack_flashes: Dictionary = {}
+const MAX_ATTACK_FLASHES := 64
+const ATTACK_FLASH_MSEC := 4000
+
+
+func flash_under_attack(target_id: int, position: Vector2) -> void:
+	if not position.is_finite(): return
+	# Keep independent locations, including attacks by wildlife or priests and
+	# a killing blow whose target has already left the render snapshot.
+	attack_flashes.erase(target_id)
+	attack_flashes[target_id] = {"position": position, "expires": Time.get_ticks_msec() + ATTACK_FLASH_MSEC}
+	while attack_flashes.size() > MAX_ATTACK_FLASHES: attack_flashes.erase(attack_flashes.keys()[0])
+
+
+func _draw_attack_flashes(game, center: Vector2, scale: float) -> void:
+	var now := Time.get_ticks_msec()
+	for target_id in attack_flashes.keys():
+		var flash: Dictionary = attack_flashes[target_id]
+		if now >= int(flash["expires"]):
+			attack_flashes.erase(target_id)
+			continue
+		if (now / 220) % 2 == 0: continue
+		var point := MinimapProjection.world_to_minimap(Vector2(flash["position"]), center, scale)
+		game.draw_arc(point, 7.0, 0.0, TAU, 20, Color("ff3325"), 2.0, true)
+		game.draw_line(point + Vector2(-10, 0), point + Vector2(10, 0), Color("ff3325"), 2.0)
+		game.draw_line(point + Vector2(0, -10), point + Vector2(0, 10), Color("ff3325"), 2.0)
 
 func draw_minimap(game, rectangle: Rect2) -> void:
 	var geometry = game.minimap_geometry(rectangle)
@@ -70,6 +96,7 @@ func draw_minimap(game, rectangle: Rect2) -> void:
 		cached_minimap_mesh_tick = snapshot_tick
 	if cached_minimap_mesh != null:
 		game.draw_mesh(cached_minimap_mesh, null)
+	_draw_attack_flashes(game, center, scale)
 	game.draw_polyline(PackedVector2Array([map_points[0], map_points[1], map_points[2], map_points[3], map_points[0]]), Color("d2bd7d"), 1.0)
 	# The visible-bounds query already resolved these exact terrain intersections.
 	# Reuse them for the minimap instead of repeating 96 height-search iterations.
@@ -177,6 +204,7 @@ func minimap_geometry(game, rectangle: Rect2 = Rect2()) -> Dictionary:
 
 
 func _reset_minimap_fog_cache(game) -> void:
+	attack_flashes.clear()
 	cached_minimap_fog_texture = null
 	cached_minimap_fog_image = null
 	cached_minimap_exploration_revision = -1

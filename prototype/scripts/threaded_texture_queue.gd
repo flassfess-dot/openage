@@ -37,11 +37,29 @@ func poll() -> void:
 	while active.size() < MAX_ACTIVE and not queued.is_empty():
 		var path: String = queued.pop_front()
 		queued_paths.erase(path)
+		var cached := ResourceLoader.get_cached_ref(path) as Texture2D
+		if cached != null:
+			completed[path] = cached
+			continue
 		var error := ResourceLoader.load_threaded_request(path, "Texture2D", false)
 		if error in [OK, ERR_BUSY]:
 			active[path] = true
 		else:
 			completed[path] = null
+
+# A dedicated loader owns this queue for the whole window. Refill the eight
+# I/O slots as files finish, independently of how often the loading UI draws.
+func load_window(paths: Array[String]) -> Dictionary:
+	var cursor := 0
+	while cursor < paths.size() or not active.is_empty() or not queued.is_empty():
+		var count := mini(MAX_QUEUED - queued.size(), paths.size() - cursor)
+		if count > 0:
+			request(paths.slice(cursor, cursor + count))
+			cursor += count
+		else:
+			poll()
+		if not active.is_empty(): OS.delay_msec(1)
+	return completed
 
 func is_complete(paths: Array[String]) -> bool:
 	for path in paths:

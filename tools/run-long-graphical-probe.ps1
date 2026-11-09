@@ -19,7 +19,8 @@ $exe=Join-Path $taskRoot '.tools/godot-4.7.2/Godot_v4.7.2-stable_win64.exe'
 $workingFolder=$taskRoot
 $arguments=@('--path',(Join-Path $taskRoot 'prototype'))
 if($Runtime -eq 'release'){
- $workingFolder=Join-Path $taskRoot 'dist/Rise of Rome Prototype'
+ . (Join-Path $PSScriptRoot "ror-build-common.ps1")
+ $workingFolder=Get-RoRReleaseDirectory $taskRoot
  $exe=Join-Path $workingFolder 'Rise of Rome Prototype.exe'
  $arguments=@()
 }

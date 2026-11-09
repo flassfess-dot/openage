@@ -1,6 +1,11 @@
 class_name RoRSimulationWorld
 const SimulationEntityMutations := preload("res://scripts/simulation_entity_mutations.gd")
 var entity_mutations := SimulationEntityMutations.new()
+const ResourceComponentPool := preload("res://scripts/resource_component_pool.gd")
+var resource_component_pool := ResourceComponentPool.new()
+var resource_digest_job: Variant:
+	get: return entity_mutations.resource_digest_job
+	set(value): entity_mutations.resource_digest_job = value
 const SimulationBuildQueries := preload("res://scripts/simulation_build_queries.gd")
 var build_queries := SimulationBuildQueries.new()
 const SimulationObserverMemory := preload("res://scripts/simulation_observer_memory.gd")
@@ -58,6 +63,15 @@ const GATHER_UPDATE_ACTION := SimulationGatheringSystem.GATHER_UPDATE_ACTION
 const GATHER_UPDATE_CARRY_IDLE := SimulationGatheringSystem.GATHER_UPDATE_CARRY_IDLE
 const GATHER_UPDATE_CARRY_MOVE := SimulationGatheringSystem.GATHER_UPDATE_CARRY_MOVE
 const GATHER_UPDATE_MOVE_IDLE := SimulationGatheringSystem.GATHER_UPDATE_MOVE_IDLE
+# One presentation result schema for script and native actor stages.
+const GATHER_VISUALS := {
+	GATHER_UPDATE_IDLE: [false, AnimationController.IDLE],
+	GATHER_UPDATE_MOVE: [true, AnimationController.MOVE],
+	GATHER_UPDATE_ACTION: [false, AnimationController.GATHER],
+	GATHER_UPDATE_CARRY_IDLE: [false, AnimationController.CARRY],
+	GATHER_UPDATE_CARRY_MOVE: [true, AnimationController.CARRY],
+	GATHER_UPDATE_MOVE_IDLE: [false, AnimationController.MOVE],
+}
 const SimulationEconomySystem := preload("res://scripts/simulation_economy_system.gd")
 const SimulationProductionSystem := preload("res://scripts/simulation_production_system.gd")
 const SimulationCombatSystem := preload("res://scripts/simulation_combat_system.gd")
@@ -86,6 +100,9 @@ var cache_epoch := 0
 const MAX_POPULATION_COST_ENTRIES := 128
 var population_cost_cache_enabled := true
 var population_cost_cache: Dictionary = {}
+const MAX_PRICE_TEAMS := 9
+const MAX_PRICE_KINDS := 256
+var resource_prices: Dictionary = {}
 var entity_changes: EntityChangeJournal:
 	get:
 		return entity_mutations.entity_changes
@@ -433,6 +450,7 @@ func set_simulation_seed(value: int) -> void:
 
 func set_performance_probe(probe: Variant) -> void:
 	entity_changes.performance_probe = probe
+	spatial_index.performance_probe = probe
 	tick_pipeline.set_performance_probe(probe)
 	pathfinder.set_performance_probe(probe)
 	visibility_system.set_performance_probe(probe)
@@ -471,6 +489,8 @@ func set_object_catalog(data: Dictionary) -> void:
 
 func set_graphics_catalog(data: Dictionary) -> void:
 	graphics_catalog_data = data
+	# Attack timing uses animation frame events from this catalog.
+	data_repository.rule_fingerprints["graphics"] = JSON.stringify(data, "", true, true).sha256_text()
 	attack_animation_spec_cache.clear()
 
 
@@ -756,7 +776,26 @@ func emit_domain_event(event_type: String, payload: Dictionary = {}) -> void:
 func record_attack_distress(attacker: Dictionary, target: Dictionary) -> void:
 	if are_teams_allied(int(attacker.get("team", 0)), int(target.get("team", 0))):
 		return
+	notify_under_attack(attacker, target)
 	ai_distress_system.record(attacker, target)
+
+
+func notify_under_attack(attacker: Dictionary, target: Dictionary) -> void:
+	var target_team := int(target.get("team", 0))
+	if target_team <= 0 or are_teams_allied(int(attacker.get("team", 0)), target_team): return
+	if capture_domain_events:
+		emit_domain_event("under_attack", {"target_id": int(target.get("id", -1)), "target_team": target_team, "position": Vector2(target.get("pos", Vector2.ZERO))})
+
+
+func reveal_ranged_attacker(attacker: Dictionary, target: Dictionary) -> void:
+	var target_team := int(target.get("team", 0))
+	if target_team <= 0 or are_teams_allied(int(attacker.get("team", 0)), target_team): return
+	var fog := get_fog_of_war()
+	fog.ensure_player(target_team)
+	var cell := Vector2i(Vector2(attacker.get("pos", Vector2.ZERO)).floor())
+	for observer in fog.states_by_player:
+		if int(observer) == target_team or bool(fog.shared_vision_by_player.get(observer, {}).get(target_team, false)):
+			fog.flash_visible_cell(int(observer), cell, 1.0)
 
 
 func get_attack_distress_signals(team: int) -> Array:
@@ -1193,8 +1232,12 @@ func _tick_gates(context: Dictionary) -> void:
 
 
 func _tick_capture_previous_positions(context: Dictionary) -> void:
+	var observer: Variant = tick_pipeline.stage_observer
+	var started := Time.get_ticks_usec() if observer != null else 0
+	var native_calls: int = unit_activity_registry.native_refresh_calls
 	unit_activity_registry.synchronize(self)
-	unit_activity_registry.begin_tick(units, maxf(0.0, float(context.get("delta", 0.0))))
+	if observer != null: observer.observe_microseconds("simulation.activity.synchronize.native" if unit_activity_registry.native_refresh_calls > native_calls else "simulation.activity.synchronize.script", Time.get_ticks_usec() - started)
+	unit_activity_registry.begin_tick(units, maxf(0.0, float(context.get("delta", 0.0))), tick_pipeline.stage_observer)
 	if tick_pipeline.performance_probe != null:
 		tick_pipeline.performance_probe.increment("entities.activity_scanned", units.size())
 
@@ -1419,19 +1462,31 @@ func update_fog_of_war() -> void:
 	_tick_fog({"force": true})
 
 
+func refresh_changed_fog_of_war() -> void:
+	# Runtime lifecycle/capability writes already enter entity_changes. Publish
+	# those immediately; unrelated moving sources retain the normal sight lane.
+	# Explicit full refresh remains available for load/scenario replacement.
+	_tick_fog({})
+
+
 func _tick_fog(context: Dictionary) -> void:
-	var probe: Variant = tick_pipeline.performance_probe
+	# Coarse owner measurements must retain the real native actor path. These
+	# five whole-phase timers do not enable per-entity performance probes.
+	var probe: Variant = tick_pipeline.performance_probe if tick_pipeline.performance_probe != null else tick_pipeline.stage_observer
 	var stage_started := Time.get_ticks_usec() if probe != null else 0
-	entity_read_index.update_building_memory(self, true)
+	var building_sample: Dictionary = entity_read_index.update_building_memory(self, true)
 	if probe != null:
 		probe.observe_microseconds("simulation.fog.memory_before", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
 	visibility_system.configure_source(self)
+	var coarse_fog_probe := tick_pipeline.performance_probe == null and probe != null
+	if coarse_fog_probe: visibility_system.fog.set_performance_probe(probe)
 	visibility_system.advance(context)
+	if coarse_fog_probe: visibility_system.fog.set_performance_probe(null)
 	if probe != null:
 		probe.observe_microseconds("simulation.fog.advance", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
-	entity_read_index.update_building_memory(self, false)
+	entity_read_index.update_building_memory(self, false, building_sample)
 	if probe != null:
 		probe.observe_microseconds("simulation.fog.memory_after", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -1474,13 +1529,19 @@ func query_combat_entities_near(position: Vector2, radius: float) -> Array:
 
 
 func update_units(delta: float, player_team: int, enemy_team: int) -> void:
+	var probe: Variant = tick_pipeline.performance_probe
+	# Boundary timings preserve the native actor span; only the explicit fine
+	# probe enters per-actor script instrumentation. Never pass this observer
+	# as actor_context.probe or use it for movement admission.
+	var order_phase_probe: Variant = probe if probe != null else tick_pipeline.stage_observer
+	var activity_started := Time.get_ticks_usec() if order_phase_probe != null else 0
 	# The regular fixed-tick pipeline prepares activity before entering this
 	# method. Keep the public method self-contained as well: scenarios, tools and
 	# compatibility callers are allowed to advance unit orders directly.
 	if not unit_activity_registry.tick_prepared:
 		unit_activity_registry.synchronize(self)
 	unit_activity_registry.ensure_tick(units, delta)
-	var probe: Variant = tick_pipeline.performance_probe
+	if order_phase_probe != null: order_phase_probe.observe_microseconds("simulation.unit_orders.tick_preparation", Time.get_ticks_usec() - activity_started)
 	movement_neighbor_query_microseconds = 0
 	movement_local_calculation_microseconds = 0
 	movement_integration_microseconds = 0
@@ -1488,7 +1549,7 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	movement_native_unit_updates = 0
 	movement_native_neighbor_candidates = 0
 	pathfinder.reset_path_query_tick_observation()
-	var phase_started := Time.get_ticks_usec() if probe != null else 0
+	var phase_started := Time.get_ticks_usec() if order_phase_probe != null else 0
 	var active_units: Array = unit_activity_registry.ordered_units()
 	if probe != null:
 		probe.increment("simulation.unit_orders.active_units", active_units.size())
@@ -1507,18 +1568,24 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 			)
 		elif unit_activity_registry.has_active_formation():
 			FormationCohesion.update(units)
-	if probe != null:
-		probe.observe_microseconds("simulation.unit_orders.formation_cohesion", Time.get_ticks_usec() - phase_started)
+	if order_phase_probe != null:
+		order_phase_probe.observe_microseconds("simulation.unit_orders.formation_cohesion", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
 	_release_finished_combat_reservations()
-	if probe != null:
-		probe.observe_microseconds("simulation.unit_orders.combat_reservations", Time.get_ticks_usec() - phase_started)
+	if order_phase_probe != null:
+		order_phase_probe.observe_microseconds("simulation.unit_orders.combat_reservations", Time.get_ticks_usec() - phase_started)
 		phase_started = Time.get_ticks_usec()
 	pathfinder.configure_entity_change_source(self)
 	pathfinder.prepare_native_movement_snapshot(units if unit_activity_registry.has_movement_candidate() else [])
-	pathfinder.prepare_native_movement_batch(active_units, delta, task_coordinator, open_movement_envelopes_by_id)
-	if probe != null:
-		probe.observe_microseconds("simulation.unit_orders.native_movement_snapshot", Time.get_ticks_usec() - phase_started)
+	var batch_started := Time.get_ticks_usec() if order_phase_probe != null else 0
+	if order_phase_probe != null: order_phase_probe.observe_microseconds("simulation.unit_orders.native_movement_capture", batch_started - phase_started)
+	var combined_motion: bool = unit_activity_registry.tick_prepared and movement_system.native_combined_motion_enabled and movement_system.native_combined_motion_supported and movement_system.native_integration_enabled and movement_system.native_progress_enabled and not movement_system.profile_progress_alternatives and not movement_system.profile_motion_alternatives
+	pathfinder.prepare_native_movement_batch(active_units, delta, task_coordinator, open_movement_envelopes_by_id, combined_motion)
+	if order_phase_probe != null:
+		order_phase_probe.observe_microseconds("simulation.unit_orders.native_movement_batch", Time.get_ticks_usec() - batch_started)
+		if pathfinder.profile_owner_movement_dispatch:
+			order_phase_probe.observe_microseconds("simulation.unit_orders.movement_dispatch.owner_only" if pathfinder.owner_movement_dispatch_tick else "simulation.unit_orders.movement_dispatch.batch_scan", Time.get_ticks_usec() - batch_started)
+		order_phase_probe.observe_microseconds("simulation.unit_orders.native_movement_snapshot", Time.get_ticks_usec() - phase_started)
 	var preparation_microseconds := 0
 	var task_microseconds := 0
 	var task_microseconds_by_kind: Dictionary = {}
@@ -1535,6 +1602,17 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 	}
 	var active_unit_index := 0
 	var last_processed_unit_order := -1
+	var checked_moves: bool = movement_system.use_checked_moves()
+	var actor_context := {"domain_result":[false,AnimationController.IDLE,null],"animation_states":AnimationController.ALL_STATES,"animation_clips":AnimationController.STATE_TO_CLIP,"gather_visuals":GATHER_VISUALS,"gather_action":GATHER_UPDATE_ACTION,"probe":probe,"checked_moves":checked_moves,"player":player_team,"boarding":boarding_ready,"unloading":unloading_ready,"task_state":task_order_update,"preparation_us":0,"task_us":0,"animation_us":0,"task_kinds":task_microseconds_by_kind,"gather_stages":gather_microseconds_by_stage}
+	var stage_observer: Variant = tick_pipeline.stage_observer
+	var actors_started := Time.get_ticks_usec() if stage_observer != null else 0
+	var unit_span: Dictionary = movement_system.prepare_unit_span(active_units, checked_moves and probe == null, actor_context)
+	if not unit_span.is_empty():
+		var progress: Dictionary = movement_system.advance_unit_span(unit_span, delta)
+		if not progress.is_empty():
+			if bool(progress.get("failed", false)): return
+			active_unit_index = int(progress["index"])
+			last_processed_unit_order = int(progress["last_order"])
 	while active_unit_index < active_units.size():
 		var unit: Dictionary = active_units[active_unit_index]
 		active_unit_index += 1
@@ -1543,110 +1621,36 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		if active_unit_order <= last_processed_unit_order:
 			continue
 		last_processed_unit_order = active_unit_order
-		phase_started = Time.get_ticks_usec() if probe != null else 0
-		if unit["hp"] <= 0.0:
-			begin_death(unit)
-			if probe != null:
-				preparation_microseconds += Time.get_ticks_usec() - phase_started
-			continue
-		var position_before_tick: Vector2 = unit.get("pos", Vector2.ZERO)
-		var task_name := String(unit.get("task", "idle"))
-		var stable_idle_tick: bool = (
-			task_name == "idle"
-			and unit.get("path", []).is_empty()
-			and int(unit.get("path_index", 0)) == 0
-			and Vector2(unit.get("target", position_before_tick)) == position_before_tick
-		)
-		if float(unit["cooldown"]) > 0.0:
-			set_entity_field(unit, "cooldown", maxf(0.0, float(unit["cooldown"]) - delta))
-		if float(unit["work"]) > 0.0:
-			set_entity_field(unit, "work", maxf(0.0, float(unit["work"]) - delta))
-		if bool(unit["components"]["conversion"]["enabled"]):
-			conversion_system.advance_faith(unit, delta)
-		if int(unit["retaliation_target_id"]) >= 0:
-			_update_huntable_reaction(unit)
-		if probe != null:
-			preparation_microseconds += Time.get_ticks_usec() - phase_started
-			phase_started = Time.get_ticks_usec()
-		var moving := false
-		var animation_state := AnimationController.IDLE
-		var attack_target: Variant = null
-		var gather_stage_name := String(unit.get("gather_stage", "none")) if task_name == "gather" else ""
-		match task_name:
-			"board":
-				moving = transport_system.advance_board_order(unit, delta, boarding_ready)
-			"unload":
-				moving = transport_system.advance_unload_order(unit, delta, unloading_ready)
-			"trade":
-				var trade_update := trade_system.advance_unit(unit, delta)
-				moving = bool(trade_update.get("moving", false))
-				animation_state = String(trade_update.get("animation_state", AnimationController.IDLE))
-			"attack_ground", "attack":
-				combat_system.advance_unit_order(unit, delta, task_order_update)
-				moving = bool(task_order_update["moving"])
-				animation_state = String(task_order_update["animation_state"])
-				attack_target = task_order_update["attack_target"]
-			"convert":
-				conversion_system.advance_unit_order(unit, delta, task_order_update)
-				moving = bool(task_order_update["moving"])
-				animation_state = String(task_order_update["animation_state"])
-			"heal":
-				healing_system.advance_unit_order(unit, delta, task_order_update)
-				moving = bool(task_order_update["moving"])
-				animation_state = String(task_order_update["animation_state"])
-			"gather":
-				var gather_update := update_gather_order(unit, delta)
-				match gather_update:
-					GATHER_UPDATE_MOVE:
-						moving = true
-						animation_state = AnimationController.MOVE
-					GATHER_UPDATE_MOVE_IDLE:
-						animation_state = AnimationController.MOVE
-					GATHER_UPDATE_ACTION:
-						animation_state = AnimationController.GATHER
-					GATHER_UPDATE_CARRY_IDLE:
-						animation_state = AnimationController.CARRY
-					GATHER_UPDATE_CARRY_MOVE:
-						moving = true
-						animation_state = AnimationController.CARRY
-			"build", "repair":
-				construction_system.advance_unit_order(unit, delta, task_order_update)
-				moving = bool(task_order_update["moving"])
-				animation_state = String(task_order_update["animation_state"])
-			"idle":
-				if stable_idle_tick:
-					# Preserve the observable effects of move_unit's arrived branch
-					# without querying neighbours or rebuilding movement state.
-					if Vector2(unit.get("actual_velocity", Vector2.ZERO)) != Vector2.ZERO:
-						set_entity_field(unit, "actual_velocity", Vector2.ZERO)
-					if int(unit.get("stuck_ticks", 0)) != 0 or int(unit.get("push_priority", 0)) != int(unit.get("base_push_priority", unit.get("push_priority", 0))):
-						StuckRecovery.reset(unit)
-				else:
-					moving = movement_system.move_unit(unit, delta)
-			_:
-				moving = movement_system.move_unit(unit, delta)
-
-		if probe != null:
-			var task_elapsed := Time.get_ticks_usec() - phase_started
-			task_microseconds += task_elapsed
-			task_microseconds_by_kind[task_name] = int(task_microseconds_by_kind.get(task_name, 0)) + task_elapsed
-			if task_name == "gather":
-				gather_microseconds_by_stage[gather_stage_name] = int(gather_microseconds_by_stage.get(gather_stage_name, 0)) + task_elapsed
-			phase_started = Time.get_ticks_usec()
-		if moving and animation_state != AnimationController.CARRY:
-			animation_state = AnimationController.MOVE
-		var restart_attack_clip := animation_state == AnimationController.ATTACK_WINDUP and String(unit.get("anim_state", "")) == AnimationController.ATTACK_RECOVER
-		advance_entity_animation(unit, animation_state, delta, restart_attack_clip)
-		if attack_target != null:
-			apply_attack_frame_event(unit, attack_target, player_team)
-		if probe != null:
-			animation_microseconds += Time.get_ticks_usec() - phase_started
-		# Dynamic component mirrors are projected on snapshot/presentation
-		# boundaries. Authoritative systems above operate on the unit runtime
-		# fields, so rewriting the same nested Dictionaries for every entity on
-		# every tick only duplicates state and dominates large moving groups.
+		if movement_system.actor_order_observer.is_valid():
+			if not movement_system.actor_order_observer.call(unit, delta, actor_context, false): return
+		elif not _advance_actor_order(unit, delta, actor_context): return
+	if stage_observer != null:
+		var actors_elapsed := Time.get_ticks_usec() - actors_started
+		stage_observer.observe_microseconds("simulation.unit_orders.actors", actors_elapsed)
+		if movement_system.profile_ordered_gather_controller:
+			stage_observer.observe_microseconds("simulation.unit_orders.actors.gather_controller_native" if movement_system.ordered_gather_controller_tick else "simulation.unit_orders.actors.gather_controller_reference", actors_elapsed)
+		if movement_system.profile_full_actor_pipeline:
+			stage_observer.observe_microseconds("simulation.unit_orders.actors.full_pipeline" if movement_system.full_actor_pipeline_tick_native else "simulation.unit_orders.actors.reference_pipeline", actors_elapsed)
+		if movement_system.profile_common_movement_pipeline:
+			stage_observer.observe_microseconds("simulation.unit_orders.actors.common_pipeline" if movement_system.common_movement_pipeline_tick_native else "simulation.unit_orders.actors.reference", actors_elapsed)
+		if pathfinder.profile_owner_movement_dispatch:
+			stage_observer.observe_microseconds("simulation.unit_orders.actors.owner_dispatch" if pathfinder.owner_movement_dispatch_tick else "simulation.unit_orders.actors.batch_dispatch", actors_elapsed)
+		if movement_system.profile_scoped_resource_digest:
+			stage_observer.observe_microseconds("simulation.unit_orders.actors.scoped_digest" if movement_system.scoped_resource_digest_tick else "simulation.unit_orders.actors.global_digest_guard", actors_elapsed)
+	if probe != null:
+		preparation_microseconds = int(actor_context["preparation_us"])
+		task_microseconds = int(actor_context["task_us"])
+		animation_microseconds = int(actor_context["animation_us"])
+	var finish_started := Time.get_ticks_usec() if order_phase_probe != null else 0
 	pathfinder.finish_native_movement_batch()
+	if order_phase_probe != null: order_phase_probe.observe_microseconds("simulation.unit_orders.movement_join", Time.get_ticks_usec() - finish_started)
+	finish_started = Time.get_ticks_usec() if order_phase_probe != null else 0
 	movement_system.settle_mobile_overlaps(active_units, delta)
+	if order_phase_probe != null:
+		var contacts_elapsed := Time.get_ticks_usec() - finish_started
+		order_phase_probe.observe_microseconds("simulation.unit_orders.contacts", contacts_elapsed)
+		if movement_system.profile_contact_frame:
+			order_phase_probe.observe_microseconds("simulation.unit_orders.contacts.flat_frame" if movement_system.contact_frame_tick_native else "simulation.unit_orders.contacts.dictionary_frame", contacts_elapsed)
 	if probe != null:
 		presentation_microseconds = animation_microseconds + component_sync_microseconds
 		probe.observe_microseconds("simulation.unit_orders.preparation", preparation_microseconds)
@@ -1669,12 +1673,163 @@ func update_units(delta: float, player_team: int, enemy_team: int) -> void:
 		probe.observe_microseconds("simulation.navigation.path_queries", pathfinder.path_query_tick_microseconds())
 		probe.increment("movement.native_unit_updates", movement_native_unit_updates)
 		probe.increment("movement.native_neighbor_candidates", movement_native_neighbor_candidates)
+	finish_started = Time.get_ticks_usec() if order_phase_probe != null else 0
 	transport_system.finish_boarding_tick(boarding_ready)
 	transport_system.finish_unloading_tick(unloading_ready)
-	for unit in active_units:
-		# Private work/faith and pure movement helpers change nested state.
-		notify_entity_changed(unit, EntityChangeJournal.ACTIVITY | EntityChangeJournal.CONTROL)
-	unit_activity_registry.finish_tick()
+	if order_phase_probe != null:
+		order_phase_probe.observe_microseconds("simulation.unit_orders.transport_commit", Time.get_ticks_usec() - finish_started)
+		finish_started = Time.get_ticks_usec()
+	if not checked_moves or not movement_system.publish_active_controls(active_units):
+		for unit in active_units:
+			# Private work/faith and pure movement helpers change nested state.
+			notify_entity_changed(unit, EntityChangeJournal.ACTIVITY | EntityChangeJournal.CONTROL)
+	if order_phase_probe != null:
+		order_phase_probe.observe_microseconds("simulation.unit_orders.end_publish", Time.get_ticks_usec() - finish_started)
+		finish_started = Time.get_ticks_usec()
+	unit_activity_registry.finish_tick(tick_pipeline.stage_observer)
+	if order_phase_probe != null: order_phase_probe.observe_microseconds("simulation.unit_orders.registry_finish", Time.get_ticks_usec() - finish_started)
+
+
+func _continue_actor_order_after_prepare(unit: Dictionary, delta: float, actor_context: Dictionary) -> bool:
+	# The native owner completed timers before movement admission failed.
+	# Continue at the domain stage; do not replay timers or checked movement.
+	return _advance_actor_order(unit, delta, actor_context, true, true)
+
+
+func _advance_actor_order(unit: Dictionary, delta: float, actor_context: Dictionary, checked_already: bool = false, prepared: bool = false) -> bool:
+	var probe: Variant = actor_context["probe"]
+	var checked_moves: bool = bool(actor_context["checked_moves"]) and not checked_already
+	var phase_started := Time.get_ticks_usec() if probe != null else 0
+	if unit["hp"] <= 0.0:
+		begin_death(unit)
+		if probe != null:
+			actor_context["preparation_us"] += Time.get_ticks_usec() - phase_started
+		return true
+	var position_before_tick: Vector2 = unit.get("pos", Vector2.ZERO)
+	var task_name := String(unit.get("task", "idle"))
+	if checked_moves and task_name in ["move", "attack_move"]:
+		var checked_started := Time.get_ticks_usec() if probe != null else 0
+		if movement_system.advance_checked_move(unit, delta):
+			if probe != null:
+				var checked_elapsed := Time.get_ticks_usec() - checked_started
+				actor_context["task_us"] += checked_elapsed
+				actor_context["task_kinds"][task_name] = int(actor_context["task_kinds"].get(task_name, 0)) + checked_elapsed
+				probe.observe_microseconds("simulation.unit_orders.checked_move", checked_elapsed)
+			return true
+	var stable_idle_tick: bool = (
+		task_name == "idle"
+		and unit.get("path", []).is_empty()
+		and int(unit.get("path_index", 0)) == 0
+		and Vector2(unit.get("target", position_before_tick)) == position_before_tick
+	)
+	if not prepared:
+		if float(unit["cooldown"]) > 0.0:
+			set_entity_field(unit, "cooldown", maxf(0.0, float(unit["cooldown"]) - delta))
+		if float(unit["work"]) > 0.0:
+			set_entity_field(unit, "work", maxf(0.0, float(unit["work"]) - delta))
+		if bool(unit["components"]["conversion"]["enabled"]):
+			conversion_system.advance_faith(unit, delta)
+		if int(unit["retaliation_target_id"]) >= 0:
+			_update_huntable_reaction(unit)
+	if probe != null:
+		actor_context["preparation_us"] += Time.get_ticks_usec() - phase_started
+		phase_started = Time.get_ticks_usec()
+	var gather_stage_name := String(unit.get("gather_stage", "none")) if task_name == "gather" else ""
+	_advance_actor_domain(unit, delta, actor_context, task_name, stable_idle_tick)
+	var result: Array = actor_context["domain_result"]
+	var moving := bool(result[0])
+	var animation_state := String(result[1])
+	var attack_target: Variant = result[2]
+
+	if probe != null:
+		var task_elapsed := Time.get_ticks_usec() - phase_started
+		actor_context["task_us"] += task_elapsed
+		actor_context["task_kinds"][task_name] = int(actor_context["task_kinds"].get(task_name, 0)) + task_elapsed
+		if task_name == "gather":
+			actor_context["gather_stages"][gather_stage_name] = int(actor_context["gather_stages"].get(gather_stage_name, 0)) + task_elapsed
+		phase_started = Time.get_ticks_usec()
+	if moving and animation_state != AnimationController.CARRY:
+		animation_state = AnimationController.MOVE
+	var restart_attack_clip := animation_state == AnimationController.ATTACK_WINDUP and String(unit.get("anim_state", "")) == AnimationController.ATTACK_RECOVER
+	advance_entity_animation(unit, animation_state, delta, restart_attack_clip)
+	if attack_target != null:
+		apply_attack_frame_event(unit, attack_target, int(actor_context["player"]))
+	if probe != null:
+		actor_context["animation_us"] += Time.get_ticks_usec() - phase_started
+	# Dynamic component mirrors are projected on snapshot/presentation
+	# boundaries. Authoritative systems above operate on the unit runtime
+	# fields, so rewriting the same nested Dictionaries for every entity on
+	# every tick only duplicates state and dominates large moving groups.
+	return true
+
+
+# A domain continuation excludes timers, faith/reaction and animation. Both
+# owners enter it once at the same point in the actor's observable order.
+func _advance_actor_domain(unit: Dictionary, delta: float, actor_context: Dictionary, task_name: String, stable_idle_tick: bool) -> void:
+	var moving := false
+	var animation_state := AnimationController.IDLE
+	var attack_target: Variant = null
+	match task_name:
+		"board":
+			moving = transport_system.advance_board_order(unit, delta, actor_context["boarding"])
+		"unload":
+			moving = transport_system.advance_unload_order(unit, delta, actor_context["unloading"])
+		"trade":
+			var trade_update := trade_system.advance_unit(unit, delta)
+			moving = bool(trade_update.get("moving", false))
+			animation_state = String(trade_update.get("animation_state", AnimationController.IDLE))
+		"attack_ground", "attack":
+			combat_system.advance_unit_order(unit, delta, actor_context["task_state"])
+			moving = bool(actor_context["task_state"]["moving"])
+			animation_state = String(actor_context["task_state"]["animation_state"])
+			attack_target = actor_context["task_state"]["attack_target"]
+		"convert":
+			conversion_system.advance_unit_order(unit, delta, actor_context["task_state"])
+			moving = bool(actor_context["task_state"]["moving"])
+			animation_state = String(actor_context["task_state"]["animation_state"])
+		"heal":
+			healing_system.advance_unit_order(unit, delta, actor_context["task_state"])
+			moving = bool(actor_context["task_state"]["moving"])
+			animation_state = String(actor_context["task_state"]["animation_state"])
+		"gather":
+			var gather_update := update_gather_order(unit, delta)
+			var visual: Array = GATHER_VISUALS.get(gather_update, GATHER_VISUALS[GATHER_UPDATE_IDLE])
+			moving = bool(visual[0])
+			animation_state = String(visual[1])
+		"build", "repair":
+			construction_system.advance_unit_order(unit, delta, actor_context["task_state"])
+			moving = bool(actor_context["task_state"]["moving"])
+			animation_state = String(actor_context["task_state"]["animation_state"])
+		"idle":
+			if stable_idle_tick:
+				# Preserve the observable effects of move_unit's arrived branch
+				# without querying neighbours or rebuilding movement state.
+				if Vector2(unit.get("actual_velocity", Vector2.ZERO)) != Vector2.ZERO:
+					set_entity_field(unit, "actual_velocity", Vector2.ZERO)
+				if int(unit.get("stuck_ticks", 0)) != 0 or int(unit.get("push_priority", 0)) != int(unit.get("base_push_priority", unit.get("push_priority", 0))):
+					StuckRecovery.reset(unit)
+			else:
+				moving = movement_system.move_unit(unit, delta)
+		_:
+			moving = movement_system.move_unit(unit, delta)
+
+	var result: Array = actor_context.get("domain_result", [])
+	if result.size() != 3:
+		result = [false, AnimationController.IDLE, null]
+		actor_context["domain_result"] = result
+	result[0] = moving
+	result[1] = animation_state
+	result[2] = attack_target
+
+
+# Diagnostic A/B changes implementation only, never route/visibility semantics.
+# All grids below belong to this synchronous owner; worker contexts are private.
+func set_fast_navigation_queries(enabled: bool) -> void:
+	navigation_grid.fast_region_queries_enabled = enabled
+	pathfinder.fast_direct_checks_enabled = enabled
+	for entry in movement_system.knowledge.entries.values():
+		entry["grid"].fast_region_queries_enabled = enabled
+		entry["planner"].fast_direct_checks_enabled = enabled
 
 
 func set_formation_cohesion_active(value: bool) -> void:
@@ -1901,6 +2056,7 @@ func detach_unit_for_transport(id: int) -> Variant:
 	entity_changes.mark(id, EntityChangeJournal.LIFECYCLE | EntityChangeJournal.ACTIVITY | EntityChangeJournal.CONTROL)
 	units.erase(unit)
 	units_by_id.erase(id)
+	entity_mutations.ui_control_versions.erase(id)
 	spatial_sync_system.mark_roster_dirty()
 	mark_combat_roster_dirty()
 	unit_activity_registry.forget(id)
@@ -2058,16 +2214,7 @@ func finish_gather_order(worker: Dictionary, reason: String) -> void:
 
 
 func building_cost(kind: String, team: int) -> Dictionary:
-	var source := object_record_for(kind, team)
-	var source_resources: Dictionary = source.get("resources", {})
-	var stats: Dictionary = {} if source_resources.has("cost") and source.has("unit_id") else unit_stats(kind)
-	var result: Dictionary = {}
-	for cost_value in source_resources.get("cost", stats.get("resource_cost", [])):
-		var cost: Dictionary = cost_value
-		if not bool(cost.get("enabled", false)) or int(cost.get("type_id", -1)) < 0:
-			continue
-		result[int(cost["type_id"])] = int(cost.get("amount", 0))
-	return apply_object_cost_modifiers(result, int(source.get("unit_id", stats.get("unit_id", -1))), team)
+	return unit_resource_cost(kind, team)
 
 
 func get_build_options(team: int) -> Array:
@@ -2435,6 +2582,7 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 	if (old_team <= 0 and not allow_neutral_owner) or (old_team > 0 and are_teams_allied(old_team, new_team)):
 		return false
 	var entity_id := int(entity.get("id", -1))
+	if resource_nodes_by_id.has(entity_id): ResourceComponentPool.detach(entity)
 	var is_building := find_building(entity_id) != null
 	if is_building:
 		if bool(entity.get("harvestable", false)):
@@ -2552,14 +2700,44 @@ func train_unit(team: int, kind: String, near: Vector2) -> bool:
 
 
 func unit_resource_cost(kind: String, team: int) -> Dictionary:
-	var stats := unit_stats(kind)
+	var technology_revision := technology_system.revision(team)
+	var rules: Dictionary = technology_system.team_states[team]
+	var prices: Dictionary = resource_prices.get(team, {})
+	# A restored rules table can have the same revision as the one it replaces.
+	if (
+		prices.is_empty()
+		or not is_same(prices["rules"], rules)
+		or prices["technology"] != technology_revision
+		or prices["repository"] != data_repository
+		or prices["revision"] != data_repository.revision
+		or prices["civilization"] != civilization_by_team.get(team, 13)
+	):
+		prices = {
+			"rules": rules, "technology": technology_revision, "repository": data_repository,
+			"revision": data_repository.revision, "civilization": civilization_by_team.get(team, 13),
+			"by_kind": {},
+		}
+		if not resource_prices.has(team) and resource_prices.size() >= MAX_PRICE_TEAMS:
+			resource_prices.erase(resource_prices.keys()[0])
+		resource_prices[team] = prices
+	var by_kind: Dictionary = prices["by_kind"]
+	if not by_kind.has(kind):
+		if by_kind.size() >= MAX_PRICE_KINDS:
+			by_kind.erase(by_kind.keys()[0])
+		by_kind[kind] = _calculate_object_resource_cost(kind, team)
+	# Prices contain only integer resource IDs and amounts. Callers own their copy.
+	return by_kind[kind].duplicate()
+
+
+func _calculate_object_resource_cost(kind: String, team: int) -> Dictionary:
 	var source := object_record_for(kind, team)
-	var result: Dictionary = {}
-	for cost_value in source.get("resources", {}).get("cost", stats.get("resource_cost", [])):
-		var cost: Dictionary = cost_value
-		if bool(cost.get("enabled", false)) and int(cost.get("type_id", -1)) >= 0:
-			result[int(cost["type_id"])] = int(cost.get("amount", 0))
-	return apply_object_cost_modifiers(result, int(source.get("unit_id", stats.get("unit_id", -1))), team)
+	var resources: Dictionary = source.get("resources", {})
+	var stats: Dictionary = {} if resources.has("cost") and source.has("unit_id") else unit_stats(kind)
+	var cost: Dictionary = {}
+	for item in resources.get("cost", stats.get("resource_cost", [])):
+		if bool(item.get("enabled", false)) and int(item.get("type_id", -1)) >= 0:
+			cost[int(item["type_id"])] = int(item.get("amount", 0))
+	return apply_object_cost_modifiers(cost, int(source.get("unit_id", stats.get("unit_id", -1))), team)
 
 
 func apply_object_cost_modifiers(base_cost: Dictionary, source_unit_id: int, team: int) -> Dictionary:
@@ -3537,7 +3715,10 @@ func erase_entity_field(entity: Dictionary, field: String) -> void:
 	entity_mutations.erase_entity_field(self, entity, field)
 
 func shutdown_derived_state() -> void:
+	entity_mutations.cancel_resource_digest()
+	resource_component_pool.clear()
 	population_cost_cache.clear()
+	resource_prices.clear()
 	task_coordinator.shutdown()
 	entity_read_index.clear()
 	unit_activity_registry.clear()

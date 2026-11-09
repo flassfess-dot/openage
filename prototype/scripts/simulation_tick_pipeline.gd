@@ -4,6 +4,8 @@ extends RefCounted
 var active_systems: Array[Dictionary] = []
 var completed_systems: Array[Dictionary] = []
 var performance_probe: Variant = null
+# Coarse timings do not enable per-entity probes or disable native execution.
+var stage_observer: Variant = null
 
 
 func clear() -> void:
@@ -24,15 +26,16 @@ func add_completed(system_name: String, executor: Callable) -> void:
 
 
 func run(match_completed: bool, context: Dictionary) -> Array[String]:
+	var observer: Variant = performance_probe if performance_probe != null else stage_observer
 	var executed: Array[String] = []
 	var systems: Array[Dictionary] = completed_systems if match_completed else active_systems
 	for system in systems:
 		var executor: Callable = system["executor"]
 		assert(executor.is_valid(), "Invalid simulation system executor: %s" % system["name"])
-		var started := Time.get_ticks_usec() if performance_probe != null else 0
+		var started := Time.get_ticks_usec() if observer != null else 0
 		executor.call(context)
-		if performance_probe != null:
-			performance_probe.observe_microseconds("simulation.system.%s" % String(system["name"]), Time.get_ticks_usec() - started)
+		if observer != null:
+			observer.observe_microseconds("simulation.system.%s" % String(system["name"]), Time.get_ticks_usec() - started)
 		executed.append(String(system["name"]))
 	return executed
 

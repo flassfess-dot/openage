@@ -12,6 +12,8 @@ static var next_seal := 1
 const MAX_IMMUTABLE_ROOTS := 12
 static var immutable_roots: Array = []
 static var native_capture_enabled := true
+static var capture_identity_tracking_enabled := OS.get_environment("ROR_DIAGNOSTIC_CAPTURE_IDENTITY_TRACKING") != "0"
+static var capture_identity_tracking_support: bool = ClassDB.class_exists("RoRReadModelKernel") and ClassDB.instantiate("RoRReadModelKernel").has_method("supports_capture_identity_tracking")
 
 static func is_detached(value: Variant, depth: int = 0) -> bool:
 	if depth > 64:
@@ -161,17 +163,22 @@ static func capture_frozen(value: Dictionary) -> Dictionary:
 # Internal producer handoff: every mutable descendant reached through a mutable
 # parent must belong to the producer. The input is consumed, including on error.
 # Readonly borrowed parents still require detached mutable descendants/buffers.
-static func freeze_owned(value: Dictionary) -> Dictionary:
-	return _capture_frozen(value, true)
+static func freeze_owned(value: Dictionary, identity_override: int = -1) -> Dictionary:
+	return _capture_frozen(value, true, identity_override)
 
-static func _capture_frozen(value: Dictionary, take_ownership: bool) -> Dictionary:
+static func _capture_frozen(value: Dictionary, take_ownership: bool, identity_override: int = -1) -> Dictionary:
 	if native_capture_enabled and ClassDB.class_exists("RoRReadModelKernel"):
 		seal_mutex.lock()
 		var trusted: Array = immutable_roots.duplicate()
 		trusted.append_array(sealed_roots.values())
 		seal_mutex.unlock()
 		var kernel = ClassDB.instantiate("RoRReadModelKernel")
-		var captured: Dictionary = kernel.capture_owned_frozen(value, trusted) if take_ownership and kernel.has_method("capture_owned_frozen") else kernel.capture_frozen(value, trusted)
+		var track_identity: bool = capture_identity_tracking_enabled and identity_override != 0
+		var captured: Dictionary
+		if capture_identity_tracking_support:
+			captured = kernel.capture_owned_frozen(value, trusted, track_identity) if take_ownership else kernel.capture_frozen(value, trusted, track_identity)
+		else:
+			captured = kernel.capture_owned_frozen(value, trusted) if take_ownership and kernel.has_method("capture_owned_frozen") else kernel.capture_frozen(value, trusted)
 		if not bool(captured.get("valid", false)):
 			return {}
 		# Preserve the reference implementation's LRU promotion: a hot map must

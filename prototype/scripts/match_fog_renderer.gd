@@ -28,6 +28,46 @@ var cached_map_edge_fog_revision := -1
 var cached_map_edge_zoom := -1.0
 var cached_map_edge_terrain_revision := -1
 
+# CPU-only adapter used while a load job exclusively owns the new world.
+# It forwards the same mask rules without retaining any scene or GPU object.
+class LoadMaskOwner extends RefCounted:
+	var world
+	var renderer
+	var map_size: Vector2i
+	func _render_terrain(): return world
+	func _ensure_fog_slope_neighbor_cache() -> void: renderer._ensure_fog_slope_neighbor_cache(self)
+	func _fog_cell_should_cover(cell: Vector2i, cells: Variant) -> bool: return renderer._fog_cell_should_cover(self, cell, cells)
+	func _fog_cell_touches_visible(cell: Vector2i, cells: Variant) -> bool: return renderer._fog_cell_touches_visible(self, cell, cells)
+	func _fog_state_at_cell(cells: Variant, cell: Vector2i) -> int: return renderer._fog_state_at_cell(self, cells, cell)
+
+
+func prepare_load_mask(world, observer: int) -> Dictionary:
+	var owner := LoadMaskOwner.new()
+	owner.world = world
+	owner.renderer = self
+	owner.map_size = world.map_size
+	var cells: PackedByteArray = world.get_fog_of_war().snapshot(observer)
+	_ensure_fog_slope_neighbor_cache(owner)
+	cached_world_fog_texture_data.resize(cells.size() * 4)
+	for index in range(cells.size()): _write_world_fog_pixel(owner, index, cells)
+	return {"cells": cells, "pixels": cached_world_fog_texture_data, "slopes": cached_fog_slope_neighbor_cells}
+
+
+func install_load_mask(game, prepared: Dictionary) -> bool:
+	var cells := PackedByteArray(game.presentation_snapshot.get("fog", {}).get("cells", []))
+	if prepared.is_empty() or cells != prepared.get("cells") or cells.size() != game.map_size.x * game.map_size.y:
+		return false
+	cached_fog_slope_neighbor_cells = prepared["slopes"]
+	cached_fog_slope_neighbor_terrain_revision = game._terrain_geometry_revision()
+	cached_world_fog_texture_data = prepared["pixels"]
+	cached_world_fog_texture_revision = int(game.presentation_snapshot.get("fog_revision", -1))
+	cached_world_fog_stamp = CacheDependency.stamp(game.simulation_world, CacheDependency.FOG_VISIBILITY, game.local_player_team)
+	var image := Image.create_from_data(game.map_size.x, game.map_size.y, false, Image.FORMAT_RGBA8, cached_world_fog_texture_data)
+	cached_world_fog_texture = ImageTexture.create_from_image(image)
+	game.simulation_world.consume_fog_presentation_dirty_cells(game.local_player_team)
+	return true
+
+
 func _terrain_geometry_revision(game) -> int:
 	if game._render_terrain() == null:
 		return -1
@@ -179,15 +219,18 @@ func _world_fog_arrays(game, bounds: Rect2i, use_native: bool = true) -> Array:
 	return arrays
 
 
-func _sync_world_fog_texture(game, cells: Variant, fog_revision: int, probe: Variant = null) -> void:
-	if game.simulation_owner.pending: return
+func _sync_world_fog_texture(game, cells: Variant, fog_revision: int, probe: Variant = null, published: Variant = null) -> void:
+	if game.simulation_owner.pending and published == null: return
 	var expected_cells = game.map_size.x * game.map_size.y
 	if cells.size() < expected_cells:
 		return
+	if published is Dictionary and cached_world_fog_texture != null and cached_world_fog_texture_revision == fog_revision and cached_world_fog_stamp == published["stamp"]: return
 	var mask_started = Time.get_ticks_usec() if probe != null else 0
 	game._ensure_fog_slope_neighbor_cache()
 	var change: Dictionary = {"full": true, "exact": false, "cells": [], "stamp": {}}
-	if game.simulation_world != null and game.simulation_world.has_method("cache_changes"):
+	if published is Dictionary:
+		change = published
+	elif game.simulation_world != null and game.simulation_world.has_method("cache_changes"):
 		change = CacheDependency.changes(game.simulation_world, CacheDependency.FOG_VISIBILITY, cached_world_fog_stamp, game.local_player_team)
 	var full_refresh: bool = cached_world_fog_texture == null or cached_world_fog_texture_data.size() != expected_cells * 4 or cached_world_fog_texture_revision < 0 or bool(change["full"]) or not bool(change["exact"])
 	var affected: Dictionary = {}
@@ -207,7 +250,7 @@ func _sync_world_fog_texture(game, cells: Variant, fog_revision: int, probe: Var
 	cached_world_fog_texture_revision = fog_revision
 	# Keep the compatibility queue bounded. Independent caches use journals,
 	# so consuming this queue no longer steals their invalidations.
-	if game.simulation_world != null and game.simulation_world.has_method("consume_fog_presentation_dirty_cells"):
+	if published == null and game.simulation_world != null and game.simulation_world.has_method("consume_fog_presentation_dirty_cells"):
 		game.simulation_world.consume_fog_presentation_dirty_cells(game.local_player_team)
 	if affected.is_empty():
 		return

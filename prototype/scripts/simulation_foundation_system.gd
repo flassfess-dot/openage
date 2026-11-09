@@ -90,7 +90,7 @@ func cancel_foundation(building_id: int) -> bool:
 	world.building_approach_slots.erase(building_id)
 	world.refresh_building_connectivity()
 	world.release_building_navigation_occupancy(building)
-	world.update_fog_of_war()
+	world.refresh_changed_fog_of_war()
 	world.emit_domain_event("foundation_cancelled", {
 		"building_id": building_id,
 		"kind": String(building.get("kind", "")),
@@ -199,7 +199,7 @@ func complete_foundation(building: Dictionary) -> void:
 		world.assign_builders_to_next_visible_foundation(completing_builder_ids, building_id)
 	world.building_approach_slots.erase(building_id)
 	world.sync_building_navigation_occupancy(building)
-	world.update_fog_of_war()
+	world.refresh_changed_fog_of_war()
 	world.emit_domain_event("build_complete", {
 		"building_id": building_id,
 		"kind": String(building.get("kind", "")),

@@ -15,6 +15,10 @@ static func plan(start_world: Vector2, goal_world: Vector2, formation_type: Stri
 	var direct := not cells.is_empty()
 	if cells.is_empty():
 		cells = pathfinder.find_cell_path(start, goal, movement_domain, restriction_id, member_radius)
+	if cells.is_empty():
+		goal = pathfinder.nearest_reachable(start, requested_goal, movement_domain, restriction_id, member_radius)
+		if goal.x >= 0:
+			cells = pathfinder.find_cell_path(start, goal, movement_domain, restriction_id, member_radius)
 	if cells.is_empty(): return empty
 	if probe != null:
 		probe.observe_microseconds("formation.corridor.search", Time.get_ticks_usec() - started)

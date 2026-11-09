@@ -11,10 +11,34 @@ var unit_cells: Array[Vector2i] = []
 var obstacle_entities: Array = []
 var maximum_unit_radius: float = 0.0
 var maximum_unit_clearance: float = 0.0
+var native_neighbors_enabled := true
+var native_neighbors_supported := false
+var native_circle_supported := false
+var performance_probe: Variant = null
+var profile_circle_alternatives := "--profile-circle-alternatives" in OS.get_cmdline_user_args()
+var circle_profile_sequence := 0
+var native_sync_enabled := OS.get_environment("ROR_DIAGNOSTIC_DISABLE_NATIVE_SPATIAL_SYNC") != "1"
+var native_sync_supported := false
+var profile_sync_alternatives := "--profile-spatial-sync-alternatives" in OS.get_cmdline_user_args()
+var synchronization_serial := 0
+var synchronization_tick_native := false
+var native_sync_calls := 0
+var native_sync_units := 0
+var native_sync_fallbacks := 0
+var script_sync_calls := 0
+var query_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null:
+	set(value):
+		query_kernel = value
+		native_neighbors_supported = value != null and value.has_method("spatial_unit_neighbors")
+		native_circle_supported = value != null and value.has_method("spatial_unit_circle")
+		native_sync_supported = value != null and value.has_method("synchronize_spatial_units_prefix") and value.get_script() == null
 
 
 func _init(bucket_size: float = 2.0) -> void:
 	cell_size = maxf(0.25, bucket_size)
+	native_neighbors_supported = query_kernel != null and query_kernel.has_method("spatial_unit_neighbors")
+	native_circle_supported = query_kernel != null and query_kernel.has_method("spatial_unit_circle")
+	native_sync_supported = query_kernel != null and query_kernel.has_method("synchronize_spatial_units_prefix") and query_kernel.get_script() == null
 
 func clear() -> void:
 	buckets.clear()
@@ -57,6 +81,8 @@ func insert(entity: Dictionary, position: Vector2, radius: float, category: Stri
 
 
 func synchronize_dynamic_entities(units: Array, buildings: Array) -> bool:
+	synchronization_serial += 1
+	synchronization_tick_native = false
 	# The identity/order of live entities changes far less often than their
 	# positions. Preserve bucket storage between ticks and move only indices that
 	# crossed a cell boundary; callers fall back to a full rebuild on lifecycle
@@ -85,6 +111,29 @@ func synchronize_dynamic_entities(units: Array, buildings: Array) -> bool:
 
 
 func synchronize_active_units(units: Array) -> bool:
+	synchronization_serial += 1
+	synchronization_tick_native = false
+	var started := Time.get_ticks_usec() if performance_probe != null else 0
+	var first := 0
+	var use_native := native_sync_enabled and native_sync_supported
+	if profile_sync_alternatives: use_native = use_native and ((synchronization_serial * 1103515245 + 12345) & 0xffff) >= 32768
+	if use_native:
+		first = int(query_kernel.synchronize_spatial_units_prefix(units, unit_index_by_id, unit_entities, unit_positions, unit_cells, unit_buckets, cell_size))
+		if first < 0 or first > units.size(): first = 0
+		native_sync_units += first
+		if first == units.size():
+			synchronization_tick_native = true
+			native_sync_calls += 1
+			if performance_probe != null: performance_probe.observe_microseconds("simulation.spatial.sync.native", Time.get_ticks_usec() - started)
+			return true
+		native_sync_fallbacks += 1
+	script_sync_calls += 1
+	var valid := _synchronize_active_units_reference(units if first == 0 else units.slice(first))
+	if performance_probe != null: performance_probe.observe_microseconds("simulation.spatial.sync.mixed" if first > 0 else "simulation.spatial.sync.script", Time.get_ticks_usec() - started)
+	return valid
+
+
+func _synchronize_active_units_reference(units: Array) -> bool:
 	# Lifecycle changes are handled by the world's dirty flag. Between those
 	# boundaries only active units can have moved, so update their dense slots
 	# directly instead of walking the complete authoritative roster.
@@ -130,6 +179,26 @@ func movement_neighbor_radius(entity: Dictionary) -> float:
 		+ 0.6 * maximum_unit_radius
 		+ 1.6 * maximum_unit_clearance
 	)
+func has_friendly_gatherer(unit: Dictionary, radius: float) -> bool:
+	if query_kernel != null and query_kernel.has_method("spatial_unit_match"):
+		var found: int = query_kernel.spatial_unit_match(unit, radius, 0, unit_buckets, unit_entities, unit_positions, unit_radii, cell_size, maximum_unit_radius)
+		if found >= 0: return found != 0
+	for other in _query_unit_circle(unit["pos"], radius):
+		if int(other["id"]) != int(unit["id"]) and String(other.get("task", "")) == "gather" and int(other.get("team", 0)) == int(unit["team"]): return true
+	return false
+
+
+func has_live_overlap(unit: Dictionary, radius: float) -> bool:
+	if query_kernel != null and query_kernel.has_method("spatial_unit_match"):
+		var found: int = query_kernel.spatial_unit_match(unit, radius, 1, unit_buckets, unit_entities, unit_positions, unit_radii, cell_size, maximum_unit_radius)
+		if found >= 0: return found != 0
+	for other in _query_unit_circle(unit["pos"], radius):
+		if int(other["id"]) == int(unit["id"]) or String(other.get("movement_domain", "land")) != String(unit.get("movement_domain", "land")) or float(other.get("hp", 0.0)) <= 0.0: continue
+		var separation := float(unit["footprint_radius"]) + float(other["footprint_radius"])
+		if Vector2(unit["pos"]).distance_squared_to(Vector2(other["pos"])) < separation * separation - 0.00001: return true
+	return false
+
+
 func query_circle(center: Vector2, radius: float, category: String = "") -> Array:
 	if category == "unit":
 		return _query_unit_circle(center, radius)
@@ -211,6 +280,7 @@ func query_neighbors_into(entity: Dictionary, radius: float, category: String, r
 			if int(candidate.get("id", -1)) != int(entity["id"]):
 				result.append(candidate)
 		return
+	if native_neighbors_enabled and native_neighbors_supported and query_kernel.spatial_unit_neighbors(entity, radius, null, unit_buckets, unit_entities, unit_positions, unit_radii, cell_size, maximum_unit_radius, result): return
 	var center: Vector2 = entity["pos"]
 	var entity_id := int(entity["id"])
 	var last_candidate_id := -9223372036854775807
@@ -241,6 +311,7 @@ func query_external_neighbors_into(entity: Dictionary, radius: float, formation_
 	# Only entities outside that proven shared-motion group can influence local
 	# avoidance. Keep the same stable-ID result contract as query_neighbors_into.
 	result.clear()
+	if native_neighbors_enabled and native_neighbors_supported and query_kernel.spatial_unit_neighbors(entity, radius, formation_group_id, unit_buckets, unit_entities, unit_positions, unit_radii, cell_size, maximum_unit_radius, result): return
 	var center: Vector2 = entity["pos"]
 	var entity_id := int(entity["id"])
 	var last_candidate_id := -9223372036854775807
@@ -267,7 +338,15 @@ func query_external_neighbors_into(entity: Dictionary, radius: float, formation_
 
 
 func _query_unit_circle(center: Vector2, radius: float) -> Array:
+	var started := Time.get_ticks_usec() if performance_probe != null else 0
 	var result: Array = []
+	var use_native := native_neighbors_enabled and native_circle_supported
+	if profile_circle_alternatives and performance_probe != null:
+		circle_profile_sequence += 1
+		use_native = use_native and circle_profile_sequence % 2 == 0
+	if use_native and query_kernel.spatial_unit_circle(center, radius, unit_buckets, unit_entities, unit_positions, unit_radii, cell_size, maximum_unit_radius, result):
+		if performance_probe != null: performance_probe.observe_microseconds("simulation.spatial.circle.native", Time.get_ticks_usec() - started)
+		return result
 	var query_radius := maxf(0.0, radius)
 	var bucket_radius := query_radius + maximum_unit_radius
 	var minimum := cell_for(center - Vector2.ONE * bucket_radius)
@@ -279,6 +358,7 @@ func _query_unit_circle(center: Vector2, radius: float) -> Array:
 				if center.distance_squared_to(unit_positions[unit_index]) <= allowed_distance * allowed_distance:
 					result.append(unit_entities[unit_index])
 	result.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
+	if performance_probe != null: performance_probe.observe_microseconds("simulation.spatial.circle.script", Time.get_ticks_usec() - started)
 	return result
 
 

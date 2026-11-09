@@ -3,6 +3,8 @@ extends RefCounted
 # Legal field projections shared by all presentation stages.
 const EntityComponents := preload("res://scripts/entity_components.gd")
 const ReadContract := preload("res://scripts/entity_read_contract.gd")
+static var profile_control_copy := "--profile-control-component-copy" in OS.get_cmdline_user_args()
+static var control_copy_stats := {"checks":0,"mismatches":0,"fast_us":0,"legacy_us":0}
 
 static func _presentation_entity(entity: Dictionary, observer_team: int = 0, compact: bool = false, compact_render: bool = false, compact_render_projector: Callable = Callable()) -> Dictionary:
 	if compact:
@@ -49,6 +51,27 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 	if ReadContract.native_enabled and ClassDB.class_exists("RoRReadModelKernel"):
 		if ReadContract.native_kernel == null: ReadContract.native_kernel = ClassDB.instantiate("RoRReadModelKernel")
 		if ReadContract.native_kernel.has_method("project_control"):
+			if profile_control_copy and int(control_copy_stats["checks"]) < 512 and ReadContract.native_kernel.has_method("project_control_legacy"):
+				var projected: Dictionary
+				var legacy: Dictionary
+				var began := Time.get_ticks_usec()
+				if int(control_copy_stats["checks"]) % 2 == 0:
+					projected = ReadContract.native_kernel.project_control(entity, base, observer_team, ReadContract.CONTROL_FIELDS, ReadContract.PRIVATE_TRADE_FIELDS)
+					control_copy_stats["fast_us"] += Time.get_ticks_usec() - began
+					began = Time.get_ticks_usec()
+					legacy = ReadContract.native_kernel.project_control_legacy(entity, base, observer_team, ReadContract.CONTROL_FIELDS, ReadContract.PRIVATE_TRADE_FIELDS)
+					control_copy_stats["legacy_us"] += Time.get_ticks_usec() - began
+				else:
+					legacy = ReadContract.native_kernel.project_control_legacy(entity, base, observer_team, ReadContract.CONTROL_FIELDS, ReadContract.PRIVATE_TRADE_FIELDS)
+					control_copy_stats["legacy_us"] += Time.get_ticks_usec() - began
+					began = Time.get_ticks_usec()
+					projected = ReadContract.native_kernel.project_control(entity, base, observer_team, ReadContract.CONTROL_FIELDS, ReadContract.PRIVATE_TRADE_FIELDS)
+					control_copy_stats["fast_us"] += Time.get_ticks_usec() - began
+				control_copy_stats["checks"] += 1
+				if projected != legacy:
+					control_copy_stats["mismatches"] += 1
+					return legacy
+				return projected
 			return ReadContract.native_kernel.project_control(entity, base, observer_team, ReadContract.CONTROL_FIELDS, ReadContract.PRIVATE_TRADE_FIELDS)
 	var result: Dictionary = base.duplicate(true)
 	for key in ReadContract.CONTROL_FIELDS:
@@ -57,7 +80,8 @@ static func _compact_control_entity(entity: Dictionary, observer_team: int = 0, 
 	if entity.has("production_queue") and (observer_team <= 0 or int(entity.get("team", 0)) == observer_team):
 		result["production_queue"] = entity.get("production_queue", []).duplicate(true)
 	var source_components: Dictionary = entity.get("components", {})
-	var components: Dictionary = result.get("components", {}).duplicate(true)
+	# base was already deeply detached above, including this subtree.
+	var components: Dictionary = result.get("components", {})
 	for component_name in ["combat", "conversion", "healing", "resource_carrier"]:
 		var component: Dictionary = EntityComponents.component_view(entity, component_name)
 		if not component.is_empty():

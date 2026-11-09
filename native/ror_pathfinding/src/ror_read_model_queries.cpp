@@ -1,3 +1,4 @@
+#include "ror_actor_keys.hpp"
 #include "ror_read_model_kernel.hpp"
 
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -8,10 +9,115 @@
 #include <unordered_map>
 #include <vector>
 #include <map>
+#include <cstring>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
+namespace {
+uint64_t environment_cell_key(int32_t x, int32_t y) {
+    return (uint64_t(uint32_t(x)) << 32) | uint32_t(y);
+}
+
+int64_t environment_item_signature(const Dictionary &item) {
+    static const StringName fields[] = {"id", "graphic_id", "asset_name", "position", "source_frame",
+        "presentation_layer", "source_elevation", "source_unit_id", "cliff_screen_offset", "mirrored", "waterfall_screen_offset"};
+    static const Variant defaults[] = {int64_t(-1), int64_t(-1), String(), Vector2(), int64_t(0),
+        ROR_TEXT("scenery"), 0.0, int64_t(-1), Vector2(), false, Vector2()};
+    Array values;
+    values.resize(11);
+    values[0] = int64_t(item.get(fields[0], defaults[0]));
+    for (int j = 1; j < 11; ++j) values[j] = item.get(fields[j], defaults[j]);
+    return int64_t(Variant(values).hash());
+}
+}
+
+bool RoREnvironmentQueryIndex::configure(const Array &items, const Dictionary &buckets, const Array &ambient) {
+    configured = false;
+    rows.clear(); cells.clear(); marks.clear(); generation = 0; static_count = items.size();
+    if (items.size() + ambient.size() > 1000000 || buckets.size() > 1048576) return false;
+    rows.reserve(items.size() + ambient.size());
+    static const StringName id_key("id"), animated_key("animated");
+    for (int pass = 0; pass < 2; ++pass) {
+        const Array &source = pass == 0 ? items : ambient;
+        for (int64_t i = 0; i < source.size(); ++i) {
+            if (source[i].get_type() != Variant::DICTIONARY) { rows.clear(); return false; }
+            Row row;
+            row.item = source[i]; row.id = row.item.get(id_key, -1);
+            row.animated = bool(row.item.get(animated_key, false));
+            if (!row.animated) {
+                row.signature = environment_item_signature(row.item);
+                row.entry[ROR_FIELD("signature")] = row.signature; row.entry[ROR_FIELD("item")] = row.item;
+                row.entry.make_read_only();
+            }
+            rows.push_back(row);
+        }
+    }
+    const Array keys = buckets.keys();
+    int64_t links = 0;
+    for (int64_t i = 0; i < keys.size(); ++i) {
+        if (keys[i].get_type() != Variant::VECTOR2I) return false;
+        const Vector2i cell = keys[i];
+        const Variant value = buckets[keys[i]];
+        if (value.get_type() != Variant::ARRAY) return false;
+        const Array bucket = value;
+        links += bucket.size();
+        if (links > 4000000) return false;
+        auto &indices = cells[environment_cell_key(cell.x, cell.y)];
+        indices.reserve(bucket.size());
+        for (int64_t j = 0; j < bucket.size(); ++j) {
+            if (bucket[j].get_type() != Variant::INT) return false;
+            const int64_t index = bucket[j];
+            if (index < 0 || index >= static_count) return false;
+            indices.push_back(index);
+        }
+    }
+    marks.resize(rows.size(), 0);
+    configured = true;
+    return true;
+}
+
+Dictionary RoREnvironmentQueryIndex::query(const Rect2i &bounds, bool include_ambient) {
+    if (!configured) return Dictionary();
+    const int64_t end_x = int64_t(bounds.position.x) + bounds.size.x;
+    const int64_t end_y = int64_t(bounds.position.y) + bounds.size.y;
+    if ((bounds.size.x > 0 && bounds.size.y > 0 && int64_t(bounds.size.x) * bounds.size.y > 1048576) ||
+        end_x > std::numeric_limits<int32_t>::max() || end_y > std::numeric_limits<int32_t>::max()) return Dictionary();
+    if (++generation == 0) { std::fill(marks.begin(), marks.end(), 0); ++generation; }
+    std::vector<int64_t> indices;
+    if (bounds.size.x > 0 && bounds.size.y > 0) {
+        for (int64_t y = bounds.position.y; y < end_y; ++y) for (int64_t x = bounds.position.x; x < end_x; ++x) {
+            const auto found = cells.find(environment_cell_key(int32_t(x), int32_t(y)));
+            if (found == cells.end()) continue;
+            for (const int64_t index : found->second) {
+                if (marks[index] == generation) continue;
+                marks[index] = generation; indices.push_back(index);
+            }
+        }
+    }
+    std::sort(indices.begin(), indices.end());
+    if (include_ambient) for (int64_t i = static_count; i < int64_t(rows.size()); ++i) indices.push_back(i);
+    Array items, animated;
+    Dictionary wanted;
+    uint64_t signature = 17;
+    for (const int64_t index : indices) {
+        const Row &row = rows[index];
+        items.append(row.item);
+        if (row.animated) animated.append(row.item);
+        else { wanted[row.id] = row.entry; signature = signature * uint64_t(31) + uint64_t(row.signature); }
+    }
+    int64_t signed_signature;
+    std::memcpy(&signed_signature, &signature, sizeof(signature));
+    Dictionary signatures, result;
+    signatures[ROR_FIELD("wanted")] = wanted; signatures[ROR_FIELD("animated")] = animated; signatures[ROR_FIELD("signature")] = signed_signature;
+    result[ROR_FIELD("items")] = items; result[ROR_FIELD("signatures")] = signatures;
+    return result;
+}
+
+void RoREnvironmentQueryIndex::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("configure", "items", "buckets", "ambient"), &RoREnvironmentQueryIndex::configure);
+    ClassDB::bind_method(D_METHOD("query", "bounds", "include_ambient"), &RoREnvironmentQueryIndex::query);
+}
 
 Dictionary RoRReadModelKernel::economy_resource_view(const Array &resources, const Array &buildings, int64_t team) const {
     static const Variant amount("amount"), id("id"), owner("team"), harvestable("harvestable"), type("resource_type_id");
@@ -29,13 +135,13 @@ Dictionary RoRReadModelKernel::economy_resource_view(const Array &resources, con
         }
     }
     Dictionary result;
-    result["resources"] = active; result["by_id"] = by_id; result["types"] = types;
+    result[ROR_FIELD("resources")] = active; result[ROR_FIELD("by_id")] = by_id; result[ROR_FIELD("types")] = types;
     return result;
 }
 
 Dictionary RoRReadModelKernel::reachable_cell_lookup(const Dictionary &navigation) const {
     Dictionary result;
-    const Dictionary reachable = navigation.get("reachable", Dictionary());
+    const Dictionary reachable = navigation.get(ROR_FIELD("reachable"), Dictionary());
     for (const char *domain : {"land", "water"}) {
         const Array values = reachable.get(domain, Array());
         if (values.is_empty()) continue;
@@ -59,7 +165,22 @@ Array RoRReadModelKernel::known_resources_in_bounds(const Dictionary &known, con
     // These are legal last-seen records and their memory index. The live
     // resource/cell indices are deliberately not arguments to this query.
     for (int y = first_y; y <= last_y; ++y) for (int x = first_x; x <= last_x; ++x) {
-        const Dictionary bucket = chunks.get(Vector2i(x, y), Dictionary());
+        const Variant bucket_value = chunks.get(Vector2i(x, y), Variant());
+        // Producer scene publications contain immutable per-chunk records.
+        // The owner-only memory query below retains its ID-index contract.
+        if (bucket_value.get_type() == Variant::ARRAY) {
+            const Array records = bucket_value;
+            for (int64_t i = 0; i < records.size(); ++i) {
+                const Dictionary row = records[i];
+                const Vector2 point = row.get(position, Vector2());
+                const int cell_x = int(std::floor(double(point.x))), cell_y = int(std::floor(double(point.y)));
+                if (cell_x >= bounds.position.x && cell_x < end.x && cell_y >= bounds.position.y && cell_y < end.y)
+                    selected.emplace_back(int64_t(row.get(id, -1)), row);
+            }
+            continue;
+        }
+        if (bucket_value.get_type() != Variant::DICTIONARY) continue;
+        const Dictionary bucket = bucket_value;
         const Array keys = bucket.keys();
         for (int64_t i = 0; i < keys.size(); ++i) {
             const Variant value = known.get(int64_t(keys[i]), Variant());
@@ -80,7 +201,7 @@ Array RoRReadModelKernel::known_resources_in_bounds(const Dictionary &known, con
 Dictionary RoRReadModelKernel::diff_resource_records(const Array &previous, const Array &current) const {
     static const Variant id("id"), tags("behavior_tags");
     Dictionary result;
-    result["valid"] = false;
+    result[ROR_FIELD("valid")] = false;
     if (!previous.is_read_only() || !current.is_read_only()) return result;
     Array changed, removed;
     int64_t old = 0;
@@ -100,9 +221,9 @@ Dictionary RoRReadModelKernel::diff_resource_records(const Array &previous, cons
         } else changed.append(row);
     }
     while (old < previous.size()) removed.append(Dictionary(previous[old++])[id]);
-    result["valid"] = true;
-    result["changed"] = changed;
-    result["removed"] = removed;
+    result[ROR_FIELD("valid")] = true;
+    result[ROR_FIELD("changed")] = changed;
+    result[ROR_FIELD("removed")] = removed;
     return result;
 }
 
@@ -110,12 +231,12 @@ Dictionary RoRReadModelKernel::infrastructure_site_bonuses(const Array &resource
     std::vector<Vector2> positions;
     for (int64_t i = 0; i < resources.size(); ++i) {
         const Dictionary resource = resources[i];
-        if (int64_t(resource.get("amount", 0)) <= 0) continue;
-        const Array domains = resource.get("allowed_gatherer_domains", Array());
-        if (!domains.is_empty() && !domains.has("land")) continue;
-        const int64_t type = resource.get("resource_type_id", -1);
-        if ((kind == "granary" && type != 0) || (kind == "storage_pit" && type == 0)) continue;
-        positions.push_back(resource.get("pos", Vector2()));
+        if (int64_t(resource.get(ROR_FIELD("amount"), 0)) <= 0) continue;
+        const Array domains = resource.get(ROR_FIELD("allowed_gatherer_domains"), Array());
+        if (!domains.is_empty() && !domains.has(ROR_FIELD("land"))) continue;
+        const int64_t type = resource.get(ROR_FIELD("resource_type_id"), -1);
+        if ((kind == ROR_TEXT("granary") && type != 0) || (kind == ROR_TEXT("storage_pit") && type == 0)) continue;
+        positions.push_back(resource.get(ROR_FIELD("pos"), Vector2()));
     }
     Dictionary result;
     for (int64_t i = 0; i < sites.size(); ++i) {
@@ -171,7 +292,7 @@ Dictionary RoRReadModelKernel::build_resource_buckets(const Array &resources, co
         for (size_t i = 0; i < rows.size(); ++i) {
             const Resource &row = rows[i];
             if (!row.allowed.is_empty() && !row.allowed.has(domain)) continue;
-            if (row.allowed.is_empty() && !unrestricted && domain != "land") continue;
+            if (row.allowed.is_empty() && !unrestricted && domain != ROR_TEXT("land")) continue;
             buckets[{row.cell.y, row.cell.x}].push_back(i);
         }
         Array list;
@@ -219,13 +340,13 @@ Dictionary RoRReadModelKernel::build_resource_buckets(const Array &resources, co
         lists[domain] = list;
         if (typed) types[domain] = typed_lists;
     }
-    Dictionary result; result["lists"] = lists; result["types"] = types; result["row_references"] = references;
+    Dictionary result; result[ROR_FIELD("lists")] = lists; result[ROR_FIELD("types")] = types; result[ROR_FIELD("row_references")] = references;
     return result;
 }
 
 bool RoRReadModelKernel::refresh_resource_bucket_rows(const Dictionary &index, const Array &previous, const Array &current) const {
-    if (previous.size() != current.size() || !index.has("row_references")) return false;
-    const Array references = index["row_references"];
+    if (previous.size() != current.size() || !index.has(ROR_FIELD("row_references"))) return false;
+    const Array references = index[ROR_FIELD("row_references")];
     if (references.size() != current.size()) return false;
     static const Variant id("id"), pos("pos"), type("resource_type_id"), domains("allowed_gatherer_domains");
     std::vector<int64_t> changed;
@@ -245,11 +366,11 @@ bool RoRReadModelKernel::refresh_resource_bucket_rows(const Dictionary &index, c
     // retain the same private entry object; updating it preserves exact order.
     for (int64_t i : changed) {
         if (references[i].get_type() == Variant::DICTIONARY) {
-            Dictionary entry = references[i]; entry["resource"] = current[i];
+            Dictionary entry = references[i]; entry[ROR_FIELD("resource")] = current[i];
         } else if (references[i].get_type() == Variant::ARRAY) {
             const Array owners = references[i];
             for (int64_t j = 0; j < owners.size(); ++j) {
-                Dictionary entry = owners[j]; entry["resource"] = current[i];
+                Dictionary entry = owners[j]; entry[ROR_FIELD("resource")] = current[i];
             }
         }
     }
@@ -262,11 +383,11 @@ Array RoRReadModelKernel::query_resource_candidates(const Array &buckets, const 
     ordered.reserve(buckets.size());
     for (int64_t i = 0; i < buckets.size(); ++i) {
         const Dictionary bucket = buckets[i];
-        const Vector2i cell = bucket["cell"];
+        const Vector2i cell = bucket[ROR_FIELD("cell")];
         const double x = double(cell.x) * cell_size, y = double(cell.y) * cell_size;
         const double dx = std::max(std::max(x - double(position.x), 0.0), double(position.x) - x - cell_size);
         const double dy = std::max(std::max(y - double(position.y), 0.0), double(position.y) - y - cell_size);
-        ordered.push_back({cell, bucket["entries"], dx * dx + dy * dy});
+        ordered.push_back({cell, bucket[ROR_FIELD("entries")], dx * dx + dy * dy});
     }
     const size_t count = std::min<size_t>(16, ordered.size());
     std::partial_sort(ordered.begin(), ordered.begin() + count, ordered.end(), [](const Bucket &a, const Bucket &b) {
@@ -279,10 +400,10 @@ Array RoRReadModelKernel::query_resource_candidates(const Array &buckets, const 
     for (size_t i = 0; i < count; ++i) {
         const Array &entries = ordered[i].entries;
         for (int64_t j = 0; j < std::min<int64_t>(64, entries.size()); ++j) {
-            const Dictionary entry = entries[j], resource = entry["resource"];
-            if (int64_t(resource.get("resource_type_id", -1)) != resource_type) continue;
-            const Vector2 target = resource.get("pos", Vector2());
-            candidates.push_back({resource, double(position.distance_squared_to(target)), resource.get("id", -1)});
+            const Dictionary entry = entries[j], resource = entry[ROR_FIELD("resource")];
+            if (int64_t(resource.get(ROR_FIELD("resource_type_id"), -1)) != resource_type) continue;
+            const Vector2 target = resource.get(ROR_FIELD("pos"), Vector2());
+            candidates.push_back({resource, double(position.distance_squared_to(target)), resource.get(ROR_FIELD("id"), -1)});
         }
     }
     std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) {

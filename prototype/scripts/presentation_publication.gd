@@ -32,7 +32,7 @@ static func capture_entity(source: Dictionary, _detailed: bool) -> Dictionary:
 static func run(input: Dictionary) -> Dictionary:
 	return ProjectionJob.new().run(input)
 
-func publish(snapshot: Dictionary, _selected_ids: Array[int], coordinator) -> Dictionary:
+func publish(snapshot: Dictionary, _selected_ids: Array, coordinator) -> Dictionary:
 	if not coordinator.is_enabled("presentation"):
 		return snapshot
 	# Projection is already complete. A worker that merely echoes copied input

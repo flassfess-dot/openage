@@ -54,8 +54,13 @@ var graphic_descriptors: Dictionary = {}
 var composite_textures: Dictionary = {}
 var composite_descriptors: Dictionary = {}
 var scenario_marker_textures: Dictionary = {}
+var performance_probe: Variant = null
 var source_resource_textures: Dictionary = {}
 var source_resource_frame_metadata: Dictionary = {}
+var source_resource_descriptors: Dictionary = {}
+var source_resource_descriptor_hits := 0
+var source_resource_descriptor_misses := 0
+const MAX_RESOURCE_DESCRIPTORS := 8192
 var environment_graphic_descriptors: Dictionary = {}
 var building_presentations := BuildingPresentationRegistry.new()
 var resource_presentations := ResourcePresentationRegistry.new()
@@ -64,64 +69,90 @@ var projectile_presentations := ProjectilePresentationRegistry.new()
 var effect_presentations := EffectPresentationRegistry.new()
 var interface_icons := InterfaceIconRegistry.new()
 var interface_skin := InterfaceSkin.new()
+var presentation_metadata_ready := false
 
 func load() -> void:
 	load_generated_data()
+	for step in range(5): _configure_presentation_step(step)
+
+
+func configure_presentations_async(tree: SceneTree, progress: Callable) -> void:
+	for step in range(5):
+		if progress.is_valid(): progress.call(float(step) / 5.0, "Подготовка оформления")
+		await tree.process_frame
+		_configure_presentation_step(step)
+
+
+func prepare_presentation_metadata() -> void:
+	# Metadata only. A load job may build these private registries before their
+	# ownership moves to presentation; no texture loading occurs in configure.
+	if presentation_metadata_ready: return
+	var graphics_frame_records: Dictionary = asset_frame_records_by_archive.get("graphics", {})
+	var interface_frame_records: Dictionary = asset_frame_records_by_archive.get("interfac", {})
 	player_palette.configure_assets(asset_records)
 	unit_presentations.player_palette = player_palette
 	building_presentations.player_palette = player_palette
 	effect_presentations.player_palette = player_palette
 	interface_icons.player_palette = player_palette
-	var graphics_frame_records: Dictionary = asset_frame_records_by_archive.get("graphics", {})
-	var interface_frame_records: Dictionary = asset_frame_records_by_archive.get("interfac", {})
-	scenario_marker_textures.clear()
-	source_resource_textures.clear()
-	source_resource_frame_metadata.clear()
-	environment_graphic_descriptors.clear()
-	terrain_textures = {
-		"grass": load_frames("terrain_grass", 9),
-		"sand": load_frames("terrain_sand", 9),
-		"water": load_frames("terrain_water", 4),
-		"water_dark": load_frames("terrain_water_dark", 4),
-	}
-	terrain_all_textures = {
-		"grass": load_frames("terrain_grass", 25),
-		"sand": load_frames("terrain_sand", 25),
-		"water": load_frames("terrain_water", 20),
-		"water_dark": load_frames("terrain_water_dark", 20),
-	}
-	terrain_border_textures = {
-		2: load_frames("border_desert_water", 12),
-		3: load_frames("border_grass_water", 12),
-		7: load_frames("border_water_dark", 4),
-		4: load_frames("border_grass_desert", 12),
-		5: load_frames("border_grass_forest", 12),
-		6: load_frames("border_grass_desert2", 4),
-	}
-	var shoreline_hotspots: Array = []
-	for frame in range(12):
-		var hotspot: Array = get_texture_metadata("border_desert_water", frame).get("hotspot", [0, 0])
-		shoreline_hotspots.append(Vector2i(hotspot[0], hotspot[1]))
-	terrain_border_textures[8] = ShorelineTiles.build_frames(terrain_border_textures[2], shoreline_hotspots, terrain_textures["water"][0])
-	town_center_texture = load("res://assets/generated/town_center.png")
-	town_center_construction_textures = load_frames("town_center_construction", 4)
-	tree_texture = load("res://assets/generated/tree.png")
-	tree_stump_textures = load_frames("tree_stump", 4)
-	berry_texture = load("res://assets/generated/berry_bush.png")
 	interface_skin.configure(asset_records, interface_source_inventory_data, interface_frame_records)
-	interface_panel_texture = interface_skin.panel_texture(0)
-	if interface_panel_texture == null:
-		interface_panel_texture = load("res://assets/generated/interface_panel.png")
 	effect_presentations.configure(graphics_catalog_data, asset_records, graphics_frame_records)
 	unit_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records, effect_presentations, graphics_frame_records)
 	unit_textures = unit_presentations.textures
-	build_graphic_descriptors()
-	load_composite_graphics()
 	building_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_metadata, graphics_frame_records)
 	resource_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records, graphics_frame_records)
 	projectile_presentations.configure(runtime_catalog_data, object_catalog_data, graphics_catalog_data, asset_records, graphics_frame_records)
 	interface_icons.configure(asset_records, interface_frame_records)
+	presentation_metadata_ready = true
 
+
+func _configure_presentation_step(step: int) -> void:
+	match step:
+		0:
+			prepare_presentation_metadata()
+			scenario_marker_textures.clear()
+			source_resource_textures.clear()
+			source_resource_frame_metadata.clear()
+			source_resource_descriptors.clear()
+			environment_graphic_descriptors.clear()
+		1:
+			terrain_textures = {
+				"grass": load_frames("terrain_grass", 9),
+				"sand": load_frames("terrain_sand", 9),
+				"water": load_frames("terrain_water", 4),
+				"water_dark": load_frames("terrain_water_dark", 4),
+			}
+			terrain_all_textures = {
+				"grass": load_frames("terrain_grass", 25),
+				"sand": load_frames("terrain_sand", 25),
+				"water": load_frames("terrain_water", 20),
+				"water_dark": load_frames("terrain_water_dark", 20),
+			}
+			terrain_border_textures = {
+				2: load_frames("border_desert_water", 12),
+				3: load_frames("border_grass_water", 12),
+				7: load_frames("border_water_dark", 4),
+				4: load_frames("border_grass_desert", 12),
+				5: load_frames("border_grass_forest", 12),
+				6: load_frames("border_grass_desert2", 4),
+			}
+		2:
+			var shoreline_hotspots: Array = []
+			for frame in range(12):
+				var hotspot: Array = get_texture_metadata("border_desert_water", frame).get("hotspot", [0, 0])
+				shoreline_hotspots.append(Vector2i(hotspot[0], hotspot[1]))
+			terrain_border_textures[8] = ShorelineTiles.build_frames(terrain_border_textures[2], shoreline_hotspots, terrain_textures["water"][0])
+			town_center_texture = load("res://assets/generated/town_center.png")
+			town_center_construction_textures = load_frames("town_center_construction", 4)
+			tree_texture = load("res://assets/generated/tree.png")
+			tree_stump_textures = load_frames("tree_stump", 4)
+			berry_texture = load("res://assets/generated/berry_bush.png")
+			interface_panel_texture = interface_skin.panel_texture(0)
+			if interface_panel_texture == null:
+				interface_panel_texture = load("res://assets/generated/interface_panel.png")
+		3:
+			load_composite_graphics()
+		4:
+			build_graphic_descriptors()
 
 func configure_player_colors(players: Array) -> void:
 	player_palette.configure_players(players)
@@ -131,7 +162,7 @@ func rally_flag_frame_info(team: int, animation_time: float) -> Dictionary:
 	return effect_presentations.frame_info_for(322, team, animation_time)
 
 
-func prewarm_match_entities(units: Array, buildings: Array) -> void:
+func prewarm_match_entities(units: Array, buildings: Array, resources: Array = [], scenery: Array = []) -> void:
 	unit_presentations.prewarm_units(units)
 	building_presentations.gate_presentations.prewarm_textures()
 	building_presentations.prewarm_buildings(buildings)
@@ -154,6 +185,123 @@ func prewarm_match_entities(units: Array, buildings: Array) -> void:
 		if impact_id >= 0:
 			effect_presentations.frame_info({"graphic_id": impact_id, "team": 1, "elapsed": 0.0})
 
+	var resource_assets := {}
+	for resource in resources: _collect_resource_prewarm_assets(resource, resource_assets)
+	for item in scenery: _collect_scenery_prewarm_assets(item, resource_assets)
+	for asset_name in resource_assets:
+		if environment_pack.owns_asset(String(asset_name)): environment_pack.prewarm_object_textures(String(asset_name))
+		else: _cache_source_resource_frames(String(asset_name))
+
+
+func prewarm_match_entities_async(units: Array, buildings: Array, tree: SceneTree, progress: Callable, resources: Array = [], scenery: Array = []) -> void:
+	var unit_progress := func(value: float, stage: String):
+		if progress.is_valid(): progress.call(value * 0.7, stage)
+	await unit_presentations.prewarm_units_async(units, tree, unit_progress)
+	building_presentations.gate_presentations.prewarm_textures()
+	var started := Time.get_ticks_usec()
+	for index in range(buildings.size()):
+		var building: Dictionary = buildings[index]
+		building_presentations.prewarm_buildings([building])
+		if String(building.get("state", "")) == "complete": rally_flag_frame_info(int(building.get("team", 1)), 0.0)
+		if Time.get_ticks_usec() - started >= 6000:
+			if progress.is_valid(): progress.call(0.7 + float(index + 1) / maxi(1, buildings.size()) * 0.1, "Подготовка зданий: %d/%d" % [index + 1, buildings.size()])
+			await tree.process_frame
+			started = Time.get_ticks_usec()
+	var projectile_ids := {}
+	for entity in units + buildings:
+		var source_id := int(entity.get("projectile_id", -1))
+		if source_id >= 0: projectile_ids[source_id] = true
+	var ordered: Array = projectile_ids.keys()
+	ordered.sort()
+	for index in range(ordered.size()):
+		var source_id := int(ordered[index])
+		projectile_presentations.ensure_loaded(source_id)
+		var source: Dictionary = object_catalog_data.get("objects", {}).get("0:%d" % source_id, {})
+		var impact_id := int(source.get("graphics", {}).get("death", -1))
+		if impact_id >= 0: effect_presentations.frame_info({"graphic_id": impact_id, "team": 1, "elapsed": 0.0})
+		if progress.is_valid(): progress.call(0.8 + float(index + 1) / maxi(1, ordered.size()) * 0.05, "Подготовка выстрелов")
+		await tree.process_frame
+	# Include hidden map resources and their depleted/felled graphics. Seeing a
+	# new area must not load a complete animation inside a gameplay frame.
+	var resource_assets := {}
+	started = Time.get_ticks_usec()
+	for index in range(resources.size()):
+		_collect_resource_prewarm_assets(resources[index], resource_assets)
+		if Time.get_ticks_usec() - started >= 6000:
+			if progress.is_valid(): progress.call(0.85 + float(index + 1) / maxi(1, resources.size()) * 0.01, "Подготовка ресурсов карты")
+			await tree.process_frame
+			started = Time.get_ticks_usec()
+	for index in range(scenery.size()):
+		_collect_scenery_prewarm_assets(scenery[index], resource_assets)
+		if Time.get_ticks_usec() - started >= 6000:
+			if progress.is_valid(): progress.call(0.86 + float(index + 1) / maxi(1, scenery.size()) * 0.01, "Подготовка окружения карты")
+			await tree.process_frame
+			started = Time.get_ticks_usec()
+	var resource_names: Array = resource_assets.keys()
+	resource_names.sort()
+	for index in range(resource_names.size()):
+		var resource_progress := func(value: float):
+			if progress.is_valid(): progress.call(0.87 + (float(index) + value) / maxi(1, resource_names.size()) * 0.13, "Подготовка ресурсов: %d/%d" % [index + 1, resource_names.size()])
+		var asset_name := String(resource_names[index])
+		if environment_pack.owns_asset(asset_name): await environment_pack.prewarm_object_textures_async(asset_name, tree, resource_progress)
+		else: await _cache_source_resource_frames_async(asset_name, tree, resource_progress)
+	if progress.is_valid(): progress.call(1.0, "Графика подготовлена")
+
+
+func _collect_resource_prewarm_assets(resource: Dictionary, assets: Dictionary) -> void:
+	for asset_name in resource_presentations.prewarm_asset_names(resource):
+		if environment_pack.owns_asset(asset_name) or resource_presentations.has_frame_records(asset_name): assets[asset_name] = true
+	if environment_pack.enabled and resource.has("environment_asset"):
+		var decorated_asset := EnvironmentPack.PREFIX + String(resource["environment_asset"])
+		if environment_pack.owns_asset(decorated_asset): assets[decorated_asset] = true
+	if String(resource.get("kind", "")) != "tree": return
+	var felled_asset := String(resource.get("source_felled_asset_name", "graphic_636"))
+	if resource_presentations.has_frame_records(felled_asset): assets[felled_asset] = true
+	# The tree crown and its ground shadow can be separate DAT graphics.
+	var spec := resource_presentations.graphic_for_resource(resource)
+	for delta in spec.get("deltas", []):
+		var graphic_id := int(delta.get("graphic_id", -1))
+		var part: Dictionary = graphics_catalog_data.get("graphics", {}).get(String.num_int64(graphic_id), {})
+		if int(part.get("layer", -1)) != 0: continue
+		if not CompositeGraphic.delta_visible(int(delta.get("display_angle", -1)), 0, int(spec.get("angle_count", 1))): continue
+		var asset_name := "graphic_%d" % graphic_id
+		if resource_presentations.has_frame_records(asset_name): assets[asset_name] = true
+
+
+func _collect_scenery_prewarm_assets(item: Dictionary, assets: Dictionary) -> void:
+	var graphic_id := int(item.get("graphic_id", -1))
+	var asset_name := String(item.get("asset_name", ""))
+	if graphic_id == 107 and String(item.get("kind", "")) == "cliff" or String(item.get("river_feature", "")) == "ledge":
+		asset_name = "cliff_grounded"
+	elif String(item.get("presentation_layer", "scenery")) == "ambient_actor":
+		var source: Dictionary = object_catalog_data.get("objects", {}).get("0:%d" % int(item.get("source_unit_id", -1)), {})
+		var movement_id := int(item.get("movement_graphic_id", source.get("graphics", {}).get("move", -1)))
+		if movement_id >= 0: asset_name = String(item.get("movement_asset_name", "graphic_%d" % movement_id))
+	if environment_pack.owns_asset(asset_name) or resource_presentations.has_frame_records(asset_name): assets[asset_name] = true
+
+
+func _cache_source_resource_frames_async(asset_name: String, tree: SceneTree, progress: Callable) -> void:
+	if source_resource_textures.has(asset_name): return
+	var records: Array = resource_presentations.valid_frame_records(asset_name)
+	var frames: Array = []
+	var metadata: Array = []
+	var started := Time.get_ticks_usec()
+	for index in range(records.size()):
+		var record: Dictionary = records[index]
+		var texture: Texture2D = load("res://assets/generated/%s" % String(record.get("file", "")))
+		if texture != null:
+			frames.append(texture)
+			metadata.append(record.duplicate(true))
+		if Time.get_ticks_usec() - started >= 6000:
+			if progress.is_valid(): progress.call(float(index + 1) / maxi(1, records.size()))
+			await tree.process_frame
+			started = Time.get_ticks_usec()
+	# Publish only complete arrays, with the same ordering and metadata as the
+	# synchronous fallback. No texture or animation frame is discarded.
+	source_resource_textures[asset_name] = frames
+	source_resource_frame_metadata[asset_name] = metadata
+	if progress.is_valid(): progress.call(1.0)
+
 
 func read_json(path: String):
 	var file := FileAccess.open(path, FileAccess.READ)
@@ -163,6 +311,7 @@ func read_json(path: String):
 	return JSON.parse_string(file.get_as_text())
 
 func load_generated_data() -> void:
+	presentation_metadata_ready = false
 	asset_metadata.clear()
 	asset_records.clear()
 	asset_frame_records_by_archive.clear()
@@ -315,6 +464,7 @@ func resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> D
 		return source_resource_frame_info(felled, animation_time)
 	var result := _standing_resource_frame_info(resource, animation_time)
 	if phase == "falling" and not result.is_empty():
+		result = result.duplicate()
 		var progress := clampf(float(resource.get("tree_fall_elapsed", 0.0)) / maxf(0.01, float(resource.get("tree_fall_duration", 0.65))), 0.0, 1.0)
 		result["rotation"] = (1.0 if int(resource.get("id", 0)) % 2 == 0 else -1.0) * progress * progress * PI * 0.5
 		result["fall_opacity"] = 1.0 - progress * 0.5
@@ -323,9 +473,8 @@ func resource_frame_info(resource: Dictionary, animation_time: float = 0.0) -> D
 
 func _standing_resource_frame_info(resource: Dictionary, animation_time: float) -> Dictionary:
 	if environment_pack.enabled and resource.has("environment_asset"):
-		var presentation := environment_pack.decorate_resource(resource, String(resource["environment_asset"]), int(resource.get("environment_variant", 0)))
-		if not presentation.is_empty():
-			return environment_pack.frame_info(presentation, true)
+		var presentation := environment_pack.frame_info(resource, true, String(resource["environment_asset"]), int(resource.get("environment_variant", 0)))
+		if not presentation.is_empty(): return presentation
 	if environment_pack.owns_asset(String(resource.get("source_graphic_asset_name", ""))):
 		return environment_pack.frame_info(resource, true)
 	var source_frame := source_resource_frame_info(resource, animation_time)
@@ -366,6 +515,12 @@ func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.
 		mirrored = bool(resolved["mirrored"])
 	elif not depleted and String(resource.get("kind", "")) in ResourcePresentationRegistry.ANIMATED_MARINE_KINDS:
 		frame_index = ResourcePresentationRegistry.animation_frame(resource, int(resource.get("id", 0)), animation_time, frames.size(), spec)
+	var canopy := String(resource.get("kind", "")) == "tree" and ResourcePresentationRegistry.tree_canopy_visible(resource)
+	var descriptor_key := [asset_name,graphic_id,frame_index,mirrored,canopy]
+	if source_resource_descriptors.has(descriptor_key):
+		source_resource_descriptor_hits += 1
+		return source_resource_descriptors[descriptor_key]
+	source_resource_descriptor_misses += 1
 	var texture: Texture2D = frames[frame_index]
 	if texture == null:
 		return {}
@@ -383,9 +538,19 @@ func source_resource_frame_info(resource: Dictionary, animation_time: float = 0.
 		"mirrored": mirrored,
 		"graphic_layer": int(spec.get("layer", 20)),
 	}
-	if String(resource.get("kind", "")) == "tree" and ResourcePresentationRegistry.tree_canopy_visible(resource):
+	if canopy:
 		var shadow := _source_tree_shadow(spec, frame_index)
-		if not shadow.is_empty(): result["shadow"] = shadow
+		if not shadow.is_empty():
+			shadow.make_read_only()
+			result["shadow"] = shadow
+	result.make_read_only()
+	if source_resource_descriptors.size() >= MAX_RESOURCE_DESCRIPTORS:
+		var oldest: Variant
+		for expired in source_resource_descriptors:
+			oldest = expired
+			break
+		source_resource_descriptors.erase(oldest)
+	source_resource_descriptors[descriptor_key] = result
 	return result
 
 
@@ -412,20 +577,26 @@ func _source_tree_shadow(spec: Dictionary, source_frame: int) -> Dictionary:
 
 
 func _cache_source_resource_frames(asset_name: String) -> void:
+	var started := Time.get_ticks_usec() if performance_probe != null else 0
 	var frames: Array = []
 	var frame_metadata: Array = []
-	# The generated manifest is authoritative. Files left behind by an older
-	# import must never increase a source graphic's frame count at runtime.
-	if resource_presentations.has_frame_records(asset_name):
-		for record_value in resource_presentations.valid_frame_records(asset_name):
-			var record: Dictionary = record_value
-			var texture: Texture2D = load("res://assets/generated/%s" % String(record.get("file", "")))
-			if texture == null:
-				continue
-			frames.append(texture)
-			frame_metadata.append(record.duplicate(true))
+	var records_started := Time.get_ticks_usec() if performance_probe != null else 0
+	# The generated manifest remains authoritative for frame membership.
+	var records: Array = resource_presentations.valid_frame_records(asset_name) if resource_presentations.has_frame_records(asset_name) else []
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.resource_asset.records." + asset_name, Time.get_ticks_usec() - records_started)
+	for record_value in records:
+		var record: Dictionary = record_value
+		var texture_started := Time.get_ticks_usec() if performance_probe != null else 0
+		var texture: Texture2D = load("res://assets/generated/%s" % String(record.get("file", "")))
+		if performance_probe != null: performance_probe.observe_microseconds("presentation.resource_asset.texture." + asset_name, Time.get_ticks_usec() - texture_started)
+		if texture == null: continue
+		frames.append(texture)
+		var metadata_started := Time.get_ticks_usec() if performance_probe != null else 0
+		frame_metadata.append(record.duplicate(true))
+		if performance_probe != null: performance_probe.observe_microseconds("presentation.resource_asset.metadata." + asset_name, Time.get_ticks_usec() - metadata_started)
 	source_resource_textures[asset_name] = frames
 	source_resource_frame_metadata[asset_name] = frame_metadata
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.resource_asset.total." + asset_name, Time.get_ticks_usec() - started)
 
 
 func projectile_frame_info(projectile: Dictionary) -> Dictionary:

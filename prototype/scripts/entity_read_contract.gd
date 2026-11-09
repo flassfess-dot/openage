@@ -45,6 +45,25 @@ const CONTROL_FIELDS := [
 const ARRAY_FIELDS := ["behavior_tags", "unit_lineage", "allowed_gatherer_domains"]
 const NESTED_RENDER_FIELDS := ["footprint", "presentation_state_overrides"]
 const PRIVATE_TRADE_FIELDS := ["target_dock_id", "home_dock_id", "selected_input_resource_type_id", "approach_position", "cargo_goods", "cargo_gold", "trip_count"]
+const PRIVATE_CONTROL_FIELDS := ["production_progress", "rally_point", "rally_point_set", "resource_id", "dropoff_id", "worker_role_source_unit_id", "diagnostic_reason"]
+
+# Data read by the HUD, context cursor, transport actions and formation preview.
+# All legally visible units receive these fields before selection changes.
+# Timers, targets, paths and conversion/healing bookkeeping stay on the owner.
+const UI_COMPONENT_FIELDS := {
+	"ownership": ["civilization_id"],
+	"worker": ["enabled"],
+	"combat": ["enabled", "attacks", "armors", "base_armor", "projectile_id", "blast_range"],
+	"conversion": ["enabled", "faith", "max_faith"],
+	"healing": ["enabled"],
+	"cargo": ["enabled", "capacity", "passenger_ids", "allowed_domains", "garrison", "allow_artifacts", "count"],
+	"trade": ["enabled", "target_building_source_id", "stage", "selected_input_resource_type_id", "cargo_gold"],
+}
+const UI_CONTROL_FIELDS := ["stance", "attack_damage", "attack_range", "attack_range_min", "attack_period", "carry_capacity", "carried_resource_type_id", "worker_role_source_unit_id"]
+
+static func redact_foreign_control(row: Dictionary, observer: int) -> void:
+	if observer > 0 and int(row.get("team", 0)) != observer:
+		for key in PRIVATE_CONTROL_FIELDS: row.erase(key)
 
 class CopyOnWrite extends RefCounted:
 	var value: Dictionary

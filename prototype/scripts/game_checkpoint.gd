@@ -99,6 +99,7 @@ static func capture(world, controller, definition: Dictionary, map: Dictionary, 
 		indices[name] = []
 		for entity in world.get(name): indices[name].append(int(entity["id"]))
 	var fog := _capture_fields(world.fog_of_war, FOG_FIELDS, detached)
+	fog["transient_visible_by_player"] = world.fog_of_war.transient_visible_by_player.duplicate(true)
 	fog["sources"] = {}
 	for key in world.fog_of_war.vision_sources:
 		var source: Dictionary = world.fog_of_war.vision_sources[key].duplicate(true)
@@ -128,7 +129,21 @@ static func _digest(bytes: PackedByteArray) -> String:
 
 static func pack(checkpoint: Dictionary) -> Dictionary:
 	var bytes := var_to_bytes(checkpoint)
-	return {"version": VERSION, "size": bytes.size(), "sha256": _digest(bytes), "data": Marshalls.raw_to_base64(bytes.compress(FileAccess.COMPRESSION_ZSTD))}
+	if bytes.is_empty() or bytes.size() > MAX_BYTES: return {}
+	var size := bytes.size()
+	var sha256 := _digest(bytes)
+	var profile_memory := "--profile-save-memory" in OS.get_cmdline_user_args()
+	if profile_memory: print("CHECKPOINT encoded bytes=", size, " heap=", OS.get_static_memory_usage(), " memory=", OS.get_memory_info())
+	var compressed := bytes.compress(FileAccess.COMPRESSION_ZSTD)
+	# The raw checkpoint can exceed 370 MiB. Release it before constructing
+	# the base64 string and archive, rather than retaining all three buffers.
+	bytes = PackedByteArray()
+	if compressed.is_empty(): return {}
+	if profile_memory: print("CHECKPOINT compressed bytes=", compressed.size(), " heap=", OS.get_static_memory_usage(), " memory=", OS.get_memory_info())
+	var encoded := Marshalls.raw_to_base64(compressed)
+	if encoded.is_empty(): return {}
+	if profile_memory: print("CHECKPOINT base64 chars=", encoded.length(), " heap=", OS.get_static_memory_usage())
+	return {"version": VERSION, "size": size, "sha256": sha256, "data": encoded}
 
 static func unpack(blob: Dictionary) -> Dictionary:
 	if int(blob.get("version", -1)) != VERSION or int(blob.get("size", 0)) <= 0 or int(blob["size"]) > MAX_BYTES: return {}
@@ -237,6 +252,7 @@ static func validate(data: Dictionary) -> bool:
 
 static func restore(data: Dictionary, world, controller) -> bool:
 	if not validate(data) or world.map_size != data["world"]["map_size"]: return false
+	world.resource_component_pool.clear()
 	_restore_fields(world, data["world"], WORLD_FIELDS)
 	# Derived cache cursors never survive a state replacement, including a
 	# restore into the same objects with coincident saved revisions.
@@ -269,6 +285,7 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	for entity in world.victory_objectives:
 		if not entities.has(int(entity["id"])): entities[int(entity["id"])] = entity
 	for resource in world.resource_nodes:
+		world.resource_component_pool.intern(resource)
 		var index: int = world._resource_cell_index(resource)
 		if not world.resource_nodes_by_cell.has(index): world.resource_nodes_by_cell[index] = []
 		world.resource_nodes_by_cell[index].append(resource)
@@ -318,6 +335,7 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	fog.visibility_change_history.clear()
 	fog.exploration_change_history.clear()
 	_restore_fields(fog, data["fog"], FOG_FIELDS)
+	fog.transient_visible_by_player = data["fog"].get("transient_visible_by_player", {}).duplicate(true)
 	fog.vision_sources.clear()
 	for key in data["fog"]["sources"]:
 		var source: Dictionary = data["fog"]["sources"][key].duplicate(true)

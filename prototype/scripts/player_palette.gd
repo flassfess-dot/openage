@@ -7,6 +7,7 @@ const MAX_CACHED_TEXTURES := 4096
 var colors_by_team: Dictionary = {}
 var references: Dictionary = {}
 var cached_textures: Dictionary = {}
+static var palette_kernel: Variant = null
 
 func configure_players(players: Array) -> void:
 	colors_by_team.clear()
@@ -71,6 +72,16 @@ func texture_for(record: Dictionary, texture: Texture2D, player: int) -> Texture
 
 static func remap_images(blue: Image, red: Image, player: int) -> Image:
 	if blue == null or red == null or blue.get_size() != red.get_size(): return null
+	if ClassDB.class_exists("RoRReadModelKernel"):
+		if palette_kernel == null: palette_kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if palette_kernel.has_method("remap_player_image"):
+			var source := PackedColorArray()
+			var target := PackedColorArray()
+			for index in range(10):
+				source.append(shade(1, index))
+				target.append(shade(player, index))
+			var native_image: Image = palette_kernel.remap_player_image(blue, red, source, target)
+			if native_image != null: return native_image
 	# The two original decodes differ only at SLP player-colour commands. Ordinary
 	# blue pixels and shadows are identical and must never be recoloured.
 	var result: Image = blue.duplicate()

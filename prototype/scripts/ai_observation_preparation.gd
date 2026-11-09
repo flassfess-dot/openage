@@ -10,7 +10,9 @@ const PRODUCERS_PER_PORTION := 4
 const CAPTURE_BUDGET_USEC := 7000
 const MAX_COMMAND_RULE_SCHEMA_BYTES := 64 * 1024
 var captures: Dictionary = {}
+var profile_input_stages := "--profile-ai-input-stages" in OS.get_cmdline_user_args()
 var command_rule_caches: Dictionary = {}
+var actor_catalog_stats := {"lookups":0,"worker_reuses":0,"comparisons":0,"mismatches":0}
 
 func clear() -> void:
 	for pending in captures.values():
@@ -18,6 +20,7 @@ func clear() -> void:
 		if world != null: world.release_read_generation(pending["token"])
 	captures.clear()
 	command_rule_caches.clear()
+	actor_catalog_stats = {"lookups":0,"worker_reuses":0,"comparisons":0,"mismatches":0}
 
 func _command_rule_cache(world, team: int, units: Array, options: Dictionary) -> Dictionary:
 	var counts: Dictionary = {}
@@ -49,6 +52,7 @@ func _command_rule_cache(world, team: int, units: Array, options: Dictionary) ->
 	return retained
 
 func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant = null, budget_usec: int = CAPTURE_BUDGET_USEC) -> Dictionary:
+	if probe == null and profile_input_stages: probe = world.tick_pipeline.stage_observer
 	var team := int(ai.team)
 	var pending: Dictionary = captures.get(team, {})
 	if pending.is_empty():
@@ -56,7 +60,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 		var initial_options: Dictionary = ai.decision_options(apply_tick) if ai.has_method("decision_options") else ai.presentation_options()
 		initial_options["defer_build_sites"] = true
 		initial_options["build_site_filter_in_worker"] = true
-		initial_options["_ai_profile_cache"] = {}
+		initial_options["_ai_profile_cache"] = {"_catalog_stats":actor_catalog_stats}
 		initial_options["_ai_build_options_cache"] = {}
 		initial_options["_ai_command_options_cache"] = {}
 		if probe != null:
@@ -82,7 +86,7 @@ func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant
 			"resources":
 				if world.prepare_known_ai_resource_snapshot(team): pending["phase"] = "facts"
 			"facts":
-				pending["snapshot"] = store.observe(world, source_tick, team, options)
+				pending["snapshot"] = store.observe(world, source_tick, team, options, pending["projection"])
 				options["_ai_command_rule_cache"] = _command_rule_cache(world,team,pending["snapshot"]["units"],options)
 				pending.erase("projection")
 				pending["phase"] = "commands"

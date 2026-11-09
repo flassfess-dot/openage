@@ -26,14 +26,20 @@ var _change_log: Array = []
 # Unlike the short route journal, it retains a page's last change indefinitely.
 var task_page_revisions: Dictionary = {}
 var task_full_revision := 0
+var fast_region_queries_enabled := true
+var region_query_cache: Dictionary = {}
+var region_query_cache_revision := -1
+var region_query_cache_epoch := -1
 
 
 func _record_change(cell: Vector2i) -> void:
+	region_query_cache.clear()
 	ChangeJournal.record_cell(_change_log, revision, cell, 96, 48)
 	task_page_revisions[Vector2i(cell.x / 16, cell.y / 16)] = revision + 1
 
 
 func _record_full_change() -> void:
+	region_query_cache.clear()
 	ChangeJournal.record_full(_change_log, revision, revision + 1, 96)
 	task_page_revisions.clear()
 	task_full_revision = revision + 1
@@ -48,6 +54,15 @@ func changed_task_pages_since(old_revision: int) -> Variant:
 
 
 func change_region_since(old_revision: int) -> Variant:
+	if fast_region_queries_enabled:
+		if region_query_cache_revision != revision or region_query_cache_epoch != cache_epoch:
+			region_query_cache.clear()
+			region_query_cache_revision = revision
+			region_query_cache_epoch = cache_epoch
+		if not region_query_cache.has(old_revision):
+			if region_query_cache.size() >= 32: region_query_cache.clear()
+			region_query_cache[old_revision] = ChangeJournal.region_since(_change_log, old_revision, revision)
+		return region_query_cache[old_revision]
 	var change := ChangeJournal.delta(_change_log, old_revision, revision)
 	return null if bool(change["full"]) else change["region"]
 

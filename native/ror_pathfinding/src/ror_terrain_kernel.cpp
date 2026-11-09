@@ -50,7 +50,8 @@ Packed pack(const std::vector<Value> &values) {
 }
 
 void RoRTerrainKernel::_bind_methods() {
-    ClassDB::bind_method(D_METHOD("build_mesh", "bounds", "cells", "heights", "frames", "materials", "seed", "maximum_subdivisions", "river"), &RoRTerrainKernel::build_mesh, DEFVAL(16), DEFVAL(PackedFloat32Array()));
+    ClassDB::bind_method(D_METHOD("supports_planar_base_compaction"), &RoRTerrainKernel::supports_planar_base_compaction);
+    ClassDB::bind_method(D_METHOD("build_mesh", "bounds", "cells", "heights", "frames", "materials", "seed", "maximum_subdivisions", "river", "compact_planar_base"), &RoRTerrainKernel::build_mesh, DEFVAL(16), DEFVAL(PackedFloat32Array()), DEFVAL(true));
     ClassDB::bind_method(D_METHOD("split_mesh_arrays", "arrays", "maximum_vertices"), &RoRTerrainKernel::split_mesh_arrays, DEFVAL(16384));
     ClassDB::bind_method(D_METHOD("capture_cached_sample_arrays", "bounds", "cache"), &RoRTerrainKernel::capture_cached_sample_arrays);
     ClassDB::bind_method(D_METHOD("build_fog_arrays", "bounds", "size", "levels"), &RoRTerrainKernel::build_fog_arrays);
@@ -149,7 +150,7 @@ Array RoRTerrainKernel::split_mesh_arrays(const Array &arrays, int32_t maximum_v
 Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32Array &cells,
         const PackedFloat32Array &heights, const PackedInt32Array &frames,
         const PackedFloat32Array &materials, int64_t seed, int32_t maximum_subdivisions,
-        const PackedFloat32Array &river) const {
+        const PackedFloat32Array &river, bool compact_planar_base) const {
     Dictionary result;
     const int width = bounds.size.x;
     const int height = bounds.size.y;
@@ -263,6 +264,9 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
     colors.reserve(static_cast<size_t>(area) * 8);
     indices.reserve(static_cast<size_t>(area) * 12);
     const Vector2 phase(positive_mod(seed, 10), positive_mod(seed / 10, 10));
+    int64_t unchanged_river_land_cells = 0;
+    int64_t potential_vertices = 0, discarded_transparent_triangles = 0;
+    int64_t planar_base_cells = 0, planar_base_triangles_saved = 0;
     for (int cy = 0; cy < height; ++cy) for (int cx = 0; cx < width; ++cx) {
         const int wx = bounds.position.x + cx, wy = bounds.position.y + cy;
         const int center = cell_at(wx, wy);
@@ -278,8 +282,22 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
                 if (water(neighbor) != water(center)) coast = true;
             }
         }
-        if (has_river) for (int y = 0; y < 3; ++y) for (int x = 0; x < 3; ++x) {
-            if (river_data[river_header + ((cy * 2 + y) * river_width + cx * 2 + x) * 4 + 1] > 0) { uniform = false; coast = true; }
+        if (has_river) {
+            bool influenced = false;
+            bool unchanged_land = uniform && !water(center);
+            for (int y = 0; y < 3; ++y) for (int x = 0; x < 3; ++x) {
+                const float *field = river_data + river_header + ((cy * 2 + y) * river_width + cx * 2 + x) * 4;
+                influenced |= field[1] > 0;
+                // Bilinear interpolation stays below the maximum of these
+                // nine field samples. On uniform land at distance <= -0.8,
+                // wet, exposed and edge are all zero: every generated vertex
+                // has exactly the original material, height and lighting.
+                unchanged_land &= field[0] <= -0.8;
+            }
+            if (influenced) {
+                if (unchanged_land) ++unchanged_river_land_cells;
+                else { uniform = false; coast = true; }
+            }
         }
         // The preview budget may simplify soil blends, but the land/water
         // contour must stay identical when the asynchronous mesh is published.
@@ -319,11 +337,19 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
         bool first_layer = true;
         for (const int id : ids) {
             const float *m = material_data + id * MATERIAL_STRIDE;
-            const int32_t first = static_cast<int32_t>(vertices.size());
+            potential_vertices += count;
+            std::array<float, 289> alphas;
+            std::array<int32_t, 289> remap;
+            remap.fill(-1);
             for (int i = 0; i < count; ++i) {
                 const double weight = weights[i].get(id);
                 accumulated[i] += weight;
-                const double alpha = first_layer ? 1.0 : (accumulated[i] > 0.00001 ? weight / accumulated[i] : 0.0);
+                alphas[i] = static_cast<float>(first_layer ? 1.0 : (accumulated[i] > 0.00001 ? weight / accumulated[i] : 0.0));
+            }
+            const auto vertex = [&](int i) {
+                if (remap[i] >= 0) return remap[i];
+                const int32_t output = static_cast<int32_t>(vertices.size());
+                remap[i] = output;
                 vertices.push_back(points[i]);
                 Vector2 uv;
                 if (m[2] != 0.0f) {
@@ -334,12 +360,50 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
                     uv = (Vector2(frame % 3, frame / 3) * 32.0 + Vector2(std::clamp(pixel.x, 0.5f, 31.5f), std::clamp(pixel.y, 0.5f, 31.5f))) / 96.0;
                 }
                 uvs.push_back(Vector2(m[3], m[4]) + uv * Vector2(m[5], m[6]));
-                colors.emplace_back(lighting[i], lighting[i], lighting[i], alpha);
-            }
-            for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x) {
-                const int32_t p = first + y * (n + 1) + x;
-                const int32_t triangle[6] = {p, p + 1, p + n + 2, p, p + n + 2, p + n + 1};
-                indices.insert(indices.end(), triangle, triangle + 6);
+                colors.emplace_back(lighting[i], lighting[i], lighting[i], alphas[i]);
+                return output;
+            };
+            const auto triangle = [&](int a, int b, int c) {
+                // Canvas terrain uses ordinary alpha blending and no depth
+                // writes. Exactly zero alpha at every vertex contributes no
+                // pixel. Keep every nonzero triangle and its original order.
+                if (alphas[a] == 0.0f && alphas[b] == 0.0f && alphas[c] == 0.0f) {
+                    ++discarded_transparent_triangles;
+                    return;
+                }
+                const int32_t ia = vertex(a), ib = vertex(b), ic = vertex(c);
+                indices.push_back(ia); indices.push_back(ib); indices.push_back(ic);
+            };
+            if (compact_planar_base && first_layer && n > 1 && h[0] + h[2] == h[1] + h[3]) {
+                // This opaque layer has constant lighting on an affine plane.
+                // UV is affine too, except at the original texture-clamp edge
+                // intervals. Retain those first/last grid intervals exactly.
+                // The blended overlays keep every original vertex/triangle.
+                const bool imported = m[2] != 0.0f;
+                const int texture_x = positive_mod(wx + static_cast<int>(phase.x), 10);
+                const int texture_y = positive_mod(wy + static_cast<int>(phase.y), 10);
+                const auto knots = [&](bool low, bool high) {
+                    std::vector<int> result{0};
+                    if (low && n > 1) result.push_back(1);
+                    if (high && n - 1 > result.back()) result.push_back(n - 1);
+                    result.push_back(n);
+                    return result;
+                };
+                const auto xs = knots(!imported || texture_x == 0, !imported || texture_x == 9);
+                const auto ys = knots(!imported || texture_y == 0, !imported || texture_y == 9);
+                for (size_t y = 0; y + 1 < ys.size(); ++y) for (size_t x = 0; x + 1 < xs.size(); ++x) {
+                    const int a = ys[y] * (n + 1) + xs[x], b = ys[y] * (n + 1) + xs[x + 1];
+                    const int c = ys[y + 1] * (n + 1) + xs[x + 1], d = ys[y + 1] * (n + 1) + xs[x];
+                    triangle(a, b, c); triangle(a, c, d);
+                }
+                ++planar_base_cells;
+                planar_base_triangles_saved += int64_t(2) * (n * n - (xs.size() - 1) * (ys.size() - 1));
+            } else {
+                for (int y = 0; y < n; ++y) for (int x = 0; x < n; ++x) {
+                    const int i = y * (n + 1) + x;
+                    triangle(i, i + 1, i + n + 2);
+                    triangle(i, i + n + 2, i + n + 1);
+                }
             }
             first_layer = false;
         }
@@ -348,6 +412,11 @@ Dictionary RoRTerrainKernel::build_mesh(const Rect2i &bounds, const PackedInt32A
     result["uvs"] = pack<PackedVector2Array>(uvs);
     result["colors"] = pack<PackedColorArray>(colors);
     result["indices"] = pack<PackedInt32Array>(indices);
+    result["unchanged_river_land_cells"] = unchanged_river_land_cells;
+    result["discarded_transparent_triangles"] = discarded_transparent_triangles;
+    result["avoided_vertices"] = potential_vertices - int64_t(vertices.size());
+    result["planar_base_cells"] = planar_base_cells;
+    result["planar_base_triangles_saved"] = planar_base_triangles_saved;
     return result;
 }
 

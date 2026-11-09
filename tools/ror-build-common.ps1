@@ -139,15 +139,80 @@ function Get-ArtifactSha256 {
     # Also works in child PowerShell sessions with restricted module discovery.
     $stream = [System.IO.File]::OpenRead($Path)
     $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { return [System.BitConverter]::ToString($sha.ComputeHash($stream)) }
+    try { return [System.BitConverter]::ToString($sha.ComputeHash($stream)).Replace("-", "").ToLowerInvariant() }
     finally { $sha.Dispose(); $stream.Dispose() }
 }
 
+function Get-RoRCurrentReleaseSlot {
+    param([string]$RepositoryRoot)
+    $marker = Join-Path $RepositoryRoot "dist\current-release.txt"
+    if (-not [IO.File]::Exists($marker)) { return "primary" }
+    $slot = [IO.File]::ReadAllText($marker).Trim()
+    if ($slot -notin @("primary", "alternate")) { throw "Unknown release slot in $marker" }
+    return $slot
+}
+
+function Get-RoRReleaseDirectory {
+    param([string]$RepositoryRoot, [string]$Slot)
+    if (-not $Slot) { $Slot = Get-RoRCurrentReleaseSlot $RepositoryRoot }
+    if ($Slot -eq "alternate") { return (Join-Path $RepositoryRoot "dist\releases\Rise of Rome Prototype") }
+    if ($Slot -ne "primary") { throw "Unknown release slot $Slot" }
+    return (Join-Path $RepositoryRoot "dist\Rise of Rome Prototype")
+}
+
+function Start-RoRReleaseBuild {
+    param([string]$RepositoryRoot)
+    $dist = Join-Path $RepositoryRoot "dist"
+    [void][IO.Directory]::CreateDirectory($dist)
+    $buildLock = [IO.File]::Open((Join-Path $dist ".release-build.lock"), "OpenOrCreate", "ReadWrite", "None")
+    try {
+        $marker = Join-Path $dist "current-release.txt"
+        $current = Get-RoRCurrentReleaseSlot $RepositoryRoot
+        $currentDirectory = Get-RoRReleaseDirectory $RepositoryRoot $current
+        if (-not [IO.File]::Exists($marker) -and -not [IO.File]::Exists((Join-Path $currentDirectory "Rise of Rome Prototype.exe"))) {
+            # A fresh checkout installs its first release at the traditional path.
+            # Keep launchers away from that path until its first export is complete.
+            $current = "alternate"
+            Publish-RoRReleaseBuild ([pscustomobject]@{ Slot = $current; Marker = $marker })
+        }
+        $next = if ($current -eq "primary") { "alternate" } else { "primary" }
+        $directory = Get-RoRReleaseDirectory $RepositoryRoot $next
+        Assert-ApplicationNotRunning -Application (Join-Path $directory "Rise of Rome Prototype.exe")
+        return [pscustomobject]@{ Directory = $directory; Slot = $next; Marker = $marker; Lock = $buildLock }
+    } catch {
+        $buildLock.Dispose()
+        throw
+    }
+}
+
+function Publish-RoRReleaseBuild {
+    param($Build)
+    # Readers switch the entire EXE/PCK/DLL set only after the manifest has been written.
+    $temporary = $Build.Marker + "." + [Guid]::NewGuid().ToString("N") + ".tmp"
+    try {
+        [IO.File]::WriteAllText($temporary, $Build.Slot)
+        if ([IO.File]::Exists($Build.Marker)) {
+            [IO.File]::Replace($temporary, $Build.Marker, [System.Management.Automation.Language.NullString]::Value)
+        } else {
+            [IO.File]::Move($temporary, $Build.Marker)
+        }
+    } finally {
+        if ([IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+    }
+}
+
 function Assert-ApplicationNotRunning {
+    param([string]$Application)
     # WMI/CIM process inspection is denied in some managed Windows sessions.
     # The packaged executable has a unique process name, so the ordinary
     # process API provides the same overwrite guard without elevated access.
-    $running = @(Get-Process -Name "Rise of Rome Prototype" -ErrorAction SilentlyContinue)
+    $running = @(Get-Process -Name "Rise of Rome Prototype" -ErrorAction SilentlyContinue | Where-Object {
+        if (-not $Application) { return $true }
+        try {
+            $path = $_.Path
+            return (-not $path -or [string]::Equals($path, [IO.Path]::GetFullPath($Application), [StringComparison]::OrdinalIgnoreCase))
+        } catch { return $true }
+    })
     if ($running.Count -eq 0) {
         return
     }

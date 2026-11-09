@@ -6,6 +6,7 @@ const IconRegistry := preload("res://scripts/interface_icon_registry.gd")
 const InterfaceLayout := preload("res://scripts/interface_layout.gd")
 const StatusPanel := preload("res://scripts/hud_status_panel.gd")
 const Typography := preload("res://scripts/hud_typography.gd")
+const CommandButton := preload("res://scripts/hud_command_button.gd")
 
 signal building_selected(building_id: int)
 signal formation_requested(formation_name: String)
@@ -18,6 +19,7 @@ signal trade_resource_requested(resource_type_id: int)
 signal unit_action_requested(action_name: String)
 signal ungarrison_requested(building_id: int, passenger_id: int)
 signal farm_reserve_requested(building_id: int, amount: int)
+signal idle_worker_requested
 
 const HUD_HEIGHT: float = InterfaceLayout.BOTTOM_HEIGHT
 const FORMATIONS := [
@@ -60,6 +62,7 @@ var command_page := 0
 var command_page_size := 1
 var command_page_count := 1
 var command_signature := 0
+var idle_worker_button: Button
 
 
 func _init() -> void:
@@ -104,6 +107,15 @@ func build_controls() -> void:
 	train_button = train_buttons[0]
 	previous_commands_button = _make_command_page_button("‹", "Предыдущие команды", -1)
 	next_commands_button = _make_command_page_button("›", "Следующие команды", 1)
+	idle_worker_button = Button.new()
+	idle_worker_button.text = "Zz"
+	idle_worker_button.tooltip_text = "Выбрать следующего незанятого крестьянина (I)"
+	idle_worker_button.focus_mode = Control.FOCUS_NONE
+	idle_worker_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	idle_worker_button.expand_icon = true
+	apply_button_theme(idle_worker_button)
+	idle_worker_button.pressed.connect(func(): idle_worker_requested.emit())
+	add_child(idle_worker_button)
 
 
 func _make_command_page_button(label: String, tooltip: String, step: int) -> Button:
@@ -125,7 +137,7 @@ func _make_command_page_button(label: String, tooltip: String, step: int) -> But
 
 func _append_action_button() -> void:
 	var index := train_buttons.size()
-	var button := Button.new()
+	var button := CommandButton.new()
 	button.visible = false
 	button.tooltip_text = "Команда производства"
 	button.focus_mode = Control.FOCUS_NONE
@@ -141,10 +153,13 @@ func _append_action_button() -> void:
 	badge.anchor_bottom = 1.0
 	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	badge.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	badge.add_theme_font_size_override("font_size", 11)
+	badge.add_theme_font_override("font", Typography.body_font())
+	badge.add_theme_font_size_override("font_size", 20)
 	badge.add_theme_color_override("font_color", Color("fff1bd"))
 	badge.add_theme_color_override("font_outline_color", Color("1a1109"))
-	badge.add_theme_constant_override("outline_size", 2)
+	badge.add_theme_constant_override("outline_size", 5)
+	badge.offset_right = -3
+	badge.offset_bottom = -1
 	badge.visible = false
 	button.add_child(badge)
 	train_buttons.append(button)
@@ -178,7 +193,7 @@ func configure_interface_skin(skin, style_index: int = 0) -> void:
 	interface_skin = skin
 	interface_style_index = clampi(style_index, 0, 4)
 	status_panel.configure(icon_registry, skin, interface_style_index)
-	for button_value in formation_buttons.values() + train_buttons + [previous_commands_button, next_commands_button]:
+	for button_value in formation_buttons.values() + train_buttons + [previous_commands_button, next_commands_button, idle_worker_button]:
 		apply_source_command_theme(button_value)
 
 
@@ -200,6 +215,10 @@ func set_state(formation_name: String, can_train: bool) -> void:
 
 func set_view_model(model: Dictionary) -> void:
 	current_model = model
+	idle_worker_button.disabled = bool(model.get("battle_over", false)) or bool(model.get("spectator", false))
+	if icon_registry != null:
+		idle_worker_button.icon = icon_registry.texture("unit", int(model.get("idle_worker_icon_id", -1)), int(model.get("icon_team", 1)))
+		idle_worker_button.text = "" if idle_worker_button.icon != null else "Zz"
 	status_panel.set_view_model(model)
 	var selection: Dictionary = model.get("selection", {})
 	var leader: Dictionary = selection.get("leader", {})
@@ -244,7 +263,8 @@ func set_view_model(model: Dictionary) -> void:
 		button.text = ""
 		button.icon = FORMATION_ICONS[formation_name]
 		button.disabled = not bool(command.get("enabled", false))
-		button.set_pressed_no_signal(bool(command.get("active", false)))
+		if button.button_pressed != bool(command.get("active", false)):
+			button.set_pressed_no_signal(bool(command.get("active", false)))
 		var hotkey := String(command.get("hotkey", ""))
 		var label := String(command.get("label", formation_name))
 		button.tooltip_text = reason_text(String(command.get("reason", ""))) if button.disabled else "%s%s" % [label, " (%s)" % hotkey if not hotkey.is_empty() else ""]
@@ -260,8 +280,7 @@ func set_view_model(model: Dictionary) -> void:
 	_ensure_action_button_capacity(active_train_commands.size())
 	for index in range(train_buttons.size()):
 		var button: Button = train_buttons[index]
-		button.visible = index < active_train_commands.size()
-		if not button.visible:
+		if index >= active_train_commands.size():
 			continue
 		var command: Dictionary = active_train_commands[index]
 		var cost_text := String(command.get("cost_text", ""))
@@ -277,9 +296,12 @@ func set_view_model(model: Dictionary) -> void:
 		queue_badges[index].visible = queue_count > 0
 		queue_badges[index].text = "×%d" % queue_count if queue_count > 0 else ""
 		button.disabled = not bool(command.get("enabled", false))
-		button.toggle_mode = String(command.get("type", "")) == "trade_resource"
-		button.button_group = trade_resource_group if button.toggle_mode else null
-		button.set_pressed_no_signal(button.toggle_mode and bool(command.get("active", false)))
+		var is_toggle := String(command.get("type", "")) == "trade_resource"
+		if button.toggle_mode != is_toggle: button.toggle_mode = is_toggle
+		var group: ButtonGroup = trade_resource_group if is_toggle else null
+		if button.button_group != group: button.button_group = group
+		if button.toggle_mode and button.button_pressed != bool(command.get("active", false)):
+			button.set_pressed_no_signal(bool(command.get("active", false)))
 		var description := "%s%s" % [label, " — %s" % cost_text if not cost_text.is_empty() else ""]
 		if float(command.get("duration", 0.0)) > 0.0:
 			description += " · %.0f сек." % float(command.get("duration", 0.0))
@@ -292,7 +314,8 @@ func set_view_model(model: Dictionary) -> void:
 		if not hotkey.is_empty():
 			description += " · %s" % hotkey
 		var unavailable := reason_text(String(command.get("reason", ""))) if button.disabled else ""
-		button.tooltip_text = description + ("\n" + unavailable if not unavailable.is_empty() else "")
+		var effect_description := String(command.get("description", ""))
+		button.tooltip_text = description + ("\n\n" + effect_description if not effect_description.is_empty() else "") + ("\n" + unavailable if not unavailable.is_empty() else "")
 	layout_controls()
 
 
@@ -305,17 +328,19 @@ func layout_controls() -> void:
 	if status_panel != null:
 		status_panel.size = size
 		status_panel.set_layout(current_layout if current_layout.has("production") else {})
+	var minimap_plane: Rect2 = current_layout.get("minimap_plane", current_layout.get("minimap", Rect2(size.x - 232, size.y - HUD_HEIGHT, 232, HUD_HEIGHT)))
+	var minimap_scale := float(current_layout.get("minimap_scale", 1.0))
+	idle_worker_button.position = Vector2(minimap_plane.position.x + 3 * minimap_scale, minimap_plane.end.y - 42 * minimap_scale)
+	idle_worker_button.size = Vector2.ONE * 40 * minimap_scale
+	idle_worker_button.add_theme_constant_override("icon_max_width", maxi(12, int(40 * minimap_scale) - 14))
 	var commands: Array[Button] = []
 	for index in range(train_buttons.size()):
 		var button := train_buttons[index]
-		button.visible = false
 		if index < active_train_commands.size():
 			commands.append(button)
 	# Compatibility entry point before a view model has been supplied.
 	if current_model.is_empty() and train_button != null:
 		commands.append(train_button)
-	for button in formation_buttons.values():
-		button.visible = false
 	# Formations own the last row on every command page. Reserve it before
 	# paginating ordinary orders, including Delete and the navigation arrows.
 	var has_formations := not available_formation_buttons.is_empty()
@@ -371,20 +396,25 @@ func layout_controls() -> void:
 	next_commands_button.tooltip_text = "Следующие команды (%d/%d)" % [command_page + 1, command_page_count]
 	var cell_size: Vector2 = grid["cell_size"]
 	var columns: int = grid["columns"]
+	# Visibility changes cancel BaseButton's pending mouse press. Publish the
+	# final page once instead of hiding/re-showing every button on HUD refresh.
+	for button in train_buttons:
+		button.visible = displayed.has(button)
+	for button in formation_buttons.values():
+		button.visible = available_formation_buttons.has(button)
 	for slot in range(displayed.size()):
 		var button := displayed[slot]
 		if button == null:
 			continue
-		button.visible = true
 		var column := slot % columns
 		var row := floori(float(slot) / float(columns))
 		set_bottom_rect(button, Rect2(local_rect.position + Vector2(column, row) * (cell_size + Vector2.ONE * InterfaceLayout.COMMAND_GAP), cell_size))
 		button.add_theme_constant_override("icon_max_width", maxi(8, int(cell_size.x) - 14))
 		if train_buttons.has(button):
-			hotkey_badges[train_buttons.find(button)].position = Vector2(4, maxf(0, cell_size.y - 16))
+			var index := train_buttons.find(button)
+			hotkey_badges[index].position = Vector2(4, 2 if queue_badges[index].visible else maxf(0, cell_size.y - 16))
 	for index in range(available_formation_buttons.size()):
 		var button := available_formation_buttons[index]
-		button.visible = true
 		set_bottom_rect(button, Rect2(Vector2(local_rect.position.x + index * (formation_cell + InterfaceLayout.COMMAND_GAP), formation_y), Vector2.ONE * formation_cell))
 		button.add_theme_constant_override("icon_max_width", maxi(8, int(formation_cell) - 14))
 

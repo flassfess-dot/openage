@@ -5,6 +5,17 @@ const Commands := preload("res://scripts/commands.gd")
 const PerceptionService := preload("res://scripts/perception_service.gd")
 
 var perception := PerceptionService.new()
+var native_awareness_enabled := OS.get_environment("ROR_DIAGNOSTIC_COMBAT_AWARENESS") != "0"
+var profile_native_awareness := "--profile-combat-awareness-alternatives" in OS.get_cmdline_user_args()
+var compare_native_awareness := "--compare-combat-awareness-results" in OS.get_cmdline_user_args()
+var native_awareness_tick_executed := false
+var native_awareness_comparison_tick := false
+var native_awareness_stats: Dictionary = {}
+var native_awareness_comparisons := 0
+var native_awareness_mismatches := 0
+var classification_shortcut_enabled := OS.get_environment("ROR_DIAGNOSTIC_COMBAT_CLASSIFICATION_DELTAS") != "0"
+var profile_classification_deltas := "--profile-combat-classification-alternatives" in OS.get_cmdline_user_args()
+var classification_shortcut_tick := false
 
 const CANDIDATE_BUCKET_SIZE := 4.0
 const AGGRESSIVE_SCAN_INTERVAL_TICKS := 4
@@ -59,6 +70,41 @@ func reset() -> void:
 
 
 func collect_commands(world, tick: int) -> Array:
+	native_awareness_tick_executed = false
+	native_awareness_comparison_tick = false
+	classification_shortcut_tick = classification_shortcut_enabled and (not profile_classification_deltas or ((tick * 1103515245 + 12345) & 0xffff) >= 32768)
+	var use_native: bool = native_awareness_enabled and classification_kernel != null and classification_kernel.has_method("collect_combat_awareness")
+	if profile_native_awareness:
+		use_native = use_native and ((tick * 1103515245 + 12345) & 0xffff) >= 32768
+	if use_native and world != null:
+		var delta: Dictionary = world.entity_changes.read_changes_since(cursor if epoch == world.entity_changes.epoch else -1)
+		var result: Dictionary = classification_kernel.collect_combat_awareness(world, self, tick, delta)
+		if not result.is_empty():
+			native_awareness_tick_executed = true
+			for key in result["stats"]:
+				native_awareness_stats[key] = int(native_awareness_stats.get(key,0)) + int(result["stats"][key])
+			var commands: Array = []
+			for decision in result["decisions"]:
+				commands.append(Commands.AttackCommand.new(tick, [int(decision["unit_id"])], int(decision["target_id"]), decision["policy"]))
+			if compare_native_awareness and native_awareness_comparisons < 32 and (native_awareness_comparisons < 4 or not commands.is_empty() or tick % 32 == 0):
+				native_awareness_comparison_tick = true
+				var expected := _collect_commands_reference(world, tick)
+				native_awareness_comparisons += 1
+				if _command_records(commands) != _command_records(expected):
+					native_awareness_mismatches += 1
+					push_error("Combat awareness mismatch: %s" % str({"tick":tick,"native":_command_records(commands),"reference":_command_records(expected)}))
+			return commands
+		native_awareness_stats["fallbacks"] = int(native_awareness_stats.get("fallbacks",0)) + 1
+	return _collect_commands_reference(world, tick)
+
+
+func _command_records(commands: Array) -> Array:
+	var result: Array = []
+	for command in commands: result.append({"units":command.unit_ids,"params":command.params})
+	return result
+
+
+func _collect_commands_reference(world, tick: int) -> Array:
 	if world == null:
 		return []
 	var probe: Variant = world.tick_pipeline.performance_probe
@@ -184,7 +230,7 @@ func tracked_attackers() -> Array:
 
 
 func _refresh_combat_rosters(world, tick: int) -> void:
-	var delta: Dictionary = world.entity_changes.changes_since(cursor if epoch == world.entity_changes.epoch else -1)
+	var delta: Dictionary = world.entity_changes.read_changes_since(cursor if epoch == world.entity_changes.epoch else -1)
 	if bool(delta["full"]):
 		reset()
 		cached_candidate_index = {"buckets": {}, "maximum_radius": 0.0}

@@ -54,6 +54,25 @@ func next_cue() -> Dictionary:
 	return cue
 
 
+func consume_attacks(events: Array, observer_team: int, current_tick: int) -> Array[Dictionary]:
+	var admitted: Array[Dictionary] = []
+	for event in events:
+		if String(event.get("type", "")) != "under_attack": continue
+		var payload: Dictionary = event.get("payload", {})
+		if observer_team <= 0 or int(payload.get("target_team", 0)) != observer_team: continue
+		var target_id := int(payload.get("target_id", -1))
+		var position: Variant = payload.get("position")
+		if target_id < 0 or not position is Vector2 or not Vector2(position).is_finite(): continue
+		if cues.any(func(existing): return int(existing.get("target_id", -1)) == target_id and current_tick - int(existing.get("tick", 0)) < TARGET_COOLDOWN_TICKS): continue
+		last_sequence = maxi(last_sequence + 1, int(event.get("sequence_id", 0)))
+		var cue := {"sequence": last_sequence, "target_id": target_id, "kind": "under_attack", "position": Vector2(position), "tick": current_tick}
+		cues.push_front(cue)
+		if cues.size() > MAX_CUES: cues.resize(MAX_CUES)
+		next_index = 0
+		admitted.append(cue.duplicate(true))
+	return admitted
+
+
 func snapshot() -> Array:
 	return cues.duplicate(true)
 

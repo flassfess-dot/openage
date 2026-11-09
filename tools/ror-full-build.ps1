@@ -10,18 +10,16 @@ Set-StrictMode -Version Latest
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $projectRoot = Join-Path $repositoryRoot "prototype"
 $generatedRoot = Join-Path $projectRoot "assets\generated"
-$distributionRoot = Join-Path $repositoryRoot "dist\Rise of Rome Prototype"
 $qaRoot = Join-Path $projectRoot "qa\dev-scripts"
 $godotApplication = Join-Path $repositoryRoot ".tools\godot-4.7.2\Godot_v4.7.2-stable_win64.exe"
 $releaseTemplate = Join-Path $repositoryRoot ".tools\godot-4.7.2\windows_release_x86_64.exe"
-$application = Join-Path $distributionRoot "Rise of Rome Prototype.exe"
-$package = Join-Path $distributionRoot "Rise of Rome Prototype.pck"
 $nativeBuildScript = Join-Path $repositoryRoot "tools\build_native_pathfinding.ps1"
 $nativeLibrary = Join-Path $projectRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = Join-Path $qaRoot "full-build-$timestamp.log"
 $godotImportLog = Join-Path $qaRoot "full-build-godot-import-$timestamp.log"
 $godotExportLog = Join-Path $qaRoot "full-build-godot-export-$timestamp.log"
+$provenanceState = Join-Path $qaRoot "full-build-source-$timestamp.json"
 
 New-Item -ItemType Directory -Force -Path $qaRoot | Out-Null
 
@@ -142,7 +140,12 @@ function Invoke-GodotLogged {
     }
 }
 
+$releaseBuild = $null
 try {
+    $releaseBuild = Start-RoRReleaseBuild $repositoryRoot
+    $distributionRoot = $releaseBuild.Directory
+    $application = Join-Path $distributionRoot "Rise of Rome Prototype.exe"
+    $package = Join-Path $distributionRoot "Rise of Rome Prototype.pck"
     Write-LogLine "Rise of Rome full build started"
     Write-LogLine "Repository: $repositoryRoot"
     Write-Status 0 "checking generated inputs"
@@ -150,7 +153,6 @@ try {
     Assert-RoRGeneratedInputs -GeneratedRoot $generatedRoot -IncludeInteractionAssets -RecoveryHint "Run tools\ror-repack-resources.ps1 first."
     Initialize-RoRReleaseTemplate -GodotApplication $godotApplication -ReleaseTemplate $releaseTemplate
     & (Join-Path $PSScriptRoot "prepare-godot-project.ps1")
-    Assert-ApplicationNotRunning
     New-Item -ItemType Directory -Force -Path $distributionRoot | Out-Null
 
     Invoke-LoggedCommand `
@@ -167,6 +169,9 @@ try {
         throw "Native library was not produced: $nativeLibrary"
     }
 
+    & python (Join-Path $PSScriptRoot "ai_build_manifest.py") begin --state $provenanceState
+    if ($LASTEXITCODE -ne 0) { throw "Unable to freeze Release source manifest" }
+
     Invoke-GodotLogged `
         -Name "godot resource import" `
         -StartPercent 25 `
@@ -174,6 +179,7 @@ try {
         -Arguments @("--headless", "--path", $projectRoot, "--import") `
         -GodotLogPath $godotImportLog
 
+    Assert-ApplicationNotRunning -Application $application
     Invoke-GodotLogged `
         -Name "godot Release export" `
         -StartPercent 40 `
@@ -182,7 +188,7 @@ try {
         -GodotLogPath $godotExportLog
 
     Write-Status 93 "copying Release runtime files"
-    Assert-ApplicationNotRunning
+    Assert-ApplicationNotRunning -Application $application
     Copy-RoRReleaseRuntime -RepositoryRoot $repositoryRoot -ProjectRoot $projectRoot -DistributionRoot $distributionRoot -NativeLibrary $nativeLibrary
 
     Write-Status 98 "verifying Release build artifacts"
@@ -190,11 +196,14 @@ try {
         Write-LogLine ("ARTIFACT: {0} | {1} bytes | {2}" -f $item.FullName, $item.Length, $item.LastWriteTime)
     }
 
+    & python (Join-Path $PSScriptRoot "ai_build_manifest.py") finish --state $provenanceState --directory $distributionRoot
+    if ($LASTEXITCODE -ne 0) { throw "Release source verification failed" }
+
     Write-LogLine "Release artifacts exported and copied."
     if ($VerifyStartup) {
         Write-Status 99 "verifying packaged random map and save loading"
         try {
-            & (Join-Path $PSScriptRoot "verify-packaged-startup.ps1")
+            & (Join-Path $PSScriptRoot "verify-packaged-startup.ps1") -Application $application
         }
         catch {
             throw "Release artifacts were exported, but startup verification failed: $($_.Exception.Message)"
@@ -205,6 +214,7 @@ try {
         Write-LogLine "Packaged startup verification was not requested. Use -VerifyStartup or tools\verify-packaged-startup.ps1 to run it."
     }
 
+    Publish-RoRReleaseBuild $releaseBuild
     Write-Status 100 "full build complete"
     Write-LogLine "Application: $application"
     Write-LogLine "Package: $package"
@@ -216,4 +226,7 @@ catch {
     Write-LogLine ("FAILED: {0}" -f $_.Exception.Message)
     Write-Progress -Activity "Rise of Rome build" -Completed
     exit 1
+}
+finally {
+    if ($null -ne $releaseBuild) { $releaseBuild.Lock.Dispose() }
 }

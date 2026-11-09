@@ -59,6 +59,7 @@ func set_resource(traders: Array, resource_type_id: int) -> String:
 	for trader_value in traders:
 		var trader: Dictionary = trader_value
 		trader["components"]["trade"]["selected_input_resource_type_id"] = resource_type_id
+		world.entity_mutations.mark_ui_control_changed(world, trader)
 		world.emit_domain_event("trade_resource_selected", {
 			"trader_id": int(trader.get("id", -1)),
 			"team": int(trader.get("team", 0)),
@@ -112,6 +113,7 @@ func cancel(trader: Dictionary, reason: String = "cancelled") -> void:
 	world.release_building_approach_slot(trader)
 	world.set_entity_field(trader, "target_building_id", -1)
 	trade["stage"] = "holding_gold" if int(trade.get("cargo_gold", 0)) > 0 else "idle"
+	world.entity_mutations.mark_ui_control_changed(world, trader)
 	trade["approach_position"] = Vector2(trader.get("pos", Vector2.ZERO))
 	world.emit_domain_event("trade_route_stopped", {
 		"trader_id": int(trader.get("id", -1)),
@@ -271,6 +273,7 @@ func _register_pool(team: int, trade: Dictionary) -> void:
 func _begin_leg(trader: Dictionary, dock: Dictionary, stage: String) -> bool:
 	var trade: Dictionary = trader["components"]["trade"]
 	trade["stage"] = stage
+	world.entity_mutations.mark_ui_control_changed(world, trader)
 	trade["approach_position"] = world.dropoff_approach_position(trader, dock)
 	if not trade["approach_position"] is Vector2:
 		_finish(trader, "trade_route_unreachable")
@@ -292,10 +295,12 @@ func _try_load_trade_goods(trader: Dictionary, target: Dictionary) -> bool:
 	var target_team := int(target.get("team", 0))
 	if world.get_resource_amount(owner, input_resource) < amount:
 		trade["stage"] = "waiting_resource"
+		world.entity_mutations.mark_ui_control_changed(world, trader)
 		world.set_entity_field(trader, "diagnostic_reason", "trade_waiting_resource")
 		return false
 	if trade_goods(target_team) + 0.0001 < float(amount):
 		trade["stage"] = "waiting_goods"
+		world.entity_mutations.mark_ui_control_changed(world, trader)
 		world.set_entity_field(trader, "diagnostic_reason", "trade_waiting_goods")
 		return false
 	var home: Variant = _resolve_home_dock(trader, target)
@@ -308,6 +313,7 @@ func _try_load_trade_goods(trader: Dictionary, target: Dictionary) -> bool:
 	var gold := maxi(0, roundi(float(base_gold) * profit_multiplier))
 	trade["cargo_goods"] = amount
 	trade["cargo_gold"] = gold
+	world.entity_mutations.mark_ui_control_changed(world, trader)
 	world.set_entity_field(trader, "diagnostic_reason", "trade_returning_gold")
 	world.emit_domain_event("trade_goods_loaded", {
 		"trader_id": int(trader.get("id", -1)),
@@ -331,6 +337,7 @@ func _deposit_gold(trader: Dictionary, home: Dictionary) -> void:
 		world.economy_system.change_resource_amount(int(trader.get("team", 0)), output_resource, gold,"trade_in")
 	trade["cargo_goods"] = 0
 	trade["cargo_gold"] = 0
+	world.entity_mutations.mark_ui_control_changed(world, trader)
 	trade["trip_count"] = int(trade.get("trip_count", 0)) + 1
 	world.set_entity_field(trader, "diagnostic_reason", "trade_trip_complete")
 	world.emit_domain_event("trade_gold_deposited", {

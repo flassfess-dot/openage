@@ -22,7 +22,7 @@ if ($SavePath -and -not $SavePath.StartsWith('user://') -and -not $SavePath.Star
 }
 $taskRepositoryRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "ror-build-common.ps1")
-$taskDistributionRoot = Join-Path $taskRepositoryRoot "dist\Rise of Rome Prototype"
+$taskDistributionRoot = Get-RoRReleaseDirectory $taskRepositoryRoot
 $taskApplication = Join-Path $taskDistributionRoot "Rise of Rome Prototype.exe"
 if ($Application) {
     $taskApplication = [System.IO.Path]::GetFullPath($Application)

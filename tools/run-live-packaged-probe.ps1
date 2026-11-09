@@ -10,7 +10,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$distributionRoot = Join-Path $repositoryRoot "dist\Rise of Rome Prototype"
+. (Join-Path $PSScriptRoot "ror-build-common.ps1")
+$distributionRoot = Get-RoRReleaseDirectory $repositoryRoot
 $application = Join-Path $distributionRoot "Rise of Rome Prototype.exe"
 $package = Join-Path $distributionRoot "Rise of Rome Prototype.pck"
 if (-not (Test-Path -LiteralPath $application) -or -not (Test-Path -LiteralPath $package)) {

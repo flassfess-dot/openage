@@ -287,9 +287,15 @@ static func sync_dynamic(entity: Dictionary) -> void:
 	for name in DYNAMIC_MIRRORS:
 		var component: Dictionary = components.get(name, {})
 		for field in DYNAMIC_MIRRORS[name]:
-			if entity.has(DYNAMIC_MIRRORS[name][field]):
+			if component.has(field) and entity.has(DYNAMIC_MIRRORS[name][field]):
+				if component.is_read_only():
+					component = component.duplicate(true)
+					components[name] = component
 				component.erase(field)
-		if name == "resource_carrier" and entity.has("amount"):
+		if name == "resource_carrier" and entity.has("amount") and component.has("amount"):
+			if component.is_read_only():
+				component = component.duplicate(true)
+				components[name] = component
 			component.erase("amount")
 
 
@@ -306,12 +312,14 @@ static func component_view(entity: Dictionary, name: String) -> Dictionary:
 	# runtime record and projecting all seven mirrors for each request made HUD
 	# selection cost several milliseconds per tick even for an unchanged group.
 	var result: Dictionary = entity.get("components", {}).get(name, {}).duplicate(true)
+	preload("res://scripts/resource_component_pool.gd").project_component_locations(entity, name, result)
 	_project_component(entity, name, result)
 	# These mirrors may install runtime containers; detach those once more.
 	return result.duplicate(true) if name in ["movement", "animation_state"] else result
 
 
 static func project_dynamic(entity: Dictionary) -> void:
+	preload("res://scripts/resource_component_pool.gd").project_locations(entity)
 	var components: Dictionary = entity.get("components", {})
 	for name in ["transform", "health", "movement", "combat", "resource_carrier", "worker", "animation_state"]:
 		if components.has(name):

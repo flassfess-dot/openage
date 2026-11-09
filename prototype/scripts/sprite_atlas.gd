@@ -7,6 +7,7 @@ const PAGE_SIZE := 2048
 const MAX_PAGES := 8
 var pages: Array = []
 var entries: Dictionary = {}
+var performance_probe: Variant = null
 
 func clear() -> void:
 	pages.clear()
@@ -29,7 +30,9 @@ func texture_for(source: Texture2D) -> Texture2D:
 		pixels.fill(Color.TRANSPARENT)
 		page = {"image": pixels, "texture": ImageTexture.create_from_image(pixels), "x": 1, "y": 1, "row": 0, "dirty": false}
 		pages.append(page)
+	var started := Time.get_ticks_usec() if performance_probe != null else 0
 	var pixels := source.get_image()
+	if performance_probe != null: performance_probe.observe_microseconds("presentation.sprite_atlas.source_image", Time.get_ticks_usec() - started)
 	if pixels == null or pixels.is_empty(): return source
 	if pixels.is_compressed() and pixels.decompress() != OK: return source
 	if pixels.get_format() != Image.FORMAT_RGBA8: pixels.convert(Image.FORMAT_RGBA8)
@@ -43,10 +46,13 @@ func texture_for(source: Texture2D) -> Texture2D:
 	result.region = Rect2(Vector2(position), Vector2(size))
 	result.filter_clip = true
 	entries[key] = result
+	if performance_probe != null: performance_probe.increment("presentation.sprite_atlas.new_entries")
 	return result
 
 func flush() -> void:
 	for page in pages:
 		if bool(page.dirty):
+			var started := Time.get_ticks_usec() if performance_probe != null else 0
 			page.texture.update(page.image)
+			if performance_probe != null: performance_probe.observe_microseconds("presentation.sprite_atlas.page_upload", Time.get_ticks_usec() - started)
 			page.dirty = false

@@ -13,6 +13,10 @@ var materials_by_id: Dictionary = {}
 var objects_by_key: Dictionary = {}
 var textures: Dictionary = {}
 var legacy_textures: Dictionary = {}
+var object_frame_cache: Dictionary = {}
+var object_frame_cache_hits := 0
+var object_frame_cache_misses := 0
+const MAX_CACHED_OBJECT_FRAMES := 4096
 
 
 func enable() -> bool:
@@ -82,6 +86,34 @@ func _texture(file: String) -> Texture2D:
 	return textures[file]
 
 
+func _prewarm_object_files(asset_name: String) -> Array:
+	if not owns_asset(asset_name): return []
+	var key := asset_name.trim_prefix(PREFIX)
+	var keys := [key, String(objects_by_key[key].get("depleted_key", ""))]
+	var files := {}
+	for object_key in keys:
+		for frame in manifest.get("objects", {}).get(object_key, {}).get("frames", []):
+			files[String(frame["file"])] = true
+			if frame.has("shadow"): files[String(frame["shadow"]["file"])] = true
+	return files.keys()
+
+
+func prewarm_object_textures(asset_name: String) -> void:
+	for file in _prewarm_object_files(asset_name): _texture(String(file))
+
+
+func prewarm_object_textures_async(asset_name: String, tree: SceneTree, progress: Callable) -> void:
+	var files := _prewarm_object_files(asset_name)
+	var started := Time.get_ticks_usec()
+	for index in range(files.size()):
+		_texture(String(files[index]))
+		if Time.get_ticks_usec() - started >= 6000:
+			if progress.is_valid(): progress.call(float(index + 1) / maxi(1, files.size()))
+			await tree.process_frame
+			started = Time.get_ticks_usec()
+	if progress.is_valid(): progress.call(1.0)
+
+
 func terrain_textures() -> Array:
 	var result: Array = []
 	if enabled:
@@ -139,8 +171,9 @@ func owns_asset(asset_name: String) -> bool:
 	return enabled and asset_name.begins_with(PREFIX) and objects_by_key.has(asset_name.trim_prefix(PREFIX))
 
 
-func frame_info(item: Dictionary, resource: bool = false) -> Dictionary:
-	var asset := String(item.get("source_graphic_asset_name" if resource else "asset_name", ""))
+func frame_info(item: Dictionary, resource: bool = false, presentation_key: String = "", presentation_variant: int = -1) -> Dictionary:
+	if not presentation_key.is_empty() and (not objects_by_key.has(presentation_key) or objects_by_key[presentation_key].get("role", "") != "tree"): return {}
+	var asset := PREFIX + presentation_key if not presentation_key.is_empty() else String(item.get("source_graphic_asset_name" if resource else "asset_name", ""))
 	if not owns_asset(asset):
 		return {}
 	var key := asset.trim_prefix(PREFIX)
@@ -149,7 +182,14 @@ func frame_info(item: Dictionary, resource: bool = false) -> Dictionary:
 	if not objects_by_key.has(key):
 		return {}
 	var frames: Array = manifest["objects"][key]["frames"]
-	var index := posmod(int(item.get("source_frame", item.get("id", 0))), frames.size())
+	var source_frame := posmod(presentation_variant, object_variant_count(presentation_key)) if not presentation_key.is_empty() else int(item.get("source_frame", item.get("id", 0)))
+	var index := posmod(source_frame, frames.size())
+	var canopy := ResourcePresentation.tree_canopy_visible(item)
+	var cache_key := [key,index,bool(item.get("mirrored",false)),item.get("waterfall_screen_offset",Vector2.ZERO),canopy]
+	if object_frame_cache.has(cache_key):
+		object_frame_cache_hits += 1
+		return object_frame_cache[cache_key]
+	object_frame_cache_misses += 1
 	var record: Dictionary = frames[index]
 	var result := {
 		"texture": _texture(String(record["file"])),
@@ -160,11 +200,20 @@ func frame_info(item: Dictionary, resource: bool = false) -> Dictionary:
 		"screen_offset": item.get("waterfall_screen_offset",Vector2.ZERO),
 		"graphic_layer": 0 if objects_by_key[key].get("role", "") == "decal" else 20,
 	}
-	if record.has("shadow") and ResourcePresentation.tree_canopy_visible(item):
+	if record.has("shadow") and canopy:
 		var shadow: Dictionary = record["shadow"]
 		result["shadow"] = {"texture": _texture(String(shadow["file"])),
 			"hotspot": Vector2(shadow["hotspot"][0], shadow["hotspot"][1]),
 			"frame_index": index, "asset_name": PREFIX + key + ":shadow", "mirrored": false}
+		result["shadow"].make_read_only()
+	result.make_read_only()
+	if object_frame_cache.size() >= MAX_CACHED_OBJECT_FRAMES:
+		var oldest: Variant
+		for expired in object_frame_cache:
+			oldest = expired
+			break
+		object_frame_cache.erase(oldest)
+	object_frame_cache[cache_key] = result
 	return result
 
 

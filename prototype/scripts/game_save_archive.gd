@@ -106,7 +106,10 @@ static func decoded(data: Dictionary) -> Dictionary:
 
 
 static func read(path: String = SAVE_PATH) -> Dictionary:
-	var file := FileAccess.open(path, FileAccess.READ)
+	# Earlier writers could be interrupted after moving the committed slot to
+	# .bak. Recover that complete archive only when the primary file is absent.
+	var stored_path := path if FileAccess.file_exists(path) else path + ".bak"
+	var file := FileAccess.open(stored_path, FileAccess.READ)
 	if file == null:
 		return {"valid": false, "error": "save_not_found", "archive": {}}
 	var parsed = JSON.parse_string(file.get_as_text())
@@ -135,11 +138,13 @@ static func list_named_saves(directory_path: String = NAMED_SAVE_DIRECTORY) -> A
 	var directory := DirAccess.open(directory_path)
 	if directory == null:
 		return result
-	for filename in directory.get_files():
+	for stored_filename in directory.get_files():
+		var filename := String(stored_filename).trim_suffix(".bak") if String(stored_filename).ends_with(".json.bak") else String(stored_filename)
 		if not filename.begins_with("slot_") or not filename.ends_with(".json"):
 			continue
 		var path := "%s/%s" % [directory_path, filename]
-		var file := FileAccess.open(path, FileAccess.READ)
+		if stored_filename != filename and FileAccess.file_exists(path): continue
+		var file := FileAccess.open(directory_path.path_join(stored_filename), FileAccess.READ)
 		if file == null:
 			continue
 		var parsed: Variant = JSON.parse_string(file.get_as_text())
@@ -169,8 +174,9 @@ static func list_named_saves(directory_path: String = NAMED_SAVE_DIRECTORY) -> A
 static func list_saves(named_directory: String = NAMED_SAVE_DIRECTORY, quick_path: String = SAVE_PATH, autosave_path: String = AUTOSAVE_PATH) -> Array[Dictionary]:
 	var entries := list_named_saves(named_directory)
 	for path in [autosave_path, quick_path]:
-		if not FileAccess.file_exists(path): continue
-		var file := FileAccess.open(path, FileAccess.READ)
+		var stored_path: String = path if FileAccess.file_exists(path) else path + ".bak"
+		if not FileAccess.file_exists(stored_path): continue
+		var file := FileAccess.open(stored_path, FileAccess.READ)
 		var data: Variant = JSON.parse_string(file.get_as_text()) if file != null else null
 		if data is Dictionary and int(data.get("format_version", -1)) == FORMAT_VERSION:
 			var metadata: Dictionary = data.get("metadata", {})
@@ -206,6 +212,9 @@ static func error_message(error: String) -> String:
 	if error.begins_with("state_hash_mismatch"):
 		return "Состояние сохранения не совпало с записью команд"
 	match error:
+		"load_worker_unavailable", "load_worker_failed": return "Не удалось подготовить загрузку. Повторите попытку"
+		"load_cancelled": return "Загрузка отменена"
+		"catalogs_unavailable": return "Не удалось прочитать игровые данные"
 		"save_busy": return "Дождитесь завершения текущего сохранения"
 		"capture_not_isolated": return "Не удалось подготовить согласованное сохранение"
 		"checkpoint_invalid":
@@ -219,7 +228,7 @@ static func error_message(error: String) -> String:
 		_: return "Не удалось загрузить или сохранить игру (%s)" % error
 
 
-static func write(path: String, archive: Dictionary, atomic_replace: bool = false) -> Error:
+static func write(path: String, archive: Dictionary, _atomic_replace: bool = true) -> Error:
 	var validation_error := validate(archive)
 	if not validation_error.is_empty():
 		return ERR_INVALID_DATA
@@ -228,7 +237,6 @@ static func write(path: String, archive: Dictionary, atomic_replace: bool = fals
 	if directory_error != OK:
 		return directory_error
 	var temporary_path := absolute_path + ".tmp"
-	var backup_path := absolute_path + ".bak"
 	var file := FileAccess.open(temporary_path, FileAccess.WRITE)
 	if file == null:
 		return FileAccess.get_open_error()
@@ -239,16 +247,4 @@ static func write(path: String, archive: Dictionary, atomic_replace: bool = fals
 	if write_error != OK:
 		DirAccess.remove_absolute(temporary_path)
 		return write_error
-	if atomic_replace:
-		return commit_autosave(temporary_path, absolute_path)
-	if FileAccess.file_exists(backup_path):
-		DirAccess.remove_absolute(backup_path)
-	if FileAccess.file_exists(absolute_path):
-		var backup_error := DirAccess.rename_absolute(absolute_path, backup_path)
-		if backup_error != OK:
-			DirAccess.remove_absolute(temporary_path)
-			return backup_error
-	var replace_error := DirAccess.rename_absolute(temporary_path, absolute_path)
-	if replace_error != OK and FileAccess.file_exists(backup_path):
-		DirAccess.rename_absolute(backup_path, absolute_path)
-	return replace_error
+	return commit_autosave(temporary_path, absolute_path)

@@ -7,22 +7,26 @@ var runtime_catalog: Dictionary = {}
 var object_catalog: Dictionary = {}
 var compatibility_gamespec: Dictionary = {}
 var revision := 0
+var rule_fingerprints: Dictionary = {}
 
 
 func configure_runtime(data: Dictionary) -> void:
 	GateCatalog.install_runtime(data)
 	runtime_catalog = data
+	rule_fingerprints["runtime"] = JSON.stringify(data, "", true, true).sha256_text()
 	revision += 1
 
 
 func configure_objects(data: Dictionary) -> void:
 	GateCatalog.install_objects(data)
 	object_catalog = data
+	rule_fingerprints["objects"] = JSON.stringify(data, "", true, true).sha256_text()
 	revision += 1
 
 
 func configure_compatibility_gamespec(data: Dictionary) -> void:
 	compatibility_gamespec = data
+	rule_fingerprints["gamespec"] = JSON.stringify(data, "", true, true).sha256_text()
 	revision += 1
 
 

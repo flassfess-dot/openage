@@ -176,8 +176,9 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	world.economy_system.add_population_points(team, int(unit["population_points_cost"]))
 	unit["population_accounted"] = true
 	world.spatial_index.insert(unit, position, unit["footprint_radius"], "unit")
+	world.register_entity_changes(unit)
 	if not world.is_bulk_loading():
-		world.update_fog_of_war()
+		world.refresh_changed_fog_of_war()
 	world.emit_domain_event("entity_created", {
 		"entity_id": entity_id,
 		"entity_category": "unit",
@@ -185,7 +186,6 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 		"kind": kind,
 		"team": team,
 	})
-	world.register_entity_changes(unit)
 	return unit
 
 
@@ -243,6 +243,7 @@ func add_resource(kind: String, position: Vector2, amount: int, resolve_placemen
 			world.set_entity_field(resource, "hp", 0.0)
 	world.apply_archetype_identity(resource, kind)
 	EntityComponents.sync_dynamic(resource)
+	world.resource_component_pool.intern(resource)
 	world.resource_nodes.append(resource)
 	world.resource_nodes_by_id[entity_id] = resource
 	var resource_cell_index: int = floori(position.y) * world.map_size.x + floori(position.x)
@@ -404,10 +405,11 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 	world.register_building_victory_objective(building)
 	if completed:
 		world.activate_building_completion(building)
+	world.register_entity_changes(building)
 	if not world.is_bulk_loading():
 		world.refresh_building_connectivity()
 		world.sync_building_navigation_occupancy(building)
-		world.update_fog_of_war()
+		world.refresh_changed_fog_of_war()
 	world.emit_domain_event("entity_created", {
 		"entity_id": int(building["id"]),
 		"entity_category": "building",
@@ -415,5 +417,4 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 		"team": team,
 		"completed": completed,
 	})
-	world.register_entity_changes(building)
 	return building

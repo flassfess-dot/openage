@@ -15,8 +15,11 @@ func _init(simulation_world) -> void:
 
 
 func profile_for_resource(worker: Dictionary, resource: Dictionary) -> Dictionary:
-	var worker_runtime: Dictionary = world.data_repository.runtime_metadata(String(worker.get("kind", "")))
-	var resource_runtime: Dictionary = world.data_repository.runtime_metadata(String(resource.get("kind", "")))
+	# Borrow configuration only for this synchronous lookup; the selected profile
+	# below still owns a deep copy. Copying every task/resource profile first made
+	# a burst of gather commands spend milliseconds cloning unrelated settings.
+	var worker_runtime: Dictionary = world.data_repository.archetype(String(worker.get("kind", ""))).get("runtime", {})
+	var resource_runtime: Dictionary = world.data_repository.archetype(String(resource.get("kind", ""))).get("runtime", {})
 	var named_profile := String(resource_runtime.get("worker_profile", ""))
 	if not named_profile.is_empty():
 		var task_profile: Dictionary = worker_runtime.get("worker_task_profiles", {}).get(named_profile, {})
@@ -26,12 +29,12 @@ func profile_for_resource(worker: Dictionary, resource: Dictionary) -> Dictionar
 
 
 func profile_for_resource_type(worker: Dictionary, resource_type_id: int) -> Dictionary:
-	var worker_runtime: Dictionary = world.data_repository.runtime_metadata(String(worker.get("kind", "")))
+	var worker_runtime: Dictionary = world.data_repository.archetype(String(worker.get("kind", ""))).get("runtime", {})
 	return worker_runtime.get("worker_resource_profiles", {}).get(String.num_int64(resource_type_id), {}).duplicate(true)
 
 
 func profile_for_task(worker: Dictionary, task_name: String) -> Dictionary:
-	var worker_runtime: Dictionary = world.data_repository.runtime_metadata(String(worker.get("kind", "")))
+	var worker_runtime: Dictionary = world.data_repository.archetype(String(worker.get("kind", ""))).get("runtime", {})
 	return worker_runtime.get("worker_task_profiles", {}).get(task_name, {}).duplicate(true)
 
 
@@ -57,9 +60,9 @@ func expected_task_work_rate(worker: Dictionary, task_name: String) -> float:
 
 
 func profile_for_hunt(worker: Dictionary, target: Dictionary) -> Dictionary:
-	var target_runtime: Dictionary = world.data_repository.runtime_metadata(String(target.get("kind", "")))
+	var target_runtime: Dictionary = world.data_repository.archetype(String(target.get("kind", ""))).get("runtime", {})
 	var profile_name := String(target_runtime.get("worker_profile", "hunt"))
-	return world.data_repository.runtime_metadata(String(worker.get("kind", ""))).get("worker_task_profiles", {}).get(profile_name, {}).duplicate(true)
+	return world.data_repository.archetype(String(worker.get("kind", ""))).get("runtime", {}).get("worker_task_profiles", {}).get(profile_name, {}).duplicate(true)
 
 
 func apply(worker: Dictionary, profile: Dictionary, combat_role: bool = false) -> bool:

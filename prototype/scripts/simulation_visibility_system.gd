@@ -51,20 +51,32 @@ func restore_source_tracking(world) -> void:
 	if not inactive_foundations.is_empty(): fog.apply_entity_changes([], [], inactive_foundations)
 
 func advance(context: Dictionary = {}) -> void:
+	var probe: Variant = fog.performance_probe
+	var phase_started := Time.get_ticks_usec() if probe != null else 0
+	fog.advance_transient_visibility(float(context.get("delta", 0.0)))
 	var world: Variant = world_ref.get_ref() if world_ref != null else null
 	if world == null:
 		fog.update(units_provider.call() if units_provider.is_valid() else [], buildings_provider.call() if buildings_provider.is_valid() else [])
 		return
 	var journal = world.entity_changes
-	var delta: Dictionary = journal.changes_since(source_cursor if source_epoch == journal.epoch else -1)
+	var delta: Dictionary = journal.read_changes_since(source_cursor if source_epoch == journal.epoch else -1)
+	if probe != null:
+		probe.observe_microseconds("simulation.fog.delta.journal", Time.get_ticks_usec() - phase_started)
+		phase_started = Time.get_ticks_usec()
 	if bool(context.get("force", false)) or bool(delta["full"]) or fog.visibility_topology_dirty:
+		if probe != null: probe.increment("fog.source_refresh.full")
 		pending_motion.clear()
 		fog.update(world.get_units(), world.get_buildings(), 1, 0)
 	else:
+		if probe != null: probe.increment("fog.source_refresh.delta")
 		var changed: Dictionary = {}
 		for id in delta["ids"]:
 			var mask := int(delta["masks"][id])
-			if mask & (1 | 8 | 32 | 128): changed[id] = true
+			# Lifecycle, ownership and capability/life changes are immediate.
+			# Sprite facing, elevation and desired velocity also mark APPEARANCE,
+			# but do not change sight. Let their POSITION event use the motion lane.
+			# Capability replacement and technology mutations publish COMBAT.
+			if mask & (1 | 8 | 128): changed[id] = true
 			elif mask & 2: pending_motion[id] = true
 		for id in pending_motion.keys():
 			if posmod(int(id), MOVEMENT_REFRESH_BUCKETS) == movement_refresh_bucket:
@@ -89,6 +101,7 @@ func advance(context: Dictionary = {}) -> void:
 				removed.append((int(id) << 1) | category)
 			elif category == 0: units.append(row)
 			else: buildings.append(row)
+		if probe != null: probe.observe_microseconds("simulation.fog.delta.roster", Time.get_ticks_usec() - phase_started)
 		fog.apply_entity_changes(units, buildings, removed)
 	source_cursor = int(delta["revision"])
 	source_epoch = int(journal.epoch)

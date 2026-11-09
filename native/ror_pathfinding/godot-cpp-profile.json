@@ -1,3 +1,3 @@
 {
-  "enabled_classes": ["OS", "RefCounted", "RenderingServer", "Geometry2D"]
+  "enabled_classes": ["OS", "RefCounted", "RenderingServer", "Geometry2D", "Image"]
 }

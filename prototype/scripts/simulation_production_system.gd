@@ -114,18 +114,11 @@ func advance(context: Dictionary) -> void:
 
 func train_unit(team: int, kind: String, near: Vector2) -> bool:
 	var building: Variant = production_building_for(team, kind)
-	var enforce_runtime_rules := true
-	# The current prototype HUD has no building-selection/production panel yet.
-	# Keep its no-building command operational through one explicit adapter; all
-	# commands naming a producer use the authoritative RoR location contract.
-	if building == null and world.data_repository.is_configured():
-		building = production_building_for(team)
-		enforce_runtime_rules = false
 	if building == null:
 		last_production_failure = "no_production_building"
 		return false
 	set_rally_point(int(building["id"]), near)
-	return enqueue_unit(int(building["id"]), team, kind, enforce_runtime_rules) != null
+	return enqueue_unit(int(building["id"]), team, kind) != null
 
 
 func production_building_for(team: int, kind: String = "") -> Variant:
@@ -143,10 +136,10 @@ func production_building_for(team: int, kind: String = "") -> Variant:
 	return selected
 
 
-func enqueue_unit(building_id: int, team: int, kind: String, enforce_runtime_rules: bool = true) -> Variant:
+func enqueue_unit(building_id: int, team: int, kind: String) -> Variant:
 	last_production_failure = ""
 	var building: Variant = world.find_building(building_id)
-	var availability := _unit_availability(building, team, kind, enforce_runtime_rules)
+	var availability := _unit_availability(building, team, kind)
 	last_production_failure = String(availability.get("reason", ""))
 	if not bool(availability.get("accepted", false)):
 		return null
@@ -181,7 +174,7 @@ func enqueue_unit(building_id: int, team: int, kind: String, enforce_runtime_rul
 
 
 func unit_availability(building_id: int, team: int, kind: String) -> Dictionary:
-	return _unit_availability(world.find_building(building_id), team, kind, true)
+	return _unit_availability(world.find_building(building_id), team, kind)
 
 
 func unit_options(building_id: int, team: int) -> Array:
@@ -192,7 +185,7 @@ func unit_options(building_id: int, team: int) -> Array:
 	var civilization_id := int(world.civilization_by_team.get(team, 13))
 	var result: Array = []
 	for alias in _unit_aliases_for(lineage, civilization_id):
-		var option := _unit_availability(building, team, alias, true)
+		var option := _unit_availability(building, team, alias)
 		if String(option.get("reason", "")) in ["unit_replaced", "unit_unavailable"]:
 			continue
 		result.append(option)
@@ -200,12 +193,12 @@ func unit_options(building_id: int, team: int) -> Array:
 	return result
 
 
-func _unit_availability(building: Variant, team: int, kind: String, enforce_runtime_rules: bool) -> Dictionary:
+func _unit_availability(building: Variant, team: int, kind: String) -> Dictionary:
 	var result: Dictionary = _unit_option_header(team, kind).duplicate(true)
 	if building == null or int(building.get("team", 0)) != team or String(building.get("state", "complete")) != "complete" or float(building.get("hp", 0.0)) <= 0.0:
 		result["reason"] = "invalid_production_building"
 		return result
-	var details := _unit_option_details(building, team, kind, enforce_runtime_rules)
+	var details := _unit_option_details(building, team, kind)
 	if not String(details["reason"]).is_empty():
 		result["reason"] = details["reason"]
 		return result
@@ -605,12 +598,12 @@ func _unit_option_header(team: int, kind: String) -> Dictionary:
 		result["button_id"] = int(source.get("interface", {}).get("button_id", -1))
 	return _remember_option_template(key, result)
 
-func _unit_option_details(building: Dictionary, team: int, kind: String, enforce_runtime_rules: bool) -> Dictionary:
+func _unit_option_details(building: Dictionary, team: int, kind: String) -> Dictionary:
 	var lineage: Array = building.get("unit_lineage", [int(building.get("source_unit_id", -1))])
-	var key := _option_template_key(team, "unit:" + kind + ":" + str(lineage) + ":" + str(enforce_runtime_rules))
+	var key := _option_template_key(team, "unit:" + kind + ":" + str(lineage))
 	var cached := _cached_option_template(key)
 	if not cached.is_empty(): return cached
-	var reason := _production_target_failure(building, team, kind) if enforce_runtime_rules else ""
+	var reason := _production_target_failure(building, team, kind)
 	if not reason.is_empty(): return _remember_option_template(key, {"reason": reason})
 	var cost: Dictionary = world.unit_resource_cost(kind, team)
 	var population_cost: int = world.unit_population_cost(kind, team)

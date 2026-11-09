@@ -1,13 +1,14 @@
 class_name RoRDestinationReservations
 
 const BUCKET_SIZE := 2.0
+const MAX_CACHED_RING := 32
 
 var reservations: Dictionary = {}
 var reservation_buckets: Dictionary = {}
 var reservation_cells: Dictionary = {}
 var maximum_reserved_radius: float = 0.0
-var cached_ring_desired: Variant = null
-var cached_ring_offsets: Array = []
+var cached_ring_fraction: Variant = null
+var cached_ring_offsets: Dictionary = {}
 var cached_search_signature: Array = []
 var cached_search_ring: int = 0
 var cached_search_offset_index: int = -1
@@ -18,7 +19,7 @@ func clear() -> void:
 	reservation_buckets.clear()
 	reservation_cells.clear()
 	maximum_reserved_radius = 0.0
-	cached_ring_desired = null
+	cached_ring_fraction = null
 	cached_ring_offsets.clear()
 	_invalidate_search_cursor()
 
@@ -48,7 +49,10 @@ func release(entity_id: int) -> void:
 
 func reserve(entity_id: int, desired: Vector2, radius: float, navigation_grid, group_id: int = -1, movement_domain: String = "land", restriction_id: int = -1) -> Vector2:
 	release(entity_id)
-	var signature := [desired, radius, movement_domain, restriction_id, int(navigation_grid.revision) if navigation_grid != null else -1]
+	var signature := [desired, radius, movement_domain, restriction_id,
+			navigation_grid.get_instance_id() if navigation_grid != null else 0,
+			navigation_grid.get("cache_epoch") if navigation_grid != null else null,
+			int(navigation_grid.revision) if navigation_grid != null else -1]
 	var continues_search := signature == cached_search_signature
 	if not continues_search:
 		cached_search_signature = signature
@@ -83,24 +87,25 @@ func _invalidate_search_cursor() -> void:
 
 
 func _ring_offsets(desired: Vector2, ring: int) -> Array:
-	if cached_ring_desired == null or Vector2(cached_ring_desired) != desired:
-		cached_ring_desired = desired
-		cached_ring_offsets.clear()
 	var fractional := desired - Vector2(floorf(desired.x), floorf(desired.y))
-	while cached_ring_offsets.size() < ring:
-		var next_ring := cached_ring_offsets.size() + 1
-		var offsets: Array[Vector2] = []
-		for y in range(-next_ring, next_ring + 1):
-			for x in range(-next_ring, next_ring + 1):
-				if absi(x) != next_ring and absi(y) != next_ring:
-					continue
+	if cached_ring_fraction != fractional:
+		cached_ring_fraction = fractional
+		cached_ring_offsets.clear()
+	if cached_ring_offsets.has(ring): return cached_ring_offsets[ring]
+	var offsets: Array[Vector2] = []
+	for y in range(-ring, ring + 1):
+		if absi(y) == ring:
+			for x in range(-ring, ring + 1):
 				offsets.append(Vector2(x + 0.5, y + 0.5))
-		offsets.sort_custom(func(left: Vector2, right: Vector2):
-			var left_distance: float = (left - fractional).length_squared()
-			var right_distance: float = (right - fractional).length_squared()
-			return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and (left.y < right.y or (left.y == right.y and left.x < right.x))))
-		cached_ring_offsets.append(offsets)
-	return cached_ring_offsets[ring - 1]
+		else:
+			offsets.append(Vector2(-ring + 0.5, y + 0.5))
+			offsets.append(Vector2(ring + 0.5, y + 0.5))
+	offsets.sort_custom(func(left: Vector2, right: Vector2):
+		var left_distance: float = (left - fractional).length_squared()
+		var right_distance: float = (right - fractional).length_squared()
+		return left_distance < right_distance or (is_equal_approx(left_distance, right_distance) and (left.y < right.y or (left.y == right.y and left.x < right.x))))
+	if ring <= MAX_CACHED_RING: cached_ring_offsets[ring] = offsets
+	return offsets
 
 
 func _store(entity_id: int, position: Vector2, radius: float, group_id: int) -> void:
@@ -131,7 +136,37 @@ func can_reserve(entity_id: int, position: Vector2, radius: float, navigation_gr
 	return _is_available(position, radius, navigation_grid, movement_domain, restriction_id, entity_id)
 
 
-func _is_available(position: Vector2, radius: float, navigation_grid, movement_domain: String = "land", restriction_id: int = -1, ignored_entity_id: int = -1) -> bool:
+func reachable_slot(entity_id: int, origin: Vector2, desired: Vector2, radius: float, planner, domain: String, restriction: int, blockers: Variant = null) -> Variant:
+	var first: Vector2i = planner.nearest_reachable(Vector2i(origin.floor()), Vector2i(desired.floor()), domain, restriction, radius)
+	if first.x < 0: return null
+	var region: int = planner.component_id(first, domain, restriction, radius)
+	if region < 0: return null
+	# Other members may already own the nearest reachable cell. Search its
+	# neighborhood without crossing an impassable edge or scanning another island.
+	var cells: Array[Vector2i] = [first]
+	var seen := {first: true}
+	var cursor := 0
+	while cursor < cells.size():
+		var cell := cells[cursor]
+		cursor += 1
+		var point := Vector2(cell) + Vector2(0.5, 0.5)
+		if _is_available(point, radius, planner.grid, domain, restriction, entity_id, blockers): return point
+		for direction in [Vector2i.UP, Vector2i.LEFT, Vector2i.RIGHT, Vector2i.DOWN]:
+			var next := cell + Vector2i(direction)
+			if seen.has(next): continue
+			seen[next] = true
+			if planner.component_id(next, domain, restriction, radius) == region: cells.append(next)
+	return null
+
+
+func released_blocker(blockers: Dictionary) -> bool:
+	for id in blockers:
+		var current: Dictionary = reservations.get(id, {})
+		if current.get("position") != blockers[id][0] or current.get("radius") != blockers[id][1]: return true
+	return false
+
+
+func _is_available(position: Vector2, radius: float, navigation_grid, movement_domain: String = "land", restriction_id: int = -1, ignored_entity_id: int = -1, blockers: Variant = null) -> bool:
 	if navigation_grid != null and not navigation_grid.is_position_walkable_for(position, radius, movement_domain, restriction_id):
 		return false
 	var reach := radius + maximum_reserved_radius + 0.02
@@ -147,6 +182,7 @@ func _is_available(position: Vector2, radius: float, navigation_grid, movement_d
 					continue
 				var minimum_distance := radius + float(existing["radius"]) + 0.02
 				if position.distance_squared_to(existing["position"]) < minimum_distance * minimum_distance:
+					if blockers != null: blockers[entity_id] = [existing["position"], existing["radius"]]
 					return false
 	return true
 

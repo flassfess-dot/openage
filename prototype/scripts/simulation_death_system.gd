@@ -228,6 +228,7 @@ func purge_removed_units() -> void:
 				world.render_entity_projection_cache.erase(removed_id)
 				world.entity_changes.remove(removed_id)
 				world.units_by_id.erase(removed_id)
+				world.entity_mutations.ui_control_versions.erase(removed_id)
 				world.units.remove_at(index)
 		for index in range(world.dying_units.size() - 1, -1, -1):
 			if bool(world.dying_units[index].get("removed", false)):

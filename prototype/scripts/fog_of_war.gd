@@ -24,6 +24,7 @@ var path_dirty_by_player: Dictionary = {}
 var allies_by_player: Dictionary = {}
 var shared_vision_by_player: Dictionary = {}
 var vision_sources: Dictionary = {}
+var transient_visible_by_player: Dictionary = {}
 var visibility_topology_dirty := true
 var revision: int = 0
 var performance_probe: Variant = null
@@ -31,6 +32,24 @@ var vision_cells_microseconds: int = 0
 var regenerated_sources: int = 0
 var native_enabled: bool = true
 var native_deltas_enabled := true
+var native_owned_buffers_enabled := OS.get_environment("ROR_DIAGNOSTIC_DISABLE_OWNED_FOG_BUFFERS") != "1"
+var profile_owned_buffer_alternatives := "--profile-owned-fog-alternatives" in OS.get_cmdline_user_args()
+var owned_buffer_application_serial := 0
+var owned_buffer_tick_native := false
+var owned_buffer_updates := 0
+var owned_states_reused := 0
+var owned_counts_reused := 0
+var native_observer_batch_enabled := OS.get_environment("ROR_DIAGNOSTIC_OBSERVER_FOG_BATCH") != "0"
+var observer_batch_calls := 0
+var observer_batch_cell_operations := 0
+var observer_batch_footprint_cells := 0
+var observer_batch_applications := 0
+var compare_observer_batch := "--compare-observer-fog-batch" in OS.get_cmdline_user_args()
+var observer_batch_comparisons := 0
+var observer_batch_mismatches := 0
+var observer_batch_native_usec := 0
+var observer_batch_reference_usec := 0
+var observer_batch_comparison_limit := 4096 if "--compare-all-observer-fog-batches" in OS.get_cmdline_user_args() else 32
 var native_available: bool = false
 var native_kernel: Variant = null
 var source_scan_generation: int = 0
@@ -62,6 +81,7 @@ func reset() -> void:
 	allies_by_player.clear()
 	shared_vision_by_player.clear()
 	vision_sources.clear()
+	transient_visible_by_player.clear()
 	source_scan_generation = 0
 	visibility_topology_dirty = true
 	revision += 1
@@ -204,6 +224,44 @@ func reveal_explored_cell(player_id: int, cell: Vector2i) -> void:
 	exploration_revisions_by_player[player_id] = int(exploration_revisions_by_player.get(player_id, 0)) + 1
 	revisions_by_player[player_id] = int(revisions_by_player.get(player_id, 0)) + 1
 	revision += 1
+
+
+func flash_visible_cell(player_id: int, cell: Vector2i, seconds: float = 1.0) -> void:
+	if player_id <= 0 or not Rect2i(Vector2i.ZERO, map_size).has_point(cell): return
+	ensure_player(player_id)
+	if not transient_visible_by_player.has(player_id): transient_visible_by_player[player_id] = {}
+	var flashes: Dictionary = transient_visible_by_player[player_id]
+	var index := _index(cell)
+	var already_visible := flashes.has(index)
+	flashes[index] = maxf(float(flashes.get(index, 0.0)), seconds)
+	if already_visible: return
+	var cells := PackedInt32Array([index])
+	_mark_personally_explored(player_id, cells)
+	if _add_visible_cells(player_id, cells):
+		revisions_by_player[player_id] = int(revisions_by_player.get(player_id, 0)) + 1
+		revision += 1
+
+
+func advance_transient_visibility(delta: float) -> void:
+	if delta <= 0.0: return
+	for player_id in transient_visible_by_player.keys():
+		var flashes: Dictionary = transient_visible_by_player[player_id]
+		var expired := PackedInt32Array()
+		for index in flashes.keys():
+			flashes[index] = float(flashes[index]) - delta
+			if float(flashes[index]) <= 0.000001:
+				expired.append(int(index))
+				flashes.erase(index)
+		if flashes.is_empty(): transient_visible_by_player.erase(player_id)
+		if expired.is_empty(): continue
+		var states: PackedByteArray = states_by_player[player_id]
+		var counts: PackedInt32Array = visible_counts_by_player[player_id]
+		var dirty: Variant = presentation_dirty_cells_by_player[player_id] if presentation_dirty_tracked_players.has(player_id) else null
+		if _apply_remove_visible_cells(states, counts, expired, dirty, _visibility_context(player_id)):
+			revisions_by_player[player_id] = int(revisions_by_player.get(player_id, 0)) + 1
+			revision += 1
+		states_by_player[player_id] = states
+		visible_counts_by_player[player_id] = counts
 
 
 func revision_for_player(player_id: int) -> int:
@@ -576,6 +634,11 @@ func _rebuild_visibility(current_sources: Dictionary) -> Dictionary:
 				var flags := _apply_add_visible_cells(states, counts, source["cells"], newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer), changes)
 				observer_changed = (flags & 1) != 0 or observer_changed
 				exploration_changed = (flags & 2) != 0 or exploration_changed
+		var transient := PackedInt32Array(transient_visible_by_player.get(observer, {}).keys())
+		if not transient.is_empty():
+			var flags := _apply_add_visible_cells(states, counts, transient, newly_explored, navigation_newly, newly_visible, presentation_dirty, path_dirty_by_player.get(observer), changes)
+			observer_changed = (flags & 1) != 0 or observer_changed
+			exploration_changed = (flags & 2) != 0 or exploration_changed
 		states_by_player[observer] = states
 		visible_counts_by_player[observer] = counts
 		if observer_changed:
@@ -648,15 +711,78 @@ func _apply_source_deltas(
 # revision boundaries stay with the existing owner-thread publication.
 func _apply_native_source_deltas(removed: Array, added: Array, previous: Array, current: Array) -> Dictionary:
 	var changed_players: Dictionary = {}
+	var use_owned: bool = native_owned_buffers_enabled and native_kernel.has_method("apply_owned_source_deltas")
+	owned_buffer_application_serial += 1
+	if profile_owned_buffer_alternatives:
+		use_owned = use_owned and ((owned_buffer_application_serial * 1103515245 + 12345) & 0xffff) >= 32768
+	owned_buffer_tick_native = use_owned
+	var apply_started := Time.get_ticks_usec() if performance_probe != null else 0
+	if use_owned and native_observer_batch_enabled and native_kernel.has_method("apply_observer_source_deltas"):
+		var batch := _apply_observer_batch(removed, added, previous, current)
+		if not batch.is_empty():
+			if performance_probe != null: performance_probe.observe_microseconds("simulation.fog.delta.apply_owned", Time.get_ticks_usec() - apply_started)
+			return batch["changed"]
 	for observer in states_by_player:
 		var publication := {"changes": _visibility_context(observer), "dirty": presentation_dirty_cells_by_player[observer] if presentation_dirty_tracked_players.has(observer) else null, "explored": newly_explored_cells_by_player[observer], "navigation": navigation_newly_explored_by_player.get(observer), "visible": newly_visible_cells_by_player[observer], "path": path_dirty_by_player.get(observer)}
-		var result: Dictionary = native_kernel.apply_source_deltas({"states": states_by_player[observer], "counts": visible_counts_by_player[observer], "allies": shared_vision_by_player.get(observer, {}), "removed": removed, "added": added, "previous": previous, "current": current, "publication": publication})
+		var input := {"allies": shared_vision_by_player.get(observer, {}), "removed": removed, "added": added, "previous": previous, "current": current, "publication": publication}
+		var result: Dictionary = {}
+		if use_owned:
+			result = native_kernel.apply_owned_source_deltas(states_by_player, visible_counts_by_player, int(observer), input)
+			if not result.is_empty():
+				owned_buffer_updates += 1
+				owned_states_reused += int(result["states_reused"])
+				owned_counts_reused += int(result["counts_reused"])
+		if result.is_empty():
+			input["states"] = states_by_player[observer]
+			input["counts"] = visible_counts_by_player[observer]
+			result = native_kernel.apply_source_deltas(input)
 		assert(not result.is_empty(), "Invalid visibility delta buffers")
 		states_by_player[observer] = result["states"]
 		visible_counts_by_player[observer] = result["counts"]
 		if not result["visibility"].is_empty(): changed_players[observer] = true
 		if not result["exploration"].is_empty(): exploration_revisions_by_player[observer] = int(exploration_revisions_by_player.get(observer, 0)) + 1
+	if performance_probe != null:
+		performance_probe.observe_microseconds("simulation.fog.delta.apply_owned" if use_owned else "simulation.fog.delta.apply_copied", Time.get_ticks_usec() - apply_started)
 	return changed_players
+
+
+func _apply_observer_batch(removed: Array, added: Array, previous: Array, current: Array) -> Dictionary:
+	var publications := {}
+	for observer in states_by_player:
+		publications[observer] = {"changes": _visibility_context(observer), "dirty": presentation_dirty_cells_by_player[observer] if presentation_dirty_tracked_players.has(observer) else null, "explored": newly_explored_cells_by_player[observer], "navigation": navigation_newly_explored_by_player.get(observer), "visible": newly_visible_cells_by_player[observer], "path": path_dirty_by_player.get(observer)}
+	var reference := {}
+	if compare_observer_batch and observer_batch_comparisons < observer_batch_comparison_limit:
+		# Same-input diagnosis during actual gameplay. These detached buffers and
+		# journals never enter the canonical world or advance gameplay a second time.
+		for observer in states_by_player:
+			reference[observer] = {"states":states_by_player[observer], "counts":visible_counts_by_player[observer], "publication":publications[observer].duplicate(true)}
+	var paired_started := Time.get_ticks_usec() if not reference.is_empty() else 0
+	var result: Dictionary = native_kernel.apply_observer_source_deltas(states_by_player, visible_counts_by_player, {"allies":shared_vision_by_player,"publications":publications,"removed":removed,"added":added,"previous":previous,"current":current})
+	if paired_started > 0: observer_batch_native_usec += Time.get_ticks_usec() - paired_started
+	if result.is_empty(): return {}
+	observer_batch_calls += 1
+	observer_batch_cell_operations += int(result["cell_operations"])
+	observer_batch_footprint_cells += int(result["footprint_cells"])
+	observer_batch_applications += int(result["observer_applications"])
+	owned_buffer_updates += int(result["observers"])
+	owned_states_reused += int(result["states_reused"])
+	owned_counts_reused += int(result["counts_reused"])
+	for observer in result["explored"]:
+		exploration_revisions_by_player[observer] = int(exploration_revisions_by_player.get(observer, 0)) + 1
+	if not reference.is_empty():
+		var mismatch := false
+		for observer in reference:
+			var before: Dictionary = reference[observer]
+			paired_started = Time.get_ticks_usec()
+			var expected: Dictionary = native_kernel.apply_source_deltas({"states":before["states"],"counts":before["counts"],"allies":shared_vision_by_player.get(observer,{}),"publication":before["publication"],"removed":removed,"added":added,"previous":previous,"current":current})
+			observer_batch_reference_usec += Time.get_ticks_usec() - paired_started
+			mismatch = mismatch or expected["states"] != states_by_player[observer] or expected["counts"] != visible_counts_by_player[observer] or before["publication"] != publications[observer]
+			mismatch = mismatch or bool(result["changed"].get(observer,false)) != (not expected["visibility"].is_empty()) or bool(result["explored"].get(observer,false)) != (not expected["exploration"].is_empty())
+		observer_batch_comparisons += 1
+		if mismatch:
+			observer_batch_mismatches += 1
+			push_error("Observer visibility batch differs from the per-observer reference")
+	return result
 
 func _add_source(source: Dictionary) -> bool:
 	var changed := false
@@ -805,6 +931,7 @@ func exploration_changes_since(observer: int, previous_revision: int) -> Diction
 
 # Called with source event deltas, never a partial roster requiring retirement.
 func apply_entity_changes(units: Array, buildings: Array, removed_keys: Array) -> void:
+	var phase_started := Time.get_ticks_usec() if performance_probe != null else 0
 	vision_cells_microseconds = 0
 	regenerated_sources = 0
 	var removed: Array[Dictionary] = []
@@ -817,7 +944,11 @@ func apply_entity_changes(units: Array, buildings: Array, removed_keys: Array) -
 			vision_sources.erase(key)
 	_collect_source_deltas(units, 0, 1, 0, added, previous, current)
 	_collect_source_deltas(buildings, 1, 1, 0, added, previous, current)
+	if performance_probe != null:
+		performance_probe.observe_microseconds("simulation.fog.delta.collect", Time.get_ticks_usec() - phase_started)
+		phase_started = Time.get_ticks_usec()
 	var changed: Dictionary = _apply_source_deltas(removed, added, previous, current)
+	if performance_probe != null: performance_probe.observe_microseconds("simulation.fog.delta.apply", Time.get_ticks_usec() - phase_started)
 	if not changed.is_empty():
 		revision += 1
 		for player in changed: revisions_by_player[player] = int(revisions_by_player.get(player, 0)) + 1

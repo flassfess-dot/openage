@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -15,6 +16,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
+#include <godot_cpp/variant/callable.hpp>
 
 namespace godot {
 
@@ -28,6 +30,8 @@ public:
     bool install_connectivity(const PackedInt32Array &labels, double radius = 0.0);
     void configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable);
     bool update_walkable(int64_t revision, const PackedInt32Array &indices, const PackedByteArray &values);
+    void configure_route_cache(bool enabled, bool profile, bool reference);
+    Dictionary route_cache_stats() const;
     PackedInt32Array find_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
     PackedInt32Array find_smoothed_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
     void configure_movement_snapshot(
@@ -40,6 +44,7 @@ public:
         const PackedByteArray &solid_animals = PackedByteArray());
     Dictionary configure_movement_entities(const Array &units, bool incremental = true);
     Dictionary update_movement_entities(const Array &units);
+    Array collect_movement_delta(const Dictionary &delta, const Dictionary &units_by_id, const Dictionary &configurations) const;
     Dictionary configure_movement_entity_rows(const Array &units, bool incremental, bool delta);
     void release_movement_snapshot();
     void share_movement_snapshot(const Ref<RoRPathKernel> &source);
@@ -55,15 +60,23 @@ public:
     bool cells_connected(const Vector2i &start, const Vector2i &goal, double clearance_radius = 0.0);
     PackedInt32Array corridor_widths(const TypedArray<Vector2i> &cells, int64_t maximum, double radius) const;
     bool is_segment_walkable(const Vector2 &start, const Vector2 &finish, double radius) const;
+    PackedByteArray positions_walkable(const Array &positions, double radius) const;
+    Dictionary local_recovery_position(const Vector2 &origin, double radius, const PackedByteArray &known, const Array &neighbors, const Array &spatial);
     PackedVector2Array smooth_swept_world_path(const Vector2 &origin, const PackedVector2Array &candidates, double radius, const Vector2 &escape_center) const;
+    PackedVector2Array finish_world_path(const Vector2 &origin, const Vector2 &destination, const Vector2i &goal, const TypedArray<Vector2i> &smoothed, double radius);
     PackedVector2Array find_local_traffic_path(const Vector2 &origin, const Vector2 &goal, double radius, double clearance, const Array &blockers) const;
+    Dictionary select_work_traffic_route(const Vector2 &origin, const Vector2 &destination, double radius, double clearance,
+        const Array &candidates, int64_t first_candidate, const Array &blockers, const Array &tail_blockers, const Callable &find_path) const;
     PackedInt32Array direct_cell_path(const Vector2i &start, const Vector2i &goal, double radius) const;
+    bool has_direct_cell_path(const Vector2i &start, const Vector2i &goal, double radius) const;
     Vector2i nearest_walkable(const Vector2i &requested, double radius) const;
+    Vector2i nearest_reachable(const Vector2i &start, const Vector2i &requested, double radius);
 
 protected:
     static void _bind_methods();
 
 private:
+    friend class RoRReadModelKernel;
     struct FrontierEntry {
         int32_t index = -1;
         double score = 0.0;
@@ -81,6 +94,29 @@ private:
     Vector2i cached_search_start_, cached_search_goal_;
     double cached_search_radius_ = 0.0;
     PackedInt32Array cached_search_path_;
+    struct RouteKey {
+        Vector2i start, goal;
+        uint64_t radius;
+        bool operator==(const RouteKey &other) const { return start == other.start && goal == other.goal && radius == other.radius; }
+    };
+    struct RouteKeyHash {
+        size_t operator()(const RouteKey &key) const {
+            uint64_t hash = key.radius;
+            for (int32_t value : {key.start.x, key.start.y, key.goal.x, key.goal.y})
+                hash ^= uint64_t(uint32_t(value)) + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+            return size_t(hash);
+        }
+    };
+    bool route_cache_enabled_ = true, route_cache_profile_ = false, route_cache_reference_ = false;
+    std::unordered_map<RouteKey, PackedInt32Array, RouteKeyHash> raw_routes_;
+    std::deque<RouteKey> raw_route_fifo_;
+    int64_t raw_route_bytes_ = 0;
+    int64_t raw_calls_ = 0, single_hits_ = 0, route_hits_ = 0, raw_searches_ = 0, raw_expanded_ = 0;
+    int64_t raw_search_us_ = 0, route_hit_us_ = 0, route_evictions_ = 0, route_invalidations_ = 0;
+    int64_t route_reference_checks_ = 0, route_reference_mismatches_ = 0, route_reference_us_ = 0, route_reference_nodes_ = 0;
+    int64_t route_peak_bytes_ = 0, route_peak_entries_ = 0;
+    PackedInt32Array search_cell_path_uncached(const Vector2i &start, const Vector2i &goal, double radius);
+    void clear_raw_routes();
     uint32_t search_generation_ = 0;
     std::shared_ptr<std::vector<uint8_t>> walkable_ = std::make_shared<std::vector<uint8_t>>();
     std::vector<double> costs_;

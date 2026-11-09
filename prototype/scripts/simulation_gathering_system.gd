@@ -8,12 +8,23 @@ const MAX_DROPOFF_ROSTERS := 64
 
 var dropoff_rosters: Dictionary = {}
 var native_recovery_enabled := true
-var recovery_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
+var profile_gather_portions := "--profile-gather-portions" in OS.get_cmdline_user_args()
+var profile_gather_continuations := "--profile-gather-continuations" in OS.get_cmdline_user_args()
+var native_resource_queries_enabled := true
+var profile_resource_query_alternatives := "--profile-resource-query-alternatives" in OS.get_cmdline_user_args()
+var resource_query_profile_sequence := 0
+var native_recovery_supported := false
+var native_resource_queries_supported := false
+var recovery_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null:
+	set(value):
+		recovery_kernel = value
+		_refresh_native_capabilities()
 var dropoff_building_ids: Dictionary = {}
 var dropoff_roster_epoch := -1
 var dropoff_roster_revision := -1
 var cluster_route_checks: Dictionary = {}
-
+var exhaustive_cluster_routes := OS.get_environment("ROR_DIAGNOSTIC_EXHAUSTIVE_CLUSTER_ROUTES") == "1"
+var cluster_route_search_stats := {"checks":0,"queries":0,"sufficient_routes":0,"reviewed_routes_reused":0}
 const GATHER_UPDATE_IDLE := 0
 const GATHER_UPDATE_MOVE := 1
 const GATHER_UPDATE_ACTION := 2
@@ -29,10 +40,18 @@ var world:
 
 func _init(simulation_world) -> void:
 	world_ref = weakref(simulation_world)
+	_refresh_native_capabilities()
+
+
+func _refresh_native_capabilities() -> void:
+	native_recovery_supported = recovery_kernel != null and recovery_kernel.has_method("advance_harvesting_recovery")
+	native_resource_queries_supported = recovery_kernel != null and recovery_kernel.has_method("resources_in_radius")
 
 
 func assign_command(selected: Array, target_id: int) -> void:
 	var simulation_world = world
+	var probe: Variant = simulation_world.tick_pipeline.performance_probe
+	var portion_started := Time.get_ticks_usec() if probe != null else 0
 	# Replace a group order atomically: old slots of later members must not
 	# block the new assignments of earlier members on a repeated right-click.
 	for unit in selected:
@@ -40,6 +59,7 @@ func assign_command(selected: Array, target_id: int) -> void:
 		release_resource_approach_slot(unit)
 		simulation_world.release_building_approach_slot(unit)
 		simulation_world.release_unit_destination(unit)
+	if probe != null: probe.observe_microseconds("simulation.gather.command.release", Time.get_ticks_usec() - portion_started)
 	for unit in selected:
 		if not simulation_world.entity_is_worker(unit):
 			continue
@@ -55,7 +75,9 @@ func assign_command(selected: Array, target_id: int) -> void:
 		simulation_world.set_entity_field(unit, "resource_id", target_id)
 		var resource: Variant = simulation_world.find_resource(target_id)
 		if resource != null and int(resource.get("amount", 0)) > 0 and simulation_world.resource_accessible_to_team(resource, int(unit.get("team", 0))) and simulation_world.resource_allows_worker(resource, unit):
+			if probe != null: portion_started = Time.get_ticks_usec()
 			simulation_world.worker_role_system.apply(unit, simulation_world.worker_role_system.profile_for_resource(unit, resource), false)
+			if probe != null: probe.observe_microseconds("simulation.gather.command.role", Time.get_ticks_usec() - portion_started)
 			simulation_world.set_entity_field(unit, "pending_hunt_target_id", -1)
 			simulation_world.begin_entity_order(unit, "gather", target_id, resource["pos"], true)
 			var carried_type := int(unit.get("carried_resource_type_id", -1))
@@ -63,8 +85,11 @@ func assign_command(selected: Array, target_id: int) -> void:
 			if float(unit.get("carried_amount", 0.0)) > 0.0 and carried_type != target_type:
 				if not begin_resource_return(unit):
 					finish_gather_order(unit, "no_dropoff")
-			elif not prepare_group_gather_approach(unit, resource):
-				if not _wait_for_shared_resource(unit, resource):
+			else:
+				if probe != null: portion_started = Time.get_ticks_usec()
+				var prepared := prepare_group_gather_approach(unit, resource)
+				if probe != null: probe.observe_microseconds("simulation.gather.command.approach", Time.get_ticks_usec() - portion_started)
+				if not prepared and not _wait_for_shared_resource(unit, resource):
 					finish_gather_order(unit, "no_approach_slot")
 		else:
 			finish_gather_order(unit, "incompatible_gatherer" if resource != null and not simulation_world.resource_allows_worker(resource, unit) else "resource_unavailable")
@@ -74,20 +99,41 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	# Active units own the complete runtime schema. Compatibility fallbacks stay
 	# at load and command boundaries instead of repeating catalog checks here.
 	var simulation_world = world
+	var probe: Variant = simulation_world.tick_pipeline.performance_probe
+	if probe == null and profile_gather_portions: probe = simulation_world.tick_pipeline.stage_observer
+	var portion_started := 0
 	var waiting_for_slot := String(worker["gather_stage"]) == "approaching" and not worker["resource_approach_slot"] is Vector2
 	var reached_work_slot: bool=float(worker["work"])>0.0 and worker["resource_approach_slot"] is Vector2 and Vector2(worker["pos"]).distance_squared_to(Vector2(worker["resource_approach_slot"]))<=0.0144
 	if (String(worker["gather_stage"])=="harvesting" or reached_work_slot) and (not worker["path"].is_empty() or Vector2(worker["actual_velocity"])!=Vector2.ZERO): simulation_world.movement_system.stop_unit_motion(worker,false)
-	if not waiting_for_slot and native_recovery_enabled and recovery_kernel != null and recovery_kernel.has_method("advance_harvesting_recovery"):
+	if not waiting_for_slot and native_recovery_enabled and native_recovery_supported:
 		assert(simulation_world.read_generation_pins == 0, "Pinned observation generation is immutable")
+		var native_started := Time.get_ticks_usec() if probe != null else 0
 		var changed_mask: int = recovery_kernel.advance_harvesting_recovery(worker, simulation_world.resource_nodes_by_id, simulation_world.resource_approach_slots)
+		if probe != null: probe.observe_microseconds("simulation.gather.recovery.native_success" if changed_mask >= 0 else "simulation.gather.recovery.native_rejected", Time.get_ticks_usec() - native_started)
 		if changed_mask >= 0:
 			if changed_mask != 0: simulation_world.notify_entity_changed(worker, changed_mask)
 			return GATHER_UPDATE_ACTION
+	return _continue_gather_order(worker, delta, waiting_for_slot)
+
+
+# Entered after stop/recovery preparation, including from the native owner.
+# A rejected recovery continues here rather than replaying gather's prelude.
+func _continue_gather_order(worker: Dictionary, delta: float, waiting_for_slot: bool) -> int:
+	var simulation_world = world
+	var probe: Variant = simulation_world.tick_pipeline.performance_probe
+	# This observer covers the domain continuation only. Unlike the legacy
+	# portion probe, it does not change native gather admission/preparation.
+	if probe == null and (profile_gather_portions or profile_gather_continuations): probe = simulation_world.tick_pipeline.stage_observer
+	var portion_started := 0
 	if not bool(worker["components"]["worker"]["enabled"]):
 		finish_gather_order(worker, "not_a_worker")
 		return GATHER_UPDATE_IDLE
 	if String(worker["gather_stage"]) == "returning":
-		return update_dropoff_order(worker, delta)
+		if probe == null: return update_dropoff_order(worker, delta)
+		var return_started := Time.get_ticks_usec()
+		var result := update_dropoff_order(worker, delta)
+		probe.observe_microseconds("simulation.gather.returning", Time.get_ticks_usec() - return_started)
+		return result
 
 	var capacity := maxf(0.0, float(worker["carry_capacity"]))
 	var resource: Variant = simulation_world.find_resource(int(worker["resource_id"]))
@@ -122,11 +168,16 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	# Keep separate work positions, but accept a clear position already in
 	# reach. Collision avoidance need not land on the original slot exactly.
 	if String(worker.get("gather_stage",""))=="approaching" and int(worker.get("path_index",0))==0 and worker.get("path",[]).size()>1:
+		if probe != null: portion_started = Time.get_ticks_usec()
 		var rerouted: Variant=_shorten_cluster_route(worker,resource)
+		if probe != null: probe.observe_microseconds("simulation.gather.cluster_route", Time.get_ticks_usec() - portion_started)
 		if rerouted!=null: resource=rerouted
 	if int(worker.get("stuck_ticks",0))>=6 and String(worker.get("gather_stage",""))=="approaching":
+		if probe != null: portion_started = Time.get_ticks_usec()
 		var reached: Variant=_adopt_reached_cluster_resource(worker,resource)
+		if probe != null: probe.observe_microseconds("simulation.gather.cluster_arrival", Time.get_ticks_usec() - portion_started)
 		if reached!=null: resource=reached
+	var range_started := Time.get_ticks_usec() if probe != null else 0
 	var in_work_range: bool = _worker_in_resource_range(worker, resource)
 	if not in_work_range and not worker["resource_approach_slot"] is Vector2:
 		if not prepare_group_gather_approach(worker, resource):
@@ -144,12 +195,23 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 			simulation_world.set_entity_field(worker, "resource_approach_slot", worker["pos"])
 			at_slot = true
 		in_work_range = at_slot if reservations.size() > 1 else in_work_range or at_slot
+	if probe != null: probe.observe_microseconds("simulation.gather.range_and_slots", Time.get_ticks_usec() - range_started)
 	if not in_work_range:
 		var approach: Vector2 = worker["resource_approach_slot"]
 		simulation_world.set_entity_field(worker, "gather_stage", "approaching")
+		if probe != null: portion_started = Time.get_ticks_usec()
 		simulation_world.ensure_navigation_destination(worker, approach)
-		return GATHER_UPDATE_MOVE if simulation_world.movement_system.move_unit(worker, delta) else GATHER_UPDATE_MOVE_IDLE
+		if probe != null: probe.observe_microseconds("simulation.gather.ensure_destination", Time.get_ticks_usec() - portion_started)
+		if probe != null: portion_started = Time.get_ticks_usec()
+		var moving: bool = simulation_world.movement_system.move_unit(worker, delta)
+		if probe != null: probe.observe_microseconds("simulation.gather.approach_move", Time.get_ticks_usec() - portion_started)
+		return GATHER_UPDATE_MOVE if moving else GATHER_UPDATE_MOVE_IDLE
 
+	return _perform_gather_action(worker, resource, capacity)
+
+
+func _perform_gather_action(worker: Dictionary, resource: Dictionary, capacity: float) -> int:
+	var simulation_world = world
 	if not worker["path"].is_empty() or Vector2(worker["actual_velocity"])!=Vector2.ZERO: simulation_world.movement_system.stop_unit_motion(worker,false)
 	simulation_world.set_entity_field(worker, "gather_stage", "harvesting")
 	simulation_world.transition_entity_order(worker, OrderPipeline.FACE_TARGET)
@@ -174,28 +236,57 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 
 func _shorten_cluster_route(worker: Dictionary,requested: Dictionary) -> Variant:
 	var simulation_world=world
-	if String(worker.get("movement_domain","land"))!="land" or int(simulation_world.data_repository.runtime_metadata(String(requested["kind"])).get("max_gatherers",0))>0: return null
+	if String(worker.get("movement_domain","land"))!="land" or int(simulation_world.data_repository.runtime_field(String(requested["kind"]), "max_gatherers", 0))>0: return null
+	# Route improvement is a decision about the assigned route, rather than a
+	# periodic reaction to unrelated exploration elsewhere on the map. A new
+	# order, resource, owner or replanned path permits another review. This
+	# small decision record travels with the unit in checkpoints/replays.
+	var review := _cluster_route_review(worker, requested)
+	if not exhaustive_cluster_routes and worker.get("gather_route_review", []) == review:
+		cluster_route_search_stats["reviewed_routes_reused"] += 1
+		return null
 	var origin:=Vector2(worker["pos"]); var cursor:=origin; var current_cost:=0.0
-	for point in worker["path"]: current_cost+=cursor.distance_to(Vector2(point)); cursor=point
+	# The path keeps its visited prefix. Counting that prefix from the worker's
+	# current position invents a return trip and repeatedly triggers new routes.
+	var current_path: Array = worker["path"]
+	for index in range(maxi(0, int(worker.get("path_index", 0))), current_path.size()):
+		var point := Vector2(current_path[index])
+		current_cost += cursor.distance_to(point)
+		cursor = point
 	if current_cost<=maxf(12.0,origin.distance_to(Vector2(requested["pos"]))*1.5): return null
 	var planner=simulation_world.movement_system.knowledge.planner(simulation_world,int(worker["team"]))
-	var key:=[int(worker["id"]),int(planner.grid.revision),int(requested["id"]),hash(worker["path"])]
-	if cluster_route_checks.has(key): return null
-	if cluster_route_checks.size()>=512: cluster_route_checks.erase(cluster_route_checks.keys()[0])
-	cluster_route_checks[key]=true
+	if exhaustive_cluster_routes:
+		var key:=[int(worker["id"]),int(planner.grid.revision),int(requested["id"]),hash(worker["path"])]
+		if cluster_route_checks.has(key): return null
+		if cluster_route_checks.size()>=512: cluster_route_checks.erase(cluster_route_checks.keys()[0])
+		cluster_route_checks[key]=true
+	else:
+		simulation_world.set_entity_field(worker, "gather_route_review", review)
+	cluster_route_search_stats["checks"] += 1
 	var best: Dictionary={}; var best_cost:=current_cost*0.85
+	var sufficient_route := false
 	var candidates: Array=_resources_near(Vector2(requested["pos"]),6.0).filter(func(r): return String(r.get("kind",""))==String(requested["kind"]) and int(r.get("amount",0))>0 and simulation_world.resource_accessible_to_team(r,int(worker["team"])) and simulation_world.resource_allows_worker(r,worker))
 	candidates.sort_custom(func(a,b): return origin.distance_squared_to(Vector2(a["pos"]))<origin.distance_squared_to(Vector2(b["pos"])) if not is_equal_approx(origin.distance_squared_to(Vector2(a["pos"])),origin.distance_squared_to(Vector2(b["pos"]))) else int(a["id"])<int(b["id"]))
 	for candidate in candidates.slice(0,8):
 		var reservations: Dictionary=simulation_world.resource_approach_slots.get(int(candidate["id"]),{})
-		var points: Array[Vector2]=simulation_world.approach_system.available_slots(worker,resource_approach_candidates(worker,candidate,simulation_world.data_repository.runtime_metadata(String(candidate["kind"]))),reservations,true)
+		var points: Array[Vector2]=simulation_world.approach_system.available_slots(worker,resource_approach_candidates(worker,candidate,simulation_world.data_repository.archetype(String(candidate["kind"])).get("runtime", {})),reservations,true)
 		for point in points.slice(0,16):
 			if origin.distance_to(point)>=best_cost: continue
+			cluster_route_search_stats["queries"] += 1
 			var route: Array[Vector2]=planner.find_path(origin,point,"land",int(worker["terrain_restriction"]),float(worker["footprint_radius"]))
 			if route.is_empty() or route.back().distance_squared_to(point)>0.0144: continue
 			cursor=origin; var cost:=0.0
 			for waypoint in route: cost+=cursor.distance_to(waypoint); cursor=waypoint
-			if cost<best_cost: best={"resource":candidate,"slot":point}; best_cost=cost
+			if cost<best_cost:
+				best={"resource":candidate,"slot":point}; best_cost=cost
+				# A clear, short approach already improves the current detour by
+				# at least 15%. Do not search every other tree/slot for a marginal
+				# improvement while the whole simulation waits for this worker.
+				if not exhaustive_cluster_routes and cost <= maxf(12.0, origin.distance_to(Vector2(candidate["pos"])) * 1.5):
+					sufficient_route = true
+					cluster_route_search_stats["sufficient_routes"] += 1
+					break
+		if sufficient_route: break
 	if best.is_empty(): return null
 	if not simulation_world.approach_system.resume(worker,best["slot"]): return null
 	release_resource_approach_slot(worker)
@@ -206,7 +297,13 @@ func _shorten_cluster_route(worker: Dictionary,requested: Dictionary) -> Variant
 	simulation_world.set_entity_field(worker,"resource_approach_slot",best["slot"])
 	simulation_world.worker_role_system.apply(worker,simulation_world.worker_role_system.profile_for_resource(worker,resource),false)
 	simulation_world.begin_entity_order(worker,"gather",int(resource["id"]),resource["pos"],true)
+	if not exhaustive_cluster_routes:
+		simulation_world.set_entity_field(worker, "gather_route_review", _cluster_route_review(worker, resource))
 	return resource
+
+
+func _cluster_route_review(worker: Dictionary, resource: Dictionary) -> Array:
+	return [int(resource["id"]), int(worker["team"]), int(worker.get("components", {}).get("order", {}).get("revision", 0)), hash(worker["path"])]
 
 
 func _adopt_reached_cluster_resource(worker: Dictionary, requested: Dictionary) -> Variant:
@@ -215,16 +312,17 @@ func _adopt_reached_cluster_resource(worker: Dictionary, requested: Dictionary) 
 	# work. Actual occupants retain priority over reservations of distant units.
 	var simulation_world=world
 	var position:=Vector2(worker["pos"])
-	if String(worker.get("movement_domain","land"))!="land" or not simulation_world.navigation_grid.is_position_walkable_for(position,float(worker["footprint_radius"]),"land",int(worker["terrain_restriction"])): return null
-	for other in simulation_world.query_units_near(position,1.5):
-		if int(other["id"])==int(worker["id"]) or String(other.get("movement_domain","land"))!="land" or float(other.get("hp",0))<=0: continue
-		var separation:=float(worker["footprint_radius"])+float(other["footprint_radius"])
-		if position.distance_squared_to(Vector2(other["pos"]))<separation*separation-0.00001: return null
+	if String(worker.get("movement_domain","land"))!="land": return null
+	# Candidates must be within 1.5 of the worker and 6 of the requested node.
+	# The broad rejection includes a small margin for Vector2 rounding.
+	if position.distance_squared_to(Vector2(requested["pos"])) > 7.501 * 7.501: return null
 	var candidates: Array=_resources_near(position,1.5).filter(func(r): return String(r.get("kind",""))==String(requested.get("kind","")) and int(r.get("amount",0))>0 and Vector2(r["pos"]).distance_squared_to(Vector2(requested["pos"]))<=36.0)
+	if candidates.is_empty() or not simulation_world.pathfinder.is_position_walkable(position,float(worker["footprint_radius"]),"land",int(worker["terrain_restriction"])): return null
+	if simulation_world.spatial_index.has_live_overlap(worker,1.5): return null
 	candidates.sort_custom(func(a,b): return int(a["id"])<int(b["id"]))
 	for candidate in candidates:
 		if not _worker_in_resource_range(worker,candidate) or not simulation_world.resource_accessible_to_team(candidate,int(worker["team"])) or not simulation_world.resource_allows_worker(candidate,worker): continue
-		if int(simulation_world.data_repository.runtime_metadata(String(candidate["kind"])).get("max_gatherers",0))>0: continue
+		if int(simulation_world.data_repository.runtime_field(String(candidate["kind"]), "max_gatherers", 0))>0: continue
 		var displaced: Array=[]
 		var occupied:=false
 		for nearby in _resources_near(position,3.0):
@@ -239,18 +337,23 @@ func _adopt_reached_cluster_resource(worker: Dictionary, requested: Dictionary) 
 				displaced.append(other)
 			if occupied: break
 		if occupied: continue
-		for other in displaced: release_resource_approach_slot(other)
-		release_resource_approach_slot(worker)
-		simulation_world.set_entity_field(worker,"resource_id",int(candidate["id"]))
-		var slots: Dictionary=simulation_world.resource_approach_slots.get(int(candidate["id"]),{})
-		slots[int(worker["id"])]=position
-		simulation_world.resource_approach_slots[int(candidate["id"])]=slots
-		simulation_world.set_entity_field(worker,"resource_approach_slot",position)
-		simulation_world.worker_role_system.apply(worker,simulation_world.worker_role_system.profile_for_resource(worker,candidate),false)
-		simulation_world.begin_entity_order(worker,"gather",int(candidate["id"]),candidate["pos"],true)
-		simulation_world.movement_system.stop_unit_motion(worker,false)
-		return candidate
+		return _complete_cluster_adoption(worker, candidate, position, displaced)
 	return null
+
+
+func _complete_cluster_adoption(worker: Dictionary, candidate: Dictionary, position: Vector2, displaced: Array) -> Dictionary:
+	var simulation_world = world
+	for other in displaced: release_resource_approach_slot(other)
+	release_resource_approach_slot(worker)
+	simulation_world.set_entity_field(worker,"resource_id",int(candidate["id"]))
+	var slots: Dictionary=simulation_world.resource_approach_slots.get(int(candidate["id"]),{})
+	slots[int(worker["id"])]=position
+	simulation_world.resource_approach_slots[int(candidate["id"])]=slots
+	simulation_world.set_entity_field(worker,"resource_approach_slot",position)
+	simulation_world.worker_role_system.apply(worker,simulation_world.worker_role_system.profile_for_resource(worker,candidate),false)
+	simulation_world.begin_entity_order(worker,"gather",int(candidate["id"]),candidate["pos"],true)
+	simulation_world.movement_system.stop_unit_motion(worker,false)
+	return candidate
 
 
 func _worker_in_resource_range(worker: Dictionary, resource: Dictionary) -> bool:
@@ -295,6 +398,11 @@ func update_dropoff_order(worker: Dictionary, delta: float) -> int:
 		simulation_world.ensure_navigation_destination(worker, destination)
 		return GATHER_UPDATE_CARRY_MOVE if simulation_world.movement_system.move_unit(worker, delta) else GATHER_UPDATE_CARRY_IDLE
 
+	return _complete_resource_deposit(worker, dropoff)
+
+
+func _complete_resource_deposit(worker: Dictionary, dropoff: Dictionary) -> int:
+	var simulation_world = world
 	simulation_world.transition_entity_order(worker, OrderPipeline.FACE_TARGET)
 	simulation_world.movement_system.face_unit_toward(worker, dropoff["pos"])
 	simulation_world.transition_entity_order(worker, OrderPipeline.PERFORM_ACTION)
@@ -327,7 +435,7 @@ func _worker_in_dropoff_range(worker: Dictionary, building: Dictionary) -> bool:
 
 
 func _wait_for_shared_resource(worker: Dictionary, resource: Dictionary) -> bool:
-	if int(resource.get("amount", 0)) <= 0 or int(world.data_repository.runtime_metadata(String(resource.get("kind", ""))).get("max_gatherers", 0)) > 0:
+	if int(resource.get("amount", 0)) <= 0 or int(world.data_repository.runtime_field(String(resource.get("kind", "")), "max_gatherers", 0)) > 0:
 		return false
 	if world.resource_approach_slots.get(int(resource["id"]), {}).is_empty(): return false
 	world.movement_system.stop_unit_motion(worker)
@@ -438,7 +546,8 @@ func prepare_resource_approach(worker: Dictionary, resource: Dictionary) -> bool
 		release_resource_approach_slot(worker)
 	var resource_id := int(resource["id"])
 	var reservations: Dictionary = simulation_world.resource_approach_slots.get(resource_id, {})
-	var runtime_metadata: Dictionary = simulation_world.data_repository.runtime_metadata(String(resource.get("kind", "")))
+	# Only read approach settings here; no configuration escapes into the worker.
+	var runtime_metadata: Dictionary = simulation_world.data_repository.archetype(String(resource.get("kind", ""))).get("runtime", {})
 	var maximum_gatherers := maxi(0, int(runtime_metadata.get("max_gatherers", 0)))
 	if maximum_gatherers > 0 and reservations.size() >= maximum_gatherers:
 		return false
@@ -465,7 +574,7 @@ func replan_work_approach(worker: Dictionary) -> bool:
 	if resource == null or not previous is Vector2 or int(resource.get("amount", 0)) <= 0: return false
 	var reservations: Dictionary = world.resource_approach_slots.get(int(resource["id"]), {})
 	reservations.erase(int(worker["id"]))
-	var candidates := resource_approach_candidates(worker, resource, world.data_repository.runtime_metadata(String(resource.get("kind", ""))))
+	var candidates := resource_approach_candidates(worker, resource, world.data_repository.archetype(String(resource.get("kind", ""))).get("runtime", {}))
 	candidates.assign(candidates.filter(func(point): return point.distance_squared_to(previous) > 0.0625))
 	var slot: Variant = world.approach_system.assign_reachable_slot(worker, candidates, reservations, true)
 	if not slot is Vector2:
@@ -482,7 +591,7 @@ func prepare_group_gather_approach(worker: Dictionary, requested_resource: Dicti
 	# stationary bodies. A single isolated resource still accepts every legal
 	# slot, and source-defined exclusive gatherers keep their original rules.
 	var current_load: int=world.resource_approach_slots.get(int(requested_resource["id"]),{}).size()
-	var exclusive: bool=int(world.data_repository.runtime_metadata(String(requested_resource.get("kind",""))).get("max_gatherers",0))>0
+	var exclusive: bool=int(world.data_repository.runtime_field(String(requested_resource.get("kind","")), "max_gatherers", 0))>0
 	if current_load>=2 and not exclusive and String(worker.get("movement_domain","land"))=="land":
 		var alternatives: Array=[]
 		for candidate in _resources_near(Vector2(requested_resource["pos"]),6.0):
@@ -651,6 +760,16 @@ func begin_resource_return(worker: Dictionary) -> bool:
 func _resources_near(origin: Vector2, radius: float) -> Array:
 	var resources: Array = []
 	var simulation_world = world
+	var probe: Variant = simulation_world.tick_pipeline.performance_probe
+	var started := Time.get_ticks_usec() if probe != null else 0
+	var native_query: bool = native_resource_queries_enabled and radius >= 0.0 and radius <= 32.0 and native_resource_queries_supported
+	if profile_resource_query_alternatives and probe != null:
+		resource_query_profile_sequence += 1
+		native_query = native_query and resource_query_profile_sequence % 2 == 0
+	if native_query:
+		resources = recovery_kernel.resources_in_radius(simulation_world.resource_nodes_by_cell, simulation_world.map_size, origin, radius)
+		if probe != null: probe.observe_microseconds("simulation.gather.resources_near.native", Time.get_ticks_usec() - started)
+		return resources
 	for y in range(maxi(0, floori(origin.y - radius)), mini(simulation_world.map_size.y, floori(origin.y + radius) + 1)):
 		for x in range(maxi(0, floori(origin.x - radius)), mini(simulation_world.map_size.x, floori(origin.x + radius) + 1)):
 			for resource in simulation_world.resource_nodes_by_cell.get(y * simulation_world.map_size.x + x, []):
@@ -658,13 +777,14 @@ func _resources_near(origin: Vector2, radius: float) -> Array:
 					resources.append(resource)
 	# Retain the old global roster order before the existing distance ranking.
 	resources.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
+	if probe != null: probe.observe_microseconds("simulation.gather.resources_near.script", Time.get_ticks_usec() - started)
 	return resources
 
 
 func _dropoff_candidates(team: int, resource_type: int, allowed: Dictionary) -> Array:
 	var simulation_world = world
 	var journal = simulation_world.entity_changes
-	var delta: Dictionary = journal.changes_since(dropoff_roster_revision if dropoff_roster_epoch == journal.epoch else -1)
+	var delta: Dictionary = journal.read_changes_since(dropoff_roster_revision if dropoff_roster_epoch == journal.epoch else -1)
 	var changed: bool = bool(delta["full"])
 	if not changed:
 		for id in delta["ids"]:
@@ -846,6 +966,7 @@ func finish_gather_order(worker: Dictionary, reason: String) -> void:
 
 
 func update_resource_state(resource: Dictionary) -> void:
+	if world.resource_digest_job != null: world.resource_digest_job.before_change(int(resource.get("id", -1)))
 	var amount := int(resource.get("amount", 0))
 	var maximum := maxi(1, int(resource.get("max_amount", amount)))
 	var harvestable_building := bool(resource.get("harvestable", false))

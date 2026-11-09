@@ -37,6 +37,13 @@ func begin(players: Array, source: int, target: int, capture: Callable) -> void:
 func is_prepared() -> bool:
 	return active and records.all(func(record): return bool(record["submitted"]))
 
+func has_runnable_capture() -> bool:
+	for record in records:
+		if not bool(record["submitted"]):
+			# An input that's already sealed is waiting for a worker slot.
+			return record["input"].is_empty()
+	return false
+
 func poll(coordinator, current_source_tick: int, frame_id: int, probe: Variant = null) -> Dictionary:
 	if not active:
 		return {"ready": true, "planned": false}

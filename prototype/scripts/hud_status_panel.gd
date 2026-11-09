@@ -408,10 +408,11 @@ func make_button(icon_width: int) -> Button:
 	count.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	count.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	count.add_theme_font_override("font", Typography.body_font())
-	count.add_theme_font_size_override("font_size", 11)
+	count.add_theme_font_size_override("font_size", 18)
 	count.add_theme_color_override("font_color", INK)
 	count.add_theme_color_override("font_outline_color", Color("201b12"))
-	count.add_theme_constant_override("outline_size", 2)
+	count.add_theme_constant_override("outline_size", 4)
+	count.offset_right = -2
 	button.add_child(count)
 	add_child(button)
 	return button

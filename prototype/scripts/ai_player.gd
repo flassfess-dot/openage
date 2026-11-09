@@ -1,6 +1,12 @@
 class_name RoRAiPlayer
 extends RefCounted
 
+static func configure_runtime_cadence(players: Array) -> void:
+	for ai in players:
+		if String(ai.profile) != "source_campaign_v1": continue
+		if int(ai.economic_interval) >= 20: ai.economic_interval = maxi(int(ai.economic_interval), 40)
+		if int(ai.military_interval) >= 20: ai.military_interval = maxi(int(ai.military_interval), 40)
+
 const NavigationPolicy := preload("res://scripts/ai_navigation_policy.gd")
 const EconomicPlanner := preload("res://scripts/ai_economic_planner.gd")
 const SourceAssignmentGroup := preload("res://scripts/source_ai_assignment_group.gd")

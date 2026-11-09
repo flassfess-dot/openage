@@ -11,6 +11,16 @@ const BUCKET_NAMES := ["land", "water", "frontier_land", "frontier_water", "reac
 const MAX_RECOVERY_CACHE_ENTRIES := 512
 const MAX_RECOVERY_CACHE_BYTES := 512 * 1024
 var recovery_cache_enabled := true
+var native_recovery_enabled := OS.get_environment("ROR_DIAGNOSTIC_DISABLE_NATIVE_AI_RECOVERY") != "1"
+var profile_native_recovery := "--profile-native-ai-recovery-alternatives" in OS.get_cmdline_user_args()
+var profile_recovery_reference := "--profile-native-ai-recovery-reference" in OS.get_cmdline_user_args()
+var recovery_tick_native := true
+var native_recovery_calls := 0
+var script_recovery_calls := 0
+var unsupported_recovery_calls := 0
+var recovery_reference_checks := 0
+var recovery_reference_mismatches := 0
+var recovery_reference_nonempty := 0
 var entries: Dictionary = {}
 var reach_caches: Dictionary = {}
 const MAX_REGION_ACTORS := 8192
@@ -354,7 +364,7 @@ func _bucket_position(bucket: Array, point: Vector2) -> int:
 func _reachable_components(world, team: int, grid) -> Dictionary:
 	var journal = world.entity_changes
 	var cached: Dictionary = reach_caches.get(team, {})
-	var delta: Dictionary = journal.changes_since(int(cached.get("cursor", -1)) if int(cached.get("epoch", -1)) == int(journal.epoch) else -1)
+	var delta: Dictionary = journal.read_changes_since(int(cached.get("cursor", -1)) if int(cached.get("epoch", -1)) == int(journal.epoch) else -1)
 	var full: bool = cached.is_empty() or bool(delta["full"]) or cached.get("surface", -1) != grid.surface_revision or cached.get("surface_grid") != grid
 	if full:
 		cached = {"rows": {}, "units": {"land": {}, "water": {}}, "buildings": {"land": {}, "water": {}}}
@@ -401,12 +411,14 @@ func _update_reach_actor(world, team: int, cached: Dictionary, row: Dictionary, 
 
 func _region_targets(world, team: int, entry: Dictionary, maximum_units: int = 96) -> bool:
 	var planner = world.movement_system.knowledge.planner(world, team)
-	var source_signature := [world.entity_changes.epoch, world.entity_changes.revision, planner.grid.cache_epoch, planner.grid.revision, entry["exploration_revision"]]
+	var source_signature := [world.entity_changes.epoch, world.entity_changes.revision, planner.grid.cache_epoch, planner.grid.revision, entry["exploration_revision"], world.get_fog_of_war().revision_for_player(team)]
 	if entry.get("regions_prepared") == source_signature: return true
 	var pending: Dictionary = entry.get("region_pending", {})
 	if pending.is_empty() or pending["signature"] != source_signature:
 		var actors: Array = world.entity_read_index.legal_entities(world, team, "units").filter(func(unit): return int(unit.get("team", 0)) == team and float(unit.get("hp", 0)) > 0)
 		pending = {"signature": source_signature, "actors": actors, "cursor": 0, "unit_regions": {}, "signatures": {}, "recovery": {}, "live_recovery_ids": {}}
+		if world.read_generation_pins > 0:
+			pending["recovery_inputs"] = {"neighbors": {}, "known_cells": {}, "connectivity": {}}
 		entry["region_pending"] = pending
 	var finish := mini(pending["actors"].size(), int(pending["cursor"]) + maxi(1, maximum_units))
 	var units: Array = pending["actors"].slice(int(pending["cursor"]), finish)
@@ -437,32 +449,34 @@ func _region_targets(world, team: int, entry: Dictionary, maximum_units: int = 9
 		if not preload("res://scripts/ai_navigation_policy.gd").is_failure(String(unit.get("diagnostic_reason", ""))): continue
 		var unit_id := int(unit["id"])
 		live_recovery_ids[unit_id] = true
-		var dependency: Array = _recovery_dependency(world, team, entry, planner, unit) if recovery_cache_enabled else []
+		var dependency: Array = _recovery_dependency(world, team, entry, planner, unit, pending.get("recovery_inputs")) if recovery_cache_enabled else []
 		var cached: Dictionary = recovery_cache.get(unit_id, {})
 		if recovery_cache_enabled and not cached.is_empty() and cached["dependency"] == dependency:
 			if cached["position"] != null: recovery[unit_id] = cached["position"]
 			if world.tick_pipeline.performance_probe != null: world.tick_pipeline.performance_probe.increment("ai.navigation.recovery_reused")
 			continue
-		var origin := Vector2(unit["pos"])
-		var cell := Vector2i(origin.floor())
-		var recovery_radius := float(unit.get("footprint_radius", 0.3))
-		if not planner.is_position_walkable(origin, recovery_radius, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
-			recovery_radius = 0.0
-		var best: Variant = null
-		var best_distance := INF
-		for y in range(cell.y - 2, cell.y + 3):
-			for x in range(cell.x - 2, cell.x + 3):
-				var next := Vector2i(x, y)
-				if not planner.grid.contains(next) or not entry["known"].has(y * world.map_size.x + x): continue
-				var point := Vector2(next) + Vector2(0.5, 0.5)
-				var distance := origin.distance_squared_to(point)
-				if distance <= 0.5625 or distance >= best_distance: continue
-				if not planner.is_position_walkable(point, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))): continue
-				var occupied: bool = world.query_units_near(point, float(unit.get("footprint_radius", 0.3)) + 1.0).any(func(other): return int(other["id"]) != int(unit["id"]) and float(other.get("hp", 0.0)) > 0 and world.is_entity_visible_to(team, other) and point.distance_squared_to(Vector2(other["pos"])) < pow(float(unit.get("footprint_radius", 0.3)) + float(other.get("footprint_radius", 0.3)) + 0.1, 2))
-				if occupied: continue
-				if planner.cells_connected(cell, next, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), recovery_radius):
-					best = point
-					best_distance = distance
+		var probe: Variant = world.tick_pipeline.performance_probe
+		var search_started := Time.get_ticks_usec() if probe != null else 0
+		var use_native: bool = native_recovery_enabled and recovery_cache_enabled and dependency.size() == 8 and get_script().resource_path == "res://scripts/ai_navigation_knowledge.gd" and world.get_script() != null and world.get_script().resource_path == "res://scripts/simulation_world.gd" and world.spatial_index.get_script() != null and world.spatial_index.get_script().resource_path == "res://scripts/spatial_hash.gd"
+		use_native = use_native and recovery_tick_native
+		var native_result: Dictionary = {}
+		if use_native:
+			var spatial = world.spatial_index
+			native_result = planner.local_recovery_position(Vector2(unit["pos"]), float(unit.get("footprint_radius", 0.3)), dependency[6], dependency[7], [spatial.unit_index_by_id, spatial.unit_entities, spatial.unit_positions, spatial.unit_radii], String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)))
+			if native_result.is_empty(): unsupported_recovery_calls += 1
+		var handled := native_result.has("position")
+		var best: Variant = native_result["position"] if handled else _local_recovery_reference(world, team, entry, planner, unit)
+		if handled: native_recovery_calls += 1
+		else: script_recovery_calls += 1
+		if probe != null: probe.observe_microseconds("ai.navigation.recovery.native" if handled else "ai.navigation.recovery.script", Time.get_ticks_usec() - search_started)
+		if profile_recovery_reference and handled and recovery_reference_checks < 512:
+			# Compare both pure queries on this real pinned scene, outside timers.
+			var reference: Variant = _local_recovery_reference(world, team, entry, planner, unit)
+			recovery_reference_checks += 1
+			if reference != null: recovery_reference_nonempty += 1
+			if reference != best:
+				recovery_reference_mismatches += 1
+				best = reference
 		if best != null: recovery[unit_id] = best
 		if recovery_cache_enabled: _remember_recovery(entry, unit_id, dependency, best)
 		if world.tick_pipeline.performance_probe != null: world.tick_pipeline.performance_probe.increment("ai.navigation.recovery_built")
@@ -492,23 +506,71 @@ func _region_targets(world, team: int, entry: Dictionary, maximum_units: int = 9
 	return true
 
 
+func _local_recovery_reference(world, team: int, entry: Dictionary, planner, unit: Dictionary) -> Variant:
+	var origin := Vector2(unit["pos"])
+	var cell := Vector2i(origin.floor())
+	var recovery_radius := float(unit.get("footprint_radius", 0.3))
+	if not planner.is_position_walkable(origin, recovery_radius, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+		recovery_radius = 0.0
+	var best: Variant = null
+	var best_distance := INF
+	for y in range(cell.y - 2, cell.y + 3):
+		for x in range(cell.x - 2, cell.x + 3):
+			var next := Vector2i(x, y)
+			if not planner.grid.contains(next) or not entry["known"].has(y * world.map_size.x + x): continue
+			var point := Vector2(next) + Vector2(0.5, 0.5)
+			var distance := origin.distance_squared_to(point)
+			if distance <= 0.5625 or distance >= best_distance: continue
+			if not planner.is_position_walkable(point, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))): continue
+			var occupied: bool = world.query_units_near(point, float(unit.get("footprint_radius", 0.3)) + 1.0).any(func(other): return int(other["id"]) != int(unit["id"]) and float(other.get("hp", 0.0)) > 0 and world.is_entity_visible_to(team, other) and point.distance_squared_to(Vector2(other["pos"])) < pow(float(unit.get("footprint_radius", 0.3)) + float(other.get("footprint_radius", 0.3)) + 0.1, 2))
+			if occupied: continue
+			if planner.cells_connected(cell, next, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), recovery_radius):
+				best = point
+				best_distance = distance
+	return best
+
+
 # Exact inputs of the old local query, using this observer's learned mask.
 # A broad query covers every +/-2-cell candidate and its collision neighborhood.
 # Only currently visible living units contribute; hidden motion cannot invalidate it.
-func _recovery_dependency(world, team: int, entry: Dictionary, planner, unit: Dictionary) -> Array:
+func _recovery_dependency(world, team: int, entry: Dictionary, planner, unit: Dictionary, source_inputs: Variant = null) -> Array:
 	var origin := Vector2(unit["pos"])
 	var cell := Vector2i(origin.floor())
 	var radius := float(unit.get("footprint_radius", 0.3))
-	var known := PackedByteArray()
-	for y in range(cell.y - 2, cell.y + 3):
-		for x in range(cell.x - 2, cell.x + 3):
-			known.append(int(planner.grid.contains(Vector2i(x, y)) and entry["known"].has(y * world.map_size.x + x)))
+	var domain := String(unit.get("movement_domain", "land"))
+	var restriction := int(unit.get("terrain_restriction", -1))
+	# Nearby workers share observations only within this observer's pinned generation.
+	var known_cells: Dictionary = source_inputs["known_cells"] if source_inputs is Dictionary else {}
+	var known: PackedByteArray = known_cells.get(cell, PackedByteArray())
+	if known.is_empty():
+		known.resize(25)
+		var index := 0
+		for y in range(cell.y - 2, cell.y + 3):
+			for x in range(cell.x - 2, cell.x + 3):
+				known[index] = int(planner.grid.contains(Vector2i(x, y)) and entry["known"].has(y * world.map_size.x + x))
+				index += 1
+		known_cells[cell] = known
+	var connectivity: Dictionary = source_inputs["connectivity"] if source_inputs is Dictionary else {}
+	var profile := [domain, restriction]
+	if not connectivity.has(profile):
+		connectivity[profile] = planner.connectivity_dependency_stamp(domain, restriction)
+	var observations: Dictionary = source_inputs["neighbors"] if source_inputs is Dictionary else {}
 	var neighbors: Array = []
+	var ordered := true
+	var last_id := -1
 	for other in world.query_units_near(origin, radius + 5.0):
-		if int(other["id"]) != int(unit["id"]) and float(other.get("hp", 0.0)) > 0.0 and world.is_entity_visible_to(team, other):
-			neighbors.append([int(other["id"]), Vector2(other["pos"]), float(other.get("footprint_radius", 0.3))])
-	neighbors.sort_custom(func(a, b): return a[0] < b[0])
-	return [world.cache_epoch, origin, radius, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), planner.connectivity_dependency_stamp(String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))), known, neighbors]
+		var other_id := int(other["id"])
+		if other_id == int(unit["id"]): continue
+		if not observations.has(other_id):
+			var visible: bool = float(other.get("hp", 0.0)) > 0.0 and world.is_entity_visible_to(team, other)
+			observations[other_id] = [other_id, Vector2(other["pos"]), float(other.get("footprint_radius", 0.3))] if visible else []
+		var row: Array = observations[other_id]
+		if row.is_empty(): continue
+		neighbors.append(row)
+		ordered = ordered and other_id >= last_id
+		last_id = other_id
+	if not ordered: neighbors.sort_custom(func(a, b): return a[0] < b[0])
+	return [world.cache_epoch, origin, radius, domain, restriction, connectivity[profile], known, neighbors]
 
 func _erase_recovery(entry: Dictionary, id: int) -> void:
 	var cache: Dictionary = entry.get("recovery_cache", {})
