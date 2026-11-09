@@ -64,3 +64,21 @@ static func delta(history: Array, previous: int, current: int) -> Dictionary:
 		if covered <= previous:
 			return {"revision": current, "full": false, "exact": exact, "cells": cells.keys() if exact else [], "region": region}
 	return fallback
+
+
+# Same coverage and region contract as delta(), without collecting exact cells
+# that region-only consumers immediately discard. null retains full fallback.
+static func region_since(history: Array, previous: int, current: int) -> Variant:
+	if previous == current: return Rect2()
+	if previous < 0 or previous > current: return null
+	var covered := current
+	var region := Rect2()
+	var has_region := false
+	for index in range(history.size() - 1, -1, -1):
+		var entry: Dictionary = history[index]
+		if int(entry.get("to", -1)) != covered or not bool(entry.get("has_region", false)): return null
+		region = region.merge(entry["region"]) if has_region else entry["region"]
+		has_region = true
+		covered = int(entry.get("from", -1))
+		if covered <= previous: return region
+	return null

@@ -22,6 +22,7 @@ $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $logPath = Join-Path $qaRoot "full-build-$timestamp.log"
 $godotImportLog = Join-Path $qaRoot "full-build-godot-import-$timestamp.log"
 $godotExportLog = Join-Path $qaRoot "full-build-godot-export-$timestamp.log"
+$provenanceState = Join-Path $qaRoot "full-build-source-$timestamp.json"
 
 New-Item -ItemType Directory -Force -Path $qaRoot | Out-Null
 
@@ -167,6 +168,9 @@ try {
         throw "Native library was not produced: $nativeLibrary"
     }
 
+    & python (Join-Path $PSScriptRoot "ai_build_manifest.py") begin --state $provenanceState
+    if ($LASTEXITCODE -ne 0) { throw "Unable to freeze Release source manifest" }
+
     Invoke-GodotLogged `
         -Name "godot resource import" `
         -StartPercent 25 `
@@ -189,6 +193,9 @@ try {
     foreach ($item in (Get-RoRReleaseArtifacts -Application $application -Package $package -NativeLibrary (Join-Path $distributionRoot "bin\ror_pathfinding.windows.template_release.x86_64.dll") -GodotApplication $godotApplication)) {
         Write-LogLine ("ARTIFACT: {0} | {1} bytes | {2}" -f $item.FullName, $item.Length, $item.LastWriteTime)
     }
+
+    & python (Join-Path $PSScriptRoot "ai_build_manifest.py") finish --state $provenanceState --directory $distributionRoot
+    if ($LASTEXITCODE -ne 0) { throw "Release source verification failed" }
 
     Write-LogLine "Release artifacts exported and copied."
     if ($VerifyStartup) {

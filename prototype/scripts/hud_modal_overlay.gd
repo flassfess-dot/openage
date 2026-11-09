@@ -47,6 +47,10 @@ var named_load_button: Button
 var named_save_input: LineEdit
 var named_load_options: ItemList
 var named_saves: Array[Dictionary] = []
+var named_save_rows_dirty := false
+# Windows timezone discovery can load system resources. Do it during overlay
+# setup or while opening the paused save menu, never for each autosave row.
+var save_timezone_bias_seconds := 0
 var resign_button: Button
 var launcher_button: Button
 var diplomacy_close_button: Button
@@ -96,6 +100,7 @@ var layout_queued := false
 
 
 func _init() -> void:
+	save_timezone_bias_seconds = int(Time.get_time_zone_from_system().get("bias", 0)) * 60
 	z_index = 300
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	set_process_unhandled_input(false)
@@ -203,17 +208,25 @@ func set_save_available(available: bool) -> void:
 
 func set_named_saves(entries: Array[Dictionary]) -> void:
 	named_saves = entries.duplicate(true)
+	named_load_button.disabled = named_saves.is_empty()
+	named_save_rows_dirty = true
+	if visible and active_mode == MODE_MENU and active_section in ["save", "load"]:
+		_refresh_named_save_rows()
+
+
+func _refresh_named_save_rows() -> void:
+	if not named_save_rows_dirty: return
+	named_save_rows_dirty = false
 	named_load_options.clear()
 	save_slots.clear()
 	for entry in named_saves:
 		var label := "%s · %s" % [String(entry.get("slot_name", "")), Timeline.time_label(int(entry.get("tick", 0)))]
 		var saved_at := int(entry.get("saved_at_unix", 0))
 		if saved_at > 0:
-			var local_at := saved_at + int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+			var local_at := saved_at + save_timezone_bias_seconds
 			label += " · %s" % Time.get_datetime_string_from_unix_time(local_at, true)
 		named_load_options.add_item(label)
 		save_slots.add_item(label)
-	named_load_button.disabled = named_saves.is_empty()
 	if not named_saves.is_empty():
 		named_load_options.select(0)
 
@@ -541,6 +554,12 @@ func _wrapping_label(text: String) -> Label:
 
 func show_section(section: String) -> void:
 	if not pages.has(section): return
+	if section in ["save", "load"]:
+		var current_bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+		if current_bias != save_timezone_bias_seconds:
+			save_timezone_bias_seconds = current_bias
+			named_save_rows_dirty = true
+		_refresh_named_save_rows()
 	active_section = section
 	backdrop.show_section(section)
 	for key in pages: pages[key].visible = key == section

@@ -7,6 +7,8 @@ param(
  [string]$OutputRoot='',
  [switch]$Pan,
  [switch]$ProfileStages,
+ [switch]$OwnerStages,
+ [switch]$FineOwnerStages,
  [switch]$NoAutosave,
  [switch]$NoAI,
  [switch]$RequireProcessAutosave,
@@ -33,6 +35,13 @@ $invocation|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $outputF
 $arguments=@('--audio-driver','Dummy','--log-file',(Join-Path $outputFolder 'runtime.log'),'--','--profile-saved-match-frames',('--save='+$save),('--output='+$output),('--seconds='+$Seconds),('--size='+$Size))
 if($DefaultFrameLimit){$arguments+='--default-frame-limit'}elseif($FrameLimit -eq 0){$arguments+='--uncapped'}else{$arguments+=('--frame-limit='+$FrameLimit)}
 if(-not $ProfileStages){$arguments+='--no-probe'}
+if($OwnerStages -or $FineOwnerStages){
+    $invocation['owner_stages']=$true
+    $invocation['owner_fine_stages']=[bool]($FineOwnerStages -or $ProfileStages)
+    # Fine per-actor probes replace the normal native span with script calls.
+    # Ordinary owner timing preserves the code path being measured.
+    $arguments += $(if($FineOwnerStages -or $ProfileStages){'--owner-stages'}else{'--owner-system-stages'})
+}
 if($Pan){$arguments+='--pan'}
 if($VisualHold){$arguments+='--visual-hold'}
 if($NoAutosave){$arguments+='--no-autosave'}

@@ -8,13 +8,17 @@ const BuildSites := preload("res://scripts/build_site_task.gd")
 var coordinator := Coordinator.new()
 var records: Array = []
 var complete := true
+# Rendering preparation shares the match input/loading barrier.
+var additional_loading: Callable = Callable()
 var match_players: Array = []
 var pending_ai_teams: Array[int] = []
 var prepare_build_topology := true
 var prepare_ai_views := true
+var initial_record_count := 0
+var initial_ai_count := 0
 
 func is_loading() -> bool:
-	return not complete
+	return not complete or (additional_loading.is_valid() and additional_loading.call())
 
 func begin(world, players: Array = [], build_topology: bool = true) -> void:
 	shutdown()
@@ -24,6 +28,7 @@ func begin(world, players: Array = [], build_topology: bool = true) -> void:
 		var team := int(player.get("team", 0))
 		if team > 0 and String(player.get("controller", "ai")) == "ai" and bool(player.get("ai", {}).get("enabled", true)):
 			pending_ai_teams.append(team)
+	initial_ai_count = pending_ai_teams.size()
 	var owners: Array = [{"planner": world.pathfinder, "units": world.get_units()}]
 	for player in match_players:
 		var team := int(player.get("team", 0))
@@ -54,11 +59,22 @@ func begin(world, players: Array = [], build_topology: bool = true) -> void:
 			var input: Dictionary = configurations[key].duplicate()
 			input["grid"] = topology
 			records.append({"planner": planner, "input": input, "request": -2, "output": {}})
+	initial_record_count = records.size()
 	complete = records.is_empty() and pending_ai_teams.is_empty()
+
+
+func progress_fraction() -> float:
+	if complete: return 1.0
+	var ready_records := 0
+	for record in records:
+		if int(record["request"]) == -1: ready_records += 1
+	var native_progress := 1.0 if records.is_empty() else float(ready_records) / maxi(1, initial_record_count)
+	var ai_progress := 1.0 if initial_ai_count == 0 else 1.0 - float(pending_ai_teams.size()) / initial_ai_count
+	return native_progress * 0.65 + ai_progress * 0.35
 
 func poll(world) -> bool:
 	if complete:
-		return true
+		return not is_loading()
 	var running := coordinator.pending.size()
 	for record in records:
 		if int(record["request"]) == -2 and running < 4:
@@ -100,6 +116,7 @@ func poll(world) -> bool:
 			for component in output.get("native_components", []):
 				kernel.install_connectivity(component["labels"], float(component["radius"]))
 			planner.native_kernels[output["key"]] = kernel
+			planner.configure_native_route_cache(kernel)
 	records.clear()
 	# Restore these derived AI views under the loading screen, before simulation
 	# resumes. Otherwise each opponent stops the match for a full map scan at
@@ -127,10 +144,12 @@ func poll(world) -> bool:
 				world.get_research_options(int(building["id"]), team)
 			pending_ai_teams.pop_front()
 	complete = pending_ai_teams.is_empty()
-	return complete
+	return not is_loading()
 
 func shutdown() -> void:
 	coordinator.shutdown()
 	records.clear()
 	pending_ai_teams.clear()
 	complete = true
+	initial_record_count = 0
+	initial_ai_count = 0

@@ -42,15 +42,54 @@ $arguments = @(
 & $cmakePath @arguments
 if ($LASTEXITCODE -ne 0) { throw "Native pathfinding configuration failed with exit code $LASTEXITCODE" }
 
+# Backups can restore an older mtime together with changed header contents.
+# A mixed set of C++ object layouts can link successfully and crash in Godot.
+# Trust a content receipt, then invalidate this project's objects on any change.
+# The much larger, pinned godot-cpp library keeps its incremental build cache.
+$libraryName = "ror_pathfinding.windows.template_release.x86_64.dll"
+$builtLibrary = Join-Path $buildPath "bin\$libraryName"
+$inputFiles = @(Get-ChildItem -LiteralPath (Join-Path $sourcePath "src") -File | Where-Object { $_.Extension -in @(".cpp", ".hpp", ".inc") })
+$inputFiles += @(Get-Item -LiteralPath (Join-Path $sourcePath "CMakeLists.txt"), (Join-Path $sourcePath "godot-cpp-profile.json"))
+$inputHashes = [ordered]@{}
+foreach ($inputFile in $inputFiles | Sort-Object FullName) {
+    $relativeName = $inputFile.FullName.Substring($sourcePath.Length).TrimStart('\', '/')
+    $inputHashes[$relativeName] = (Get-FileHash -LiteralPath $inputFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$inputState = [ordered]@{ build_type = $BuildType; godot_cpp = $actualGodotCppRevision; inputs = $inputHashes }
+$inputSignature = $inputState | ConvertTo-Json -Depth 4 -Compress
+$receiptPath = Join-Path $buildPath "native-project-content-receipt.json"
+$previousReceipt = $null
+if (Test-Path -LiteralPath $receiptPath) {
+    try { $previousReceipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json } catch { $previousReceipt = $null }
+}
+$contentMatches = $previousReceipt -and $previousReceipt.signature -eq $inputSignature -and (Test-Path -LiteralPath $builtLibrary)
+if ($contentMatches) { $contentMatches = $previousReceipt.library_sha256 -eq (Get-FileHash -LiteralPath $builtLibrary -Algorithm SHA256).Hash.ToLowerInvariant() }
+if (-not $contentMatches) {
+    $resolvedBuildRoot = [IO.Path]::GetFullPath($buildPath).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    $objectRoot = [IO.Path]::GetFullPath((Join-Path $buildPath "CMakeFiles\ror_pathfinding.dir"))
+    if (-not $objectRoot.StartsWith($resolvedBuildRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Native object directory escaped the build root" }
+    if (Test-Path -LiteralPath $objectRoot) {
+        foreach ($objectFile in Get-ChildItem -LiteralPath $objectRoot -File -Recurse -Filter "*.obj") {
+            if (-not $objectFile.FullName.StartsWith($objectRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "Native object escaped its target directory" }
+            Remove-Item -LiteralPath $objectFile.FullName -Force
+        }
+    }
+    Write-Host "Native project content changed; recompiling all module objects"
+}
+
 & $cmakePath --build $buildPath --config $BuildType --parallel 8
 if ($LASTEXITCODE -ne 0) {
     throw "Native pathfinding build failed with exit code $LASTEXITCODE"
 }
 
-$libraryName = "ror_pathfinding.windows.template_release.x86_64.dll"
-$builtLibrary = Join-Path $buildPath "bin\$libraryName"
 $targetLibrary = Join-Path $projectRoot "prototype\bin\$libraryName"
 if (-not (Test-Path -LiteralPath $builtLibrary)) { throw "Native build output missing: $builtLibrary" }
+foreach ($inputFile in $inputFiles) {
+    $relativeName = $inputFile.FullName.Substring($sourcePath.Length).TrimStart('\', '/')
+    if ((Get-FileHash -LiteralPath $inputFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $inputHashes[$relativeName]) { throw "Native source changed during the build: $relativeName" }
+}
+[ordered]@{ signature = $inputSignature; state = $inputState; library_sha256 = (Get-FileHash -LiteralPath $builtLibrary -Algorithm SHA256).Hash.ToLowerInvariant() } |
+    ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $receiptPath -Encoding UTF8
 # Stage before replacing: a running preview may still map the previous DLL.
 $previousLibrary = $null
 $stagedLibrary = "$targetLibrary.new"

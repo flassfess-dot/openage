@@ -17,9 +17,23 @@ var active_world
 var active_team := -1
 var active_versions: Dictionary = {}
 var active_cache: Dictionary = {}
+var prepared_projection_enabled := true
 const MAX_OBSERVERS := 8
 const MAX_PROJECTION_BYTES := 8 * 1024 * 1024
 const MAX_PROJECTIONS := 16384
+const PROJECTION_CATEGORIES := ["units", "buildings", "objectives"]
+const PROJECTION_SCHEMA := {
+	"categories": PROJECTION_CATEGORIES,
+	"fields": ReadContract.AI_FIELDS, "visible_fields": ReadContract.VISIBLE_AI_FIELDS,
+	"array_fields": ReadContract.ARRAY_FIELDS, "private_trade_fields": ReadContract.PRIVATE_TRADE_FIELDS,
+	"render_key": ReadContract.RENDER_SCHEMA_KEY, "render_version": ReadContract.SCHEMA_VERSION,
+	"max_records": MAX_PROJECTIONS, "max_bytes": MAX_PROJECTION_BYTES,
+}
+var projection_kernel: Variant = null
+var projection_capture_sequence := 0
+var profile_projection := "--profile-ai-projection-alternatives" in OS.get_cmdline_user_args()
+var compare_projection := "--compare-ai-projection-results" in OS.get_cmdline_user_args()
+var projection_counters: Dictionary = {}
 
 
 func clear() -> void:
@@ -34,7 +48,7 @@ func observe_with_queries(world, tick: int, observer_team: int, options: Diction
 
 
 # Retain legal factual records only; placement and command queries are explicit.
-func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> Dictionary:
+func observe(world, tick: int, observer_team: int, options: Dictionary = {}, prepared: Dictionary = {}) -> Dictionary:
 	if observer_team <= 0 or not _supports_retained_projection(options):
 		return SimulationSnapshot.presentation(world, tick, observer_team, options)
 	var probe: Variant = options.get("performance_probe")
@@ -53,15 +67,32 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 	active_team = observer_team
 	active_versions = cache.get("versions", {})
 	cache["versions"] = active_versions
+	var prepared_ready: bool = (
+		prepared_projection_enabled
+		and not prepared.is_empty()
+		and int(world.read_generation_pins) > 0
+		and prepared.get("world") is WeakRef
+		and prepared["world"].get_ref() == world
+		and int(prepared.get("team", -1)) == observer_team
+		and int(prepared.get("epoch", -1)) == int(world.entity_changes.epoch)
+		and int(prepared.get("revision", -1)) == int(world.entity_changes.revision)
+		and int(prepared.get("fog_revision", -1)) == int(fog.revision)
+		and bool(prepared.get("complete", false))
+		and is_same(prepared.get("cache"), cache)
+	)
 
 	var units: Array = []
 	var seen_unit_ids: Dictionary = {}
-	for unit_value in world.entity_read_index.legal_entities(world, observer_team, "units"):
+	# These owner-local rows were selected with the observer's fog at the
+	# pinned revision above. The live references expire with this capture.
+	var legal: Dictionary = prepared.get("legal", {}) if prepared_ready else {}
+	var unit_rows: Array = legal["units"] if legal.has("units") else world.entity_read_index.legal_entities(world, observer_team, "units")
+	for unit_value in unit_rows:
 		var unit: Dictionary = unit_value
-		if not _entity_visible(unit, observer_team, observer_states, fog_map_size):
+		if not prepared_ready and not _entity_visible(unit, observer_team, observer_states, fog_map_size):
 			continue
 		var unit_id := int(unit.get("id", -1))
-		var projected := _project_entity(cache["units"], unit, observer_team)
+		var projected := _project_entity(cache["units"], unit, observer_team, prepared_ready)
 		# Alliance shares vision, not the transport's private cargo manifest/count.
 		units.append(projected)
 		seen_unit_ids[unit_id] = true
@@ -83,12 +114,13 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 
 	var objectives: Array = []
 	var seen_objective_ids: Dictionary = {}
-	for objective_value in world.entity_read_index.legal_entities(world, observer_team, "objectives"):
+	var objective_rows: Array = legal["objectives"] if legal.has("objectives") else world.entity_read_index.legal_entities(world, observer_team, "objectives")
+	for objective_value in objective_rows:
 		var objective: Dictionary = objective_value
-		if not bool(objective.get("active", true)) or not _entity_visible(objective, observer_team, observer_states, fog_map_size):
+		if not bool(objective.get("active", true)) or (not prepared_ready and not _entity_visible(objective, observer_team, observer_states, fog_map_size)):
 			continue
 		var objective_id := int(objective.get("id", -1))
-		objectives.append(_project_entity(cache["objectives"], objective, observer_team))
+		objectives.append(_project_entity(cache["objectives"], objective, observer_team, prepared_ready))
 		seen_objective_ids[objective_id] = true
 	_prune_entity_cache(cache["objectives"], seen_objective_ids)
 	_sort_by_entity_id_if_needed(objectives)
@@ -99,7 +131,8 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 	var seen_building_ids: Dictionary = {}
 	var remembered_buildings: Dictionary = world.last_known_buildings_by_player.get(observer_team, {})
 	var blocked_population_queues := 0
-	for building_value in world.entity_read_index.legal_entities(world, observer_team, "buildings"):
+	var building_rows: Array = legal["buildings"] if legal.has("buildings") else world.entity_read_index.legal_entities(world, observer_team, "buildings")
+	for building_value in building_rows:
 		var building: Dictionary = building_value
 		var building_id := int(building.get("id", -1))
 		var own_building := int(building.get("team", 0)) == observer_team
@@ -107,7 +140,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 			var own_queue: Array = building.get("production_queue", [])
 			if not own_queue.is_empty() and String(own_queue[0].get("status", "")) == "blocked_population":
 				blocked_population_queues += 1
-		var visible_now := _entity_visible(building, observer_team, observer_states, fog_map_size)
+		var visible_now := prepared_ready or _entity_visible(building, observer_team, observer_states, fog_map_size)
 		var knowledge: Dictionary = building
 		if visible_now:
 			_remember_visible_building(remembered_buildings, building_id, building)
@@ -122,7 +155,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 				if remembered_state == 2:
 					remembered_buildings.erase(building_id)
 				continue
-		var projected := _project_entity(cache["buildings"], knowledge, observer_team)
+		var projected := _project_entity(cache["buildings"], knowledge, observer_team, prepared_ready)
 		if not visible_now:
 			projected = projected.duplicate()
 			projected["last_known"] = true
@@ -150,7 +183,7 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}) -> 
 			continue
 		if memory_state != 1:
 			continue
-		var projected_memory := _project_entity(cache["buildings"], memory, observer_team)
+		var projected_memory := _project_entity(cache["buildings"], memory, observer_team, prepared_ready)
 		projected_memory = projected_memory.duplicate()
 		projected_memory["last_known"] = true
 		buildings.append(projected_memory)
@@ -229,10 +262,13 @@ func _cache_for(observer_team: int) -> Dictionary:
 	return cache
 
 
-func _project_entity(entity_cache: Dictionary, source: Dictionary, observer_team: int) -> Dictionary:
+func _project_entity(entity_cache: Dictionary, source: Dictionary, observer_team: int, prepared: bool = false) -> Dictionary:
 	var entity_id := int(source.get("id", -1))
 	var immutable: Dictionary
 	var memory := ReadContract.is_render_record(source)
+	# A completed preparation owns this cache at the same pinned world/fog
+	# generation. Capacity eviction may still miss a row; retain the normal path.
+	if prepared and not memory and entity_cache.has(entity_id): return entity_cache[entity_id]
 	var version: int = active_world.entity_changes.revision_for(entity_id, 255) if active_world != null and not memory else -1
 	var key := Vector2i(entity_id, 1 if memory else 0)
 	if not memory and entity_cache.has(entity_id) and active_versions.get(key, -2) == version:
@@ -352,27 +388,132 @@ func _observe_stage(probe: Variant, metric: String, started: int) -> void:
 	if probe != null:
 		probe.observe_microseconds(metric, Time.get_ticks_usec() - started)
 
+func _projection_counter(key: String, value: int = 1) -> void:
+	projection_counters[key] = int(projection_counters.get(key, 0)) + value
+
+func _projection_rows_reference(legal_sets: Array, cache: Dictionary, world) -> Array:
+	var rows: Array = []
+	for category_index in range(PROJECTION_CATEGORIES.size()):
+		var category: String = PROJECTION_CATEGORIES[category_index]
+		for row in legal_sets[category_index]:
+			var entity_id := int(row.get("id", -1))
+			if not ReadContract.is_render_record(row) and cache[category].has(entity_id) and cache["versions"].get(Vector2i(entity_id, 0), -2) == world.entity_changes.revision_for(entity_id, 255):
+				continue
+			rows.append({"source": row, "category": category})
+	return rows
+
+func _projection_cache_copy(cache: Dictionary) -> Dictionary:
+	# Copy mutable cache containers, retaining the exact immutable DTO islands.
+	var copy := cache.duplicate()
+	for category in PROJECTION_CATEGORIES:
+		copy[category] = cache[category].duplicate()
+	copy["versions"] = cache["versions"].duplicate()
+	if cache.has("retained"): copy["retained"] = cache["retained"].duplicate()
+	return copy
+
+func _compare_projection_portion(cache: Dictionary, before: Dictionary, rows: Array, begin: int, finish: int, team: int) -> void:
+	var started := Time.get_ticks_usec()
+	active_cache = before
+	active_versions = before["versions"]
+	for index in range(begin, finish):
+		var item: Dictionary = rows[index]
+		_project_entity(before[item["category"]], item["source"], team)
+	active_cache = cache
+	active_versions = cache["versions"]
+	_projection_counter("compared_portions")
+	_projection_counter("comparison_us", Time.get_ticks_usec() - started)
+	if cache != before:
+		_projection_counter("mismatches")
+		push_error("Native AI retained projection differs from the canonical cache")
+	# Also sample the independent field/privacy contract on the actual legal
+	# source. The normal cache comparison deliberately uses the existing kernel.
+	var record_started := Time.get_ticks_usec()
+	for index in range(begin, finish, 16):
+		var item: Dictionary = rows[index]
+		var source: Dictionary = item["source"]
+		var entity_id := int(source.get("id", -1))
+		if not cache[item["category"]].has(entity_id): continue
+		var expected := ReadContract.ai_reference(source, team)
+		_projection_counter("compared_records")
+		if cache[item["category"]][entity_id] != expected:
+			_projection_counter("mismatches")
+			push_error("Native AI projection differs from the independent field contract")
+	_projection_counter("record_comparison_us", Time.get_ticks_usec() - record_started)
+
 func prepare_projection(world, team: int, pending: Dictionary, maximum: int = 96) -> bool:
 	var cache: Dictionary = _cache_for(team)
 	if int(cache.get("epoch", -1)) != int(world.entity_changes.epoch):
 		cache = {"units": {}, "buildings": {}, "objectives": {}, "versions": {}, "epoch": int(world.entity_changes.epoch)}
 		observer_caches[team] = cache
+	# Projection portions may alternate between observers. Bookkeeping and
+	# eviction must belong to the same cache as the rows being prepared.
+	active_cache = cache
 	active_world = world
 	active_team = team
 	active_versions = cache.get("versions", {})
 	cache["versions"] = active_versions
 	if not pending.has("rows"):
-		pending["rows"] = []
+		projection_capture_sequence += 1
+		var native := ReadContract.native_enabled and ReadContract.native_ai_enabled and ClassDB.class_exists("RoRReadModelKernel")
+		if native and projection_kernel == null: projection_kernel = ClassDB.instantiate("RoRReadModelKernel")
+		native = native and projection_kernel.has_method("collect_ai_projection_changes") and projection_kernel.has_method("retain_ai_projection_portion")
+		if profile_projection: native = native and projection_capture_sequence % 2 == 1
+		pending["native"] = native
+		pending["compare"] = native and compare_projection and (projection_capture_sequence <= 16 or projection_capture_sequence % 64 == 1)
+		var legal_started := Time.get_ticks_usec() if profile_projection or compare_projection else 0
+		var legal_sets: Array = []
+		var legal := {}
+		for category in PROJECTION_CATEGORIES:
+			var rows: Array = world.entity_read_index.legal_entities(world, team, category)
+			legal_sets.append(rows)
+			legal[category] = rows
+		pending["legal"] = legal
+		if legal_started > 0: _projection_counter("legal_sources_us", Time.get_ticks_usec() - legal_started)
+		var started := Time.get_ticks_usec() if profile_projection or compare_projection else 0
+		var collected: Dictionary = projection_kernel.collect_ai_projection_changes(legal_sets, PROJECTION_CATEGORIES, cache, world.entity_changes.version_source(), PROJECTION_SCHEMA) if native else {}
+		if native and not bool(collected.get("supported", false)):
+			native = false
+			pending["native"] = false
+			pending["compare"] = false
+		pending["rows"] = collected["rows"] if native else _projection_rows_reference(legal_sets, cache, world)
+		if started > 0:
+			_projection_counter("collect_native_us" if native else "collect_reference_us", Time.get_ticks_usec() - started)
+			_projection_counter("native_captures" if native else "reference_captures")
+		if bool(pending["compare"]):
+			var comparison_started := Time.get_ticks_usec()
+			var expected := _projection_rows_reference(legal_sets, cache, world)
+			var actual: Array = pending["rows"]
+			var matches := actual.size() == expected.size()
+			for index in range(mini(actual.size(), expected.size())):
+				matches = matches and actual[index]["category"] == expected[index]["category"] and is_same(actual[index]["source"], expected[index]["source"])
+			_projection_counter("compared_collections")
+			_projection_counter("comparison_us", Time.get_ticks_usec() - comparison_started)
+			if not matches:
+				_projection_counter("mismatches")
+				push_error("Native AI projection change set differs from legal source collection")
 		pending["cursor"] = 0
-		for category in ["units", "buildings", "objectives"]:
-			for row in world.entity_read_index.legal_entities(world, team, category):
-				var entity_id := int(row.get("id", -1))
-				if not ReadContract.is_render_record(row) and cache[category].has(entity_id) and active_versions.get(Vector2i(entity_id, 0), -2) == world.entity_changes.revision_for(entity_id, 255):
-					continue
-				pending["rows"].append({"source": row, "category": category})
 	var finish := mini(pending["rows"].size(), int(pending["cursor"]) + maxi(1, maximum))
-	for index in range(int(pending["cursor"]), finish):
-		var item: Dictionary = pending["rows"][index]
-		_project_entity(cache[item["category"]], item["source"], team)
+	var before := _projection_cache_copy(cache) if bool(pending["compare"]) else {}
+	var started := Time.get_ticks_usec() if profile_projection or compare_projection else 0
+	var native: bool = pending["native"]
+	if native: native = projection_kernel.retain_ai_projection_portion(pending["rows"], int(pending["cursor"]), finish, team, cache, world.entity_changes.version_source(), PROJECTION_SCHEMA)
+	if not native:
+		for index in range(int(pending["cursor"]), finish):
+			var item: Dictionary = pending["rows"][index]
+			_project_entity(cache[item["category"]], item["source"], team)
+	if started > 0:
+		_projection_counter("native_us" if native else "reference_us", Time.get_ticks_usec() - started)
+		_projection_counter("native_portions" if native else "reference_portions")
+		_projection_counter("native_rows" if native else "reference_rows", finish - int(pending["cursor"]))
+	if bool(pending["compare"]): _compare_projection_portion(cache, before, pending["rows"], int(pending["cursor"]), finish, team)
 	pending["cursor"] = finish
-	return finish == pending["rows"].size()
+	var complete: bool = finish == pending["rows"].size()
+	if complete:
+		pending["world"] = weakref(world)
+		pending["team"] = team
+		pending["epoch"] = int(world.entity_changes.epoch)
+		pending["revision"] = int(world.entity_changes.revision)
+		pending["fog_revision"] = int(world.get_fog_of_war().revision)
+		pending["cache"] = cache
+		pending["complete"] = true
+	return complete

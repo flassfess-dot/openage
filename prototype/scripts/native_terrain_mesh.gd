@@ -5,6 +5,7 @@ const Terrain := preload("res://scripts/environment_terrain.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const RiverSurface := preload("res://scripts/random_map_river_surface.gd")
 static var native_cached_samples_enabled := true
+static var compact_planar_base_enabled := OS.get_environment("ROR_DIAGNOSTIC_PLANAR_TERRAIN") != "0"
 
 # Capture each terrain/height sample once, instead of crossing the script and
 # dictionary boundary for every vertex of every material layer. The native
@@ -48,7 +49,7 @@ static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pa
 			field_samples = capture_river_reference(bounds, elevation.river_shape)
 		river.append_array(field_samples)
 	timings["capture_us"] = Time.get_ticks_usec() - started
-	return {"bounds": bounds, "cells": cells, "heights": heights, "frames": frames, "materials": materials, "seed": seed, "river": river}
+	return {"bounds": bounds, "cells": cells, "heights": heights, "frames": frames, "materials": materials, "seed": seed, "river": river, "compact_planar_base":compact_planar_base_enabled}
 
 
 static func capture_river_reference(bounds: Rect2i, shape: Dictionary) -> PackedFloat32Array:
@@ -67,9 +68,23 @@ static func build_arrays(kernel, bounds: Rect2i, seed: int, provider: Callable, 
 static func build_request(kernel, request: Dictionary, subdivisions: int = 16, timings: Dictionary = {}) -> Array:
 	if kernel == null or request.is_empty(): return []
 	var started := Time.get_ticks_usec()
-	var geometry: Dictionary = kernel.build_mesh(request["bounds"], request["cells"], request["heights"], request["frames"], request["materials"], request["seed"], subdivisions, request.get("river", PackedFloat32Array()))
+	var geometry: Dictionary
+	if kernel.has_method("supports_planar_base_compaction"):
+		geometry = kernel.build_mesh(request["bounds"], request["cells"], request["heights"], request["frames"], request["materials"], request["seed"], subdivisions, request.get("river", PackedFloat32Array()), bool(request.get("compact_planar_base", compact_planar_base_enabled)))
+	else:
+		geometry = kernel.build_mesh(request["bounds"], request["cells"], request["heights"], request["frames"], request["materials"], request["seed"], subdivisions, request.get("river", PackedFloat32Array()))
 	timings["native_us"] = Time.get_ticks_usec() - started
-	if geometry.is_empty() or geometry["vertices"].is_empty(): return []
+	timings["unchanged_river_land_cells"] = int(geometry.get("unchanged_river_land_cells", 0))
+	timings["discarded_transparent_triangles"] = int(geometry.get("discarded_transparent_triangles", 0))
+	timings["avoided_vertices"] = int(geometry.get("avoided_vertices", 0))
+	timings["planar_base_cells"] = int(geometry.get("planar_base_cells", 0))
+	timings["planar_base_triangles_saved"] = int(geometry.get("planar_base_triangles_saved", 0))
+	if geometry.is_empty(): return []
+	if geometry["vertices"].is_empty():
+		# A finite map may have rows with no drawable cells. An empty, valid
+		# surface must not turn whole-map preparation into a failed job.
+		timings["valid_empty_geometry"] = true
+		return []
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = geometry["vertices"]
@@ -86,10 +101,22 @@ var request: Dictionary
 var result: Array = []
 var result_chunks: Array = []
 var timings: Dictionary = {}
+var subdivisions := 16
+var split_result := true
+
+class RetiredBuffers extends RefCounted:
+	var chunks: Array = []
+	var elapsed_us := 0
+	var chunk_count := 0
+
+	func run() -> void:
+		var started := Time.get_ticks_usec()
+		chunks.clear()
+		elapsed_us = Time.get_ticks_usec() - started
 
 func run() -> void:
-	result = build_request(kernel, request, 16, timings)
-	if not result.is_empty() and kernel.has_method("split_mesh_arrays"):
+	result = build_request(kernel, request, subdivisions, timings)
+	if split_result and not result.is_empty() and kernel.has_method("split_mesh_arrays"):
 		var started := Time.get_ticks_usec()
 		result_chunks = kernel.split_mesh_arrays(result, 16384)
 		timings["split_us"] = Time.get_ticks_usec()-started

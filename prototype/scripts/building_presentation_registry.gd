@@ -38,6 +38,8 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 	object_catalog = object_data
 	graphics_catalog = graphics_data
 	asset_metadata = metadata
+	gate_presentations.visual_sources.clear()
+	gate_presentations.cache.clear()
 	source_records_by_key.clear()
 	presentation_facing_by_key.clear()
 	civilization_icon_sets.clear()
@@ -178,6 +180,9 @@ func prewarm_buildings(buildings: Array) -> void:
 		var player := _player_asset_id(int(building.get("team", 1)))
 		var source := _source_record(building)
 		var graphics: Dictionary = source.get("graphics", {})
+		if String(building.get("kind","")) == "gate":
+			for graphic_id in gate_presentations.graphic_dependencies(self,building):
+				requested[Vector2i(int(graphic_id),player)] = true
 		for graphic_name in ["idle", "move", "attack", "death", "construction"]:
 			var graphic_id := int(graphics.get(graphic_name, -1))
 			if graphic_id >= 0:
@@ -208,6 +213,11 @@ func prewarm_buildings(buildings: Array) -> void:
 		var logical_angle_count := maxi(1, int(graphics_catalog.get("graphics", {}).get(String.num_int64(key.x), {}).get("angle_count", 1)))
 		for logical_facing in range(logical_angle_count):
 			_composite_parts(key.x, key.y, logical_facing, 0.0)
+
+	# Complete composite definitions while loading, after their dependencies.
+	for building in buildings:
+		if String(building.get("kind","")) == "gate":
+			gate_presentations.frame_info(self,building,_player_asset_id(int(building.get("team",1))))
 
 
 func imported_frame_count(graphic_id: int, player: int = 1) -> int:

@@ -9,6 +9,7 @@ const AntiqueTheme := preload("res://scripts/antique_ui_theme.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 const MatchDefinition := preload("res://scripts/match_definition.gd")
 const GAME_SCENE := preload("res://main.tscn")
+const MatchLoadJob := preload("res://scripts/match_load_job.gd")
 
 const SCREEN_MAIN := "main"
 const SCREEN_SINGLE_PLAYER := "single_player"
@@ -27,6 +28,13 @@ const DEFAULT_POPULATION_LIMIT := 500
 # Keep the paused single-player match in the scene tree while the launcher is
 # open, making both saving and returning to that match available here.
 var active_game
+var initial_load_path := ""
+var _load_job: RefCounted
+var _finishing_saved_load := false
+var _load_started_at := 0
+var _load_progress := 0.0
+var _load_stage := ""
+var _retirement_thread := Thread.new()
 var save_list: ItemList
 var save_name_input: LineEdit
 var save_details_label: Label
@@ -132,6 +140,9 @@ func _ready() -> void:
 		var verifier = load("res://tests/manual/verify_packaged_startup.gd").new()
 		get_tree().root.add_child.call_deferred(verifier)
 		return
+	if not initial_load_path.is_empty():
+		load_saved_game.call_deferred(initial_load_path)
+		return
 	if is_instance_valid(active_game):
 		return
 	var requested := MatchRegistry.requested_match(OS.get_cmdline_args())
@@ -146,6 +157,18 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	if _load_job != null or _finishing_saved_load:
+		if _load_job != null and not _finishing_saved_load:
+			var loading: Dictionary = _load_job.snapshot()
+			_update_saved_load_progress(float(loading["progress"]), String(loading["stage"]))
+			if bool(loading["complete"]):
+				_finishing_saved_load = true
+				var restored: Dictionary = _load_job.take_result()
+				_load_job = null
+				_finish_saved_load(restored)
+		else:
+			_update_saved_load_progress(_load_progress, _load_stage)
+		return
 	_poll_launcher_save()
 	if current_screen != SCREEN_LOADING or _generation_job == null or _finishing_generation:
 		return
@@ -161,6 +184,8 @@ func _process(_delta: float) -> void:
 
 
 func _exit_tree() -> void:
+	if _load_job != null: _load_job.shutdown()
+	if _retirement_thread.is_started(): _retirement_thread.wait_to_finish()
 	if _generation_job != null:
 		_generation_job.shutdown()
 
@@ -668,7 +693,7 @@ func _show_loading_screen(title_text: String, initial_status: String) -> void:
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 14)
 	panel.add_child(column)
-	var message := _label("Империя рождается…", 20, HORIZONTAL_ALIGNMENT_CENTER)
+	var message := _label("Восстановление вашей игры" if title_text == "ЗАГРУЗКА СОХРАНЕНИЯ" else "Империя рождается…", 20, HORIZONTAL_ALIGNMENT_CENTER)
 	LauncherTheme.heading(message, 20)
 	column.add_child(message)
 	generation_progress_bar = ProgressBar.new()
@@ -1007,37 +1032,102 @@ func _set_save_status(message: String, failed: bool = false) -> void:
 
 
 func _load_selected_save() -> void:
-	if save_list == null or _saving_current_game:
-		return
+	if save_list == null or _saving_current_game: return
 	var selection := save_list.get_selected_items()
-	if selection.is_empty() or selection[0] >= saved_games.size():
+	if selection.is_empty() or selection[0] >= saved_games.size(): return
+	load_saved_game(String(saved_games[selection[0]]["path"]))
+
+
+func load_saved_game(path: String) -> void:
+	if _load_job != null or _finishing_saved_load or _saving_current_game: return
+	_load_progress = 0.0
+	_load_stage = "Подготовка загрузки"
+	_load_started_at = Time.get_ticks_msec()
+	if not get_window().close_requested.is_connected(_loading_window_close): get_window().close_requested.connect(_loading_window_close)
+	_show_loading_screen("ЗАГРУЗКА СОХРАНЕНИЯ", _load_stage)
+	_load_job = MatchLoadJob.new()
+	var autosave_enabled := true
+	var autosave_path := GameSaveArchive.AUTOSAVE_PATH
+	var previous_saves: RefCounted
+	if is_instance_valid(active_game):
+		autosave_enabled = bool(active_game.autosave.enabled)
+		autosave_path = String(active_game.autosave.save_path)
+		previous_saves = active_game.background_saves
+	if not _load_job.start(path, autosave_enabled, autosave_path, previous_saves):
+		_load_job = null
+		_saved_load_failed("load_worker_unavailable")
+
+
+func _loading_window_close() -> void:
+	if not is_instance_valid(active_game): get_tree().quit()
+
+
+func _update_saved_load_progress(value: float, stage: String) -> void:
+	_load_progress = maxf(_load_progress, clampf(value, 0.0, 1.0))
+	_load_stage = stage
+	if is_instance_valid(generation_progress_bar): generation_progress_bar.value = _load_progress * 100.0
+	if is_instance_valid(status_label):
+		status_label.text = "%s  ·  %.1f с" % [stage, float(Time.get_ticks_msec() - _load_started_at) / 1000.0]
+
+
+func _saved_load_failed(reason: String) -> void:
+	_finishing_saved_load = false
+	if is_instance_valid(status_label):
+		status_label.text = GameSaveArchive.error_message(reason)
+		status_label.add_theme_color_override("font_color", Color("f1a994"))
+	var back := _menu_button("НАЗАД", _show_main_menu, true, "Вернуться в меню", "load_failed_back")
+	back.position = Vector2(108, 550)
+	back.size = Vector2(584, 48)
+	_screen_root.add_child(back)
+
+
+func _finish_saved_load(restored: Dictionary) -> void:
+	if not String(restored.get("error", "load_worker_failed")).is_empty():
+		_saved_load_failed(String(restored.get("error", "load_worker_failed")))
 		return
-	var path := String(saved_games[selection[0]]["path"])
-	_show_loading_screen("ЗАГРУЗКА СОХРАНЕНИЯ", "Восстановление вашей игры…")
-	await get_tree().process_frame
-	var inspected := GameSaveArchive.read(path)
-	if not bool(inspected.get("valid", false)):
-		_show_save_menu()
-		_set_save_status(GameSaveArchive.error_message(String(inspected.get("error", "archive_invalid"))), true)
-		return
-	# The current checkpoint contains the match and map. Initialize the common
-	# scene/catalogs, then let its lifecycle owner restore that embedded state.
 	var game = GAME_SCENE.instantiate()
+	game.prepared_load_bootstrap = true
 	game.process_mode = Node.PROCESS_MODE_DISABLED
 	game.hide()
 	get_tree().root.add_child(game)
-	if not game.load_game_from_path(path, inspected):
-		var message := GameSaveArchive.error_message(game.last_save_error)
+	if not await game.initialize_prepared_load_async(restored, _update_saved_load_progress):
+		var reason := String(game.last_save_error)
+		restored["autosave"].shutdown()
 		game.queue_free()
-		_show_save_menu()
-		_set_save_status(message, true)
+		_saved_load_failed(reason)
 		return
+	# Complete previous saves only after the replacement can be adopted. The
+	# paused previous scene remains available when archive restoration fails.
+	var retiring: Array = []
+	var runtime_owners: Array = []
+	if is_instance_valid(active_game):
+		retiring = [active_game.background_saves, active_game.autosave]
+		runtime_owners = [active_game.simulation_world, active_game.game_controller]
+	if not retiring.is_empty():
+		_update_saved_load_progress(0.99, "Завершение текущих сохранений")
+		if _retirement_thread.start(MatchLoadJob.close_saves.bind(retiring)) != OK:
+			game.queue_free()
+			_saved_load_failed("load_worker_unavailable")
+			return
+		while _retirement_thread.is_alive(): await get_tree().process_frame
+		_retirement_thread.wait_to_finish()
+		_retirement_thread = Thread.new()
+	var previous_scene = active_game
 	_discard_active_game()
 	await get_tree().process_frame
+	while is_instance_valid(previous_scene): await get_tree().process_frame
+	if not runtime_owners.is_empty():
+		_update_saved_load_progress(0.99, "Освобождение предыдущей игры")
+		var retirement_task := WorkerThreadPool.add_task(MatchLoadJob.release_retired.bind(runtime_owners), false, "Retire previous match")
+		while not WorkerThreadPool.is_task_completed(retirement_task): await get_tree().process_frame
+		WorkerThreadPool.wait_for_task_completion(retirement_task)
+	_update_saved_load_progress(1.0, "Игра готова")
+	await get_tree().process_frame
+	game.prepared_load_bootstrap = false
 	game.resume_from_launcher()
 	get_tree().current_scene = game
+	_finishing_saved_load = false
 	queue_free()
-
 
 func _leave_save_menu() -> void:
 	if _save_menu_parent == SCREEN_SINGLE_PLAYER:

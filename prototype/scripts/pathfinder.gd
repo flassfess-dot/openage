@@ -4,6 +4,14 @@ var native_batch_results: Dictionary = {}
 var native_movement_jobs: Array = []
 var native_movement_job_by_unit: Dictionary = {}
 var native_movement_coordinator: Variant = null
+var skip_unused_combined_batches_enabled := true
+var owner_movement_dispatch_enabled := OS.get_environment("ROR_DIAGNOSTIC_OWNER_MOVEMENT_DISPATCH") != "0"
+var profile_owner_movement_dispatch := "--profile-movement-dispatch-alternatives" in OS.get_cmdline_user_args()
+var owner_movement_dispatch_sequence := 0
+var owner_movement_dispatch_tick := false
+var owner_movement_dispatch_counts := {"owner_only":0,"batch_scan":0}
+var profile_movement_batch_alternatives := "--profile-movement-batch-alternatives" in OS.get_cmdline_user_args()
+var movement_batch_profile_sequence := 0
 const MAX_MOVEMENT_JOBS := 4
 const PathBatchTask := preload("res://scripts/path_batch_task.gd")
 const PerformanceProbe := preload("res://scripts/performance_probe.gd")
@@ -33,12 +41,21 @@ var geometry_metadata: Dictionary = {"world": {}, "cells": {}, "smooth": {}}
 var fallback_components: Dictionary = {}
 var resolved_endpoints: Dictionary = {}
 var endpoint_cache_revision := -1
+var profile_cache_eviction := "--profile-route-cache-eviction" in OS.get_cmdline_user_args()
+var cache_eviction_stats := {"calls":0,"reference_checks":0,"mismatches":0,"iterator_us":0,"keys_us":0,"entries_avoided":0}
 var cache_hits: int = 0
 var route_cache_revision: int = -1
 var performance_probe: Variant = null
 var native_enabled: bool = true
+var native_position_batch_enabled := OS.get_environment("ROR_DIAGNOSTIC_DISABLE_POSITION_BATCH") != "1"
 static var native_world_smoothing_default := true
 var native_world_smoothing_enabled := native_world_smoothing_default
+var native_world_finish_enabled := OS.get_environment("ROR_DIAGNOSTIC_DISABLE_WORLD_FINISH") != "1"
+var native_world_finish_support := -1
+var fast_direct_checks_enabled := true
+var native_direct_check_support := -1
+var profile_world_finish_alternatives := "--profile-world-route-finish-alternatives" in OS.get_cmdline_user_args()
+var world_finish_profile_sequence := 0
 var native_region_grouping_enabled := true
 var native_available: bool = false
 var native_kernels: Dictionary = {}
@@ -46,6 +63,13 @@ var native_movement_kernels_by_unit_id: Dictionary = {}
 var native_shared_movement_kernel: Variant = null
 var incremental_movement_enabled := true
 var last_movement_snapshot_stats: Dictionary = {}
+var native_movement_delta_enabled := OS.get_environment("ROR_DIAGNOSTIC_NATIVE_MOVEMENT_DELTA") != "0"
+var native_movement_delta_support := -1
+var profile_movement_delta := "--profile-movement-delta-alternatives" in OS.get_cmdline_user_args()
+var movement_delta_sequence := 0
+var movement_delta_tick_native := false
+var movement_delta_counts := {"native":0,"script":0,"fallbacks":0}
+var movement_delta_us := {"native":0,"script":0}
 var native_movement_ids := PackedInt32Array()
 var native_movement_positions := PackedVector2Array()
 var native_movement_radii := PackedFloat32Array()
@@ -117,6 +141,29 @@ func is_position_walkable(position: Vector2, radius: float, domain: String = "la
 		if kernel.has_method("is_position_walkable"): return kernel.is_position_walkable(position, radius)
 	return grid.is_position_walkable_for(position, radius, domain, restriction)
 
+func local_recovery_position(origin: Vector2, radius: float, known: PackedByteArray, neighbors: Array, spatial: Array, domain: String = "land", restriction: int = -1) -> Dictionary:
+	if get_script().resource_path != "res://scripts/pathfinder.gd" or not uses_native_kernel(): return {}
+	var kernel = _native_kernel_for(domain, restriction)
+	if kernel.get_script() != null or not kernel.has_method("local_recovery_position"): return {}
+	return kernel.local_recovery_position(origin, radius, known, neighbors, spatial)
+
+
+func position_walkability(positions: Array[Vector2], radius: float, domain: String = "land", restriction: int = -1) -> PackedByteArray:
+	if positions.is_empty(): return PackedByteArray()
+	# Work-slot geometry is checked together against one synchronized mask.
+	# No command or world mutation occurs between the former scalar queries.
+	if native_position_batch_enabled and uses_native_kernel() and positions.size() <= 256:
+		var kernel = _native_kernel_for(domain, restriction)
+		if kernel.has_method("positions_walkable"):
+			var result: PackedByteArray = kernel.positions_walkable(positions, radius)
+			if result.size() == positions.size():
+				if performance_probe != null: performance_probe.increment("navigation.position_batch_calls")
+				return result
+	var result := PackedByteArray()
+	result.resize(positions.size())
+	for index in range(positions.size()): result[index] = int(is_position_walkable(positions[index], radius, domain, restriction))
+	return result
+
 func is_segment_walkable(start: Vector2, finish: Vector2, radius: float, domain: String = "land", restriction: int = -1) -> bool:
 	if uses_native_kernel():
 		var kernel = _native_kernel_for(domain, restriction)
@@ -139,6 +186,8 @@ func create_task_context(topology: Dictionary, configurations: Array, route_snap
 	var private_grid = NavigationTaskData.create_grid(topology)
 	var planner = get_script().new(private_grid)
 	planner.native_enabled = native_enabled
+	planner.native_world_smoothing_enabled = native_world_smoothing_enabled
+	planner.native_world_finish_enabled = native_world_finish_enabled
 	planner.route_cache_revision = int(private_grid.revision)
 	# Completed cache geometry is copied once by the owner, then shared read-only.
 	# Each context owns the dictionaries it inserts into or trims.
@@ -250,6 +299,7 @@ func prepare_threaded_navigation(units: Array, coordinator) -> void:
 			for component in output.get("native_components", []):
 				kernel.install_connectivity(component["labels"], float(component["radius"]))
 			native_kernels[output["key"]] = kernel
+			configure_native_route_cache(kernel)
 
 func prepare_native_kernels_for_units(units: Array) -> void:
 	if not uses_native_kernel():
@@ -286,6 +336,7 @@ func configure_entity_change_source(world) -> void:
 		movement_kernels_by_configuration.clear()
 
 func prepare_native_movement_snapshot(units: Array) -> void:
+	movement_delta_tick_native = false
 	native_batch_results.clear()
 	native_shared_movement_kernel = null
 	native_movement_kernels_by_unit_id = {}
@@ -309,17 +360,35 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 			native_movement_kernels_by_unit_id[int(unit["id"])] = kernel
 		return
 	var journal = world.entity_changes
-	var delta: Dictionary = journal.changes_since(movement_cursor if movement_epoch == journal.epoch else -1)
+	var delta: Dictionary = journal.read_changes_since(movement_cursor if movement_epoch == journal.epoch else -1)
 	var rebuild: bool = movement_owner == null or bool(delta["full"])
 	var changed: Array = []
-	for id in delta["ids"]:
-		var mask := int(delta["masks"][id])
-		if mask & 1 and (world.units_by_id.has(id) or movement_configuration_by_id.has(id)): rebuild = true
-		var unit: Variant = world.find_unit(int(id))
-		if unit != null and mask & (2 | 4 | 8 | 128):
-			changed.append(unit)
-			var configuration := "%s:%d" % [String(unit["movement_domain"]), int(unit["terrain_restriction"])]
-			if movement_configuration_by_id.get(int(id), "") != configuration: rebuild = true
+	var delta_started := Time.get_ticks_usec() if performance_probe != null or profile_movement_delta else 0
+	if native_movement_delta_support < 0 and movement_owner != null: native_movement_delta_support = int(movement_owner.has_method("collect_movement_delta"))
+	var native_delta: bool = native_movement_delta_enabled and native_movement_delta_support == 1 and movement_owner != null
+	if profile_movement_delta:
+		movement_delta_sequence += 1
+		native_delta = native_delta and ((movement_delta_sequence * 1103515245 + 12345) & 0xffff) >= 32768
+	var movement_delta: Array = movement_owner.collect_movement_delta(delta, world.units_by_id, movement_configuration_by_id) if native_delta else []
+	if native_delta and movement_delta.size() != 2:
+		movement_delta_counts["fallbacks"] += 1
+		native_delta = false
+	if native_delta:
+		changed = movement_delta[0]
+		rebuild = rebuild or bool(movement_delta[1])
+	else:
+		for id in delta["ids"]:
+			var mask := int(delta["masks"][id])
+			if mask & 1 and (world.units_by_id.has(id) or movement_configuration_by_id.has(id)): rebuild = true
+			var unit: Variant = world.find_unit(int(id))
+			if unit != null and mask & (2 | 4 | 8 | 128):
+				changed.append(unit)
+				var configuration := "%s:%d" % [String(unit["movement_domain"]), int(unit["terrain_restriction"])]
+				if movement_configuration_by_id.get(int(id), "") != configuration: rebuild = true
+	movement_delta_counts["native" if native_delta else "script"] += 1
+	movement_delta_tick_native = native_delta
+	if profile_movement_delta: movement_delta_us["native" if native_delta else "script"] += Time.get_ticks_usec() - delta_started
+	if performance_probe != null: performance_probe.observe_microseconds("simulation.movement.delta.native" if native_delta else "simulation.movement.delta.script", Time.get_ticks_usec() - delta_started)
 	# Other terrain kernels drop borrowed owner generations before mutation.
 	# Worker batches have already joined at this owner-thread tick boundary.
 	for kernel in movement_kernels:
@@ -367,14 +436,43 @@ func has_native_movement_for(unit_id: int) -> bool:
 	return native_shared_movement_kernel != null or native_movement_kernels_by_unit_id.has(unit_id)
 
 
-func prepare_native_movement_batch(units: Array, delta: float, coordinator, excluded_ids: Dictionary = {}) -> void:
+func prepare_native_movement_batch(units: Array, delta: float, coordinator, excluded_ids: Dictionary = {}, combined_motion: bool = false) -> void:
+	var skip_combined := combined_motion and skip_unused_combined_batches_enabled
+	owner_movement_dispatch_tick = skip_combined and owner_movement_dispatch_enabled
+	if profile_owner_movement_dispatch:
+		owner_movement_dispatch_sequence += 1
+		owner_movement_dispatch_tick = owner_movement_dispatch_tick and ((owner_movement_dispatch_sequence * 1103515245 + 12345) & 0xffff) >= 32768
+	if profile_movement_batch_alternatives and performance_probe != null:
+		movement_batch_profile_sequence += 1
+		skip_combined = skip_combined and movement_batch_profile_sequence % 2 == 0
+	var started := Time.get_ticks_usec() if performance_probe != null else 0
+	_prepare_native_movement_batch(units, delta, coordinator, excluded_ids, skip_combined, owner_movement_dispatch_tick)
+	owner_movement_dispatch_counts["owner_only" if owner_movement_dispatch_tick else "batch_scan"] += 1
+	if performance_probe != null:
+		performance_probe.observe_microseconds("simulation.movement.batch_prepare.%s" % ("combined" if skip_combined else "legacy"), Time.get_ticks_usec() - started)
+
+
+func _prepare_native_movement_batch(units: Array, delta: float, coordinator, excluded_ids: Dictionary, combined_motion: bool, owner_dispatch_only: bool = false) -> void:
 	finish_native_movement_batch()
 	native_batch_results.clear()
+	# The combined ordered actor pass owns movement for this tick. Its scalar
+	# fallbacks call the same pure velocity kernel directly if needed; the batch
+	# pre-scan duplicates work even when it ends up submitting no worker jobs.
+	# Join/discard the previous generation above, then skip the entire pre-scan.
+	if owner_dispatch_only: return
 	if not coordinator.is_enabled("movement") or units.size() < 64:
 		return
 	var groups: Dictionary = {}
+	var skipped_combined := 0
 	for unit in units:
 		var unit_id := int(unit["id"])
+		# The combined owner-thread step never consumes a batch velocity. Avoid
+		# capturing and calculating that same movement a second time. If its
+		# later eligibility changes, calculate_native_movement still falls back
+		# to the unchanged pure kernel on the owner.
+		if combined_motion and int(unit.get("stuck_ticks", 0)) < 29:
+			skipped_combined += 1
+			continue
 		if unit.get("path", []).is_empty() or float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("formation_shared_motion", false)) or int(unit.get("formation_group_id", -1)) >= 0 or excluded_ids.has(unit_id) or Vector2(unit["target"]).distance_squared_to(Vector2(unit["pos"])) < 0.001225:
 			continue
 		var kernel = native_shared_movement_kernel if native_shared_movement_kernel != null else native_movement_kernels_by_unit_id.get(unit_id)
@@ -386,6 +484,7 @@ func prepare_native_movement_batch(units: Array, delta: float, coordinator, excl
 			groups[key] = {"kernel": kernel, "requests": []}
 		groups[key]["requests"].append({"id": unit_id, "target": unit["target"], "speed": unit["speed"], "scale": unit["cohesion_speed_scale"], "delta": delta, "revision": kernel.get_revision()})
 	var candidate_count := 0
+	if performance_probe != null: performance_probe.increment("movement.batch_combined_skipped", skipped_combined)
 	for group in groups.values():
 		candidate_count += group["requests"].size()
 	if candidate_count < 64:
@@ -595,6 +694,28 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 	if direct_path and performance_probe != null:
 		performance_probe.increment("navigation.direct_path_hits")
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
+	var use_native_finish: bool = native_world_finish_enabled and native_world_smoothing_enabled and uses_native_kernel() and native_world_finish_support == 1
+	if profile_world_finish_alternatives and performance_probe != null:
+		world_finish_profile_sequence += 1
+		use_native_finish = use_native_finish and world_finish_profile_sequence % 2 == 0
+	var result: Array[Vector2] = []
+	var finish_started := Time.get_ticks_usec() if performance_probe != null else 0
+	if use_native_finish:
+		var kernel = _native_kernel_for(movement_domain, restriction_id)
+		var packed: PackedVector2Array = kernel.finish_world_path(start_world, goal_world, goal, smoothed, clearance_radius)
+		for point in packed: result.append(point)
+	else:
+		result = _finish_world_path_script(start_world, goal_world, start, goal, requested_goal, smoothed, clearance_radius, movement_domain, restriction_id)
+	if performance_probe != null: performance_probe.observe_microseconds("navigation.world_finish.native" if use_native_finish else "navigation.world_finish.script", Time.get_ticks_usec() - finish_started)
+	cache[key] = result.duplicate()
+	_record_geometry("world", key, result, start, requested_goal, clearance_radius)
+	# Opening a closer endpoint can occur outside the previous route bounds.
+	geometry_metadata["world"][key]["global"] = goal != requested_goal
+	if performance_probe != null: performance_probe.observe_microseconds("navigation.world_finish", Time.get_ticks_usec() - stage_started)
+	return _finish_path_observation(started, result, false)
+
+
+func _finish_world_path_script(start_world: Vector2, goal_world: Vector2, start: Vector2i, goal: Vector2i, requested_goal: Vector2i, smoothed: Array[Vector2i], clearance_radius: float, movement_domain: String, restriction_id: int) -> Array[Vector2]:
 	var result: Array[Vector2] = []
 	for index in range(1, smoothed.size()):
 		var cell: Vector2i = smoothed[index]
@@ -618,12 +739,7 @@ func find_path(start_world: Vector2, goal_world: Vector2, movement_domain: Strin
 		var swept_started := Time.get_ticks_usec() if performance_probe != null else 0
 		result = _swept_world_route(start_world, result.back(), start, goal, clearance_radius, movement_domain, restriction_id)
 		if performance_probe != null: performance_probe.observe_microseconds("navigation.world_swept", Time.get_ticks_usec() - swept_started)
-	cache[key] = result.duplicate()
-	_record_geometry("world", key, result, start, requested_goal, clearance_radius)
-	# Opening a closer endpoint can occur outside the previous route bounds.
-	geometry_metadata["world"][key]["global"] = goal != requested_goal
-	if performance_probe != null: performance_probe.observe_microseconds("navigation.world_finish", Time.get_ticks_usec() - stage_started)
-	return _finish_path_observation(started, result, false)
+	return result
 
 
 func _world_route_is_clear(origin: Vector2, route: Array[Vector2], radius: float, domain: String, restriction: int) -> bool:
@@ -718,8 +834,35 @@ func _sync_route_revision() -> void:
 
 func _trim_geometry_cache(name: String) -> void:
 	var bucket := _geometry_bucket(name)
+	if profile_cache_eviction: cache_eviction_stats["peak_" + name] = maxi(int(cache_eviction_stats.get("peak_" + name, 0)), bucket.size())
 	if bucket.size() >= MAX_ROUTE_CACHE_ENTRIES:
-		var oldest: Variant = bucket.keys()[0]
+		var oldest: Variant
+		if profile_cache_eviction:
+			cache_eviction_stats["calls"] += 1
+			cache_eviction_stats["entries_avoided"] += bucket.size()
+		if profile_cache_eviction and int(cache_eviction_stats["reference_checks"]) < 1024:
+			var legacy: Variant
+			var started := Time.get_ticks_usec()
+			if int(cache_eviction_stats["reference_checks"]) % 2 == 0:
+				legacy = bucket.keys()[0]
+				cache_eviction_stats["keys_us"] += Time.get_ticks_usec() - started
+				started = Time.get_ticks_usec()
+				for key in bucket: oldest = key; break
+				cache_eviction_stats["iterator_us"] += Time.get_ticks_usec() - started
+			else:
+				for key in bucket: oldest = key; break
+				cache_eviction_stats["iterator_us"] += Time.get_ticks_usec() - started
+				started = Time.get_ticks_usec()
+				legacy = bucket.keys()[0]
+				cache_eviction_stats["keys_us"] += Time.get_ticks_usec() - started
+			cache_eviction_stats["reference_checks"] += 1
+			if oldest != legacy:
+				cache_eviction_stats["mismatches"] += 1
+				oldest = legacy
+		else:
+			# Dictionary iteration and keys() share insertion order. Finish the
+			# iterator before erasing, and avoid allocating all 2048 keys.
+			for key in bucket: oldest = key; break
 		bucket.erase(oldest)
 		geometry_metadata[name].erase(oldest)
 
@@ -934,12 +1077,20 @@ func _search_native_smoothed_cell_path(start: Vector2i, goal: Vector2i, movement
 	return {"path": result, "direct": direct}
 
 
+func configure_native_route_cache(kernel) -> void:
+	if kernel.has_method("configure_route_cache"):
+		kernel.configure_route_cache(OS.get_environment("ROR_DIAGNOSTIC_DISABLE_RAW_ROUTE_CACHE") != "1", "--profile-native-raw-route-cache" in OS.get_cmdline_user_args(), "--profile-native-raw-route-reference" in OS.get_cmdline_user_args())
+
+
 func _native_kernel_for(movement_domain: String, restriction_id: int):
 	var key := "%s:%d" % [movement_domain, restriction_id]
 	var kernel = native_kernels.get(key)
 	if kernel == null:
 		kernel = ClassDB.instantiate("RoRPathKernel")
 		native_kernels[key] = kernel
+		configure_native_route_cache(kernel)
+	if native_world_finish_support < 0: native_world_finish_support = 1 if kernel.has_method("finish_world_path") else 0
+	if native_direct_check_support < 0: native_direct_check_support = 1 if kernel.has_method("has_direct_cell_path") else 0
 	if int(kernel.get_revision()) == int(grid.revision) and bool(kernel.is_configured()):
 		return kernel
 	var started := Time.get_ticks_usec() if performance_probe != null else 0
@@ -1060,6 +1211,16 @@ func line_walkable(start: Vector2i, goal: Vector2i, movement_domain: String = "l
 	return not direct_cell_path(start, goal, movement_domain, restriction_id, clearance_radius).is_empty()
 
 
+func has_direct_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> bool:
+	if not fast_direct_checks_enabled or not uses_native_kernel():
+		return not direct_cell_path(start, goal, movement_domain, restriction_id, clearance_radius).is_empty()
+	if grid == null or not grid.contains(start) or not grid.contains(goal): return false
+	if movement_domain == "water" and clearance_radius > 0.0 and not is_segment_walkable(Vector2(start) + Vector2.ONE * 0.5, Vector2(goal) + Vector2.ONE * 0.5, clearance_radius, movement_domain, restriction_id): return false
+	var kernel = _native_kernel_for(movement_domain, restriction_id)
+	if native_direct_check_support == 1: return kernel.has_direct_cell_path(start, goal, clearance_radius)
+	return not direct_cell_path(start, goal, movement_domain, restriction_id, clearance_radius).is_empty()
+
+
 func direct_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Array[Vector2i]:
 	if grid == null or not grid.contains(start) or not grid.contains(goal):
 		return []
@@ -1090,6 +1251,32 @@ func direct_cell_path(start: Vector2i, goal: Vector2i, movement_domain: String =
 		result.append(current)
 		previous = current
 	return result
+
+
+func nearest_reachable(start: Vector2i, requested: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Vector2i:
+	_sync_route_revision()
+	if endpoint_cache_revision != int(grid.revision):
+		resolved_endpoints.clear()
+		endpoint_cache_revision = int(grid.revision)
+	var region := component_id(start, movement_domain, restriction_id, clearance_radius)
+	if region < 0: return Vector2i(-1, -1)
+	var key := "reachable:%d:%d:%d:%s:%d:%.8f" % [region, requested.x, requested.y, movement_domain, restriction_id, clearance_radius]
+	if resolved_endpoints.has(key): return resolved_endpoints[key]
+	var best := Vector2i(-1, -1)
+	if uses_native_kernel() and _native_kernel_for(movement_domain, restriction_id).has_method("nearest_reachable"):
+		best = _native_kernel_for(movement_domain, restriction_id).nearest_reachable(start, requested, clearance_radius)
+	else:
+		var distance := 9223372036854775807
+		for y in range(grid.size.y):
+			for x in range(grid.size.x):
+				var cell := Vector2i(x, y)
+				if component_id(cell, movement_domain, restriction_id, clearance_radius) != region: continue
+				var candidate := cell.distance_squared_to(requested)
+				if candidate < distance:
+					distance = candidate
+					best = cell
+	_remember_endpoint(key, best)
+	return best
 
 
 func nearest_walkable(requested: Vector2i, movement_domain: String = "land", restriction_id: int = -1, clearance_radius: float = 0.0) -> Vector2i:
@@ -1126,7 +1313,9 @@ func nearest_walkable(requested: Vector2i, movement_domain: String = "land", res
 
 func _remember_endpoint(key: String, cell: Vector2i) -> void:
 	if resolved_endpoints.size() >= MAX_ROUTE_CACHE_ENTRIES:
-		resolved_endpoints.erase(resolved_endpoints.keys()[0])
+		var oldest: Variant
+		for endpoint_key in resolved_endpoints: oldest = endpoint_key; break
+		resolved_endpoints.erase(oldest)
 	resolved_endpoints[key] = cell
 
 

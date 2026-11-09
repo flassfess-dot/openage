@@ -21,6 +21,8 @@ func planner(world, team: int):
 		var grid = KnowledgeGrid.new(world.map_size)
 		grid.terrain_restrictions = world.navigation_grid.terrain_restrictions
 		entry = {"source": world.navigation_grid, "grid": grid, "planner": Pathfinder.new(grid), "source_revision": -1}
+		grid.fast_region_queries_enabled = world.navigation_grid.fast_region_queries_enabled
+		entry["planner"].fast_direct_checks_enabled = world.pathfinder.fast_direct_checks_enabled
 		entry["planner"].set_native_enabled(world.pathfinder.native_enabled)
 		fog.track_path_knowledge(team)
 		var states: PackedByteArray = fog.states_by_player[team]

@@ -6,6 +6,10 @@ var pending_states: Dictionary = {}
 var loading_generation := 1
 var background_loading_enabled := false
 var prewarming := false
+const PREWARM_CLIPS_PER_WINDOW := 8
+const PREWARM_FRAME_BUDGET_USEC := 5000
+var prewarm_thread := Thread.new()
+var prewarm_textures: Dictionary = {}
 
 const GraphicDescriptor := preload("res://scripts/graphic_descriptor.gd")
 const FacingConvention := preload("res://scripts/facing_convention.gd")
@@ -27,6 +31,14 @@ var source_records: Dictionary = {}
 var loaded_states: Dictionary = {}
 var effect_presentations
 
+# Shared art is independent of an entity's position, health and selection.
+# Exact animation times also preserve independently animated composite parts.
+const MAX_POSE_RECORDS := 4096
+var pose_cache_enabled := OS.get_environment("ROR_DIAGNOSTIC_UNIT_POSE_CACHE") != "0"
+var pose_records: Dictionary = {}
+var pose_cache_hits := 0
+var pose_cache_misses := 0
+
 
 func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data: Dictionary, records: Array, effect_registry = null, indexed_frame_records: Dictionary = {}) -> void:
 	shutdown_loading()
@@ -41,6 +53,9 @@ func configure(runtime_data: Dictionary, object_data: Dictionary, graphics_data:
 	definitions.clear()
 	source_records.clear()
 	loaded_states.clear()
+	pose_records.clear()
+	pose_cache_hits = 0
+	pose_cache_misses = 0
 	records_by_name = indexed_frame_records.duplicate() if not indexed_frame_records.is_empty() else _records_by_name()
 	effect_presentations = effect_registry
 	var archetypes: Dictionary = runtime_catalog.get("archetypes", {})
@@ -98,11 +113,7 @@ func animation_frames(texture_key: String, state: String) -> Array:
 	return textures.get(texture_key, {}).get(state, [])
 
 
-func prewarm_units(units: Array) -> void:
-	prewarming = true
-	# Loading is deliberately performed during match setup. A unit's first move,
-	# attack, work or death must not synchronously decode a new clip in the middle
-	# of a live presentation frame.
+func _prewarm_plan(units: Array) -> Dictionary:
 	var requested_states_by_key: Dictionary = {}
 	var requested_effect_graphics: Dictionary = {}
 	for unit_value in units:
@@ -140,27 +151,75 @@ func prewarm_units(units: Array) -> void:
 			var impact_graphic_id := int(components.get("combat", {}).get("impact_effect_graphic_id", -1))
 			if impact_graphic_id >= 0:
 				requested_effect_graphics[Vector2i(impact_graphic_id, int(unit.get("team", 1)))] = true
-	var ordered_keys: Array = requested_states_by_key.keys()
-	ordered_keys.sort()
-	for texture_key_value in ordered_keys:
-		var texture_key := String(texture_key_value)
-		var states: Array = requested_states_by_key[texture_key].keys()
-		states.sort()
-		for state_value in states:
-			ensure_loaded(texture_key, String(state_value))
-	var effect_keys: Array = requested_effect_graphics.keys()
-	effect_keys.sort_custom(func(left, right):
-		var left_key := Vector2i(left)
-		var right_key := Vector2i(right)
-		return left_key.x < right_key.x or (left_key.x == right_key.x and left_key.y < right_key.y)
-	)
-	for key_value in effect_keys:
-		var key := Vector2i(key_value)
-		effect_presentations.frame_info_for(key.x, key.y, 0.0)
+	var states: Array = []
+	var keys: Array = requested_states_by_key.keys()
+	keys.sort()
+	for key in keys:
+		var names: Array = requested_states_by_key[key].keys()
+		names.sort()
+		for state in names: states.append([String(key), String(state)])
+	var effects: Array = requested_effect_graphics.keys()
+	effects.sort_custom(func(left, right): return left.x < right.x or (left.x == right.x and left.y < right.y))
+	return {"states": states, "effects": effects}
 
 
+func prewarm_units(units: Array) -> void:
+	prewarming = true
+	var plan := _prewarm_plan(units)
+	for entry in plan["states"]: ensure_loaded(entry[0], entry[1])
+	for key in plan["effects"]: effect_presentations.frame_info_for(key.x, key.y, 0.0)
 	prewarming = false
 
+
+func prewarm_units_async(units: Array, tree: SceneTree, progress: Callable) -> void:
+	var plan := _prewarm_plan(units)
+	var states: Array = plan["states"]
+	var effects: Array = plan["effects"]
+	var total := maxi(1, states.size() + effects.size())
+	var generation := loading_generation
+	var started := Time.get_ticks_usec()
+	for first in range(0, states.size(), PREWARM_CLIPS_PER_WINDOW):
+		var end := mini(first + PREWARM_CLIPS_PER_WINDOW, states.size())
+		var distinct := {}
+		for index in range(first, end):
+			var key := String(states[index][0])
+			var state := String(states[index][1])
+			if loaded_states.get(key, {}).has(state): continue
+			var definition: Dictionary = definitions.get(key, {})
+			var spec: Dictionary = definition.get("state_specs", {}).get(state, {})
+			for path in _state_paths(definition, spec): distinct[path] = true
+		var paths: Array[String] = []
+		paths.assign(distinct.keys())
+		if not paths.is_empty():
+			var loader := ThreadedTextureQueue.new()
+			if prewarm_thread.start(loader.load_window.bind(paths)) == OK:
+				if progress.is_valid(): progress.call(float(first) / total, "Загрузка анимаций: %d/%d" % [first, total])
+				while prewarm_thread.is_alive():
+					await tree.process_frame
+					if generation != loading_generation: return
+				prewarm_textures = prewarm_thread.wait_to_finish()
+			else:
+				while not loader.is_complete(paths):
+					loader.request(paths)
+					await tree.process_frame
+					if generation != loading_generation: return
+				prewarm_textures = loader.completed
+		# Only whole clips become available. Palette conversion and publication
+		# stay on the main thread. The next window reuses textures held by them.
+		for index in range(first, end):
+			_ensure_loaded_synchronous(states[index][0], states[index][1])
+			if Time.get_ticks_usec() - started >= PREWARM_FRAME_BUDGET_USEC:
+				if progress.is_valid(): progress.call(float(index + 1) / total, "Подготовка анимаций: %d/%d" % [index + 1, total])
+				await tree.process_frame
+				if generation != loading_generation: return
+				started = Time.get_ticks_usec()
+		prewarm_textures = {}
+	for index in range(effects.size()):
+		var key: Vector2i = effects[index]
+		effect_presentations.frame_info_for(key.x, key.y, 0.0)
+		if progress.is_valid(): progress.call(float(states.size() + index + 1) / total, "Подготовка эффектов")
+		await tree.process_frame
+		if generation != loading_generation: return
 
 func texture_key_for_unit(unit: Dictionary) -> String:
 	var alias := String(unit.get("kind", ""))
@@ -266,13 +325,17 @@ func ensure_loaded(texture_key: String, requested_state: String = "") -> void:
 	poll_background_loading()
 
 func _texture_for_path(path: String) -> Texture2D:
+	if prewarm_textures.has(path): return prewarm_textures[path]
 	if prewarming or not background_loading_enabled:
 		return load(path) as Texture2D
 	return texture_queue.texture(path)
 
 func shutdown_loading() -> void:
 	loading_generation += 1
+	if prewarm_thread.is_started(): prewarm_thread.wait_to_finish()
+	prewarm_textures = {}
 	pending_states.clear()
+	pose_records.clear()
 	texture_queue.shutdown()
 
 func _ensure_loaded_synchronous(texture_key: String, requested_state: String = "") -> void:
@@ -308,8 +371,6 @@ func _ensure_loaded_synchronous(texture_key: String, requested_state: String = "
 
 
 func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0, ambient_time: float = -1.0) -> Dictionary:
-	var alias := String(unit.get("kind", ""))
-	var source_id := int(unit.get("source_unit_id", -1))
 	var texture_key := texture_key_for_unit(unit)
 	ensure_loaded(texture_key, state)
 	# A missing/pending lifecycle clip must never resurrect the living sprite.
@@ -322,35 +383,60 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0, a
 			fallback_state = role_death
 	if not textures.get(texture_key, {}).has(state):
 		ensure_loaded(texture_key, fallback_state)
+	var time := float(unit.get("anim", 0.0)) if animation_time < 0.0 else animation_time
+	var pose_key: Array = [texture_key, state, int(unit.get("facing", 0)), time]
+	var base: Dictionary = pose_records.get(pose_key, {}) if pose_cache_enabled else {}
+	if base.is_empty():
+		base = _pose_frame_info(texture_key, state, fallback_state, int(unit.get("facing", 0)), time)
+		if base.is_empty(): return {}
+		if pose_cache_enabled:
+			pose_cache_misses += 1
+			for part in base["composite_parts"]: part.make_read_only()
+			base["composite_parts"].make_read_only()
+			base.make_read_only()
+			pose_records[pose_key] = base
+			while pose_records.size() > MAX_POSE_RECORDS:
+				for oldest in pose_records:
+					pose_records.erase(oldest)
+					break
+	else:
+		pose_cache_hits += 1
+	var hp := float(unit.get("hp", 0.0))
+	var max_hp := maxf(1.0, float(unit.get("max_hp", 1.0)))
+	if corpse_requested or death_requested or effect_presentations == null or hp + 0.0001 >= max_hp:
+		return base
+	# Damage belongs to this entity and has an independent ambient clock. Never
+	# append it to the shared pose or retain a source entity in the cache.
+	var source := _source_record(archetype_for_unit(String(unit.get("kind", ""))), int(unit.get("source_unit_id", -1)), unit)
+	var damage_graphic_id := DamageSelector.select_graphic_id(unit, source)
+	if damage_graphic_id < 0: return base
+	var result := base.duplicate()
+	var resolved_parts: Array = base["composite_parts"].duplicate()
+	var damage_time := time if ambient_time < 0.0 else ambient_time
+	var damage_part: Dictionary = effect_presentations.frame_info_for(damage_graphic_id, int(unit.get("team", 1)), damage_time)
+	if not damage_part.is_empty():
+		damage_part["effect_kind"] = "damage"
+		resolved_parts.append(damage_part)
+	result["composite_parts"] = resolved_parts
+	result["damage_graphic_id"] = damage_graphic_id
+	return result
+
+
+func _pose_frame_info(texture_key: String, state: String, fallback_state: String, facing: int, time: float) -> Dictionary:
 	var animation_sets: Dictionary = textures.get(texture_key, {})
 	var resolved_state := state if animation_sets.has(state) else fallback_state
 	var frames: Array = animation_sets.get(resolved_state, [])
 	var graphic_descriptor = descriptor(texture_key, resolved_state)
 	if frames.is_empty() or graphic_descriptor == null:
 		return {}
-	var time := float(unit.get("anim", 0.0)) if animation_time < 0.0 else animation_time
-	if corpse_requested and resolved_state != state:
+	if (state == "corpse" or state.ends_with("_corpse")) and resolved_state != state:
 		time = float(graphic_descriptor.frames_per_angle) * float(graphic_descriptor.frame_duration)
-	var graphic_facing := FacingConvention.for_angle_count(int(unit.get("facing", 0)), graphic_descriptor.logical_angle_count)
+	var graphic_facing := FacingConvention.for_angle_count(facing, graphic_descriptor.logical_angle_count)
 	var resolved: Dictionary = graphic_descriptor.resolve(graphic_facing, time, frames.size())
 	var frame_index := int(resolved["frame_index"])
 	var texture: Texture2D = frames[frame_index]
 	var graphic_id := int(graphic_ids.get(texture_key, {}).get(resolved_state, -1))
-	var resolved_parts := _resolved_composite_parts(texture_key, resolved_state, int(unit.get("facing", 0)), time)
-	var damage_graphic_id := -1
-	var hp := float(unit.get("hp", 0.0))
-	var max_hp := maxf(1.0, float(unit.get("max_hp", 1.0)))
-	if not corpse_requested and not death_requested and effect_presentations != null and hp + 0.0001 < max_hp:
-		var source := _source_record(archetype_for_unit(alias), source_id, unit)
-		damage_graphic_id = DamageSelector.select_graphic_id(unit, source)
-		if damage_graphic_id >= 0:
-			# Persistent fire has its own clock: sparse idle poses and action clip
-			# changes must not pause or restart the damage effect.
-			var damage_time := time if ambient_time < 0.0 else ambient_time
-			var damage_part: Dictionary = effect_presentations.frame_info_for(damage_graphic_id, int(unit.get("team", 1)), damage_time)
-			if not damage_part.is_empty():
-				damage_part["effect_kind"] = "damage"
-				resolved_parts.append(damage_part)
+	var resolved_parts := _resolved_composite_parts(texture_key, resolved_state, facing, time)
 	return {
 		"texture": texture,
 		"frame_index": frame_index,
@@ -362,7 +448,7 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0, a
 		"direction_degrees": int(resolved["direction_degrees"]),
 		"hotspot": graphic_descriptor.hotspot_for(frame_index, Vector2(texture.get_width() * 0.5, texture.get_height())),
 		"composite_parts": resolved_parts,
-		"damage_graphic_id": damage_graphic_id,
+		"damage_graphic_id": -1,
 	}
 
 
@@ -394,6 +480,8 @@ func _register_team(alias: String, texture_key: String, team: int, archetype: Di
 
 
 func _load_team(alias: String, texture_key: String, team: int, archetype: Dictionary, state_specs: Dictionary, source_unit_id: int = -1) -> void:
+	# Pending clips may replace a fallback while this registry is in use.
+	pose_records.clear()
 	if not textures.has(texture_key):
 		textures[texture_key] = {}
 		descriptors[texture_key] = {}

@@ -3,6 +3,7 @@ extends RefCounted
 const Rules := preload("res://scripts/combat_rules.gd")
 static var native_actor_enabled := true
 static var actor_kernel: Variant = null
+static var compare_actor_catalog := "--compare-ai-actor-catalog" in OS.get_cmdline_user_args()
 
 
 static func from_record(source: Dictionary, entity: Dictionary = {}) -> Dictionary:
@@ -23,7 +24,7 @@ static func from_record(source: Dictionary, entity: Dictionary = {}) -> Dictiona
 	}
 
 
-static func actor(world, row: Dictionary, team: int) -> Dictionary:
+static func actor(world, row: Dictionary, team: int, generation_cache: Variant = null) -> Dictionary:
 	# Enemy definitions are public estimates. Never look up a live foreign actor.
 	if int(row.get("team", 0)) != team:
 		var source: Dictionary = world.object_record_by_id(int(row.get("source_unit_id", -1)), int(row.get("team", 0)))
@@ -38,18 +39,31 @@ static func actor(world, row: Dictionary, team: int) -> Dictionary:
 		if actor_kernel.has_method("owned_ai_actor_profile"):
 			var prepared: Dictionary = actor_kernel.owned_ai_actor_profile(live)
 			if not prepared.is_empty():
-				_owned_tactical(prepared,live,world)
+				_owned_tactical(prepared,live,world,generation_cache)
+				_compare_owned_catalog(prepared, live, world, generation_cache)
 				return prepared
 	var source: Dictionary = world.object_record_by_id(int(row.get("source_unit_id", -1)), int(row.get("team", 0)))
 	var data := from_record(source, live if live is Dictionary else row)
 	if live is Dictionary:
-		_owned_tactical(data,live,world)
+		_owned_tactical(data,live,world,generation_cache)
 		data["carried_amount"] = float(live.get("carried_amount", 0.0))
 		data["carried_resource_type_id"] = int(live.get("carried_resource_type_id", -1))
 		data["gather_stage"] = String(live.get("gather_stage", ""))
+		_compare_owned_catalog(data, live, world, generation_cache)
 	return data
 
-static func _owned_tactical(data: Dictionary, actor: Dictionary, world) -> void:
+static func _compare_owned_catalog(data: Dictionary, actor: Dictionary, world, generation_cache: Variant) -> void:
+	if not compare_actor_catalog or not data.has("drop_site_kinds") or not generation_cache is Dictionary: return
+	var stats: Dictionary = generation_cache.get("_catalog_stats", {})
+	if stats.is_empty() or int(stats["comparisons"]) >= 128: return
+	var reference := data.duplicate(true)
+	_owned_tactical(reference, actor, world)
+	stats["comparisons"] += 1
+	if reference != data:
+		stats["mismatches"] += 1
+		push_error("AI worker catalog reuse changed actor profile: id=%d" % int(actor.get("id", -1)))
+
+static func _owned_tactical(data: Dictionary, actor: Dictionary, world, generation_cache: Variant = null) -> void:
 	if String(actor.get("entity_type", "")) == "building":
 		data["footprint_half_size"] = Vector2(actor.get("footprint", {}).get("half_size", Vector2(0.5, 0.5)))
 	data["cooldown"] = float(actor.get("cooldown",0.0))
@@ -69,10 +83,24 @@ static func _owned_tactical(data: Dictionary, actor: Dictionary, world) -> void:
 			if not role_source.is_empty(): delivery_allowed = role_source.get("resources", {}).get("drop_site_ids", allowed)
 		data["drop_site_kinds"]=[]
 		data["delivery_drop_site_kinds"]=[]
+		# This cache belongs to one pinned observation, or one synchronous
+		# presentation capture. Catalog/civilization rules cannot change inside
+		# that generation. Resolve its four public definitions once per owner,
+		# rather than once for every worker. Only numeric IDs are retained.
+		var owner := int(actor.get("team", 0))
+		var catalogs: Dictionary = generation_cache.get("_drop_site_catalog", {}) if generation_cache is Dictionary else {}
+		if generation_cache is Dictionary: generation_cache["_drop_site_catalog"] = catalogs
+		var catalog: Dictionary = catalogs.get(owner, {})
+		var stats: Dictionary = generation_cache.get("_catalog_stats", {}) if generation_cache is Dictionary else {}
+		if catalog.is_empty():
+			for kind in ["town_center","granary","storage_pit","dock"]:
+				catalog[kind] = int(world.object_record_for(kind, owner).get("unit_id", -2))
+			if generation_cache is Dictionary: catalogs[owner] = catalog
+			if not stats.is_empty(): stats["lookups"] += 4
+		elif not stats.is_empty(): stats["worker_reuses"] += 1
 		for kind in ["town_center","granary","storage_pit","dock"]:
-			var record: Dictionary=world.object_record_for(kind,int(actor.get("team",0)))
-			if allowed.any(func(id): return int(id)==int(record.get("unit_id",-2))): data["drop_site_kinds"].append(kind)
-			if delivery_allowed.any(func(id): return int(id)==int(record.get("unit_id",-2))): data["delivery_drop_site_kinds"].append(kind)
+			if allowed.any(func(id): return int(id)==int(catalog[kind])): data["drop_site_kinds"].append(kind)
+			if delivery_allowed.any(func(id): return int(id)==int(catalog[kind])): data["delivery_drop_site_kinds"].append(kind)
 
 
 static func decorate_options(world, options: Dictionary, team: int, units: Array, generation_cache: Variant = null) -> Dictionary:

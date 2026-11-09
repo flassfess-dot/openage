@@ -12,6 +12,7 @@ const CombatAwarenessSystem := preload("res://scripts/combat_awareness_system.gd
 const WildlifeBehaviorSystem := preload("res://scripts/wildlife_behavior_system.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const StuckRecovery := preload("res://scripts/stuck_recovery.gd")
+const LocalCommandInbox := preload("res://scripts/local_command_inbox.gd")
 
 # Prototype-owned 20 Hz simulation step, independent of rendering and AI cadence.
 # libopenage/time/clock.cpp clamps long clock gaps to 50 ms; it does not prescribe
@@ -39,6 +40,8 @@ var event_stream := SimulationEventStream.new()
 var combat_awareness := CombatAwarenessSystem.new()
 var wildlife_behavior := WildlifeBehaviorSystem.new()
 var accumulator_seconds: float = 0.0
+var local_command_inbox: LocalCommandInbox
+var local_publication_tick := -1
 var preparation_waiting := false
 var preparation_wait_seconds := 0.0
 var preparation_preserved_debt := 0.0
@@ -53,6 +56,9 @@ var replay_source: Variant = null
 var record_replay_state_hashes := true
 var last_replay_mismatch: String = ""
 var performance_probe: Variant = null
+var fixed_tick_observer: Variant = null
+var stage_observer: Variant = null
+var profile_navigation_query_alternatives := "--profile-navigation-query-alternatives" in OS.get_cmdline_user_args()
 var frame_simulation_budget_usec := FRAME_SIMULATION_BUDGET_USEC
 var yield_ready_tick_for_presentation := true
 var before_fixed_tick: Callable = Callable()
@@ -161,6 +167,7 @@ func load_replay(data: Variant) -> bool:
 
 func clear_queue() -> void:
 	command_queue.clear()
+	local_publication_tick = -1
 
 func reset_timing() -> void:
 	_render_deadline_usec = 0
@@ -237,6 +244,7 @@ func process_commands() -> void:
 		if command.tick > tick_index:
 			pending.append(command)
 			continue
+		var command_started := Time.get_ticks_usec() if performance_probe != null else 0
 		var previous_tasks := _unit_task_states(command.unit_ids)
 		var result: Dictionary = _dispatch_command(command)
 		command_results[int(command.sequence_id)] = result
@@ -244,6 +252,8 @@ func process_commands() -> void:
 		event_stream.emit(tick_index, event_type, result)
 		if bool(result["accepted"]):
 			_emit_command_task_changes(command, previous_tasks)
+		if performance_probe != null:
+			performance_probe.observe_microseconds("controller.command." + String(command.command_type()), Time.get_ticks_usec() - command_started)
 	command_queue = pending
 	_prune_command_results()
 
@@ -336,16 +346,16 @@ func _dispatch_command(command) -> Dictionary:
 		if command.command_type() in REPLACING_ORDERS and command.command_type() != "attack" and not bool(command.params.get("autonomous", false)):
 			for unit_id in command.unit_ids:
 				var unit = simulation_world.find_unit(int(unit_id))
-				if unit != null: unit["combat_pursuit"] = false
+				if unit != null and (int(command.issuer_id) <= 0 or int(unit.get("team", 0)) == int(command.issuer_id)): simulation_world.set_entity_field(unit, "combat_pursuit", false)
 		if command.command_type() in REPLACING_ORDERS and command.command_type() not in ["board", "unload"]:
 			for unit_id in command.unit_ids:
 				var unit = simulation_world.find_unit(int(unit_id))
-				if unit != null:
+				if unit != null and (int(command.issuer_id) <= 0 or int(unit.get("team", 0)) == int(command.issuer_id)):
 					simulation_world.transport_system.clear_pending_order(unit)
 		if command.command_type() in REPLACING_ORDERS and not bool(command.params.get("queued_execution", false)) and not bool(command.params.get("autonomous", false)):
 			for unit_id in command.unit_ids:
 				var unit = simulation_world.find_unit(int(unit_id))
-				if unit != null:
+				if unit != null and (int(command.issuer_id) <= 0 or int(unit.get("team", 0)) == int(command.issuer_id)):
 					simulation_world.clear_entity_queued_orders(unit)
 					queued_unit_ids.erase(int(unit_id))
 		return CommandResult.accepted(command, tick_index)
@@ -828,7 +838,7 @@ func _apply_wall_line(command, workers: Array) -> String:
 			simulation_world.clear_entity_queued_orders(worker)
 			queued_unit_ids.erase(int(worker["id"]))
 			simulation_world.transport_system.clear_pending_order(worker)
-			worker["combat_pursuit"] = false
+			simulation_world.set_entity_field(worker, "combat_pursuit", false)
 		return _start_planned_wall_line(command, workers, foundation_ids)
 	return ""
 
@@ -1179,19 +1189,13 @@ func _assign_formation(selected: Array, anchor: Vector2, formation_name: String,
 		if simulation_world.entity_is_worker(unit):
 			simulation_world.worker_role_system.clear(unit)
 			simulation_world.set_entity_field(unit, "pending_hunt_target_id", -1)
-		simulation_world.set_entity_field(unit, "target_building_id", -1)
-		simulation_world.set_entity_field(unit, "gather_stage", "none")
-		simulation_world.set_entity_field(unit, "task", "move")
-		simulation_world.set_entity_field(unit, "target_id", -1)
-		simulation_world.set_entity_field(unit, "resource_id", -1)
-		simulation_world.set_entity_field(unit, "preferred_formation", formation_name)
-		simulation_world.set_entity_field(unit, "formation_group_id", group.group_id)
-		simulation_world.set_entity_field(unit, "formation_slot_id", assigned_slot["slot_id"])
-		simulation_world.set_entity_field(unit, "formation_slot_capacity", assigned_slot["capacity_radius"])
-		simulation_world.set_entity_field(unit, "formation_forward", forward)
-		simulation_world.set_entity_field(unit, "formation_facing", formation_facing)
-		simulation_world.set_entity_field(unit, "formation_home", assigned_slot["world"])
-		simulation_world.set_entity_field(unit, "formation_slot_mode", "soft")
+		simulation_world.set_entity_fields(unit, {
+			"target_building_id": -1, "gather_stage": "none", "task": "move", "target_id": -1, "resource_id": -1,
+			"preferred_formation": formation_name, "formation_group_id": group.group_id,
+			"formation_slot_id": assigned_slot["slot_id"], "formation_slot_capacity": assigned_slot["capacity_radius"],
+			"formation_forward": forward, "formation_facing": formation_facing,
+			"formation_home": assigned_slot["world"], "formation_slot_mode": "soft",
+		})
 		var member_waypoints: Array[Vector2] = []
 		var slot_id := int(assigned_slot["slot_id"])
 		if slot_id >= 0 and slot_id < member_waypoint_sets.size():
@@ -1312,9 +1316,17 @@ func _reconcile_formation_group(group_id: int, requested_member_ids: Variant = n
 
 
 func _update_group_lifecycle(group, members: Array) -> void:
-	var transition: Dictionary = FormationLifecycle.evaluate(group, members, Callable(simulation_world, "find_combat_target"))
+	var stranded: Array = []
 	for unit in members:
-		simulation_world.set_entity_field(unit, "formation_slot_mode", "released" if String(unit.get("task", "")) == "attack" else "soft")
+		var task := String(unit.get("task", ""))
+		var slot_mode := "released" if task == "attack" else "soft"
+		if unit.get("formation_slot_mode") != slot_mode:
+			simulation_world.set_entity_field(unit, "formation_slot_mode", slot_mode)
+		if task == "idle" and unit.get("diagnostic_reason") in ["no_path", "no_group_route"]:
+			stranded.append(unit)
+	if not stranded.is_empty():
+		simulation_world.movement_system.resume_failed_formation_members(group, stranded)
+	var transition: Dictionary = FormationLifecycle.evaluate(group, members, Callable(simulation_world, "find_combat_target"))
 	if bool(transition["changed"]):
 		event_stream.emit(tick_index, "formation_state_changed", {
 			"group_id": int(group.group_id),
@@ -1467,18 +1479,14 @@ func _detach_units_from_formations(selected: Array) -> void:
 		_reconcile_formation_group(int(group_id))
 
 func _clear_unit_formation(unit: Dictionary) -> void:
-	simulation_world.set_entity_field(unit, "preferred_formation", FormationSelection.type_for(unit, formation_groups))
-	simulation_world.set_entity_field(unit, "formation_group_id", -1)
-	simulation_world.set_entity_field(unit, "formation_slot_id", -1)
-	simulation_world.set_entity_field(unit, "formation_slot_capacity", 0.0)
-	simulation_world.set_entity_field(unit, "formation_forward", Vector2.ZERO)
-	simulation_world.set_entity_field(unit, "formation_home", null)
-	simulation_world.set_entity_field(unit, "formation_slot_mode", "none")
-	simulation_world.set_entity_field(unit, "formation_shared_motion", false)
-	simulation_world.set_entity_field(unit, "formation_shared_isolated", false)
+	simulation_world.set_entity_fields(unit, {
+		"preferred_formation": FormationSelection.type_for(unit, formation_groups),
+		"formation_group_id": -1, "formation_slot_id": -1, "formation_slot_capacity": 0.0,
+		"formation_forward": Vector2.ZERO, "formation_home": null, "formation_slot_mode": "none",
+		"formation_shared_motion": false, "formation_shared_isolated": false, "cohesion_speed_scale": 1.0,
+	})
 	simulation_world.erase_entity_field(unit, "formation_steering_target")
 	unit.erase("_formation_path_cache")
-	simulation_world.set_entity_field(unit, "cohesion_speed_scale", 1.0)
 
 func advance_frame(frame_delta: float, player_team: int, enemy_team: int, maximum_steps: int = MAX_STEPS_PER_FRAME) -> String:
 	if paused or simulation_world == null:
@@ -1515,18 +1523,89 @@ func advance_frame(frame_delta: float, player_team: int, enemy_team: int, maximu
 		preparation_preserved_debt = 0.0
 		accumulator_seconds -= FIXED_STEP_SECONDS
 		steps += 1
+		# Publish the first authoritative step of a player order before
+		# spending the rest of this owner slice on catch-up ticks.
+		if local_publication_tick >= 0 and tick_index >= local_publication_tick:
+			local_publication_tick = -1
+			break
 	_render_deadline_usec = 0
 	return simulation_world.get_last_battle_message()
 
 func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
-	var fixed_tick_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var recovery_queries = simulation_world.ai_navigation_knowledge
+	if recovery_queries.profile_native_recovery:
+		recovery_queries.recovery_tick_native = (((tick_index + 1) * 1103515245 + 12345) & 0xffff) >= 32768
+	var recovery_native: bool = recovery_queries.recovery_tick_native
+	var activity = simulation_world.unit_activity_registry
+	activity.refresh_last_native = false
+	if activity.profile_refresh_alternatives:
+		activity.refresh_tick_native = (((tick_index + 1) * 1103515245 + 12345) & 0xffff) >= 32768
+	if activity.profile_order_alternatives:
+		activity.order_tick_native = activity.native_order_enabled and activity.native_order_supported and (((tick_index + 1) * 1103515245 + 12345) & 0xffff) >= 32768
+	var fast_navigation_queries := true
+	if profile_navigation_query_alternatives:
+		fast_navigation_queries = (((tick_index + 1) * 1103515245 + 12345) & 0xffff) >= 32768
+		simulation_world.set_fast_navigation_queries(fast_navigation_queries)
+	var tick_observer: Variant = fixed_tick_observer
+	if tick_observer == null and (simulation_world.spatial_index.profile_sync_alternatives or activity.profile_order_alternatives or activity.profile_refresh_alternatives or recovery_queries.profile_native_recovery): tick_observer = performance_probe
+	if tick_observer == null: return _run_fixed_tick_internal(player_team, enemy_team)
+	var fog = simulation_world.fog_of_war
+	var fog_serial: int = fog.owned_buffer_application_serial if fog.profile_owned_buffer_alternatives else -1
+	var spatial = simulation_world.spatial_index
+	var spatial_serial: int = spatial.synchronization_serial if spatial.profile_sync_alternatives else -1
+	var started := Time.get_ticks_usec()
+	var advanced := _run_fixed_tick_internal(player_team, enemy_team)
+	var elapsed := Time.get_ticks_usec() - started
+	tick_observer.observe_microseconds("controller.fixed_tick.total" if advanced else "controller.preparation_only.total", elapsed)
+	if advanced and simulation_world.pathfinder.profile_owner_movement_dispatch:
+		tick_observer.observe_microseconds("controller.fixed_tick.owner_dispatch" if simulation_world.pathfinder.owner_movement_dispatch_tick else "controller.fixed_tick.batch_dispatch", elapsed)
+	if advanced and simulation_world.movement_system.profile_scoped_resource_digest:
+		tick_observer.observe_microseconds("controller.fixed_tick.scoped_digest" if simulation_world.movement_system.scoped_resource_digest_tick else "controller.fixed_tick.global_digest_guard", elapsed)
+	if advanced and simulation_world.movement_system.profile_ordered_gather_controller:
+		tick_observer.observe_microseconds("controller.fixed_tick.gather_controller_native" if simulation_world.movement_system.ordered_gather_controller_tick else "controller.fixed_tick.gather_controller_reference", elapsed)
+	if advanced and combat_awareness.profile_native_awareness:
+		tick_observer.observe_microseconds("controller.fixed_tick.awareness_comparison" if combat_awareness.native_awareness_comparison_tick else "controller.fixed_tick.awareness_native" if combat_awareness.native_awareness_tick_executed else "controller.fixed_tick.awareness_reference", elapsed)
+	if advanced and combat_awareness.profile_classification_deltas and combat_awareness.native_awareness_tick_executed:
+		tick_observer.observe_microseconds("controller.fixed_tick.classification_delta" if combat_awareness.classification_shortcut_tick else "controller.fixed_tick.classification_full", elapsed)
+	if recovery_queries.profile_native_recovery: tick_observer.observe_microseconds(("controller.fixed_tick.ai_recovery_" if advanced else "controller.preparation_only.ai_recovery_") + ("native" if recovery_native else "script"), elapsed)
+	if advanced and spatial_serial >= 0:
+		var updates: int = spatial.synchronization_serial - spatial_serial
+		var implementation := "unused" if updates == 0 else "mixed" if updates > 1 else "native" if spatial.synchronization_tick_native else "script"
+		tick_observer.observe_microseconds("controller.fixed_tick.spatial_sync_" + implementation, elapsed)
+	if advanced and simulation_world.movement_system.profile_unit_span:
+		tick_observer.observe_microseconds("controller.fixed_tick.unit_span_native" if simulation_world.movement_system.unit_span_tick_native else "controller.fixed_tick.unit_span_script", elapsed)
+	if advanced and fog_serial >= 0:
+		var applications: int = fog.owned_buffer_application_serial - fog_serial
+		var implementation := "unused" if applications == 0 else "mixed" if applications > 1 else "native" if fog.owned_buffer_tick_native else "script"
+		tick_observer.observe_microseconds("controller.fixed_tick.owned_fog_" + implementation, elapsed)
+	if advanced and profile_navigation_query_alternatives:
+		tick_observer.observe_microseconds("controller.fixed_tick.navigation_fast" if fast_navigation_queries else "controller.fixed_tick.navigation_script", elapsed)
+	if advanced and simulation_world.movement_system.profile_work_traffic:
+		tick_observer.observe_microseconds("controller.fixed_tick.work_traffic_native" if simulation_world.movement_system.work_traffic_tick_native else "controller.fixed_tick.work_traffic_reference", elapsed)
+	if advanced and simulation_world.movement_system.profile_full_actor_pipeline:
+		tick_observer.observe_microseconds("controller.fixed_tick.full_actor_pipeline" if simulation_world.movement_system.full_actor_pipeline_tick_native else "controller.fixed_tick.reference_actor_pipeline", elapsed)
+	if advanced and simulation_world.movement_system.profile_common_movement_pipeline:
+		tick_observer.observe_microseconds("controller.fixed_tick.common_movement_pipeline" if simulation_world.movement_system.common_movement_pipeline_tick_native else "controller.fixed_tick.reference_movement", elapsed)
+	if advanced and simulation_world.movement_system.profile_checked_moves:
+		tick_observer.observe_microseconds("controller.fixed_tick.checked_move_native" if simulation_world.movement_system.checked_move_tick_native else "controller.fixed_tick.checked_move_script", elapsed)
+	if advanced and activity.profile_refresh_alternatives:
+		tick_observer.observe_microseconds("controller.fixed_tick.activity_refresh_native" if activity.refresh_last_native else "controller.fixed_tick.activity_refresh_script", elapsed)
+	if advanced and activity.profile_order_alternatives:
+		tick_observer.observe_microseconds("controller.fixed_tick.activity_order_native" if activity.order_tick_native else "controller.fixed_tick.activity_order_script", elapsed)
+	return advanced
+
+
+func _run_fixed_tick_internal(player_team: int, enemy_team: int) -> bool:
+	var observer: Variant = performance_probe if performance_probe != null else stage_observer
+	var fixed_tick_started := Time.get_ticks_usec() if observer != null else 0
 	if replay_source == null and before_fixed_tick.is_valid():
 		var preparation: Variant = before_fixed_tick.call(tick_index + 1)
+		if observer != null: observer.observe_microseconds("controller.preparation", Time.get_ticks_usec() - fixed_tick_started)
 		# Legacy boolean callbacks are informational. An explicit readiness
 		# envelope may yield before tick/state/command queues are consumed.
 		if preparation is Dictionary and not bool(preparation.get("ready", false)):
-			if performance_probe != null:
-				performance_probe.increment("controller.preparation_yields")
+			if observer != null:
+				observer.increment("controller.preparation_yields")
 			return false
 		# Only explicitly repeatable preparation may yield here. A callback that
 		# commits AI state/commands must proceed to its target tick exactly once.
@@ -1536,44 +1615,50 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 			_deferred_ready_tick = tick_index + 1
 			return false
 	_deferred_ready_tick = -1
+	if local_command_inbox != null and replay_source == null:
+		local_command_inbox.receive_on_owner(self, player_team)
 	_inject_replay_commands_for_current_tick()
 	tick_index += 1
 	if simulation_world.get("match_statistics") != null:
 		simulation_world.match_statistics.begin(simulation_world, tick_index - 1)
 	simulation_world.begin_event_capture()
-	var command_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var command_started := Time.get_ticks_usec() if observer != null else 0
 	process_commands()
-	var command_microseconds := Time.get_ticks_usec() - command_started if performance_probe != null else 0
-	var autonomy_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var command_microseconds := Time.get_ticks_usec() - command_started if observer != null else 0
+	var autonomy_started := Time.get_ticks_usec() if observer != null else 0
 	var wildlife_started := autonomy_started
 	for wildlife_command in wildlife_behavior.collect_commands(simulation_world, tick_index):
 		enqueue_command(wildlife_command, false, 0)
-	var wildlife_microseconds := Time.get_ticks_usec() - wildlife_started if performance_probe != null else 0
-	var awareness_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var wildlife_microseconds := Time.get_ticks_usec() - wildlife_started if observer != null else 0
+	var awareness_started := Time.get_ticks_usec() if observer != null else 0
 	for autonomous_command in combat_awareness.collect_commands(simulation_world, tick_index):
 		var attacker = simulation_world.find_combat_target(int(autonomous_command.unit_ids[0]))
 		if attacker != null:
 			enqueue_command(autonomous_command, false, int(attacker.get("team", 0)))
-	var awareness_microseconds := Time.get_ticks_usec() - awareness_started if performance_probe != null else 0
-	var autonomy_microseconds := Time.get_ticks_usec() - autonomy_started if performance_probe != null else 0
-	command_started = Time.get_ticks_usec() if performance_probe != null else 0
+	var awareness_microseconds := Time.get_ticks_usec() - awareness_started if observer != null else 0
+	if observer != null and combat_awareness.profile_native_awareness:
+		observer.observe_microseconds("controller.autonomy.combat.comparison" if combat_awareness.native_awareness_comparison_tick else "controller.autonomy.combat.native" if combat_awareness.native_awareness_tick_executed else "controller.autonomy.combat.reference", awareness_microseconds)
+	if observer != null and combat_awareness.profile_classification_deltas and combat_awareness.native_awareness_tick_executed:
+		observer.observe_microseconds("controller.autonomy.combat.classification_delta" if combat_awareness.classification_shortcut_tick else "controller.autonomy.combat.classification_full", awareness_microseconds)
+	var autonomy_microseconds := Time.get_ticks_usec() - autonomy_started if observer != null else 0
+	command_started = Time.get_ticks_usec() if observer != null else 0
 	process_commands()
-	if performance_probe != null:
+	if observer != null:
 		command_microseconds += Time.get_ticks_usec() - command_started
 	simulation_world.begin_runtime_task_capture()
-	var world_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var world_started := Time.get_ticks_usec() if observer != null else 0
 	if simulation_world.has_method("set_formation_cohesion_active"):
 		simulation_world.set_formation_cohesion_active(not formation_groups.is_empty())
 	if simulation_world.has_method("set_formation_groups_view"):
 		simulation_world.set_formation_groups_view(formation_groups)
 	simulation_world.advance(FIXED_STEP_SECONDS, player_team, enemy_team)
 	_advance_deferred_orders()
-	var world_microseconds := Time.get_ticks_usec() - world_started if performance_probe != null else 0
-	var formation_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var world_microseconds := Time.get_ticks_usec() - world_started if observer != null else 0
+	var formation_started := Time.get_ticks_usec() if observer != null else 0
 	if posmod(tick_index, FORMATION_RECONCILE_INTERVAL_TICKS) == 0:
 		reconcile_formation_groups()
-	var formation_microseconds := Time.get_ticks_usec() - formation_started if performance_probe != null else 0
-	var event_started := Time.get_ticks_usec() if performance_probe != null else 0
+	var formation_microseconds := Time.get_ticks_usec() - formation_started if observer != null else 0
+	var event_started := Time.get_ticks_usec() if observer != null else 0
 	simulation_world.end_event_capture()
 	_forward_domain_events()
 	if simulation_world.get("match_statistics") != null:
@@ -1588,15 +1673,15 @@ func _run_fixed_tick(player_team: int, enemy_team: int) -> bool:
 			var actual: String = replay_source.world_state_hash(simulation_world, tick_index, self)
 			if actual != expected:
 				last_replay_mismatch = "tick:%d expected:%s actual:%s" % [tick_index, expected, actual]
-	if performance_probe != null:
-		performance_probe.observe_microseconds("controller.commands", command_microseconds)
-		performance_probe.observe_microseconds("controller.autonomy", autonomy_microseconds)
-		performance_probe.observe_microseconds("controller.autonomy.wildlife", wildlife_microseconds)
-		performance_probe.observe_microseconds("controller.autonomy.combat", awareness_microseconds)
-		performance_probe.observe_microseconds("controller.world_advance", world_microseconds)
-		performance_probe.observe_microseconds("controller.formation_reconcile", formation_microseconds)
-		performance_probe.observe_microseconds("controller.events_replay", Time.get_ticks_usec() - event_started)
-		performance_probe.observe_microseconds("controller.fixed_tick", Time.get_ticks_usec() - fixed_tick_started)
+	if observer != null:
+		observer.observe_microseconds("controller.commands", command_microseconds)
+		observer.observe_microseconds("controller.autonomy", autonomy_microseconds)
+		observer.observe_microseconds("controller.autonomy.wildlife", wildlife_microseconds)
+		observer.observe_microseconds("controller.autonomy.combat", awareness_microseconds)
+		observer.observe_microseconds("controller.world_advance", world_microseconds)
+		observer.observe_microseconds("controller.formation_reconcile", formation_microseconds)
+		observer.observe_microseconds("controller.events_replay", Time.get_ticks_usec() - event_started)
+		observer.observe_microseconds("controller.fixed_tick", Time.get_ticks_usec() - fixed_tick_started)
 	return true
 
 

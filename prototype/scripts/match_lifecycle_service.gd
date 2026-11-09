@@ -7,21 +7,27 @@ const Decisions := preload("res://scripts/ai_decision_queue.gd")
 const SoundHistory := preload("res://scripts/sound_cue_history.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 
-func restore(path: String, new_world: Callable, new_players: Callable, configure_cadence: Callable, capture_ai: Callable, inspected: Dictionary = {}) -> Dictionary:
+func restore(path: String, new_world: Callable, new_players: Callable, configure_cadence: Callable, capture_ai: Callable, inspected: Dictionary = {}, progress: Callable = Callable()) -> Dictionary:
+	if not _progress(progress, 0.02, "Чтение сохранения"): return {"error": "load_cancelled"}
 	var loaded: Dictionary = Archive.read(path) if inspected.is_empty() else inspected
 	if not bool(loaded.get("valid", false)): return {"error": String(loaded.get("error", "archive_invalid"))}
 	var archive: Dictionary = loaded["archive"]
 	var blob: Dictionary = archive["checkpoint"]
 	if String(archive["state_sha256"]) != String(blob["sha256"]): return {"error": "checkpoint_invalid"}
+	if not _progress(progress, 0.15, "Распаковка сохранения"): return {"error": "load_cancelled"}
 	var checkpoint: Dictionary = Checkpoint.unpack(blob)
 	if checkpoint.is_empty(): return {"error": "checkpoint_invalid"}
 	var definition: Dictionary = checkpoint["match_definition"]
 	var map: Dictionary = checkpoint["map_definition"]
 	if Archive.fingerprint(definition) != String(archive["match_fingerprint"]): return {"error": "match_fingerprint_mismatch"}
+	if not _progress(progress, 0.36, "Создание мира"): return {"error": "load_cancelled"}
 	var world = new_world.call(map["size"])
 	var controller = Controller.new(world)
+	if not _progress(progress, 0.45, "Восстановление мира"): return _failed(world, "load_cancelled")
 	if not Checkpoint.restore(checkpoint, world, controller) or int(controller.tick_index) != int(archive["tick"]): return _failed(world, "checkpoint_invalid")
+	if not _progress(progress, 0.68, "Восстановление приказов"): return _failed(world, "load_cancelled")
 	if not controller.install_recording_history(archive["replay"], false): return _failed(world, "recording_history_invalid")
+	if not _progress(progress, 0.78, "Восстановление игроков"): return _failed(world, "load_cancelled")
 	var players: Array = new_players.call(definition)
 	configure_cadence.call(players)
 	var states := {}
@@ -40,10 +46,15 @@ func restore(path: String, new_world: Callable, new_players: Callable, configure
 		var sequence := int(result.get("sequence_id", -1))
 		if not expected_feedback.has(sequence) or int(result.get("issuer_id", -1)) != int(expected_feedback[sequence]) or int(result.get("applied_tick", -1)) < 0 or int(result.get("applied_tick", -1)) > controller.tick_index or controller.command_results.has(sequence): return _failed(world, "ai_feedback_invalid")
 		controller.command_results[sequence] = result.duplicate(true)
+	if not _progress(progress, 0.88, "Восстановление планов игроков"): return _failed(world, "load_cancelled")
 	if not saved_controller.get("ai_decisions", {}) is Dictionary or not decisions.restore_state(saved_controller.get("ai_decisions", {}), players, controller.tick_index, capture_ai): return _failed(world, "ai_decision_state_invalid")
 	var sound_history := SoundHistory.new()
 	if not sound_history.restore_state(archive["view_state"]["sound_cue_history"], int(archive["tick"])): return _failed(world, "sound_cue_history_invalid")
 	return {"error": "", "archive": archive, "world": world, "controller": controller, "definition": definition, "map": map, "players": players, "decisions": decisions, "sound_history": sound_history}
+
+
+func _progress(callback: Callable, value: float, stage: String) -> bool:
+	return bool(callback.call(value, stage)) if callback.is_valid() else true
 
 func retire_runtime(world, ai_runtime, render_snapshot_source, decisions, coordinator, release_derived_state: bool = true) -> void:
 	# Join/cancel producers before retiring the world they can still reference.

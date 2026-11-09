@@ -34,6 +34,7 @@ var command_option_entity_lookup: Dictionary
 var restrict_command_options: bool
 var compact_render_projector: Callable
 var units: Array
+var render_units: Array
 var control_units: Array
 var overview_units: Array
 var resources: Array
@@ -99,14 +100,16 @@ func setup() -> void:
 	has_entity_bounds = false
 	if entity_bounds is Rect2:
 		has_entity_bounds = (entity_bounds as Rect2).has_area()
-	var always_include_entity_ids: Array = options.get("always_include_entity_ids", [])
-	var command_option_entity_ids: Array = options.get("command_option_entity_ids", [])
-	always_include_entity_lookup = {}
-	for entity_id_value in always_include_entity_ids:
-		always_include_entity_lookup[int(entity_id_value)] = true
-	command_option_entity_lookup = {}
-	for entity_id_value in command_option_entity_ids:
-		command_option_entity_lookup[int(entity_id_value)] = true
+	if options.has("_scene_control_ids"):
+		always_include_entity_lookup = options["_scene_control_ids"]
+		command_option_entity_lookup = always_include_entity_lookup
+	else:
+		always_include_entity_lookup = {}
+		for entity_id_value in options.get("always_include_entity_ids", []):
+			always_include_entity_lookup[int(entity_id_value)] = true
+		command_option_entity_lookup = {}
+		for entity_id_value in options.get("command_option_entity_ids", []):
+			command_option_entity_lookup[int(entity_id_value)] = true
 	restrict_command_options = options.has("command_option_entity_ids")
 	compact_render_projector = Callable(world, "compact_render_projection") if compact_render_entities and world.has_method("compact_render_projection") else Callable()
 	if snapshot_probe != null:
@@ -116,6 +119,8 @@ func setup() -> void:
 
 func project_units() -> void:
 	units = []
+	render_units = []
+	var split_metadata := bool(options.get("_scene_unit_metadata", false))
 	control_units = []
 	overview_units = []
 	var unit_control_projection_microseconds = 0
@@ -130,10 +135,11 @@ func project_units() -> void:
 	# the population scale where it becomes cheaper and enables future 500-unit
 	# players without penalizing today's campaign missions.
 	world.entity_read_index.synchronize(world)
-	var use_bounded_unit_query: bool = has_entity_bounds
+	var scene_controls := options.has("_scene_control_ids")
+	var use_bounded_unit_query: bool = has_entity_bounds and not bool(options.get("full_render_scene", false))
 	var unit_substage_started = Time.get_ticks_usec() if snapshot_probe != null else 0
 	var detail_units: Array = world.entity_read_index.in_bounds(entity_bounds, "units") if use_bounded_unit_query else world.entity_read_index.legal_entities(world, observer_team, "units")
-	if has_entity_bounds and not always_include_entity_lookup.is_empty():
+	if not scene_controls and has_entity_bounds and not always_include_entity_lookup.is_empty():
 		var detailed_ids: Dictionary = {}
 		for unit_value in detail_units:
 			detailed_ids[int(unit_value.get("id", -1))] = true
@@ -148,35 +154,56 @@ func project_units() -> void:
 		unit_acquisition_microseconds = Time.get_ticks_usec() - unit_substage_started
 		unit_substage_started = Time.get_ticks_usec()
 	if include_overview:
-		for unit_value in world.entity_read_index.legal_entities(world, observer_team, "units"):
+		var overview_source: Array = detail_units if scene_controls and not use_bounded_unit_query else world.entity_read_index.legal_entities(world, observer_team, "units")
+		for unit_value in overview_source:
 			var overview_unit: Dictionary = unit_value
-			if EntityProjection._entity_visible_to_observer(overview_unit, observer_team, observer_states, observer_allies, fog_map_size):
+			if scene_controls or EntityProjection._entity_visible_to_observer(overview_unit, observer_team, observer_states, observer_allies, fog_map_size):
 				overview_units.append(EntityProjection._overview_entity(overview_unit))
 	if snapshot_probe != null:
 		unit_overview_microseconds = Time.get_ticks_usec() - unit_substage_started
 		unit_substage_started = Time.get_ticks_usec()
-	if compact_render_entities and borrow_visible_render_entities and not compact_entities and (always_include_entity_lookup.is_empty() or native_selected_batch_enabled):
+	if compact_render_entities and borrow_visible_render_entities and not compact_entities and ((not scene_controls and always_include_entity_lookup.is_empty()) or native_selected_batch_enabled):
 		var kernel: Variant = world.render_entity_projection_cache.native_kernel
 		if kernel != null and kernel.has_method("filter_visible_entities"):
-			var visible: Array = kernel.filter_visible_entities(detail_units, observer_team, observer_states, fog_map_size)
+			var visible: Array = detail_units if scene_controls and not use_bounded_unit_query else kernel.filter_visible_entities(detail_units, observer_team, observer_states, fog_map_size)
 			units = world.render_entity_projection_cache.project_many(visible, world.entity_changes)
+			if split_metadata:
+				render_units = units
+				render_units.make_read_only()
+				units = []
 			for index in range(visible.size()):
-				if not always_include_entity_lookup.has(int(visible[index].get("id",-1))): continue
+				var unit_id := int(visible[index].get("id", -1))
+				if scene_controls and float(visible[index].get("hp", 0.0)) > 0.0:
+					always_include_entity_lookup[unit_id] = true
+				if not always_include_entity_lookup.has(unit_id):
+					if split_metadata: units.append(render_units[index])
+					continue
 				var projection_started = Time.get_ticks_usec() if snapshot_probe != null else 0
-				var control = EntityProjection._compact_control_entity(visible[index], observer_team, Callable(), units[index])
-				units[index] = control
+				var rendered_row: Dictionary = render_units[index] if split_metadata else units[index]
+				var control = options["_scene_controls"].project(visible[index], rendered_row, observer_team, split_metadata) if options.has("_scene_controls") else EntityProjection._compact_control_entity(visible[index], observer_team, Callable(), rendered_row)
+				if split_metadata: units.append(control)
+				else: units[index] = control
 				control_units.append(control)
 				if snapshot_probe != null: unit_control_projection_microseconds += Time.get_ticks_usec()-projection_started
 			detail_units = []
 	for unit in detail_units:
+		if scene_controls and float(unit.get("hp", 0.0)) > 0.0:
+			always_include_entity_lookup[int(unit["id"])] = true
 		if has_entity_bounds and not use_bounded_unit_query and not EntityProjection._entity_in_bounds(unit, entity_bounds) and not always_include_entity_lookup.has(int(unit.get("id", -1))):
 			continue
 		if EntityProjection._entity_visible_to_observer(unit, observer_team, observer_states, observer_allies, fog_map_size):
 			var unit_id = int(unit.get("id", -1))
 			var presentation_unit: Dictionary
+			var render_pose: Dictionary = {}
+			if split_metadata:
+				render_pose = compact_render_projector.call(unit) if compact_render_projector.is_valid() else ReadContract.render(unit)
 			if compact_render_entities and always_include_entity_lookup.has(unit_id):
 				var projection_started = Time.get_ticks_usec() if snapshot_probe != null else 0
-				presentation_unit = EntityProjection._compact_control_entity(unit, observer_team, compact_render_projector)
+				if options.has("_scene_controls"):
+					var rendered_control: Dictionary = render_pose if split_metadata else (compact_render_projector.call(unit) if compact_render_projector.is_valid() else ReadContract.render(unit))
+					presentation_unit = options["_scene_controls"].project(unit, rendered_control, observer_team, split_metadata)
+				else:
+					presentation_unit = EntityProjection._compact_control_entity(unit, observer_team, compact_render_projector)
 				if snapshot_probe != null:
 					unit_control_projection_microseconds += Time.get_ticks_usec() - projection_started
 			elif compact_render_entities and borrow_visible_render_entities:
@@ -200,6 +227,7 @@ func project_units() -> void:
 				var allied_cargo: Dictionary = presentation_unit.get("components", {}).get("cargo", {})
 				if bool(allied_cargo.get("enabled", false)):
 					allied_cargo["count"] = unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).size()
+			if split_metadata: render_units.append(render_pose)
 			units.append(presentation_unit)
 			if always_include_entity_lookup.has(unit_id):
 				control_units.append(presentation_unit)
@@ -213,6 +241,7 @@ func project_units() -> void:
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.control_projection", unit_control_projection_microseconds)
 		snapshot_probe.observe_microseconds(snapshot_prefix + ".units.render_projection", unit_render_projection_microseconds)
 		snapshot_stage_started = Time.get_ticks_usec()
+	if split_metadata and not render_units.is_read_only(): render_units.make_read_only()
 
 
 func project_resources() -> void:
@@ -249,7 +278,7 @@ func project_resources() -> void:
 		# The legal memory records are already detached render projections. Only
 		# selected resources need the larger control projection; selected units
 		# must not cause the whole forest to be traversed/copied each tick.
-		for selected_id_value in always_include_entity_lookup:
+		for selected_id_value in ([] if bool(options.get("full_render_scene", false)) else always_include_entity_lookup):
 			var selected_id = int(selected_id_value)
 			var low = 0
 			var high = resources.size()
@@ -304,14 +333,17 @@ func project_buildings() -> void:
 	var borrow_building_memory: bool = bool(options.get("borrow_sampled_building_memory", false)) and int(memory_cursor.get("entity", -1)) == world.entity_changes.revision and int(memory_cursor.get("fog", -1)) == fog.revision_for_player(observer_team)
 	var live_building_ids: Dictionary = {}
 	blocked_population_queues = 0
+	var scene_controls := options.has("_scene_control_ids")
 	for building in world.entity_read_index.legal_entities(world, observer_team, "buildings"):
 		if observer_team > 0 and int(building.get("team", 0)) == observer_team:
 			var own_queue: Array = building.get("production_queue", [])
 			if not own_queue.is_empty() and String(own_queue[0].get("status", "")) == "blocked_population":
 				blocked_population_queues += 1
 		var building_id = int(building.get("id", -1))
+		if scene_controls and float(building.get("hp", 0.0)) > 0.0:
+			always_include_entity_lookup[building_id] = true
 		live_building_ids[building_id] = true
-		var visible_now = EntityProjection._entity_visible_to_observer(building, observer_team, observer_states, observer_allies, fog_map_size)
+		var visible_now = scene_controls or EntityProjection._entity_visible_to_observer(building, observer_team, observer_states, observer_allies, fog_map_size)
 		var knowledge: Dictionary = building
 		var observed_render: Dictionary = {}
 		if visible_now and observer_team > 0:
@@ -346,7 +378,7 @@ func project_buildings() -> void:
 				presentation_building = presentation_building.duplicate()
 				presentation_building["last_known"] = true
 			elif compact_render_entities and always_include_entity_lookup.has(building_id):
-				presentation_building = EntityProjection._compact_control_entity(building, observer_team, compact_render_projector, observed_render)
+				presentation_building = options["_scene_controls"].project(building, observed_render, observer_team) if options.has("_scene_controls") else EntityProjection._compact_control_entity(building, observer_team, compact_render_projector, observed_render)
 			elif compact_render_entities and not observed_render.is_empty():
 				presentation_building = observed_render
 			else:
@@ -452,6 +484,8 @@ func compose() -> Dictionary:
 		"observer_team": observer_team,
 		"map_size": world.map_size,
 		"units": sorted_units,
+		"split_unit_metadata": bool(options.get("_scene_unit_metadata", false)),
+		"render_units": render_units,
 		"control_units": control_units,
 		"resources": sorted_resources,
 		"resource_delta": world.known_resource_view_delta(observer_team) if borrow_resource_view and world.has_method("known_resource_view_delta") else {},

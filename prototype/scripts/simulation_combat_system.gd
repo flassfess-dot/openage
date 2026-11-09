@@ -357,6 +357,9 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 			"target_id": int(enemy["id"]),
 			"ranged": int(unit.get("projectile_id", -1)) >= 0,
 		})
+	if int(unit.get("projectile_id", -1)) >= 0 or float(unit.get("attack_range", 0.0)) > 1.5:
+		world.reveal_ranged_attacker(unit, enemy)
+		world.notify_under_attack(unit, enemy)
 	if int(unit.get("projectile_id", -1)) >= 0:
 		var count := 1 + Garrison.extra_arrows(world, unit)
 		for index in range(count):

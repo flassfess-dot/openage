@@ -83,6 +83,13 @@ func _is_invalid_resource_frame(record: Dictionary) -> bool:
 	return int(semantic_pixels.get("transparency", -1)) == 0
 
 
+func prewarm_asset_names(resource: Dictionary) -> Array:
+	var metadata := _resource_metadata(resource)
+	return [String(resource.get("source_graphic_asset_name", "")),
+		String(resource.get("source_depleted_asset_name", "")),
+		String(metadata.get("asset_name", "")), String(metadata.get("depleted_asset_name", ""))]
+
+
 func frame_info(resource: Dictionary, animation_time: float = 0.0) -> Dictionary:
 	var kind := String(resource.get("kind", ""))
 	var metadata := _resource_metadata(resource)

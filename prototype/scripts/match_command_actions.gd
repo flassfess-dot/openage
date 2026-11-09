@@ -25,6 +25,7 @@ var wall_placement_preview: Dictionary = {}
 var wall_preview_renderer := RenderWorld.new()
 var pending_target_command := ""
 var pending_target_queue_order := false
+var last_idle_worker_id := -1
 
 func handle_input_action(game, action: Dictionary) -> void:
 	if game.local_spectator and String(action.get("type", "")) not in ["consume_outside_world", "zoom", "pointer_moved", "toggle_audio", "toggle_pause", "change_speed", "toggle_diagnostics", "toggle_status_indicators", "next_sound_cue", "reset_game", "quit", "open_game_menu", "open_help"]:
@@ -166,7 +167,6 @@ func handle_minimap_input(game, event: InputEvent) -> bool:
 
 
 func issue_order(game, mouse: Vector2, direction_end: Variant = null, queue_order: bool = false) -> void:
-	game.join_simulation_owner()
 	var selected = game.selected_units()
 	if selected.is_empty():
 		selected = game.selected_entities().filter(func(entity): return int(entity.get("team", 0)) == game.local_player_team)
@@ -184,43 +184,43 @@ func issue_order(game, mouse: Vector2, direction_end: Variant = null, queue_orde
 	if not hit_stack.is_empty():
 		clicked_entity = game.picking_service.context_entity(hit_stack[0])
 
-	var resolution = ContextResolver.resolve(selected, clicked_entity, mouse_world, game.local_player_team, game.simulation_world.get_allied_teams(game.local_player_team))
+	var resolution = ContextResolver.resolve(selected, clicked_entity, mouse_world, game.local_player_team, game.command_context_allies())
 	var selected_ids = game._selection_ids(selected)
 	var command: Variant = null
 	var accepted_message = ""
 	match resolution["type"]:
 		"set_rally_point":
-			command = RoRCommands.SetRallyPointCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target"])
+			command = RoRCommands.SetRallyPointCommand.new(game.next_local_command_tick(), selected_ids, resolution["target"])
 			accepted_message = "Точка сбора установлена"
 		"attack":
-			command = RoRCommands.AttackCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
+			command = RoRCommands.AttackCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
 			accepted_message = "Атаковать цель"
 		"convert":
-			command = RoRCommands.ConvertCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
+			command = RoRCommands.ConvertCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
 			accepted_message = "Обратить цель"
 		"heal":
-			command = RoRCommands.HealCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
+			command = RoRCommands.HealCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
 			accepted_message = "Исцелить союзника"
 		"board":
-			command = RoRCommands.BoardCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
+			command = RoRCommands.BoardCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
 			accepted_message = "Занять гарнизон башни" if bool(resolution.get("garrison", false)) else "Погрузиться в транспорт"
 		"trade":
-			command = RoRCommands.TradeCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
+			command = RoRCommands.TradeCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
 			accepted_message = "Торговый маршрут назначен"
 		"gather":
-			command = RoRCommands.GatherCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
+			command = RoRCommands.GatherCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
 			accepted_message = "Работники отправлены к ресурсу"
 		"return_resources":
-			command = RoRCommands.ReturnResourcesCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
+			command = RoRCommands.ReturnResourcesCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
 			accepted_message = "Сдать ресурсы"
 		"build":
-			command = RoRCommands.BuildCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["building_type"], resolution["target"])
+			command = RoRCommands.BuildCommand.new(game.next_local_command_tick(), selected_ids, resolution["building_type"], resolution["target"])
 			accepted_message = "Продолжить строительство"
 		"repair":
-			command = RoRCommands.RepairCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target_id"])
+			command = RoRCommands.RepairCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
 			accepted_message = "Ремонтировать здание"
 		"move":
-			command = RoRCommands.MoveCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target"]) if queue_order else RoRCommands.FormationMoveCommand.new(game.game_controller.tick_index + 1, selected_ids, resolution["target"], game.formation, formation_forward)
+			command = RoRCommands.MoveCommand.new(game.next_local_command_tick(), selected_ids, resolution["target"]) if queue_order else RoRCommands.FormationMoveCommand.new(game.next_local_command_tick(), selected_ids, resolution["target"], game.formation, formation_forward)
 			command.params["preserve_formations"] = true
 			accepted_message = "Движение: %s" % game.formation_name()
 		_:
@@ -230,35 +230,40 @@ func issue_order(game, mouse: Vector2, direction_end: Variant = null, queue_orde
 	if queue_order and String(command.command_type()) in GameController.QUEUEABLE_ORDERS:
 		command.params["queue_order"] = true
 	var feedback_marker: Variant = ContextResolver.feedback_marker(resolution, clicked_entity, mouse_world)
+	if String(resolution.get("type", "")) == "move":
+		game.command_marker_presentation.trigger(mouse_world)
+		feedback_marker = null
 	game.enqueue_with_feedback(command, accepted_message, "command:%s" % String(selected[0].get("kind", "")), feedback_marker)
 
 
 func issue_ground_order(game, target: Vector2, queue_order: bool = false) -> void:
-	game.join_simulation_owner()
 	var selected = game.selected_units()
 	if selected.is_empty():
 		selected = game.selected_entities().filter(func(entity): return int(entity.get("team", 0)) == game.local_player_team)
 	if selected.is_empty(): return
 	var ids = game._selection_ids(selected)
-	var resolution = ContextResolver.resolve(selected, null, target, game.local_player_team, game.simulation_world.get_allied_teams(game.local_player_team))
+	var resolution = ContextResolver.resolve(selected, null, target, game.local_player_team, game.command_context_allies())
 	var command: Variant = null
 	if String(resolution.get("type", "")) == "set_rally_point":
-		command = RoRCommands.SetRallyPointCommand.new(game.game_controller.tick_index + 1, ids, target)
+		command = RoRCommands.SetRallyPointCommand.new(game.next_local_command_tick(), ids, target)
 	elif String(resolution.get("type", "")) == "move":
-		command = RoRCommands.MoveCommand.new(game.game_controller.tick_index + 1, ids, target) if queue_order else RoRCommands.FormationMoveCommand.new(game.game_controller.tick_index + 1, ids, target, game.formation, Vector2.ZERO)
+		command = RoRCommands.MoveCommand.new(game.next_local_command_tick(), ids, target) if queue_order else RoRCommands.FormationMoveCommand.new(game.next_local_command_tick(), ids, target, game.formation, Vector2.ZERO)
 		command.params["preserve_formations"] = true
 		if queue_order: command.params["queue_order"] = true
 	else:
 		return
-	game.enqueue_with_feedback(command, CommandFeedbackRouter.accepted_message(command.command_type()), "command:%s" % String(selected[0].get("kind", "")), target)
+	var marker: Variant = target
+	if String(resolution.get("type", "")) == "move":
+		game.command_marker_presentation.trigger(target)
+		marker = null
+	game.enqueue_with_feedback(command, CommandFeedbackRouter.accepted_message(command.command_type()), "command:%s" % String(selected[0].get("kind", "")), marker)
 
 
 func issue_martyrdom(game) -> void:
-	game.join_simulation_owner()
 	var selected = game.selected_units()
 	if selected.is_empty():
 		return
-	var command = RoRCommands.MartyrdomCommand.new(game.game_controller.tick_index + 1, game._selection_ids(selected))
+	var command = RoRCommands.MartyrdomCommand.new(game.next_local_command_tick(), game._selection_ids(selected))
 	game.enqueue_with_feedback(command, "Жертвоприношение", "", null)
 
 
@@ -275,10 +280,10 @@ func issue_delete_context(game) -> void:
 		else:
 			delete_ids.append(entity_id)
 	if not martyr_ids.is_empty():
-		var martyrdom = RoRCommands.MartyrdomCommand.new(game.game_controller.tick_index + 1, martyr_ids)
+		var martyrdom = RoRCommands.MartyrdomCommand.new(game.next_local_command_tick(), martyr_ids)
 		game.enqueue_with_feedback(martyrdom, "Жертвоприношение", "", null)
 	if not delete_ids.is_empty():
-		var deletion = RoRCommands.DeleteEntityCommand.new(game.game_controller.tick_index + 1, delete_ids)
+		var deletion = RoRCommands.DeleteEntityCommand.new(game.next_local_command_tick(), delete_ids)
 		game.enqueue_with_feedback(deletion, "Удалить выбранные объекты", "", null)
 
 
@@ -308,14 +313,13 @@ func issue_unload_at_pointer(game, queue_order: bool = false) -> void:
 
 
 func issue_unit_action(game, action_name: String) -> void:
-	game.join_simulation_owner()
 	if action_name == "ungarrison":
 		game.issue_unload_at_pointer()
 		return
 	if action_name.begins_with("gate_"):
 		var gates = game.selected_entities().filter(func(entity): return String(entity.get("kind", "")) == "gate" and int(entity.get("team", 0)) == game.local_player_team)
 		if not gates.is_empty() and not game.battle_over:
-			var gate_command = RoRCommands.GateModeCommand.new(game.game_controller.tick_index + 1, game._selection_ids(gates), action_name.trim_prefix("gate_"))
+			var gate_command = RoRCommands.GateModeCommand.new(game.next_local_command_tick(), game._selection_ids(gates), action_name.trim_prefix("gate_"))
 			game.enqueue_with_feedback(gate_command, "Режим ворот", "")
 		return
 	if action_name == "unload":
@@ -345,14 +349,14 @@ func issue_unit_action(game, action_name: String) -> void:
 	var message = ""
 	match action_name:
 		"stop":
-			command = RoRCommands.StopCommand.new(game.game_controller.tick_index + 1, ids)
+			command = RoRCommands.StopCommand.new(game.next_local_command_tick(), ids)
 			message = "Остановиться"
 		"hold":
-			command = RoRCommands.HoldCommand.new(game.game_controller.tick_index + 1, ids)
+			command = RoRCommands.HoldCommand.new(game.next_local_command_tick(), ids)
 			message = "Держать позицию"
 		"stance":
 			var stance = RoRCommands.next_stance(String(selected[0].get("stance", "aggressive")))
-			command = RoRCommands.StanceCommand.new(game.game_controller.tick_index + 1, ids, stance)
+			command = RoRCommands.StanceCommand.new(game.next_local_command_tick(), ids, stance)
 			message = "Стойка: %s" % game.stance_name(stance)
 		_:
 			return
@@ -369,7 +373,7 @@ func issue_ungarrison(game, building_id: int, passenger_id: int = -1) -> void:
 	var ids: Array[int] = []
 	if passenger_id >= 0:
 		ids.append(passenger_id)
-	var command = RoRCommands.UnloadCommand.new(game.game_controller.tick_index + 1, [building_id], Vector2(tower["pos"]), ids)
+	var command = RoRCommands.UnloadCommand.new(game.next_local_command_tick(), [building_id], Vector2(tower["pos"]), ids)
 	game.enqueue_with_feedback(command, "Высадить бойца" if passenger_id >= 0 else "Высадить весь гарнизон", "", null)
 
 
@@ -432,7 +436,7 @@ func commit_repair_target(game, screen_position: Vector2) -> void:
 		game.message_time = 2.0
 		return
 	workers = workers.filter(func(worker): return game.simulation_world.can_worker_repair(worker, target))
-	var command = RoRCommands.RepairCommand.new(game.game_controller.tick_index + 1, game._selection_ids(workers), int(target["id"]))
+	var command = RoRCommands.RepairCommand.new(game.next_local_command_tick(), game._selection_ids(workers), int(target["id"]))
 	pending_target_command = ""
 	game.update_interaction_cursor(game.input_adapter.pointer_position)
 	game.enqueue_with_feedback(command, "Ремонтировать цель", "command:%s" % String(workers[0].get("kind", "villager")), Vector2(target.get("pos", Vector2.ZERO)))
@@ -486,7 +490,7 @@ func commit_pending_target(game, screen_position: Vector2, queue_order: bool = f
 		selected = selected.filter(func(unit): return bool(unit.get("components", {}).get("cargo", {}).get("enabled", false)) and not unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).is_empty())
 		if selected.is_empty():
 			return
-		command = RoRCommands.UnloadCommand.new(game.game_controller.tick_index + 1, game._selection_ids(selected), target)
+		command = RoRCommands.UnloadCommand.new(game.next_local_command_tick(), game._selection_ids(selected), target)
 		if pending_target_queue_order or queue_order:
 			command.params["queue_order"] = true
 		pending_target_queue_order = false
@@ -495,10 +499,10 @@ func commit_pending_target(game, screen_position: Vector2, queue_order: bool = f
 		selected = selected.filter(func(unit): return game.simulation_world.can_attack_ground(unit))
 		if selected.is_empty():
 			return
-		command = RoRCommands.AttackGroundCommand.new(game.game_controller.tick_index + 1, game._selection_ids(selected), target)
+		command = RoRCommands.AttackGroundCommand.new(game.next_local_command_tick(), game._selection_ids(selected), target)
 		message = "Атаковать точку"
 	else:
-		command = RoRCommands.AttackMoveCommand.new(game.game_controller.tick_index + 1, game._selection_ids(selected), target)
+		command = RoRCommands.AttackMoveCommand.new(game.next_local_command_tick(), game._selection_ids(selected), target)
 		message = "Двигаться с атакой"
 	game.enqueue_with_feedback(command, message, "command:%s" % String(selected[0].get("kind", "")), target)
 
@@ -508,7 +512,6 @@ func stance_name(game, value: String) -> String:
 
 
 func set_formation(game, value: String) -> void:
-	game.join_simulation_owner()
 	if game.selected_units().is_empty():
 		return
 	game.formation = value
@@ -524,7 +527,7 @@ func set_formation(game, value: String) -> void:
 		center += unit["pos"]
 	center /= float(selected.size())
 	var existing_forward: Vector2 = selected[0].get("formation_forward", Vector2.ZERO)
-	var reform = RoRCommands.FormationMoveCommand.new(game.game_controller.tick_index + 1, game._selection_ids(selected), center, value, existing_forward)
+	var reform = RoRCommands.FormationMoveCommand.new(game.next_local_command_tick(), game._selection_ids(selected), center, value, existing_forward)
 	game._queue_local_command(reform)
 
 
@@ -605,7 +608,7 @@ func commit_build_placement(game, screen_position: Vector2, queue_order: bool = 
 	else:
 		pending_build_started = true
 	game.update_interaction_cursor(game.input_adapter.pointer_position)
-	var command = RoRCommands.BuildCommand.new(game.game_controller.tick_index + 1, game._selection_ids(workers), kind, target)
+	var command = RoRCommands.BuildCommand.new(game.next_local_command_tick(), game._selection_ids(workers), kind, target)
 	if kind == "gate":
 		command.params["gate_axis"] = pending_gate_axis
 	if defer_order:
@@ -619,53 +622,34 @@ func queue_wall_line(game, workers: Array, cells: Array[Vector2i], queue_order: 
 	game.join_simulation_owner()
 	if cells.is_empty():
 		return
-	var command = RoRCommands.BuildCommand.new(game.game_controller.tick_index + 1, game._selection_ids(workers), "wall", Vector2(cells[0]))
+	var command = RoRCommands.BuildCommand.new(game.next_local_command_tick(), game._selection_ids(workers), "wall", Vector2(cells[0]))
 	command.params["wall_cells"] = cells.duplicate()
 	command.params["queue_order"] = queue_order
 	game.enqueue_with_feedback(command, "Строительство стены", "command:%s" % String(workers[0].get("kind", "villager")), null)
 
 
 func train_unit_from_hud(game, unit_kind: String, building_id: int) -> void:
-	game.join_simulation_owner()
 	if game.simulation_world == null or game.battle_over or building_id < 0 or unit_kind.is_empty():
 		return
-	var building: Variant = game.simulation_world.find_building(building_id)
-	if building == null:
-		game.game_message = "Здание больше недоступно"
-		game.message_time = 2.0
-		return
-	var command = RoRCommands.TrainCommand.new(game.game_controller.tick_index + 1, [building_id], unit_kind, game.local_player_team, Vector2.ZERO)
+	var command = RoRCommands.TrainCommand.new(game.next_local_command_tick(), [building_id], unit_kind, game.local_player_team, Vector2.ZERO)
 	game.enqueue_with_feedback(command, "Добавлено в очередь: %s" % unit_kind, "", null)
 
 
 func research_from_hud(game, technology_id: int, building_id: int) -> void:
-	game.join_simulation_owner()
 	if game.simulation_world == null or game.battle_over or building_id < 0 or technology_id < 0:
 		return
-	var building: Variant = game.simulation_world.find_building(building_id)
-	if building == null:
-		game.game_message = "Здание больше недоступно"
-		game.message_time = 2.0
-		return
-	var command = RoRCommands.ResearchCommand.new(game.game_controller.tick_index + 1, [building_id], String.num_int64(technology_id))
+	var command = RoRCommands.ResearchCommand.new(game.next_local_command_tick(), [building_id], String.num_int64(technology_id))
 	game.enqueue_with_feedback(command, "Исследование добавлено в очередь", "", null)
 
 
 func cancel_production_from_hud(game, building_id: int, queue_index: int) -> void:
-	game.join_simulation_owner()
 	if game.simulation_world == null or building_id < 0:
 		return
-	var building: Variant = game.simulation_world.find_building(building_id)
-	if building == null:
-		game.game_message = "Здание больше недоступно"
-		game.message_time = 2.0
-		return
-	var command = RoRCommands.CancelProductionCommand.new(game.game_controller.tick_index + 1, [building_id], queue_index)
+	var command = RoRCommands.CancelProductionCommand.new(game.next_local_command_tick(), [building_id], queue_index)
 	game.enqueue_with_feedback(command, "Элемент очереди отменён", "", null)
 
 
 func set_trade_resource_from_hud(game, resource_type_id: int) -> void:
-	game.join_simulation_owner()
 	if game.simulation_world == null or game.battle_over or resource_type_id not in [0, 1, 2]:
 		return
 	var traders: Array = game.selected_units().filter(func(unit): return bool(unit.get("components", {}).get("trade", {}).get("enabled", false)))
@@ -673,7 +657,7 @@ func set_trade_resource_from_hud(game, resource_type_id: int) -> void:
 		game.game_message = "Выберите торговое судно"
 		game.message_time = 2.0
 		return
-	var command = RoRCommands.SetTradeResourceCommand.new(game.game_controller.tick_index + 1, game._selection_ids(traders), resource_type_id)
+	var command = RoRCommands.SetTradeResourceCommand.new(game.next_local_command_tick(), game._selection_ids(traders), resource_type_id)
 	var label: String = String({0: "еда", 1: "дерево", 2: "камень"}.get(resource_type_id, "ресурс"))
 	game.enqueue_with_feedback(command, "Торговый ресурс: %s" % label, "", null)
 
@@ -711,6 +695,34 @@ func recall_control_group(game, group_number: int, additive: bool) -> void:
 	else:
 		game.game_message = "Выбрана группа %d: %d юнитов" % [group_number, recalled_ids.size()]
 	game.message_time = 1.5
+
+
+func select_idle_worker(game) -> void:
+	game.join_simulation_owner()
+	if game.simulation_world == null or game.battle_over or game.local_spectator: return
+	var workers: Array = game.simulation_world.get_units().filter(func(unit):
+		return int(unit.get("team", 0)) == game.local_player_team and float(unit.get("hp", 0.0)) > 0.0 and game.simulation_world.entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land" and String(unit.get("task", "idle")) == "idle" and unit.get("components", {}).get("order", {}).get("queued", []).is_empty()
+	)
+	workers.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
+	if workers.is_empty():
+		game.game_message = "Незанятых крестьян нет"
+		game.message_time = 1.5
+		return
+	var worker: Dictionary = workers[0]
+	for candidate in workers:
+		if int(candidate["id"]) > last_idle_worker_id:
+			worker = candidate
+			break
+	last_idle_worker_id = int(worker["id"])
+	game.cancel_pending_targeting()
+	if game.hud_controls != null: game.hud_controls.set_build_menu_open(false)
+	var ids: Array[int] = [last_idle_worker_id]
+	game.player_control_state.replace_or_add(ids, false)
+	game.center_view_on_world(Vector2(worker["pos"]))
+	game.sync_world_state()
+	game.refresh_hud_model()
+	game.play_sfx("selection:%s" % String(worker["kind"]))
+	game.queue_redraw()
 
 
 func select_hud_building(game, building_id: int) -> void:

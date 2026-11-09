@@ -3,6 +3,10 @@ extends Node2D
 
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const NativeTerrainMesh := preload("res://scripts/native_terrain_mesh.gd")
+const PreparedScene := preload("res://scripts/prepared_terrain_scene.gd")
+var prepared_scene: Variant = null
+var prepared_geometry_stamp: Dictionary = {}
+var prepared_scene_enabled := OS.get_environment("ROR_DIAGNOSTIC_PREPARED_TERRAIN") != "0"
 const TerrainRenderer := preload("res://scripts/terrain_renderer.gd")
 const PixelScaling := preload("res://scripts/pixel_scaling.gd")
 # Full-detail mixed terrain is intentionally expensive.  Keep enough terrain
@@ -41,15 +45,39 @@ var native_kernel: Variant
 var terrain_mesh: ArrayMesh
 var terrain_mesh_parts: Array[ArrayMesh] = []
 var retired_meshes: Array[ArrayMesh] = []
+var preparation_draws := 0
+var fallback_draws := 0
+var fallback_material_meshes := 0
+var retired_cpu_arrays: Array = []
+var peak_retired_cpu_chunks := 0
+var cpu_retirement_task_id := -1
+var cpu_retirement_job: Variant
 var refinement_upload: Variant
 const UPLOAD_BUDGET_USEC := 2000
 const MAX_UPLOADS_PER_FRAME := 2
 const MAX_RETIREMENTS_PER_FRAME := 4
+const CPU_RETIREMENT_BACKPRESSURE_CHUNKS := 512
 var peak_chunk_upload_us := 0
 var terrain_mesh_bounds := Rect2i()
 var native_sample_cache: Dictionary = {}
 var native_sample_revision := -1
 var refinement_prefetch := false
+var coverage_parts: Array[Dictionary] = []
+var peak_coverage_parts := 0
+var coverage_cache_pressure_frames := 0
+var coverage_bounds := Rect2i()
+var coverage_revision := -1
+var performance_probe: Variant = null
+var coverage_prefetch_enabled := not OS.get_cmdline_user_args().has("--no-coverage-prefetch")
+var coverage_task_id := -1
+var coverage_job: Variant
+var coverage_job_bounds := Rect2i()
+var coverage_job_revision := -1
+var coverage_job_generation := -1
+var coverage_upload: Variant
+var queued_coverage: Array[Dictionary] = []
+const MAX_QUEUED_COVERAGE := 4
+var peak_coverage_jobs := 0
 
 
 func _ready() -> void:
@@ -60,11 +88,19 @@ func _ready() -> void:
 
 
 func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable, visible_bounds_provider: Callable) -> void:
+	preparation_draws = 0
+	fallback_draws = 0
+	fallback_material_meshes = 0
 	_finish_refinement()
+	if prepared_scene != null: prepared_scene.shutdown(self)
+	prepared_scene = null
+	prepared_geometry_stamp = {}
 	terrain_drawable_cache.clear()
 	native_sample_cache.clear()
 	native_sample_revision = -1
 	queued_refinement = null
+	peak_coverage_parts = 0
+	coverage_cache_pressure_frames = 0
 	map_size = size
 	map_seed = seed
 	resource_catalog = catalog
@@ -75,8 +111,29 @@ func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable,
 	terrain_id_provider = id_provider
 	bounds_provider = visible_bounds_provider
 	_build_terrain_atlas()
-	_rebuild_terrain_mesh()
+	if native_enabled and _uses_world_mesh() and native_kernel == null and ClassDB.class_exists("RoRTerrainKernel"):
+		native_kernel = ClassDB.instantiate("RoRTerrainKernel")
+	if prepared_scene_enabled and native_enabled and native_kernel != null and _uses_world_mesh() and terrain_atlas != null:
+		prepared_scene = PreparedScene.new()
+		prepared_scene.begin(self)
+		prepared_geometry_stamp = CacheDependency.stamp(simulation_world, CacheDependency.TERRAIN_GEOMETRY)
+		set_process(true)
+	else:
+		_rebuild_terrain_mesh()
 	queue_redraw()
+
+
+func is_scene_preparing() -> bool:
+	return prepared_scene != null and not prepared_scene.failed and not prepared_scene.ready
+
+
+func poll_scene_preparation() -> void:
+	if prepared_scene != null: prepared_scene.poll(self)
+	if prepared_scene != null and prepared_scene.pending(): set_process(true)
+
+
+func scene_preparation_fraction() -> float:
+	return prepared_scene.fraction() if prepared_scene != null else 1.0
 
 
 func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, next_terrain_revision: int) -> void:
@@ -85,7 +142,9 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 	var geometry_changed := cached_geometry_key != geometry_key
 	var surface_changed := terrain_revision != next_terrain_revision
 	var surface_rebuild := false
+	var changed_scene_cells: Variant = null
 	if geometry_changed or (zoom_changed and not _uses_world_mesh()):
+		_retire_coverage_mesh()
 		terrain_drawable_cache.clear()
 		native_sample_cache.clear()
 	if surface_changed:
@@ -94,6 +153,7 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 			var change := CacheDependency.changes(simulation_world, CacheDependency.TERRAIN_SURFACE, surface_stamp)
 			changed = change["cells"] if not bool(change["full"]) and bool(change["exact"]) else null
 			surface_stamp = change["stamp"]
+		changed_scene_cells = changed
 		if changed is Array and not geometry_changed:
 			_invalidate_terrain_cells(changed)
 			_advance_unchanged_refinement(changed, next_terrain_revision)
@@ -103,6 +163,23 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 			native_sample_cache.clear()
 			surface_rebuild = true
 		native_sample_revision = next_terrain_revision
+	if prepared_scene != null and not prepared_scene.failed:
+		var prepared_view_changed := geometry_changed or surface_changed or zoom_changed or not view_offset.is_equal_approx(offset) or not viewport_size.is_equal_approx(next_viewport_size)
+		if geometry_changed or surface_changed:
+			var dirty: Variant = null
+			if geometry_changed and simulation_world is Object and simulation_world.has_method("cache_changes"):
+				var geometry_delta := CacheDependency.changes(simulation_world, CacheDependency.TERRAIN_GEOMETRY, prepared_geometry_stamp)
+				prepared_geometry_stamp = geometry_delta["stamp"]
+				if not bool(geometry_delta["full"]) and bool(geometry_delta["exact"]): dirty = geometry_delta["cells"]
+			elif not geometry_changed:
+				# Surface history was consumed above; retain its exact changed cells.
+				dirty = changed_scene_cells
+			prepared_scene.invalidate(dirty, self)
+			set_process(true)
+		view_zoom = zoom; view_offset = offset; viewport_size = next_viewport_size
+		terrain_revision = next_terrain_revision; cached_geometry_key = geometry_key
+		if prepared_view_changed: queue_redraw()
+		return
 	var projection_changed := geometry_changed or surface_rebuild or (zoom_changed and not _uses_world_mesh())
 	var view_changed := zoom_changed or projection_changed or surface_changed or not view_offset.is_equal_approx(offset) or not viewport_size.is_equal_approx(next_viewport_size)
 	if not view_changed:
@@ -112,7 +189,9 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 	viewport_size = next_viewport_size
 	terrain_revision = next_terrain_revision
 	cached_geometry_key = geometry_key
-	var visible_bounds: Rect2i = bounds_provider.call() if bounds_provider.is_valid() else Rect2i()
+	var visible_bounds: Rect2i = Rect2i(Vector2i.ZERO, map_size).intersection(bounds_provider.call()) if bounds_provider.is_valid() else Rect2i()
+	if _uses_world_mesh() and terrain_mesh != null and not _bounds_contains(terrain_mesh_bounds, _expanded_bounds(visible_bounds, 4)):
+		_ensure_visible_coverage(visible_bounds)
 	if projection_changed or terrain_mesh == null:
 		if async_rebuilds and _uses_world_mesh() and terrain_mesh != null:
 			_schedule_terrain_prefetch(visible_bounds, true)
@@ -139,11 +218,25 @@ func _terrain_geometry_key() -> int:
 
 
 func _advance_unchanged_refinement(cells: Array, next_revision: int) -> void:
-	if refinement_task_id >= 0 and not cells.any(func(cell): return refinement_bounds.grow(1).has_point(cell)):
+	if coverage_task_id >= 0 and coverage_job_revision == terrain_revision and not cells.any(func(cell): return coverage_job_bounds.grow(1).has_point(cell)):
+		coverage_job_revision = next_revision
+	for entry in queued_coverage:
+		if int(entry["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(entry["bounds"]).grow(1).has_point(cell)):
+			entry["revision"] = next_revision
+	if coverage_upload != null and int(coverage_upload["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(coverage_upload["bounds"]).grow(1).has_point(cell)):
+		coverage_upload["revision"] = next_revision
+	var coverage_unchanged := true
+	for part in coverage_parts:
+		if int(part.get("revision", coverage_revision)) == terrain_revision and not cells.any(func(cell): return Rect2i(part["bounds"]).grow(1).has_point(cell)):
+			part["revision"] = next_revision
+		else:
+			coverage_unchanged = false
+	if coverage_unchanged: coverage_revision = next_revision
+	if refinement_task_id >= 0 and refinement_revision == terrain_revision and not cells.any(func(cell): return refinement_bounds.grow(1).has_point(cell)):
 		refinement_revision = next_revision
-	if queued_refinement != null and not cells.any(func(cell): return Rect2i(queued_refinement["bounds"]).grow(1).has_point(cell)):
+	if queued_refinement != null and int(queued_refinement["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(queued_refinement["bounds"]).grow(1).has_point(cell)):
 		queued_refinement["revision"] = next_revision
-	if refinement_upload != null and not cells.any(func(cell): return Rect2i(refinement_upload["bounds"]).grow(1).has_point(cell)):
+	if refinement_upload != null and int(refinement_upload["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(refinement_upload["bounds"]).grow(1).has_point(cell)):
 		refinement_upload["revision"] = next_revision
 
 
@@ -174,6 +267,11 @@ func invalidate_content() -> void:
 	terrain_drawable_cache.clear()
 	native_sample_cache.clear()
 	native_sample_revision = -1
+	if prepared_scene != null and not prepared_scene.failed:
+		prepared_scene.invalidate(null, self)
+		set_process(true)
+		queue_redraw()
+		return
 	_rebuild_terrain_mesh()
 	queue_redraw()
 
@@ -185,8 +283,23 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, viewport_size), Color.BLACK, true)
 	if resource_catalog == null or simulation_world == null or not terrain_id_provider.is_valid() or not bounds_provider.is_valid():
 		return
+	if prepared_scene != null and not prepared_scene.failed:
+		if prepared_scene.ready and terrain_atlas != null:
+			draw_set_transform(PixelScaling.snap_screen(view_offset), 0.0, Vector2.ONE*view_zoom)
+			prepared_scene.draw(self, _expanded_bounds(bounds_provider.call(), 4))
+			draw_set_transform(Vector2.ZERO)
+		else:
+			# The match loading barrier owns this interval. A second per-cell
+			# representation can allocate hundreds of thousands of transient GPU
+			# objects before the first complete map is published.
+			preparation_draws += 1
+		return
 	if terrain_mesh != null and terrain_atlas != null:
 		draw_set_transform(PixelScaling.snap_screen(view_offset), 0.0, Vector2.ONE * (view_zoom if _uses_world_mesh() else 1.0))
+		for part in coverage_parts:
+			if part.has("meshes"):
+				for mesh in part["meshes"]: draw_mesh(mesh, terrain_atlas)
+			else: draw_mesh(part["mesh"], terrain_atlas)
 		if terrain_mesh_parts.is_empty(): draw_mesh(terrain_mesh, terrain_atlas)
 		else:
 			for part in terrain_mesh_parts: draw_mesh(part, terrain_atlas)
@@ -196,6 +309,7 @@ func _draw() -> void:
 
 
 func _draw_terrain_fallback() -> void:
+	fallback_draws += 1
 	var bounds: Rect2i = bounds_provider.call()
 	for y in range(bounds.position.y, bounds.end.y):
 		for x in range(bounds.position.x, bounds.end.x):
@@ -289,6 +403,7 @@ func _next_power_of_two(value: int) -> int:
 
 func _rebuild_terrain_mesh(refine_async: bool = false) -> void:
 	mesh_generation += 1
+	_retire_coverage_mesh()
 	queued_refinement = null
 	_discard_refinement_upload()
 	_retire_current_meshes()
@@ -437,6 +552,7 @@ func _append_material_layer(vertices: PackedVector3Array, uvs: PackedVector2Arra
 
 
 func _draw_material_layer(layer: Dictionary) -> void:
+	fallback_material_meshes += 1
 	TerrainRenderer.EnvironmentTerrain.draw_layer(self, layer)
 
 
@@ -453,6 +569,204 @@ func _prepare_native_samples() -> void:
 	if native_sample_revision != terrain_revision:
 		native_sample_cache.clear()
 		native_sample_revision = terrain_revision
+
+
+func _retire_coverage_mesh() -> void:
+	if not coverage_parts.is_empty():
+		for part in coverage_parts: _retire_coverage_part(part)
+		set_process(true)
+	coverage_parts = []
+	coverage_bounds = Rect2i()
+	coverage_revision = -1
+
+
+func _retire_coverage_part(part: Dictionary) -> void:
+	if part.has("meshes"): retired_meshes.append_array(part["meshes"])
+	else: retired_meshes.append(part["mesh"])
+
+
+func _uncovered_rectangles(bounds: Rect2i, covered: Rect2i) -> Array[Rect2i]:
+	var overlap := bounds.intersection(covered)
+	if overlap.size.x <= 0 or overlap.size.y <= 0: return [bounds]
+	var result: Array[Rect2i] = []
+	# Disjoint strips cover bounds minus the installed mesh. Do not rebuild or
+	# alpha-blend another complete surface over already available terrain.
+	if overlap.position.y > bounds.position.y: result.append(Rect2i(bounds.position, Vector2i(bounds.size.x, overlap.position.y - bounds.position.y)))
+	if overlap.end.y < bounds.end.y: result.append(Rect2i(Vector2i(bounds.position.x, overlap.end.y), Vector2i(bounds.size.x, bounds.end.y - overlap.end.y)))
+	if overlap.position.x > bounds.position.x: result.append(Rect2i(Vector2i(bounds.position.x, overlap.position.y), Vector2i(overlap.position.x - bounds.position.x, overlap.size.y)))
+	if overlap.end.x < bounds.end.x: result.append(Rect2i(Vector2i(overlap.end.x, overlap.position.y), Vector2i(bounds.end.x - overlap.end.x, overlap.size.y)))
+	return result
+
+
+func _ensure_visible_coverage(visible_bounds: Rect2i) -> void:
+	if native_kernel == null or visible_bounds.size == Vector2i.ZERO: return
+	var bounds := _expanded_bounds(visible_bounds, 4)
+	if coverage_revision == terrain_revision and _bounds_contains(coverage_bounds, bounds): return
+	# A minimap jump still fills the whole uncovered view immediately. Panning
+	# usually exposes a thin strip: retain the same contour/detail there without
+	# rebuilding the much larger installed terrain surface on the UI thread.
+	var regions := _uncovered_rectangles(bounds, terrain_mesh_bounds)
+	var retained: Array[Dictionary] = []
+	for part in coverage_parts:
+		if int(part.get("revision", coverage_revision)) != terrain_revision or not bounds.intersects(part["bounds"]): continue
+		retained.append(part)
+		var remaining: Array[Rect2i] = []
+		for region in regions: remaining.append_array(_uncovered_rectangles(region, part["bounds"]))
+		regions = remaining
+	# Do not discard valid visible strips when their count crosses a threshold:
+	# that turns one new camera column into a synchronous rebuild of the whole
+	# uncovered view. Integer, non-overlapping parts each intersect this finite
+	# view halo, so their count is bounded by its cell area. Offscreen parts are
+	# evicted above; a full-mesh replacement retires all remaining strips.
+	if retained.size() + regions.size() > 64:
+		coverage_cache_pressure_frames += 1
+	var deferred := false
+	# Pending work only covers the offscreen halo. A fast camera jump that
+	# reaches an unfinished strip keeps the synchronous visible-area fallback.
+	var pending_bounds: Array[Rect2i] = []
+	if coverage_task_id >= 0 and coverage_job_revision == terrain_revision and coverage_job_generation == mesh_generation:
+		pending_bounds.append(coverage_job_bounds)
+	if coverage_upload != null and int(coverage_upload["revision"]) == terrain_revision and int(coverage_upload["generation"]) == mesh_generation:
+		pending_bounds.append(coverage_upload["bounds"])
+	for entry in queued_coverage:
+		if int(entry["revision"]) == terrain_revision and int(entry["generation"]) == mesh_generation: pending_bounds.append(entry["bounds"])
+	for pending in pending_bounds:
+		if not pending.intersects(bounds): continue
+		var remaining: Array[Rect2i] = []
+		for region in regions:
+			if region.intersects(visible_bounds): remaining.append(region)
+			else: remaining.append_array(_uncovered_rectangles(region, pending))
+		regions = remaining
+		deferred = true
+	_prepare_native_samples()
+	var additions: Array[Dictionary] = []
+	for region in regions:
+		if coverage_prefetch_enabled and async_rebuilds and not region.intersects(visible_bounds) and queued_coverage.size() >= MAX_QUEUED_COVERAGE:
+			deferred = true
+			continue
+		var stage_started := Time.get_ticks_usec() if performance_probe != null else 0
+		# Capture may prune its sample window. Keep the large prefetch cache intact
+		# instead of replacing it with each small coverage strip.
+		var samples := native_sample_cache.duplicate()
+		var request := NativeTerrainMesh.capture(region, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, {}, samples, native_kernel)
+		if performance_probe != null:
+			performance_probe.observe_microseconds("presentation.terrain.coverage_capture", Time.get_ticks_usec() - stage_started)
+			stage_started = Time.get_ticks_usec()
+		if coverage_prefetch_enabled and async_rebuilds and not region.intersects(visible_bounds):
+			deferred = true
+			if queued_coverage.size() < MAX_QUEUED_COVERAGE:
+				var job := NativeTerrainMesh.new()
+				job.kernel = native_kernel
+				job.request = request
+				job.subdivisions = 2
+				job.split_result = true
+				queued_coverage.append({"job":job,"bounds":region,"revision":terrain_revision,"generation":mesh_generation})
+				peak_coverage_jobs = maxi(peak_coverage_jobs, queued_coverage.size() + int(coverage_task_id >= 0) + int(coverage_upload != null))
+				set_process(true)
+			continue
+		var arrays := NativeTerrainMesh.build_request(native_kernel, request, 2)
+		if performance_probe != null:
+			performance_probe.observe_microseconds("presentation.terrain.coverage_build", Time.get_ticks_usec() - stage_started)
+			stage_started = Time.get_ticks_usec()
+		if arrays.is_empty():
+			for part in additions: _retire_coverage_part(part)
+			if not additions.is_empty(): set_process(true)
+			return
+		var next_mesh := ArrayMesh.new()
+		next_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		additions.append({"mesh": next_mesh, "bounds": region, "revision": terrain_revision})
+		if performance_probe != null:
+			performance_probe.observe_microseconds("presentation.terrain.coverage_upload", Time.get_ticks_usec() - stage_started)
+			performance_probe.increment("presentation.terrain.coverage_cells", region.size.x * region.size.y)
+	for part in coverage_parts:
+		if not retained.has(part): _retire_coverage_part(part)
+	if not retired_meshes.is_empty(): set_process(true)
+	coverage_parts = retained
+	coverage_parts.append_array(additions)
+	peak_coverage_parts = maxi(peak_coverage_parts, coverage_parts.size())
+	coverage_bounds = Rect2i() if deferred else bounds
+	coverage_revision = terrain_revision
+	_start_queued_coverage()
+
+
+func _start_queued_coverage() -> void:
+	if coverage_task_id >= 0 or coverage_upload != null: return
+	while not queued_coverage.is_empty():
+		var entry: Dictionary = queued_coverage.pop_front()
+		if int(entry["revision"]) != terrain_revision or int(entry["generation"]) != mesh_generation: continue
+		coverage_job = entry["job"]
+		coverage_job_bounds = entry["bounds"]
+		coverage_job_revision = entry["revision"]
+		coverage_job_generation = entry["generation"]
+		coverage_task_id = WorkerThreadPool.add_task(Callable(coverage_job,"run"), true, "Terrain coverage ahead of camera")
+		set_process(true)
+		return
+
+
+func _coverage_result_usable(bounds: Rect2i, generation: int, revision: int) -> bool:
+	var visible: Rect2i = Rect2i(Vector2i.ZERO,map_size).intersection(bounds_provider.call())
+	if generation != mesh_generation or revision != terrain_revision or not bounds.intersects(_expanded_bounds(visible,4)) or terrain_mesh_bounds.intersects(bounds): return false
+	for part in coverage_parts:
+		if Rect2i(part["bounds"]).intersects(bounds): return false
+	return true
+
+
+func _discard_coverage_upload() -> void:
+	if coverage_upload == null: return
+	retired_meshes.append_array(coverage_upload["meshes"])
+	_retire_cpu_arrays(coverage_upload["arrays"])
+	coverage_upload = null
+	set_process(true)
+
+
+func _advance_coverage() -> bool:
+	var uploaded := false
+	if coverage_task_id >= 0 and WorkerThreadPool.is_task_completed(coverage_task_id):
+		WorkerThreadPool.wait_for_task_completion(coverage_task_id)
+		coverage_task_id = -1
+		# A synchronous fallback or a newer full mesh may have superseded part
+		# of this strip. Never alpha-blend duplicate terrain over that region.
+		if _coverage_result_usable(coverage_job_bounds,coverage_job_generation,coverage_job_revision):
+			var chunks: Array = coverage_job.result_chunks
+			if chunks.is_empty() and not coverage_job.result.is_empty(): chunks = [coverage_job.result]
+			if not chunks.is_empty():
+				coverage_upload = {"arrays":chunks,"meshes":[],"cursor":0,"bounds":coverage_job_bounds,"generation":coverage_job_generation,"revision":coverage_job_revision,"native_us":int(coverage_job.timings.get("native_us",0))}
+		else:
+			_retire_cpu_arrays(coverage_job.result_chunks)
+		if not coverage_job.result.is_empty():
+			var obsolete: Array = [coverage_job.result]
+			coverage_job.result = []
+			_retire_cpu_arrays(obsolete)
+		coverage_job = null
+	if coverage_upload != null:
+		var state: Dictionary = coverage_upload
+		if not _coverage_result_usable(state["bounds"],state["generation"],state["revision"]):
+			_discard_coverage_upload()
+		else:
+			var started := Time.get_ticks_usec()
+			var count := 0
+			while int(state["cursor"]) < state["arrays"].size() and count < MAX_UPLOADS_PER_FRAME:
+				var mesh := ArrayMesh.new()
+				mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,state["arrays"][state["cursor"]])
+				state["meshes"].append(mesh)
+				state["arrays"][state["cursor"]] = null
+				state["cursor"] += 1
+				count += 1
+				uploaded = true
+				if Time.get_ticks_usec()-started >= UPLOAD_BUDGET_USEC: break
+			if performance_probe != null: performance_probe.observe_microseconds("presentation.terrain.coverage_prefetch_upload",Time.get_ticks_usec()-started)
+			if int(state["cursor"]) == state["arrays"].size():
+				coverage_parts.append({"mesh":state["meshes"][0],"meshes":state["meshes"],"bounds":state["bounds"],"revision":terrain_revision})
+				peak_coverage_parts = maxi(peak_coverage_parts, coverage_parts.size())
+				coverage_bounds = Rect2i()
+				queue_redraw()
+				if performance_probe != null:
+					performance_probe.observe_microseconds("presentation.terrain.coverage_prefetch_worker",state["native_us"])
+					var area: Vector2i = state["bounds"].size
+					performance_probe.increment("presentation.terrain.coverage_prefetched_cells",area.x*area.y)
+				coverage_upload = null
+	_start_queued_coverage()
+	return uploaded
 
 
 func _schedule_terrain_prefetch(visible_bounds: Rect2i, invalidate_pending: bool = false) -> void:
@@ -481,7 +795,10 @@ func _schedule_terrain_prefetch(visible_bounds: Rect2i, invalidate_pending: bool
 		return
 	var job := NativeTerrainMesh.new()
 	job.kernel = native_kernel
+	var capture_started := Time.get_ticks_usec() if performance_probe != null else 0
 	job.request = NativeTerrainMesh.capture(next_bounds, map_seed, terrain_id_provider, simulation_world.terrain_elevation, resource_catalog.environment_pack, terrain_atlas_regions, terrain_atlas_size, job.timings, native_sample_cache, native_kernel)
+	if performance_probe != null:
+		performance_probe.observe_microseconds("presentation.terrain.prefetch_capture", Time.get_ticks_usec() - capture_started)
 	queued_refinement = {"job": job, "bounds": next_bounds, "revision": terrain_revision, "generation": mesh_generation, "prefetch": true}
 	_start_queued_refinement()
 
@@ -504,6 +821,9 @@ func _prefetch_target_bounds(visible_bounds: Rect2i) -> Rect2i:
 
 func _start_queued_refinement() -> void:
 	if refinement_task_id >= 0 or queued_refinement == null or refinement_upload != null: return
+	# A single completed worker can enqueue a large numeric result. Drain it
+	# before producing another; the installed terrain/coverage remains visible.
+	if _retired_cpu_chunk_count() >= CPU_RETIREMENT_BACKPRESSURE_CHUNKS: return
 	refinement_job = queued_refinement["job"]
 	refinement_bounds = queued_refinement["bounds"]
 	refinement_revision = int(queued_refinement["revision"])
@@ -515,21 +835,70 @@ func _start_queued_refinement() -> void:
 
 
 func _process(_delta: float) -> void:
+	poll_scene_preparation()
+	_advance_cpu_retirement()
+	var coverage_uploaded := _advance_coverage()
+	var retirement_started := Time.get_ticks_usec() if performance_probe != null else 0
 	for _index in range(mini(MAX_RETIREMENTS_PER_FRAME,retired_meshes.size())): retired_meshes.pop_back()
+	if performance_probe != null:
+		performance_probe.observe_microseconds("presentation.terrain.gpu_retire", Time.get_ticks_usec() - retirement_started)
 	if refinement_task_id >= 0:
 		if not WorkerThreadPool.is_task_completed(refinement_task_id): return
 		WorkerThreadPool.wait_for_task_completion(refinement_task_id)
 		refinement_task_id = -1
-		var bounds_valid := _bounds_contains(refinement_bounds, bounds_provider.call()) if refinement_prefetch else refinement_bounds == terrain_mesh_bounds
+		var bounds_valid := _bounds_contains(refinement_bounds, Rect2i(Vector2i.ZERO, map_size).intersection(bounds_provider.call())) if refinement_prefetch else refinement_bounds == terrain_mesh_bounds
 		if refinement_generation == mesh_generation and queued_refinement == null and bounds_valid and refinement_revision == terrain_revision:
 			var chunks: Array = refinement_job.result_chunks
 			if chunks.is_empty() and not refinement_job.result.is_empty(): chunks = [refinement_job.result]
 			if not chunks.is_empty():
 				refinement_upload = {"arrays":chunks,"meshes":[],"cursor":0,"generation":refinement_generation,"revision":refinement_revision,"bounds":refinement_bounds,"prefetch":refinement_prefetch,"timings":refinement_job.timings.duplicate(),"upload_us":0,"max_chunk_upload_us":0,"vertices":0}
+		else:
+			# Only inspect/transfer worker results after completion and join. These
+			# arrays contain numeric mesh data, never scene or GPU objects.
+			_retire_cpu_arrays(refinement_job.result_chunks)
+			if not refinement_job.result.is_empty():
+				var unsplit: Array = [refinement_job.result]
+				refinement_job.result = []
+				_retire_cpu_arrays(unsplit)
+		var release_started := Time.get_ticks_usec() if performance_probe != null else 0
 		refinement_job = null
-	_upload_refinement_parts()
+		if performance_probe != null:
+			performance_probe.observe_microseconds("presentation.terrain.job_release", Time.get_ticks_usec() - release_started)
+	if not coverage_uploaded: _upload_refinement_parts()
 	_start_queued_refinement()
-	set_process(refinement_task_id >= 0 or refinement_upload != null or not retired_meshes.is_empty())
+	set_process(refinement_task_id >= 0 or refinement_upload != null or not retired_meshes.is_empty() or not retired_cpu_arrays.is_empty() or cpu_retirement_task_id >= 0 or coverage_task_id >= 0 or coverage_upload != null or not queued_coverage.is_empty() or (prepared_scene != null and prepared_scene.pending()))
+
+
+func _retire_cpu_arrays(chunks: Array) -> void:
+	for chunk in chunks:
+		if chunk is Array and not chunk.is_empty(): retired_cpu_arrays.append(chunk)
+	# All callers have relinquished the obsolete result. Clear the container
+	# while retaining its packed buffers for a separate numeric-only worker.
+	chunks.clear()
+	peak_retired_cpu_chunks = maxi(peak_retired_cpu_chunks, _retired_cpu_chunk_count())
+	if not retired_cpu_arrays.is_empty(): set_process(true)
+
+
+func _retired_cpu_chunk_count() -> int:
+	return retired_cpu_arrays.size() + (int(cpu_retirement_job.chunk_count) if cpu_retirement_job != null else 0)
+
+
+func _advance_cpu_retirement() -> void:
+	if cpu_retirement_task_id >= 0:
+		if not WorkerThreadPool.is_task_completed(cpu_retirement_task_id): return
+		WorkerThreadPool.wait_for_task_completion(cpu_retirement_task_id)
+		if performance_probe != null:
+			performance_probe.observe_microseconds("presentation.terrain.cpu_retire_worker", cpu_retirement_job.elapsed_us)
+		cpu_retirement_task_id = -1
+		cpu_retirement_job = null
+	if retired_cpu_arrays.is_empty(): return
+	# Relinquish the complete obsolete numeric container. The worker never
+	# touches an ArrayMesh, texture, scene node, live request or active result.
+	cpu_retirement_job = NativeTerrainMesh.RetiredBuffers.new()
+	cpu_retirement_job.chunks = retired_cpu_arrays
+	cpu_retirement_job.chunk_count = retired_cpu_arrays.size()
+	retired_cpu_arrays = []
+	cpu_retirement_task_id = WorkerThreadPool.add_task(Callable(cpu_retirement_job, "run"), false, "Release obsolete terrain buffers")
 
 func _retire_current_meshes() -> void:
 	if not terrain_mesh_parts.is_empty(): retired_meshes.append_array(terrain_mesh_parts)
@@ -540,14 +909,18 @@ func _retire_current_meshes() -> void:
 
 func _discard_refinement_upload() -> void:
 	if refinement_upload == null: return
+	var release_started := Time.get_ticks_usec() if performance_probe != null else 0
 	retired_meshes.append_array(refinement_upload["meshes"])
+	_retire_cpu_arrays(refinement_upload["arrays"])
 	refinement_upload = null
+	if performance_probe != null:
+		performance_probe.observe_microseconds("presentation.terrain.upload_discard", Time.get_ticks_usec() - release_started)
 	if not retired_meshes.is_empty(): set_process(true)
 
 func _upload_refinement_parts() -> void:
 	if refinement_upload == null: return
 	var state: Dictionary = refinement_upload
-	var bounds_valid: bool = _bounds_contains(state["bounds"],bounds_provider.call()) if state["prefetch"] else state["bounds"] == terrain_mesh_bounds
+	var bounds_valid: bool = _bounds_contains(state["bounds"], Rect2i(Vector2i.ZERO, map_size).intersection(bounds_provider.call())) if state["prefetch"] else state["bounds"] == terrain_mesh_bounds
 	if state["generation"] != mesh_generation or state["revision"] != terrain_revision or not bounds_valid or queued_refinement != null:
 		_discard_refinement_upload()
 		return
@@ -575,6 +948,7 @@ func _upload_refinement_parts() -> void:
 	terrain_mesh_parts.assign(state["meshes"])
 	terrain_mesh = terrain_mesh_parts[0]
 	terrain_mesh_bounds = state["bounds"]
+	_retire_coverage_mesh()
 	last_mesh_build_metrics = state["timings"]
 	last_mesh_build_metrics["refinement_us"] = last_mesh_build_metrics.get("native_us",0)
 	for field in ["upload_us","max_chunk_upload_us","vertices"]: last_mesh_build_metrics[field] = state[field]
@@ -584,6 +958,11 @@ func _upload_refinement_parts() -> void:
 
 
 func _finish_refinement() -> void:
+	if coverage_task_id >= 0: WorkerThreadPool.wait_for_task_completion(coverage_task_id)
+	coverage_task_id = -1
+	coverage_job = null
+	queued_coverage.clear()
+	_discard_coverage_upload()
 	if refinement_task_id >= 0:
 		WorkerThreadPool.wait_for_task_completion(refinement_task_id)
 	refinement_task_id = -1
@@ -591,8 +970,15 @@ func _finish_refinement() -> void:
 	queued_refinement = null
 	_discard_refinement_upload()
 	retired_meshes.clear()
+	if cpu_retirement_task_id >= 0:
+		WorkerThreadPool.wait_for_task_completion(cpu_retirement_task_id)
+	cpu_retirement_task_id = -1
+	cpu_retirement_job = null
+	retired_cpu_arrays.clear()
 	set_process(false)
 
 
 func _exit_tree() -> void:
+	if prepared_scene != null: prepared_scene.shutdown(self)
+	prepared_scene = null
 	_finish_refinement()

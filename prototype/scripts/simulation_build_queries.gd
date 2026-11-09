@@ -13,6 +13,7 @@ var local_build_site_cache: Dictionary = {}
 var build_query_scopes: Dictionary = {}
 var ai_build_capture_cache: Dictionary = {}
 var build_query_scope_bytes := 0
+var next_scope_revision := 0
 var local_build_site_cache_bytes := 0
 var build_option_catalog_cache: Dictionary = {}
 
@@ -400,20 +401,20 @@ func _get_cached_local_build_sites_sequential(world, team: int, kinds: Array, ti
 
 
 func _build_site_query_dependencies(world, team: int, search_radius: int = 12, preferred_sites: Dictionary = {}) -> Array:
-	var scope: Dictionary = world.entity_read_index.build_query_scope(world, team, search_radius, preferred_sites)
 	var planner = world.movement_system.knowledge.planner(world, team)
 	var key = hash([team, search_radius, preferred_sites])
 	var cached: Dictionary = build_query_scopes.get(key, {})
 	var local_revision = int(cached.get("local_revision", 0))
 	var changes: Variant = planner.grid.changed_cells_since(int(cached.get("grid_revision", -1))) if not cached.is_empty() else null
-	var changed: bool = changes == null or cached.get("workers") != scope["workers"] or cached.get("versions") != scope["versions"]
+	var scope: Dictionary = world.entity_read_index.build_query_scope(world, team, search_radius, preferred_sites, changes if changes != null else [])
+	var changed: bool = changes == null or scope["grid_changed"] or cached.get("workers") != scope["workers"] or cached.get("versions") != scope["versions"]
 	if not changed:
-		for cell in changes:
-			var sector = Vector2i(floori(float(cell.x) / 4.0), floori(float(cell.y) / 4.0))
-			if scope["keys"].has(sector):
-				changed = true
-				break
-	if changed: local_revision += 1
+		cached["grid_revision"] = planner.grid.revision
+		return [world.cache_epoch, team, key, local_revision, world.technology_system.revision(team), world.fog_of_war.exploration_revision_for_player(team)]
+	# A scope can be evicted before individual cached sites. Never let a new
+	# scope reuse the generation of a different, previously evicted one.
+	next_scope_revision += 1
+	local_revision = next_scope_revision
 	var record = {"local_revision": local_revision, "grid_revision": planner.grid.revision, "workers": scope["workers"], "versions": scope["versions"]}
 	var bytes = var_to_bytes(record).size() + 64
 	if build_query_scopes.has(key):
@@ -427,8 +428,6 @@ func _build_site_query_dependencies(world, team: int, search_radius: int = 12, p
 		record["bytes"] = bytes
 		build_query_scopes[key] = record
 		build_query_scope_bytes += bytes
-	else:
-		local_revision = hash([scope["workers"], scope["versions"], planner.grid.revision])
 	return [world.cache_epoch, team, key, local_revision, world.technology_system.revision(team), world.fog_of_war.exploration_revision_for_player(team)]
 
 

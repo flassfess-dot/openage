@@ -9,17 +9,80 @@ const ObservationQueries := preload("res://scripts/simulation_observation_querie
 const ReadContract := preload("res://scripts/entity_read_contract.gd")
 
 const FORMAT_VERSION: int = 1
+static var autosave_digest_kernel: Variant = null
 
 
-static func canonical(world, tick: int, controller = null) -> Dictionary:
+# detached=false is a synchronous owner-only view. Its borrowed nested values
+# must be consumed before the next simulation mutation, never queued as a DTO.
+static func canonical(world, tick: int, controller = null, detached: bool = true) -> Dictionary:
 	var snapshot := {
 		"format_version": FORMAT_VERSION,
 		"tick": tick,
-		"world": _world_state(world),
+		"world": _world_state(world, detached),
 	}
 	if controller != null:
 		snapshot["controller"] = _controller_state(controller)
 	return snapshot
+
+
+# Synchronous owner-only comparison. Each complete entity and each remaining
+# canonical section contributes its engine value digest. Hashing the compact
+# digest list avoids JSON projection and serializing every static capability
+# record in a large forest on the render thread. Archive bytes retain their
+# separate cryptographic checkpoint checksum.
+static func autosave_checksum(world, controller) -> String:
+	return finish_autosave_checksum(autosave_checksum_state(world, controller))
+
+
+static func autosave_checksum_state(world, controller, defer_resources: bool = false) -> Dictionary:
+	var trace_enabled := "--profile-autosave-capture" in OS.get_cmdline_user_args()
+	var trace := {}
+	var trace_started := Time.get_ticks_usec() if trace_enabled else 0
+	var state := canonical(world, controller.tick_index, controller, false)
+	if trace_enabled: trace["view_us"] = Time.get_ticks_usec() - trace_started
+	var world_state: Dictionary = state["world"]
+	for field in world_state:
+		var field_started := Time.get_ticks_usec() if trace_enabled else 0
+		if defer_resources and field == "resources":
+			world_state[field] = PackedInt64Array()
+		elif field in ["units", "embarked_units", "resources", "buildings", "projectiles", "resolved_projectiles", "static_obstructions"]:
+			world_state[field] = _autosave_entity_digests(world_state[field])
+		else:
+			world_state[field] = hash(world_state[field])
+		if trace_enabled: trace[field] = Time.get_ticks_usec() - field_started
+	for field in state["controller"]:
+		state["controller"][field] = hash(state["controller"][field])
+	if trace_enabled: print("AUTOSAVE_DIGEST ", JSON.stringify(trace))
+	return state
+
+
+static func finish_autosave_checksum(state: Dictionary) -> String:
+	var hashing := HashingContext.new()
+	hashing.start(HashingContext.HASH_SHA256)
+	hashing.update(var_to_bytes(state))
+	return hashing.finish().hex_encode()
+
+
+static func _autosave_entity_digests(source: Array) -> PackedInt64Array:
+	if ClassDB.class_exists("RoRReadModelKernel"):
+		if autosave_digest_kernel == null: autosave_digest_kernel = ClassDB.instantiate("RoRReadModelKernel")
+		if autosave_digest_kernel.has_method("autosave_entity_digests"):
+			var native: PackedInt64Array = autosave_digest_kernel.autosave_entity_digests(source)
+			if native.size() == source.size() * 2: return native
+	var entities := source.duplicate()
+	entities.sort_custom(func(left, right): return int(left.get("id", -1)) < int(right.get("id", -1)))
+	var digests := PackedInt64Array()
+	digests.resize(entities.size() * 2)
+	for index in range(entities.size()):
+		var entity: Dictionary = entities[index]
+		var record: Dictionary = entity
+		for transient in ["selected", "formation_shared_motion", "_formation_path_cache", "formation_steering_target", "formation_shared_isolated"]:
+			if record.has(transient):
+				if is_same(record, entity): record = entity.duplicate()
+				record.erase(transient)
+		digests[index * 2] = int(record.get("id", -1))
+		digests[index * 2 + 1] = hash(record)
+	return digests
 
 
 # Shared legal-projection contract. Presentation and retained AI observations
@@ -60,25 +123,31 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 	return PresentationBuilder.new(world, tick, observer_team, options, FORMAT_VERSION, native_selected_batch_enabled).build()
 
 
-static func _world_state(world) -> Dictionary:
+static func _world_state(world, detached: bool = true) -> Dictionary:
 	var fog = world.get_fog_of_war()
 	var economy: Dictionary = world.get_economy_snapshot()
 	return {
 		"map_size": world.map_size,
+		"map_terrain_ids": world.map_terrain_ids.duplicate() if detached else world.map_terrain_ids,
+		"map_reserved_foundation_cells": world.map_reserved_foundation_cells.duplicate() if detached else world.map_reserved_foundation_cells,
+		"terrain_river_shape": world.terrain_elevation.river_shape.duplicate(true) if detached else world.terrain_elevation.river_shape,
+		"simulation_rules": world.data_repository.rule_fingerprints.duplicate(),
+		"terrain_restrictions": world.navigation_grid.terrain_restrictions.duplicate(true) if detached else world.navigation_grid.terrain_restrictions,
+		"full_tech_tree": world.full_tech_tree_enabled,
 		"simulation_seed": int(world.simulation_seed),
 		"rng_state": int(world.simulation_rng.state),
 		"next_entity_id": int(world.entity_id_sequence.peek()),
 		"next_production_order_id": int(world.next_production_order_id),
-		"units": _sorted_entities(world.get_units()),
-		"embarked_units": _sorted_entities(world.get_embarked_units()),
-		"farm_reseed_queues": world.economy_system.farm_reseed_queues_by_team.duplicate(true),
-		"resources": _sorted_entities(world.get_resources()),
-		"buildings": _sorted_entities(world.get_buildings()),
-		"projectiles": _sorted_entities(world.get_projectiles()),
-		"resolved_projectiles": _sorted_entities(world.get_resolved_projectiles()),
+		"units": _sorted_entities(world.get_units(), detached),
+		"embarked_units": _sorted_entities(world.get_embarked_units(), detached),
+		"farm_reseed_queues": world.economy_system.farm_reseed_queues_by_team.duplicate(true) if detached else world.economy_system.farm_reseed_queues_by_team,
+		"resources": _sorted_entities(world.get_resources(), detached),
+		"buildings": _sorted_entities(world.get_buildings(), detached),
+		"projectiles": _sorted_entities(world.get_projectiles(), detached),
+		"resolved_projectiles": _sorted_entities(world.get_resolved_projectiles(), detached),
 		"ai_distress": world.ai_distress_system.canonical_state(),
-		"static_obstructions": _sorted_entities(world.get_static_obstructions()),
-		"civilizations": world.civilization_by_team.duplicate(true),
+		"static_obstructions": _sorted_entities(world.get_static_obstructions(), detached),
+		"civilizations": world.civilization_by_team.duplicate(true) if detached else world.civilization_by_team,
 		"players": world.player_registry.canonical_state(),
 		"population": economy["population"],
 		"population_points": economy["population_points"],
@@ -90,12 +159,12 @@ static func _world_state(world) -> Dictionary:
 		"resource_stockpiles": economy["resource_stockpiles"],
 		"resource_ledger": economy["resource_ledger"],
 		"trade": world.trade_system.canonical_state(),
-		"resource_approach_slots": world.resource_approach_slots.duplicate(true),
-		"building_approach_slots": world.building_approach_slots.duplicate(true),
-		"destination_reservations": world.destination_reservations.reservations.duplicate(true),
-		"terrain_vertex_levels": world.terrain_elevation.vertex_levels.duplicate(true),
-		"fog": _fog_state(fog),
-		"technology_team_states": world.technology_system.team_states.duplicate(true),
+		"resource_approach_slots": world.resource_approach_slots.duplicate(true) if detached else world.resource_approach_slots,
+		"building_approach_slots": world.building_approach_slots.duplicate(true) if detached else world.building_approach_slots,
+		"destination_reservations": world.destination_reservations.reservations.duplicate(true) if detached else world.destination_reservations.reservations,
+		"terrain_vertex_levels": world.terrain_elevation.vertex_levels.duplicate(true) if detached else world.terrain_elevation.vertex_levels,
+		"fog": _fog_state(fog, detached),
+		"technology_team_states": world.technology_system.team_states.duplicate(true) if detached else world.technology_system.team_states,
 		"victory": _victory_state(world),
 		"food": int(world.get_food()),
 		"wood": int(world.get_wood()),
@@ -120,11 +189,13 @@ static func _controller_state(controller) -> Dictionary:
 	}
 
 
-static func _sorted_entities(source: Array) -> Array:
+static func _sorted_entities(source: Array, detached: bool = true) -> Array:
+	if not detached: return source
 	var result: Array = []
 	for entity in source:
-		var canonical_entity: Dictionary = entity.duplicate(true)
-		EntityComponents.project_dynamic(canonical_entity)
+		var canonical_entity: Dictionary = entity.duplicate(detached)
+		if detached:
+			EntityComponents.project_dynamic(canonical_entity)
 		# Selection belongs to player-control/presentation state and must not
 		# change deterministic simulation hashes.
 		canonical_entity.erase("selected")
@@ -248,22 +319,26 @@ static func _formation_groups(source: Dictionary) -> Array:
 	return result
 
 
-static func _fog_state(fog) -> Dictionary:
+static func _fog_state(fog, detached: bool = true) -> Dictionary:
 	var players: Array = fog.states_by_player.keys()
 	players.sort()
 	var states: Dictionary = {}
 	for player in players:
+		if not detached:
+			states[int(player)] = fog.states_by_player[player]
+			continue
 		var cells: Array = []
 		for value in fog.states_by_player[player]:
 			cells.append(int(value))
 		states[int(player)] = cells
 	return {
 		"revision": int(fog.revision),
-		"revisions_by_player": fog.revisions_by_player.duplicate(true),
+		"revisions_by_player": fog.revisions_by_player.duplicate(true) if detached else fog.revisions_by_player,
 		"states_by_player": states,
-		"personally_explored_by_player": fog.personally_explored_by_player.duplicate(true),
-		"allies_by_player": fog.allies_by_player.duplicate(true),
-		"shared_vision_by_player": fog.shared_vision_by_player.duplicate(true),
+		"personally_explored_by_player": fog.personally_explored_by_player.duplicate(true) if detached else fog.personally_explored_by_player,
+		"allies_by_player": fog.allies_by_player.duplicate(true) if detached else fog.allies_by_player,
+		"shared_vision_by_player": fog.shared_vision_by_player.duplicate(true) if detached else fog.shared_vision_by_player,
+		"transient_visible_by_player": fog.transient_visible_by_player.duplicate(true) if detached else fog.transient_visible_by_player,
 	}
 
 

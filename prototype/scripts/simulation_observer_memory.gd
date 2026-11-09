@@ -56,22 +56,26 @@ func known_resource_revision(world, observer_team: int) -> int:
 # null requests an initial/bulk rebuild; an empty dictionary means no work.
 
 
-func consume_known_resource_marker_changes(world, observer_team: int) -> Variant:
+func resource_marker_snapshot(world, observer_team: int, compact: bool = true) -> Variant:
 	world.get_known_resources(observer_team)
 	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
-	if cached.is_empty():
-		return null
-	var rebuild = not bool(cached.get("marker_changes_tracked", false)) or bool(cached.get("marker_changes_overflow", false))
-	cached["marker_changes_tracked"] = true
-	cached["marker_changes_overflow"] = false
-	var pending: Dictionary = cached.get("marker_changes", {})
+	if not cached.get("marker_changes_tracked", false) or cached.get("marker_changes_overflow", false): return null
 	var changes: Dictionary = {}
-	if not rebuild:
-		var ids: Dictionary = cached.get("ids", {})
-		for resource_id in pending:
-			changes[resource_id] = ids.get(resource_id)
-	pending.clear()
-	return null if rebuild else changes
+	var ids: Dictionary = cached.get("ids", {})
+	for resource_id in cached.get("marker_changes", {}):
+		var record: Variant = ids.get(resource_id)
+		changes[resource_id] = {"pos":record["pos"], "amount":record.get("amount", 0)} if compact and record is Dictionary else record
+	return changes
+
+
+func consume_known_resource_marker_changes(world, observer_team: int) -> Variant:
+	var changes: Variant = resource_marker_snapshot(world, observer_team, false)
+	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
+	if not cached.is_empty():
+		cached["marker_changes_tracked"] = true
+		cached["marker_changes_overflow"] = false
+		cached["marker_changes"].clear()
+	return changes
 
 
 func _mark_known_resource_marker_changed(world, cached: Dictionary, resource_id: int) -> void:
@@ -323,6 +327,7 @@ func _remember_known_resource(world, cached: Dictionary, resource: Dictionary, c
 		if existing.get("pos") != memory.get("pos") or (int(existing.get("amount", 0)) > 0) != (int(memory.get("amount", 0)) > 0):
 			world._mark_known_resource_marker_changed(cached, resource_id)
 		if existing.get("pos") == memory.get("pos"):
+			_mark_scene_chunk(cached, world._resource_chunk_key(memory))
 			world._mark_resource_view_changed(cached, resource_id)
 			world._replace_known_resource(cached["resources"], memory)
 			ids[resource_id] = memory
@@ -346,6 +351,7 @@ func _remember_known_resource(world, cached: Dictionary, resource: Dictionary, c
 	var chunk_ids: Dictionary = by_chunk.get(chunk_key, {})
 	chunk_ids[resource_id] = true
 	by_chunk[chunk_key] = chunk_ids
+	_mark_scene_chunk(cached, chunk_key)
 	cached["resources"] = known
 	cached["ids"] = ids
 	cached["by_cell"] = by_cell
@@ -358,6 +364,7 @@ func _forget_known_resource(world, cached: Dictionary, resource_id: int) -> bool
 	var memory: Variant = ids.get(resource_id)
 	if not memory is Dictionary:
 		return false
+	_mark_scene_chunk(cached, world._resource_chunk_key(memory))
 	world._mark_resource_view_changed(cached, resource_id)
 	var known: Array = cached.get("resources", [])
 	known.erase(memory)
@@ -490,6 +497,49 @@ func known_resource_view_delta(world, observer_team: int) -> Dictionary:
 	# At most the latest legal publication and its predecessor. Consumers that
 	# missed a publication use the ordinary full comparison instead.
 	return known_resources_by_player.get(observer_team, {}).get("render_view", {}).get("delta", {})
+
+
+func _mark_scene_chunk(cached: Dictionary, key: Vector2i) -> void:
+	# Activate only after the first scene publication. No extra work for AI
+	# observers that only consume their existing knowledge/viewport stores.
+	if cached.has("scene_chunks"): cached["scene_dirty"][key] = true
+
+
+func publish_resource_chunks(world, observer_team: int) -> Dictionary:
+	world.get_known_resources(observer_team)
+	var cached: Dictionary = known_resources_by_player.get(observer_team, {})
+	if cached.is_empty(): return {}
+	var initial := not cached.has("scene_chunks")
+	var chunks: Dictionary = cached.get("scene_chunks", {})
+	var dirty: Dictionary = cached.get("scene_dirty", {})
+	var by_chunk: Dictionary = cached["by_chunk"]
+	if initial:
+		for key in by_chunk: dirty[key] = true
+	if dirty.is_empty():
+		if initial:
+			chunks.make_read_only()
+			cached["scene_chunks"] = chunks
+			cached["scene_dirty"] = {}
+		preload("res://scripts/isolated_task_data.gd")._retain_immutable(chunks)
+		return chunks
+	if chunks.is_read_only(): chunks = chunks.duplicate()
+	var records: Dictionary = cached["ids"]
+	for key in dirty:
+		var ids: Dictionary = by_chunk.get(key, {})
+		if ids.is_empty():
+			chunks.erase(key)
+			continue
+		var rows: Array = []
+		for id in ids: rows.append(records[id])
+		rows.make_read_only()
+		chunks[key] = rows
+	chunks.make_read_only()
+	cached["scene_chunks"] = chunks
+	cached["scene_dirty"] = {}
+	# Every child is an existing immutable legal-memory projection; no live
+	# entity, hidden depletion, or mutable memory index crosses this boundary.
+	preload("res://scripts/isolated_task_data.gd")._retain_immutable(chunks)
+	return chunks
 
 
 func _mark_resource_view_changed(world, cached: Dictionary, id: int) -> void:

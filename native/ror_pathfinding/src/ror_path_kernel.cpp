@@ -1,6 +1,8 @@
+#include "ror_actor_keys.hpp"
 #include "ror_path_kernel.hpp"
 #include <godot_cpp/classes/geometry2d.hpp>
 #include <array>
+#include <chrono>
 
 #include <algorithm>
 #include <cmath>
@@ -10,6 +12,7 @@
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/math.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
 
@@ -27,22 +30,31 @@ constexpr int32_t DIRECTIONS[8][2] = {
 void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("corridor_widths", "cells", "maximum", "radius"), &RoRPathKernel::corridor_widths);
     ClassDB::bind_method(D_METHOD("is_position_walkable", "position", "radius"), &RoRPathKernel::position_walkable);
+    ClassDB::bind_method(D_METHOD("positions_walkable", "positions", "radius"), &RoRPathKernel::positions_walkable);
+    ClassDB::bind_method(D_METHOD("local_recovery_position", "origin", "radius", "known", "neighbors", "spatial"), &RoRPathKernel::local_recovery_position);
     ClassDB::bind_method(D_METHOD("is_segment_walkable", "start", "finish", "radius"), &RoRPathKernel::is_segment_walkable);
     ClassDB::bind_method(D_METHOD("smooth_swept_world_path", "origin", "candidates", "radius", "escape_center"), &RoRPathKernel::smooth_swept_world_path);
     ClassDB::bind_method(D_METHOD("find_local_traffic_path", "origin", "goal", "radius", "clearance", "blockers"), &RoRPathKernel::find_local_traffic_path);
+    ClassDB::bind_method(D_METHOD("select_work_traffic_route", "origin", "destination", "radius", "clearance", "candidates", "first_candidate", "blockers", "tail_blockers", "find_path"), &RoRPathKernel::select_work_traffic_route);
     ClassDB::bind_method(D_METHOD("direct_cell_path", "start", "goal", "radius"), &RoRPathKernel::direct_cell_path);
+    ClassDB::bind_method(D_METHOD("has_direct_cell_path", "start", "goal", "radius"), &RoRPathKernel::has_direct_cell_path);
     ClassDB::bind_method(D_METHOD("nearest_walkable", "requested", "radius"), &RoRPathKernel::nearest_walkable);
+    ClassDB::bind_method(D_METHOD("nearest_reachable", "start", "requested", "radius"), &RoRPathKernel::nearest_reachable);
     ClassDB::bind_method(D_METHOD("create_search_context"), &RoRPathKernel::create_search_context);
     ClassDB::bind_method(D_METHOD("create_movement_context"), &RoRPathKernel::create_movement_context);
     ClassDB::bind_method(D_METHOD("connectivity_labels", "radius"), &RoRPathKernel::connectivity_labels, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("install_connectivity", "labels", "radius"), &RoRPathKernel::install_connectivity, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("configure", "width", "height", "revision", "walkable"), &RoRPathKernel::configure);
     ClassDB::bind_method(D_METHOD("update_walkable", "revision", "indices", "values"), &RoRPathKernel::update_walkable);
+    ClassDB::bind_method(D_METHOD("configure_route_cache", "enabled", "profile", "reference"), &RoRPathKernel::configure_route_cache);
+    ClassDB::bind_method(D_METHOD("route_cache_stats"), &RoRPathKernel::route_cache_stats);
     ClassDB::bind_method(D_METHOD("find_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_cell_path, DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("find_smoothed_cell_path", "start", "goal", "clearance_radius"), &RoRPathKernel::find_smoothed_cell_path, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("finish_world_path", "origin", "destination", "goal", "smoothed", "radius"), &RoRPathKernel::finish_world_path);
     ClassDB::bind_method(D_METHOD("configure_movement_snapshot", "ids", "positions", "radii", "clearances", "priorities", "health", "solid_animals"), &RoRPathKernel::configure_movement_snapshot, DEFVAL(PackedByteArray()));
     ClassDB::bind_method(D_METHOD("configure_movement_entities", "units", "incremental"), &RoRPathKernel::configure_movement_entities, DEFVAL(true));
     ClassDB::bind_method(D_METHOD("update_movement_entities", "units"), &RoRPathKernel::update_movement_entities);
+    ClassDB::bind_method(D_METHOD("collect_movement_delta", "delta", "units_by_id", "configurations"), &RoRPathKernel::collect_movement_delta);
     ClassDB::bind_method(D_METHOD("release_movement_snapshot"), &RoRPathKernel::release_movement_snapshot);
     ClassDB::bind_method(D_METHOD("share_movement_snapshot", "source"), &RoRPathKernel::share_movement_snapshot);
     ClassDB::bind_method(D_METHOD("calculate_movement", "unit_id", "target", "speed", "cohesion_scale", "delta"), &RoRPathKernel::calculate_movement);
@@ -64,6 +76,7 @@ Ref<RoRPathKernel> RoRPathKernel::create_search_context() const {
     context->height_ = height_;
     context->revision_ = revision_;
     context->walkability_version_ = walkability_version_;
+    context->configure_route_cache(route_cache_enabled_, route_cache_profile_, route_cache_reference_);
     context->walkable_ = walkable_;
     context->costs_.resize(walkable_->size());
     context->parents_.resize(walkable_->size());
@@ -80,6 +93,7 @@ Ref<RoRPathKernel> RoRPathKernel::create_movement_context() const {
     context->height_ = height_;
     context->revision_ = revision_;
     context->walkability_version_ = walkability_version_;
+    context->configure_route_cache(route_cache_enabled_, route_cache_profile_, route_cache_reference_);
     context->walkable_ = walkable_;
     context->movement_ = movement_;
     // Movement has thread-local scratch and needs no map-sized A* arrays.
@@ -162,6 +176,40 @@ Dictionary RoRPathKernel::configure_movement_entities(const Array &units, bool i
 Dictionary RoRPathKernel::update_movement_entities(const Array &units) {
     return configure_movement_entity_rows(units, true, true);
 }
+// One synchronous reader of the journal's ordered delta. Canonical entities
+// and the configuration roster are borrowed only for this call, never retained.
+Array RoRPathKernel::collect_movement_delta(const Dictionary &delta, const Dictionary &units_by_id,
+        const Dictionary &configurations) const {
+    static const Variant ids_key("ids"), masks_key("masks"), full_key("full");
+    static const Variant domain_key("movement_domain"), restriction_key("terrain_restriction");
+    const Variant ids_value = delta.get(ids_key, Variant()), masks_value = delta.get(masks_key, Variant());
+    if (ids_value.get_type() != Variant::ARRAY || masks_value.get_type() != Variant::DICTIONARY) return Array();
+    const Array ids = ids_value;
+    if (ids.size() > 65536) return Array();
+    const Dictionary masks = masks_value;
+    Array changed;
+    bool rebuild = delta.get(full_key, false);
+    for (int64_t index = 0; index < ids.size(); ++index) {
+        const Variant id = ids[index];
+        if (id.get_type() != Variant::INT) return Array();
+        const Variant mask_value = masks.get(id, Variant());
+        if (mask_value.get_type() != Variant::INT) return Array();
+        const int64_t mask = mask_value;
+        const Variant entity = units_by_id.get(id, Variant());
+        if ((mask & 1) && (entity.get_type() != Variant::NIL || configurations.has(id))) rebuild = true;
+        if (entity.get_type() == Variant::NIL || !(mask & (2 | 4 | 8 | 128))) continue;
+        if (entity.get_type() != Variant::DICTIONARY) return Array();
+        const Dictionary unit = entity;
+        const Variant domain = unit.get(domain_key, Variant()), restriction = unit.get(restriction_key, Variant());
+        if (domain.get_type() != Variant::STRING || restriction.get_type() != Variant::INT) return Array();
+        changed.append(unit);
+        const String configuration = String(domain) + ":" + String::num_int64(int64_t(restriction));
+        if (String(configurations.get(id, String())) != configuration) rebuild = true;
+    }
+    Array result;
+    result.append(changed); result.append(rebuild);
+    return result;
+}
 void RoRPathKernel::release_movement_snapshot() {
     movement_ = std::make_shared<MovementSnapshot>();
 }
@@ -183,11 +231,11 @@ Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, boo
         stable = movement_->ids[static_cast<size_t>(i)] == static_cast<int32_t>(int64_t(unit[k_id]));
     }
     Dictionary stats;
-    stats["checked"] = count;
-    stats["updated"] = 0;
-    stats["bucket_updates"] = 0;
-    stats["generation_copies"] = 0;
-    stats["full_rebuilds"] = stable ? 0 : 1;
+    stats[ROR_FIELD("checked")] = count;
+    stats[ROR_FIELD("updated")] = 0;
+    stats[ROR_FIELD("bucket_updates")] = 0;
+    stats[ROR_FIELD("generation_copies")] = 0;
+    stats[ROR_FIELD("full_rebuilds")] = stable ? 0 : 1;
     if (!stable) {
         PackedInt32Array ids, priorities;
         PackedVector2Array positions;
@@ -204,11 +252,11 @@ Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, boo
             const Array tags = unit.get(k_behavior_tags, Array());
             const String kind = unit.get(k_kind, String());
             solid[i] =
-                tags.has("predator") || tags.has("huntable") ||
+                tags.has(ROR_FIELD("predator")) || tags.has(ROR_FIELD("huntable")) ||
                 ((kind == "gazelle" || kind == "elephant" || kind == "lion" || kind == "alligator" || kind == "crocodile") && int64_t(unit.get(k_team, 0)) == 0);
         }
         configure_movement_snapshot(ids, positions, radii, clearances, priorities, health, solid);
-        stats["updated"] = count; stats["bucket_updates"] = count;
+        stats[ROR_FIELD("updated")] = count; stats[ROR_FIELD("bucket_updates")] = count;
         return stats;
     }
     std::shared_ptr<MovementSnapshot> next;
@@ -230,7 +278,7 @@ Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, boo
         else {
             const Array tags = unit.get(k_behavior_tags, Array());
             const String kind = unit.get(k_kind, String());
-            solid = tags.has("predator") || tags.has("huntable") ||
+            solid = tags.has(ROR_FIELD("predator")) || tags.has(ROR_FIELD("huntable")) ||
                 ((kind == "gazelle" || kind == "elephant" || kind == "lion" || kind == "alligator" || kind == "crocodile") && int64_t(unit.get(k_team, 0)) == 0);
         }
         if (movement_->positions[slot] == position && movement_->radii[slot] == radius &&
@@ -270,9 +318,9 @@ Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, boo
             }
         }
         movement_ = next;
-        stats["generation_copies"] = copied_generation ? 1 : 0;
+        stats[ROR_FIELD("generation_copies")] = copied_generation ? 1 : 0;
     }
-    stats["updated"] = updated; stats["bucket_updates"] = bucket_updates;
+    stats[ROR_FIELD("updated")] = updated; stats[ROR_FIELD("bucket_updates")] = bucket_updates;
     return stats;
 }
 
@@ -424,6 +472,7 @@ bool RoRPathKernel::update_walkable(int64_t revision, const PackedInt32Array &in
         else it = components_by_radius_.erase(it);
     }
     ++walkability_version_;
+    clear_raw_routes();
     revision_ = revision;
     return true;
 }
@@ -581,6 +630,7 @@ bool RoRPathKernel::patch_component_region(double radius, const std::vector<int3
 
 void RoRPathKernel::configure(int32_t width, int32_t height, int64_t revision, const PackedByteArray &walkable) {
     ++walkability_version_;
+    clear_raw_routes();
     width_ = std::max<int32_t>(0, width);
     height_ = std::max<int32_t>(0, height);
     revision_ = revision;
@@ -688,14 +738,102 @@ bool RoRPathKernel::cells_connected(const Vector2i &start, const Vector2i &goal,
     return false;
 }
 
-PackedInt32Array RoRPathKernel::find_cell_path(const Vector2i &start, const Vector2i &goal, double clearance_radius) {
-    PackedInt32Array result;
-    last_expanded_nodes_ = 0;
-    // Corridor smoothing immediately requests the same raw A* route. Retain
-    // one bounded value result; walkability generations invalidate it exactly.
-    if (cached_search_version_ == walkability_version_ && cached_search_start_ == start && cached_search_goal_ == goal && cached_search_radius_ == clearance_radius) return cached_search_path_;
+void RoRPathKernel::clear_raw_routes() {
+    if (route_cache_profile_ && !raw_routes_.empty()) ++route_invalidations_;
+    raw_routes_.clear();
+    raw_route_fifo_.clear();
+    raw_route_bytes_ = 0;
     cached_search_version_ = -1;
     cached_search_path_ = PackedInt32Array();
+}
+
+void RoRPathKernel::configure_route_cache(bool enabled, bool profile, bool reference) {
+    if (route_cache_enabled_ != enabled) clear_raw_routes();
+    route_cache_enabled_ = enabled;
+    route_cache_profile_ = profile;
+    route_cache_reference_ = reference;
+}
+
+Dictionary RoRPathKernel::route_cache_stats() const {
+    Dictionary out;
+    out[ROR_FIELD("enabled")] = route_cache_enabled_;
+    out[ROR_FIELD("calls")] = raw_calls_; out[ROR_FIELD("single_hits")] = single_hits_; out[ROR_FIELD("multi_hits")] = route_hits_;
+    out[ROR_FIELD("searches")] = raw_searches_; out[ROR_FIELD("expanded")] = raw_expanded_; out[ROR_FIELD("search_us")] = raw_search_us_;
+    out[ROR_FIELD("hit_us")] = route_hit_us_; out[ROR_FIELD("evictions")] = route_evictions_; out[ROR_FIELD("invalidations")] = route_invalidations_;
+    out[ROR_FIELD("entries")] = int64_t(raw_routes_.size()); out[ROR_FIELD("bytes")] = raw_route_bytes_;
+    out[ROR_FIELD("peak_entries")] = route_peak_entries_; out[ROR_FIELD("peak_bytes")] = route_peak_bytes_;
+    out[ROR_FIELD("reference_checks")] = route_reference_checks_; out[ROR_FIELD("reference_mismatches")] = route_reference_mismatches_;
+    out[ROR_FIELD("reference_us")] = route_reference_us_; out[ROR_FIELD("reference_nodes")] = route_reference_nodes_;
+    return out;
+}
+
+PackedInt32Array RoRPathKernel::find_cell_path(const Vector2i &start, const Vector2i &goal, double radius) {
+    using Clock = std::chrono::steady_clock;
+    const auto elapsed = [](const Clock::time_point &since) { return std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - since).count(); };
+    last_expanded_nodes_ = 0;
+    if (route_cache_profile_) ++raw_calls_;
+    if (cached_search_version_ == walkability_version_ && cached_search_start_ == start && cached_search_goal_ == goal && cached_search_radius_ == radius) {
+        if (route_cache_profile_) ++single_hits_;
+        return cached_search_path_;
+    }
+    cached_search_version_ = -1;
+    cached_search_path_ = PackedInt32Array();
+    uint64_t radius_bits = 0;
+    const double normalized_radius = radius == 0.0 ? 0.0 : radius;
+    std::memcpy(&radius_bits, &normalized_radius, sizeof(radius_bits));
+    const RouteKey key{start, goal, radius_bits};
+    PackedInt32Array result;
+    bool hit = false;
+    if (route_cache_enabled_ && std::isfinite(radius)) {
+        const auto started = route_cache_profile_ ? Clock::now() : Clock::time_point();
+        const auto found = raw_routes_.find(key);
+        if (found != raw_routes_.end()) {
+            result = found->second;
+            hit = true;
+            if (route_cache_profile_) { ++route_hits_; route_hit_us_ += elapsed(started); }
+            // Compare only real repeated gameplay requests, never synthetic routes.
+            if (route_cache_reference_ && route_reference_checks_ < 128) {
+                const auto reference_started = Clock::now();
+                const PackedInt32Array reference = search_cell_path_uncached(start, goal, radius);
+                route_reference_us_ += elapsed(reference_started);
+                route_reference_nodes_ += last_expanded_nodes_;
+                ++route_reference_checks_;
+                if (reference != result) { ++route_reference_mismatches_; result = reference; clear_raw_routes(); }
+                last_expanded_nodes_ = 0;
+            }
+        }
+    }
+    if (!hit) {
+        const auto started = route_cache_profile_ ? Clock::now() : Clock::time_point();
+        result = search_cell_path_uncached(start, goal, radius);
+        if (route_cache_profile_) { ++raw_searches_; raw_expanded_ += last_expanded_nodes_; raw_search_us_ += elapsed(started); }
+        // Packed arrays are value/COW results. FIFO and bytes are both bounded;
+        // every mask generation clears all entries before any later query.
+        const int64_t bytes = result.size() * int64_t(sizeof(int32_t));
+        if (route_cache_enabled_ && std::isfinite(radius) && !result.is_empty() && result.size() <= 32768) {
+            while (!raw_route_fifo_.empty() && (raw_routes_.size() >= 128 || raw_route_bytes_ + bytes > 1048576)) {
+                const auto first = raw_routes_.find(raw_route_fifo_.front());
+                if (first != raw_routes_.end()) { raw_route_bytes_ -= first->second.size() * int64_t(sizeof(int32_t)); raw_routes_.erase(first); }
+                raw_route_fifo_.pop_front();
+                if (route_cache_profile_) ++route_evictions_;
+            }
+            raw_routes_.emplace(key, result);
+            raw_route_fifo_.push_back(key);
+            raw_route_bytes_ += bytes;
+            if (route_cache_profile_) { route_peak_bytes_ = std::max(route_peak_bytes_, raw_route_bytes_); route_peak_entries_ = std::max(route_peak_entries_, int64_t(raw_routes_.size())); }
+        }
+    }
+    if (!result.is_empty() && result.size() <= 32768) {
+        cached_search_version_ = walkability_version_;
+        cached_search_start_ = start; cached_search_goal_ = goal;
+        cached_search_radius_ = radius; cached_search_path_ = result;
+    }
+    return result;
+}
+
+PackedInt32Array RoRPathKernel::search_cell_path_uncached(const Vector2i &start, const Vector2i &goal, double clearance_radius) {
+    PackedInt32Array result;
+    last_expanded_nodes_ = 0;
     if (!is_configured() || !contains(start.x, start.y) || !contains(goal.x, goal.y) || !cell_walkable_for(goal.x, goal.y, clearance_radius)) {
         return result;
     }
@@ -773,13 +911,6 @@ PackedInt32Array RoRPathKernel::find_cell_path(const Vector2i &start, const Vect
     for (auto iterator = reversed.rbegin(); iterator != reversed.rend(); ++iterator) {
         result.set(output++, *iterator % width_);
         result.set(output++, *iterator / width_);
-    }
-    if (result.size() <= 32768) {
-        cached_search_version_ = walkability_version_;
-        cached_search_start_ = start;
-        cached_search_goal_ = goal;
-        cached_search_radius_ = clearance_radius;
-        cached_search_path_ = result;
     }
     return result;
 }
@@ -1009,6 +1140,98 @@ int64_t RoRPathKernel::movement_bucket_key(int32_t x, int32_t y) const {
     return static_cast<int64_t>(packed);
 }
 
+// One pinned owner query; unsupported inputs return an empty dictionary before
+// any navigation query. A handled query contains "position", including NIL.
+Dictionary RoRPathKernel::local_recovery_position(const Vector2 &origin, double radius,
+        const PackedByteArray &known, const Array &neighbors, const Array &spatial) {
+    Dictionary result;
+    if (!is_configured() || !std::isfinite(origin.x) || !std::isfinite(origin.y) ||
+            !std::isfinite(radius) || radius < 0.0 || radius > std::max(width_, height_) ||
+            origin.x < -1048576 || origin.y < -1048576 ||
+            origin.x > width_ + 1048576.0 || origin.y > height_ + 1048576.0 ||
+            known.size() != 25 || neighbors.size() > 4096 || spatial.size() != 4 ||
+            spatial[0].get_type() != Variant::DICTIONARY || spatial[1].get_type() != Variant::ARRAY ||
+            spatial[2].get_type() != Variant::ARRAY || spatial[3].get_type() != Variant::ARRAY) return result;
+    for (int64_t i = 0; i < 25; ++i) if (known[i] > 1) return result;
+    const Dictionary indices = spatial[0];
+    const Array entities = spatial[1], positions = spatial[2], radii = spatial[3];
+    if (entities.size() > 65536 || positions.size() != entities.size() || radii.size() != entities.size()) return result;
+    struct Neighbor {
+        Vector2 factual, indexed;
+        double query_squared, collision_squared;
+    };
+    std::vector<Neighbor> rows;
+    rows.reserve(size_t(neighbors.size()));
+    std::unordered_set<int64_t> ids;
+    for (int64_t i = 0; i < neighbors.size(); ++i) {
+        if (neighbors[i].get_type() != Variant::ARRAY) return result;
+        const Array row = neighbors[i];
+        if (row.size() != 3 || row[0].get_type() != Variant::INT || row[1].get_type() != Variant::VECTOR2 ||
+                (row[2].get_type() != Variant::FLOAT && row[2].get_type() != Variant::INT)) return result;
+        const int64_t id = row[0];
+        const Variant slot_value = indices.get(id, Variant());
+        if (id < 0 || !ids.insert(id).second || slot_value.get_type() != Variant::INT) return result;
+        const int64_t slot = slot_value;
+        if (slot < 0 || slot >= entities.size() || entities[slot].get_type() != Variant::DICTIONARY ||
+                positions[slot].get_type() != Variant::VECTOR2 ||
+                (radii[slot].get_type() != Variant::FLOAT && radii[slot].get_type() != Variant::INT)) return result;
+        const Dictionary entity = entities[slot];
+        const Variant entity_id = entity.get(ROR_FIELD("id"), Variant());
+        if (entity_id.get_type() != Variant::INT || int64_t(entity_id) != id) return result;
+        const Vector2 factual = row[1], indexed = positions[slot];
+        const double live_radius = row[2], index_radius = radii[slot];
+        if (!std::isfinite(factual.x) || !std::isfinite(factual.y) || !std::isfinite(indexed.x) ||
+                !std::isfinite(indexed.y) || !std::isfinite(live_radius) || !std::isfinite(index_radius) ||
+                live_radius < 0.0 || index_radius < 0.0) return result;
+        const double allowed = radius + 1.0 + index_radius;
+        rows.push_back({factual, indexed, allowed * allowed, UtilityFunctions::pow(radius + live_radius + 0.1, 2.0)});
+    }
+    const Vector2i cell{int32_t(std::floor(double(origin.x))), int32_t(std::floor(double(origin.y)))};
+    const double recovery_radius = position_walkable(origin, radius) ? radius : 0.0;
+    double best_distance = std::numeric_limits<double>::infinity();
+    Variant best;
+    int32_t index = 0;
+    for (int32_t y = cell.y - 2; y <= cell.y + 2; ++y) {
+        for (int32_t x = cell.x - 2; x <= cell.x + 2; ++x, ++index) {
+            if (!known[index] || !contains(x, y)) continue;
+            const Vector2 point = Vector2(Vector2i(x, y)) + Vector2(0.5, 0.5);
+            const double distance = origin.distance_squared_to(point);
+            if (distance <= 0.5625 || distance >= best_distance || !position_walkable(point, radius)) continue;
+            bool occupied = false;
+            for (const auto &other : rows) {
+                // Match the indexed circle membership, then the factual live
+                // collision predicate. Indexed and live positions may differ.
+                if (point.distance_squared_to(other.indexed) <= other.query_squared &&
+                        point.distance_squared_to(other.factual) < other.collision_squared) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if (occupied || !cells_connected(cell, Vector2i(x, y), recovery_radius)) continue;
+            best = point;
+            best_distance = distance;
+        }
+    }
+    result[ROR_FIELD("position")] = best;
+    return result;
+}
+
+PackedByteArray RoRPathKernel::positions_walkable(const Array &positions, double radius) const {
+    // Read the same configured mask and run the exact scalar predicate. The
+    // caller synchronizes its grid once before this owner-only batch.
+    if (positions.is_empty() || positions.size() > 256) return PackedByteArray();
+    for (int64_t i = 0; i < positions.size(); ++i) {
+        if (positions[i].get_type() != Variant::VECTOR2) return PackedByteArray();
+    }
+    PackedByteArray result;
+    result.resize(positions.size());
+    uint8_t *output = result.ptrw();
+    for (int64_t i = 0; i < positions.size(); ++i) {
+        output[i] = position_walkable(Vector2(positions[i]), radius) ? 1 : 0;
+    }
+    return result;
+}
+
 bool RoRPathKernel::position_walkable(const Vector2 &position, double radius) const {
     const int32_t center_x = static_cast<int32_t>(std::floor(position.x));
     const int32_t center_y = static_cast<int32_t>(std::floor(position.y));
@@ -1056,6 +1279,48 @@ PackedInt32Array RoRPathKernel::direct_cell_path(const Vector2i &start, const Ve
     return direct_path(start.y * width_ + start.x, goal.y * width_ + goal.x, radius, &cells) ? pack_cells(cells) : PackedInt32Array();
 }
 
+bool RoRPathKernel::has_direct_cell_path(const Vector2i &start, const Vector2i &goal, double radius) const {
+    if (!contains(start.x, start.y) || !contains(goal.x, goal.y) || !cell_walkable_for(start.x, start.y, radius) || !cell_walkable_for(goal.x, goal.y, radius)) return false;
+    return direct_path(start.y * width_ + start.x, goal.y * width_ + goal.x, radius);
+}
+
+Vector2i RoRPathKernel::nearest_reachable(const Vector2i &start, const Vector2i &requested, double radius) {
+    if (!is_configured() || !contains(start.x, start.y)) return Vector2i(-1, -1);
+    const auto &labels = components(radius);
+    const int32_t region = labels[start.y * width_ + start.x];
+    if (region < 0) return Vector2i(-1, -1);
+    const Vector2i center(std::clamp(requested.x, 0, width_ - 1), std::clamp(requested.y, 0, height_ - 1));
+    Vector2i best(-1, -1);
+    uint64_t best_distance = std::numeric_limits<uint64_t>::max();
+    const auto consider = [&](int x, int y) {
+        if (labels[y * width_ + x] != region) return;
+        const uint64_t dx = uint64_t(std::abs(int64_t(x) - requested.x));
+        const uint64_t dy = uint64_t(std::abs(int64_t(y) - requested.y));
+        const uint64_t distance = dx * dx + dy * dy;
+        if (distance < best_distance || (distance == best_distance && (y < best.y || (y == best.y && x < best.x)))) {
+            best_distance = distance;
+            best = Vector2i(x, y);
+        }
+    };
+    consider(center.x, center.y);
+    const int maximum = std::max({center.x, center.y, width_ - 1 - center.x, height_ - 1 - center.y});
+    for (int64_t ring = 1; ring <= maximum && uint64_t(ring * ring) <= best_distance; ++ring) {
+        const int64_t left = int64_t(center.x) - ring, right = int64_t(center.x) + ring;
+        const int64_t top = int64_t(center.y) - ring, bottom = int64_t(center.y) + ring;
+        const int x0 = int(std::max<int64_t>(0, left)), x1 = int(std::min<int64_t>(width_ - 1, right));
+        for (int x = x0; x <= x1; ++x) {
+            if (top >= 0) consider(x, int(top));
+            if (bottom < height_) consider(x, int(bottom));
+        }
+        const int y0 = int(std::max<int64_t>(0, top + 1)), y1 = int(std::min<int64_t>(height_ - 1, bottom - 1));
+        for (int y = y0; y <= y1; ++y) {
+            if (left >= 0) consider(int(left), y);
+            if (right < width_) consider(int(right), y);
+        }
+    }
+    return best;
+}
+
 Vector2i RoRPathKernel::nearest_walkable(const Vector2i &requested, double radius) const {
     if (cell_walkable_for(requested.x, requested.y, radius)) return requested;
     for (int ring = 1; ring <= std::max(width_, height_); ++ring) {
@@ -1080,6 +1345,50 @@ Vector2i RoRPathKernel::nearest_walkable(const Vector2i &requested, double radiu
 bool RoRPathKernel::is_segment_walkable(const Vector2 &start, const Vector2 &finish, double radius) const {
     if (!position_walkable(start, radius) || !position_walkable(finish, radius)) return false;
     return segment_interior_walkable(start, finish, radius);
+}
+
+PackedVector2Array RoRPathKernel::finish_world_path(const Vector2 &origin, const Vector2 &destination,
+        const Vector2i &goal, const TypedArray<Vector2i> &smoothed, double radius) {
+    // Fuses the existing world-endpoint and swept-footprint checks. The caller
+    // still owns route caches, revision invalidation, and endpoint resolution.
+    PackedVector2Array result;
+    if (!is_configured() || smoothed.is_empty()) return result;
+    const Vector2i start(int32_t(std::floor(origin.x)), int32_t(std::floor(origin.y)));
+    const Vector2i requested(int32_t(std::floor(destination.x)), int32_t(std::floor(destination.y)));
+    for (int64_t i = 1; i < smoothed.size(); ++i) result.append(Vector2(Vector2i(smoothed[i])) + Vector2(0.5, 0.5));
+    if (result.is_empty()) {
+        const Vector2 point = goal == requested ? destination : Vector2(goal) + Vector2(0.5, 0.5);
+        if (origin.distance_squared_to(point) > 0.0001) result.append(point);
+    }
+    if (goal == requested && !result.is_empty() && position_walkable(destination, radius)) {
+        const Vector2 before = result.size() > 1 ? result[result.size() - 2] : origin;
+        const Vector2 last = result[result.size() - 1];
+        if (last.is_equal_approx(destination) || is_segment_walkable(before, destination, radius)) result.set(result.size() - 1, destination);
+        else if (!last.is_equal_approx(destination)) result.append(destination);
+    }
+    const Vector2 start_center = Vector2(start) + Vector2(0.5, 0.5);
+    if (!result.is_empty() && !origin.is_equal_approx(start_center) && !is_segment_walkable(origin, result[0], radius)) {
+        PackedVector2Array with_start;
+        with_start.append(start_center);
+        with_start.append_array(result);
+        result = with_start;
+    }
+    Vector2 cursor = origin;
+    const bool escaped_start = !position_walkable(origin, radius);
+    bool clear = true;
+    for (int64_t i = 0; i < result.size(); ++i) {
+        if (!(i == 0 && escaped_start) && !is_segment_walkable(cursor, result[i], radius)) { clear = false; break; }
+        cursor = result[i];
+    }
+    if (clear || result.is_empty()) return result;
+    const Vector2 end = result[result.size() - 1];
+    const PackedInt32Array cells = find_cell_path(start, goal, radius);
+    if (cells.is_empty()) return PackedVector2Array();
+    PackedVector2Array candidates;
+    if (!origin.is_equal_approx(start_center)) candidates.append(start_center);
+    for (int64_t i = 2; i + 1 < cells.size(); i += 2) candidates.append(Vector2(cells[i], cells[i + 1]) + Vector2(0.5, 0.5));
+    if (candidates.is_empty() || !candidates[candidates.size() - 1].is_equal_approx(end)) candidates.append(end);
+    return smooth_swept_world_path(origin, candidates, radius, start_center);
 }
 
 PackedVector2Array RoRPathKernel::smooth_swept_world_path(const Vector2 &origin, const PackedVector2Array &candidates, double radius, const Vector2 &escape_center) const {
@@ -1119,6 +1428,85 @@ PackedVector2Array RoRPathKernel::smooth_swept_world_path(const Vector2 &origin,
     return result;
 }
 
+Dictionary RoRPathKernel::select_work_traffic_route(const Vector2 &origin, const Vector2 &destination,
+        double radius, double clearance, const Array &candidates, int64_t first_candidate,
+        const Array &blockers, const Array &tail_blockers, const Callable &find_path) const {
+    // A synchronous geometry transaction: capture each body once, then examine
+    // all candidates. The canonical planner still owns endpoint resolution,
+    // smoothing and route caches; this method never applies a world mutation.
+    Dictionary result;
+    result[ROR_FIELD("supported")] = false;
+    if (!is_configured() || !find_path.is_valid() || first_candidate < 0 || first_candidate > candidates.size() ||
+            candidates.size() > 256 || blockers.size() > 65536 || tail_blockers.size() > 65536 ||
+            !std::isfinite(radius) || !std::isfinite(clearance) || radius < 0.0 || clearance < 0.0) return result;
+    struct Body { Vector2 center; double separation_squared; };
+    std::vector<Body> bodies, tail_bodies;
+    const auto capture = [&](const Array &rows, std::vector<Body> &output) {
+        output.reserve(size_t(rows.size()));
+        for (int64_t i = 0; i < rows.size(); ++i) {
+            if (rows[i].get_type() != Variant::DICTIONARY) return false;
+            const Dictionary row = rows[i];
+            const Variant position = row.get(ROR_FIELD("pos"), Variant());
+            if (position.get_type() != Variant::VECTOR2 || !row.has(ROR_FIELD("footprint_radius"))) return false;
+            const double other_radius = row[ROR_FIELD("footprint_radius")], other_clearance = row.get(ROR_FIELD("minimum_clearance"), 0.06);
+            const Vector2 center = position;
+            if (!std::isfinite(other_radius) || !std::isfinite(other_clearance) ||
+                    !std::isfinite(double(center.x)) || !std::isfinite(double(center.y))) return false;
+            const double separation = radius + other_radius + std::max(clearance, other_clearance);
+            output.push_back({center, separation * separation});
+        }
+        return true;
+    };
+    if (!capture(blockers, bodies) || !capture(tail_blockers, tail_bodies)) return result;
+    for (int64_t i = first_candidate; i < candidates.size(); ++i) {
+        if (candidates[i].get_type() != Variant::VECTOR2) return result;
+    }
+    Geometry2D *geometry = Geometry2D::get_singleton();
+    int64_t candidate_tests = 0, body_tests = 0, tail_queries = 0;
+    const auto clear = [&](const Vector2 &start, const Vector2 &finish, const std::vector<Body> &obstacles) {
+        for (const auto &body : obstacles) {
+            ++body_tests;
+            const double minimum = std::min(body.separation_squared, double(start.distance_squared_to(body.center)));
+            const Vector2 closest = geometry->get_closest_point_to_segment(body.center, start, finish);
+            if (double(body.center.distance_squared_to(closest)) < minimum - 0.0001) return false;
+        }
+        return true;
+    };
+    TypedArray<Vector2> selected;
+    int64_t selected_index = candidates.size();
+    for (int64_t i = first_candidate; i < candidates.size(); ++i) {
+        ++candidate_tests;
+        const Vector2 point = candidates[i];
+        if (!is_segment_walkable(origin, point, radius) || !clear(origin, point, bodies)) continue;
+        ++tail_queries;
+        const Variant value = find_path.call(point, destination);
+        if (value.get_type() != Variant::ARRAY) return result;
+        const Array route = value;
+        if (route.is_empty()) continue;
+        for (int64_t j = 0; j < route.size(); ++j) if (route[j].get_type() != Variant::VECTOR2) return result;
+        if (Vector2(route[route.size()-1]).distance_squared_to(destination) > 0.0144) continue;
+        Vector2 cursor = point;
+        bool valid = true;
+        for (int64_t j = 0; j < route.size(); ++j) {
+            const Vector2 waypoint = route[j];
+            if (!clear(cursor, waypoint, tail_bodies)) { valid = false; break; }
+            cursor = waypoint;
+        }
+        if (!valid) continue;
+        selected.append(point);
+        selected.append_array(route);
+        selected_index = i;
+        break;
+    }
+    result[ROR_FIELD("supported")] = true;
+    result[ROR_FIELD("path")] = selected;
+    result[ROR_FIELD("index")] = selected_index;
+    result[ROR_FIELD("candidate_tests")] = candidate_tests;
+    result[ROR_FIELD("body_tests")] = body_tests;
+    result[ROR_FIELD("tail_queries")] = tail_queries;
+    return result;
+}
+
 PackedVector2Array RoRPathKernel::find_local_traffic_path(const Vector2 &origin, const Vector2 &goal, double radius, double clearance, const Array &blockers) const {
     struct Entry { Vector2i cell; double cost; double score; };
     struct Body { Vector2 center; double separation_squared; };
@@ -1126,8 +1514,8 @@ PackedVector2Array RoRPathKernel::find_local_traffic_path(const Vector2 &origin,
     bodies.reserve(static_cast<size_t>(blockers.size()));
     for (int64_t i = 0; i < blockers.size(); ++i) {
         const Dictionary row = blockers[i];
-        const double separation = radius + double(row.get("footprint_radius", 0.3)) + std::max(clearance, double(row.get("minimum_clearance", 0.06)));
-        bodies.push_back({Vector2(row["pos"]), separation * separation});
+        const double separation = radius + double(row.get(ROR_FIELD("footprint_radius"), 0.3)) + std::max(clearance, double(row.get(ROR_FIELD("minimum_clearance"), 0.06)));
+        bodies.push_back({Vector2(row[ROR_FIELD("pos")]), separation * separation});
     }
     Geometry2D *geometry = Geometry2D::get_singleton();
     const auto clear = [&](const Vector2 &start, const Vector2 &finish) {

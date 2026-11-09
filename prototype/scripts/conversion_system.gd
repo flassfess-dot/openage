@@ -87,7 +87,7 @@ func finish_conversion(converter: Dictionary, reason: String) -> void:
 	cancel(converter, reason)
 	world.release_building_approach_slot(converter)
 	world.release_unit_destination(converter)
-	converter["target_id"] = -1
+	world.set_entity_field(converter, "target_id", -1)
 	converter["target_building_id"] = -1
 	world.set_entity_field(converter, "task", "idle")
 	converter["diagnostic_reason"] = "conversion_complete:%s" % reason
@@ -180,7 +180,11 @@ func advance_faith(converter: Dictionary, delta: float) -> void:
 	if bool(conversion.get("active", false)):
 		return
 	var maximum := float(conversion.get("max_faith", 100.0))
-	conversion["faith"] = minf(maximum, float(conversion.get("faith", 0.0)) + maxf(0.0, delta) * rate)
+	var faith := minf(maximum, float(conversion.get("faith", 0.0)) + maxf(0.0, delta) * rate)
+	var faith_changed := not conversion.has("faith") or typeof(conversion["faith"]) != TYPE_FLOAT or faith != float(conversion["faith"])
+	conversion["faith"] = faith
+	if faith_changed:
+		world.entity_mutations.mark_ui_control_changed(world, converter)
 
 
 func advance_unit_order(converter: Dictionary, delta: float, result: Dictionary) -> void:
@@ -237,12 +241,17 @@ func advance_conversion(converter: Dictionary, target: Dictionary, delta: float)
 	var conversion := component(converter)
 	if not bool(conversion.get("active", false)) or int(conversion.get("target_id", -1)) != int(target.get("id", -1)):
 		return "conversion_not_active"
+	if int(conversion.get("chants", 0)) == 0 and float(conversion.get("chant_elapsed", 0.0)) == 0.0:
+		world.reveal_ranged_attacker(converter, target)
+		world.notify_under_attack(converter, target)
 	conversion["chant_elapsed"] = float(conversion.get("chant_elapsed", 0.0)) + maxf(0.0, delta)
 	var interval := maxf(0.1, float(conversion.get("chant_interval", 1.5)))
 	while float(conversion.get("chant_elapsed", 0.0)) + 0.0001 >= interval:
 		conversion["chant_elapsed"] = float(conversion["chant_elapsed"]) - interval
 		conversion["chants"] = int(conversion.get("chants", 0)) + 1
 		var chant_count := int(conversion["chants"])
+		world.reveal_ranged_attacker(converter, target)
+		world.notify_under_attack(converter, target)
 		world.emit_domain_event("conversion_chant", {
 			"converter_id": int(converter.get("id", -1)),
 			"target_id": int(target.get("id", -1)),
@@ -260,6 +269,7 @@ func advance_conversion(converter: Dictionary, target: Dictionary, delta: float)
 		if not world.transfer_entity_ownership(target, new_team, int(converter.get("id", -1))):
 			return "ownership_transfer_failed"
 		conversion["faith"] = 0.0
+		world.entity_mutations.mark_ui_control_changed(world, converter)
 		complete(converter)
 		world.emit_domain_event("conversion_succeeded", {
 			"converter_id": int(converter.get("id", -1)),

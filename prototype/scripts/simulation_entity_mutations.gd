@@ -4,16 +4,41 @@ extends RefCounted
 const AnimationController := preload("res://scripts/animation_controller.gd")
 const EntityChangeJournal := preload("res://scripts/entity_change_journal.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
+const ReadContract := preload("res://scripts/entity_read_contract.gd")
+static var ui_field_inputs: Dictionary = _ui_field_inputs()
+
+static func _ui_field_inputs() -> Dictionary:
+	var fields := {}
+	for field in ReadContract.UI_CONTROL_FIELDS + ["id", "team", "kind", "entity_type", "behavior_tags", "movement_domain", "task", "components", "source_unit_id", "combat_enabled"]: fields[field] = true
+	# Include scalar inputs that capability refreshes may mirror into components.
+	for component_fields in ReadContract.UI_COMPONENT_FIELDS.values():
+		for field in component_fields: fields[field] = true
+	fields.make_read_only()
+	return fields
 
 var entity_changes := EntityChangeJournal.new()
 var read_generation_pins := 0
 var runtime_task_capture := false
 var runtime_previous_tasks: Dictionary = {}
 var runtime_actor_eligibility: Dictionary = {}
+var resource_digest_job: Variant = null
+var ui_versions_enabled := OS.get_environment("ROR_DIAGNOSTIC_COMPACT_UI_CONTROLS") != "0"
+var ui_control_versions: Dictionary = {}
+var ui_control_serial := 0
+
+func mark_ui_control_changed(world, entity: Dictionary) -> void:
+	if not ui_versions_enabled: return
+	var id := int(entity.get("id", -1))
+	if not world.units_by_id.has(id): return
+	ui_control_serial += 1
+	ui_control_versions[id] = ui_control_serial
 
 func reset() -> void:
+	cancel_resource_digest()
 	read_generation_pins = 0
 	entity_changes.reset()
+	ui_control_versions.clear()
+	ui_control_serial = 0
 
 
 func clear_runtime_capture() -> void:
@@ -22,40 +47,80 @@ func clear_runtime_capture() -> void:
 	runtime_actor_eligibility.clear()
 
 
+func cancel_resource_digest() -> void:
+	if resource_digest_job != null: resource_digest_job.cancel()
+	resource_digest_job = null
+
+
 # Domain operations reserve their notification at entry, before any nested
 # setter can publish a read. The callback runs synchronously on the owner thread.
 # This preserves the existing journal boundary and activity refresh ordering.
 func mutate_entity(world, entity: Dictionary, operation: Callable, mask: int = EntityChangeJournal.MUTABLE_GROUPS) -> Variant:
 	assert(read_generation_pins == 0, "Pinned observation generation is immutable")
+	if resource_digest_job != null: resource_digest_job.before_change(int(entity.get("id", -1)))
+	# Domain callbacks may edit nested capabilities (scenario/technology). Scalar
+	# field setters do not touch these templates and need no extra copies.
+	if world.resource_nodes_by_id.has(int(entity.get("id", -1))):
+		preload("res://scripts/resource_component_pool.gd").detach(entity)
 	notify_entity_changed(world, entity, mask)
 	return operation.call()
 
 
 func set_entity_fields(world, entity: Dictionary, values: Dictionary) -> void:
-	for field in values:
-		set_entity_field(world, entity, String(field), values[field])
+	assert(read_generation_pins == 0, "Pinned observation generation is immutable")
+	if values.has("id"):
+		for key in values: set_entity_field(world, entity, String(key), values[key])
+		return
+	var id := int(entity.get("id", -1))
+	var mask := 0
+	var ui_changed := false
+	var changed := false
+	for key in values:
+		var field := String(key)
+		var value: Variant = values[key]
+		if not (value is Array or value is Dictionary) and entity.has(field) and typeof(entity[field]) == typeof(value) and entity[field] == value: continue
+		if not changed and resource_digest_job != null: resource_digest_job.before_change(id)
+		if runtime_task_capture and field in ["task", "hp", "state", "combat_enabled"]:
+			_capture_runtime_field(world, entity, field, id)
+		entity[field] = value
+		mask |= EntityChangeJournal.field_mask(field)
+		ui_changed = ui_changed or ui_field_inputs.has(field)
+		changed = true
+	if mask: entity_changes.mark(id, mask)
+	if ui_changed: mark_ui_control_changed(world, entity)
+	if mask & EntityChangeJournal.ACTIVITY: world.refresh_unit_activity(entity)
+
+
+func _capture_runtime_field(world, entity: Dictionary, field: String, id: int) -> void:
+	if not runtime_actor_eligibility.has(id):
+		runtime_actor_eligibility[id] = bool(entity.get("combat_enabled", false)) and float(entity.get("hp", 0.0)) > 0.0 and (not world.entity_is_static(entity) or String(entity.get("state", "complete")) == "complete")
+	if field == "task" and bool(runtime_actor_eligibility[id]) and not runtime_previous_tasks.has(id):
+		runtime_previous_tasks[id] = [entity, String(entity.get("task", "idle"))]
 
 
 func set_entity_field(world, entity: Dictionary, field: String, value: Variant) -> void:
 	assert(read_generation_pins == 0, "Pinned observation generation is immutable")
 	if not (value is Array or value is Dictionary) and entity.has(field) and typeof(entity[field]) == typeof(value) and entity[field] == value: return
+	if resource_digest_job != null: resource_digest_job.before_change(int(entity.get("id", -1)))
 	if runtime_task_capture and field in ["task", "hp", "state", "combat_enabled"]:
-		var id = int(entity.get("id", -1))
-		if not runtime_actor_eligibility.has(id): runtime_actor_eligibility[id] = bool(entity.get("combat_enabled", false)) and float(entity.get("hp", 0.0)) > 0.0 and (not world.entity_is_static(entity) or String(entity.get("state", "complete")) == "complete")
-		if field == "task" and bool(runtime_actor_eligibility[id]) and not runtime_previous_tasks.has(id): runtime_previous_tasks[id] = [entity, String(entity.get("task", "idle"))]
+		_capture_runtime_field(world, entity, field, int(entity.get("id", -1)))
 	entity[field] = value
 	var mask = EntityChangeJournal.field_mask(field)
 	entity_changes.mark(int(entity.get("id", -1)), mask)
+	if ui_field_inputs.has(field): mark_ui_control_changed(world, entity)
 	if mask & EntityChangeJournal.ACTIVITY: world.refresh_unit_activity(entity)
 
 
 func register_entity_changes(world, entity: Dictionary) -> void:
 	entity_changes.mark(int(entity.get("id", -1)), EntityChangeJournal.ALL)
+	mark_ui_control_changed(world, entity)
 	world.refresh_unit_activity(entity)
 
 
 func rebuild_entity_change_tracking(world) -> void:
 	entity_changes.reset()
+	ui_control_versions.clear()
+	ui_control_serial = 0
 	world.entity_read_index.clear()
 	world.unit_activity_registry.clear()
 	for entity in world._entity_change_comparison_roster(): world.register_entity_changes(entity)
@@ -164,17 +229,21 @@ func end_runtime_task_capture(world) -> Array:
 
 func notify_entity_changed(world, entity: Dictionary, mask: int = EntityChangeJournal.MUTABLE_GROUPS) -> void:
 	entity_changes.mark(int(entity.get("id", -1)), mask)
+	mark_ui_control_changed(world, entity)
 	if mask & EntityChangeJournal.ACTIVITY: world.refresh_unit_activity(entity)
 
 
 func erase_entity_field(world, entity: Dictionary, field: String) -> void:
+	if resource_digest_job != null and entity.has(field): resource_digest_job.before_change(int(entity.get("id", -1)))
 	if entity.erase(field):
 		entity_changes.mark(int(entity.get("id", -1)), EntityChangeJournal.field_mask(field))
+		if ui_field_inputs.has(field): mark_ui_control_changed(world, entity)
 		world.refresh_unit_activity(entity)
 
 
 func advance_entity_animation(world, entity: Dictionary, state: String, delta: float, restart_same_clip: bool = false) -> bool:
 	assert(read_generation_pins == 0, "Pinned observation generation is immutable")
+	if resource_digest_job != null: resource_digest_job.before_change(int(entity.get("id", -1)))
 	var changed = AnimationController.update(entity, state, delta, restart_same_clip)
 	if changed: entity_changes.mark(int(entity["id"]), EntityChangeJournal.APPEARANCE)
 	return changed

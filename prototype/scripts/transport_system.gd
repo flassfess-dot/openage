@@ -80,7 +80,7 @@ func board(passengers: Array, transport: Dictionary) -> String:
 	cargo["count"] = passenger_ids.size()
 	world.notify_entity_changed(transport)
 	world.rebuild_spatial_index()
-	world.update_fog_of_war()
+	world.refresh_changed_fog_of_war()
 	return ""
 
 
@@ -324,7 +324,7 @@ func unload(transports: Array, target: Vector2, requested_passenger_ids: Array =
 		var plan: Dictionary = plan_value
 		_restore_passenger(plan["transport"], plan["passenger"], plan["position"])
 	world.rebuild_spatial_index()
-	world.update_fog_of_war()
+	world.refresh_changed_fog_of_war()
 	return ""
 
 
@@ -495,6 +495,7 @@ func destroy_cargo(transport: Dictionary) -> void:
 		})
 	cargo["passenger_ids"] = []
 	cargo["count"] = 0
+	world.entity_mutations.mark_ui_control_changed(world, transport)
 
 
 func reconcile_ownership(transport: Dictionary) -> void:

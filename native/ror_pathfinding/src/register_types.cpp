@@ -8,6 +8,8 @@
 #include "ror_visibility_kernel.hpp"
 #include "ror_terrain_kernel.hpp"
 #include "ror_read_model_kernel.hpp"
+#include "ror_entity_read_index.hpp"
+#include "ror_entity_change_journal.hpp"
 #include "ror_save_file_kernel.hpp"
 
 using namespace godot;
@@ -20,7 +22,11 @@ void initialize_ror_pathfinding(ModuleInitializationLevel level) {
     GDREGISTER_CLASS(RoRVisibilityKernel);
     GDREGISTER_CLASS(RoRTerrainKernel);
     GDREGISTER_CLASS(RoRStaticSpriteProjection);
+    GDREGISTER_CLASS(RoREnvironmentQueryIndex);
     GDREGISTER_CLASS(RoRReadModelKernel);
+    GDREGISTER_CLASS(RoREntityReadIndexKernel);
+    GDREGISTER_CLASS(RoREntityChangeJournalKernel);
+    GDREGISTER_CLASS(RoRResourceDigest);
     GDREGISTER_CLASS(RoRSaveFileKernel);
 }
 

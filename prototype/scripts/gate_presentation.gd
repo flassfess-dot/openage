@@ -12,6 +12,8 @@ const PROFILES := [
 ]
 var textures: Dictionary = {}
 var cache: Dictionary = {}
+# Immutable visual definitions belong to this configured asset generation.
+var visual_sources: Dictionary = {}
 
 func prewarm_textures() -> void:
 	for group in range(GROUPS.size()):
@@ -31,16 +33,46 @@ static func visual_origin(building: Dictionary) -> Vector2:
 	# Even-width footprints have no central tile; use the same tile anchors as walls.
 	return WallPlacement.masonry_center(building)-Vector2(building.get("pos",Vector2.ZERO))
 
-func frame_info(registry, building: Dictionary, player: int) -> Dictionary:
+func _visual_source(registry, building: Dictionary) -> Dictionary:
 	var civilization := int(building.get("components", {}).get("ownership", {}).get("civilization_id", 13))
-	var group: int = int(registry.civilization_icon_sets.get(civilization,4))
 	var wall_id := int(building.get("source_unit_id",10072))-10000
-	if wall_id not in [72,117,155]:
-		wall_id = 72
-	if wall_id == 72:
-		group = 0
+	if wall_id not in [72,117,155]: wall_id = 72
+	var key := Vector2i(civilization,wall_id)
+	if visual_sources.has(key): return visual_sources[key]
+	var group := 0 if wall_id == 72 else int(registry.civilization_icon_sets.get(civilization,4))
 	var source: Dictionary = registry.object_catalog.get("objects", {}).get("%d:%d" % [civilization,wall_id], {})
-	var graphic := int(source.get("graphics", {}).get("idle",-1))
+	var result := {"civilization":civilization,"wall_id":wall_id,"group":group,"source":source,"graphic":int(source.get("graphics",{}).get("idle",-1))}
+	result.make_read_only()
+	visual_sources[key] = result
+	return result
+
+
+func graphic_dependencies(registry, building: Dictionary) -> Array:
+	# Synthetic gates do not have an imported graphic at their synthetic ID.
+	# Declare the same masonry, flag, reference and damage sources used to draw.
+	var visual := _visual_source(registry,building)
+	var graphics: Dictionary = visual["source"].get("graphics",{})
+	var ids := {702:true}
+	for name in ["idle","death","construction"]:
+		var id := int(graphics.get(name,-1))
+		if id >= 0: ids[id] = true
+	for damage in graphics.get("damage",[]):
+		var id := int(damage.get("graphic_id",-1))
+		if id >= 0: ids[id] = true
+	if int(visual["wall_id"]) == 155:
+		var reference: Dictionary = registry.object_catalog.get("objects",{}).get("%d:117" % int(visual["civilization"]),{})
+		var id := int(reference.get("graphics",{}).get("idle",-1))
+		if id >= 0: ids[id] = true
+	return ids.keys()
+
+
+func frame_info(registry, building: Dictionary, player: int) -> Dictionary:
+	var visual := _visual_source(registry,building)
+	var civilization := int(visual["civilization"])
+	var wall_id := int(visual["wall_id"])
+	var group := int(visual["group"])
+	var source: Dictionary = visual["source"]
+	var graphic := int(visual["graphic"])
 	var axis := int(building.get("gate_axis",0))
 	var pose := roundi(clampf(float(building.get("gate_open_fraction",0)),0,1)*7)
 	var ruined := float(building.get("hp",1)) <= 0 or String(building.get("state","")) == "destroyed"

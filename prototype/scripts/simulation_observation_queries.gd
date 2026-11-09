@@ -4,6 +4,7 @@ const AiProfile := preload("res://scripts/ai_observation_profile.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 const MAX_COMMAND_RULE_ENTRIES := 256
 const MAX_COMMAND_RULE_BYTES := 2 * 1024 * 1024
+static var compare_price_bounds := "--compare-command-price-bounds" in OS.get_cmdline_user_args()
 
 # Explicit owner-thread queries. Snapshot projection never calls these services.
 # Only IDs already present in an observer's legal read model may be enriched.
@@ -56,9 +57,10 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 				cache["worker_commands"] = worker_build_commands
 				cache["available_kinds"] = available_kinds
 	var restricted := options.has("command_option_entity_ids")
-	var command_ids: Dictionary = {}
-	for id in options.get("command_option_entity_ids", []):
-		command_ids[int(id)] = true
+	var command_ids: Dictionary = options.get("_scene_control_ids", {})
+	if not options.has("_scene_control_ids"):
+		for id in options.get("command_option_entity_ids", []):
+			command_ids[int(id)] = true
 	var keep_actors: bool = restricted and command_ids.is_empty()
 	var replacements: Dictionary = {}
 	var units: Array = []
@@ -66,6 +68,7 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	var worker_options_ready := false
 	var include_builder_productivity: bool=bool(options.get("include_builder_productivity",false)) and not bool(options.get("tactical_only",false)) and not bool(snapshot.get("tactical_only",false))
 	var builder_rates: Dictionary={}
+	var profile_cache: Dictionary = options.get("_ai_profile_cache", {})
 	if include_builder_productivity:
 		var build_cache: Dictionary=options.get("_ai_build_options_cache",{})
 		builder_rates=build_cache.get("builder_rates",{})
@@ -78,9 +81,16 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 				row["command_options"] = worker_build_commands
 			elif bool(options.get("include_worker_command_options", true)):
 				if not worker_options_ready:
-					worker_options = world.get_build_options(team)
+					var scene_worker: Dictionary = options.get("_scene_worker_publication", {})
+					if scene_worker.has("commands"):
+						worker_build_commands = scene_worker["commands"]
+						worker_options = worker_build_commands["build"]
+					else: worker_options = world.get_build_options(team)
+					if options.has("_scene_worker_publication") and not scene_worker.has("commands"):
+						worker_build_commands = Data.capture_frozen({"build":worker_options})
+						options["_scene_worker_publication"]["commands"] = worker_build_commands
 					worker_options_ready = true
-				row["command_options"] = {"build": worker_options}
+				row["command_options"] = worker_build_commands if options.has("_scene_worker_publication") else {"build": worker_options}
 			if include_builder_productivity and String(row.get("movement_domain","land"))=="land":
 				var source_worker: Variant=world.find_unit(int(row.get("id",-1)))
 				if source_worker!=null:
@@ -91,12 +101,13 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 			replacements[int(row.get("id", -1))] = row
 		if bool(options.get("include_ai_profiles", false)) and not row.has("ai_profile") and (not restricted or command_ids.has(int(row.get("id", -1)))):
 			row = row.duplicate()
-			row["ai_profile"] = AiProfile.actor(world, row, team)
+			row["ai_profile"] = AiProfile.actor(world, row, team, profile_cache)
 		units.append(row)
 	if keep_actors: units = snapshot.get("units", [])
+	if options.has("_scene_controls") and options.has("_scene_worker_publication") and not bool(options.get("include_ai_profiles", false)) and not include_builder_productivity:
+		options["_scene_controls"].seal_units(units)
 	result["units"] = units
 	var buildings: Array = []
-	var profile_cache: Dictionary = options.get("_ai_profile_cache", {})
 	for row_value in ([] if keep_actors else snapshot.get("buildings", [])):
 		var row: Dictionary = row_value
 		if int(row.get("team", 0)) == team and not bool(row.get("last_known", false)) and (not restricted or command_ids.has(int(row.get("id", -1)))):
@@ -109,7 +120,7 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 				if String(source.get("state","complete"))=="foundation":
 					row["construction_progress"]=float(source.get("construction_progress",0.0))
 					if include_builder_productivity: row["construction_required"]=float(source.get("construction_required",1.0))
-				if not bool(options.get("tactical_only",false)) and String(source.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(source, options.get("foundation_units", units))):
+				if not bool(options.get("skip_builder_reachability_queries", false)) and not bool(options.get("tactical_only",false)) and String(source.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(source, options.get("foundation_units", units))):
 					row["reachable_builder_ids"] = world.reachable_builder_ids(source)
 				if not bool(options.get("tactical_only",false)):
 					row["command_options"] = building_command_options(world,source,team,options,options.get("foundation_units",units),profile_cache)
@@ -122,9 +133,10 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 			replacements[int(row.get("id", -1))] = row
 		if bool(options.get("include_ai_profiles", false)) and not row.has("ai_profile") and (not restricted or command_ids.has(int(row.get("id", -1)))):
 			row = row.duplicate()
-			row["ai_profile"] = AiProfile.actor(world, row, team)
+			row["ai_profile"] = AiProfile.actor(world, row, team, profile_cache)
 		buildings.append(row)
 	if keep_actors: buildings = snapshot.get("buildings", [])
+	if options.has("_scene_controls"): buildings = options["_scene_controls"].seal_buildings(buildings)
 	result["buildings"] = buildings
 	for category in ([] if keep_actors else ["control_units", "control_buildings"]):
 		if snapshot.has(category):
@@ -278,18 +290,28 @@ static func building_command_options(world, source: Dictionary, team: int, optio
 	var first: Dictionary = queue[0] if not queue.is_empty() else {}
 	var key := [String(source.get("kind","")),int(source.get("team",0)),String(source.get("state","complete")),float(source.get("hp",0.0)) > 0.0,source.get("unit_lineage",[int(source.get("source_unit_id",-1))]),queue.size(),first.get("kind",""),first.get("order_type","unit"),first.get("status","")]
 	if options.has("_ai_command_options_cache") and cache.has(key):
+		if options.has("_scene_rule_counters"):
+			var counts: Dictionary = options["_scene_rule_counters"]
+			counts["generation_hits"] = int(counts.get("generation_hits", 0)) + 1
 		var retained: Dictionary = cache[key]
 		Data._retain_immutable(retained)
 		return retained
 	var rules: Dictionary = options.get("_ai_command_rule_cache",{})
 	if not rules.is_empty() and rules["entries"].has(key):
+		if options.has("_scene_rule_counters"):
+			var counts: Dictionary = options["_scene_rule_counters"]
+			counts["retained_hits"] = int(counts.get("retained_hits", 0)) + 1
 		var previous: Dictionary = rules["entries"][key]
-		var priced := _price_command_rules(world,team,previous)
+		var certificate: Dictionary = rules.get("price_bounds", {}).get(key, {})
+		var priced := _price_command_rules(world,team,previous,certificate)
 		if not is_same(priced,previous): _remember_command_rules(rules,key,priced)
 		if options.has("_ai_command_options_cache") and cache.size() < MAX_COMMAND_RULE_ENTRIES: cache[key] = priced
 		Data._retain_immutable(priced)
 		return priced
 	var result: Dictionary
+	if options.has("_scene_rule_counters"):
+		var counts: Dictionary = options["_scene_rule_counters"]
+		counts["rule_captures"] = int(counts.get("rule_captures", 0)) + 1
 	if bool(options.get("requested_production_only",false)):
 		result = requested_production_options(world,source,team,options.get("production_requests",[]))
 	elif bool(options.get("economic_production_options_only",false)):
@@ -309,10 +331,30 @@ static func building_command_options(world, source: Dictionary, team: int, optio
 		if not rules.is_empty() and not result.is_empty(): _remember_command_rules(rules,key,result)
 	return result
 
-static func _price_command_rules(world, team: int, template: Dictionary) -> Dictionary:
+static func _price_command_rules(world, team: int, template: Dictionary, certificate: Variant = null) -> Dictionary:
+	return price_command_rules(world, team, template, ["train", "research"], certificate)
+
+
+static func price_command_rules(world, team: int, template: Dictionary, categories: Array, certificate: Variant = null) -> Dictionary:
+	var stocks: Dictionary = world.economy_system.resource_stockpiles_by_team.get(team, {})
+	if certificate is Dictionary and is_same(certificate.get("template"), template) and int(certificate.get("team", -1)) == team and certificate.get("categories", []) == categories:
+		var valid := true
+		for resource_id in certificate["lower"]:
+			if int(stocks.get(resource_id, 0)) < int(certificate["lower"][resource_id]): valid = false; break
+		if valid:
+			for resource_id in certificate["upper"]:
+				if int(stocks.get(resource_id, 0)) >= int(certificate["upper"][resource_id]): valid = false; break
+		if valid:
+			certificate["hits"] = int(certificate.get("hits", 0)) + 1
+			if compare_price_bounds and int(certificate.get("comparisons", 0)) < 128 and int(certificate["hits"]) % 16 == 0:
+				certificate["comparisons"] = int(certificate.get("comparisons", 0)) + 1
+				if price_command_rules(world, team, template, categories) != template:
+					certificate["mismatches"] = int(certificate.get("mismatches", 0)) + 1
+					push_error("Command affordability changed inside retained price bounds")
+			return template
 	var result := template.duplicate()
 	var changed := false
-	for category in ["train","research"]:
+	for category in categories:
 		var next: Array = []
 		var category_changed := false
 		for previous in template.get(category,[]):
@@ -333,12 +375,49 @@ static func _price_command_rules(world, team: int, template: Dictionary) -> Dict
 			next.make_read_only()
 			result[category] = next
 			changed = true
-	if not changed: return template
-	# Original children belong to a validated immutable template. New children
-	# change scalar flags only, so this producer can certify its new outer root.
-	result.make_read_only()
-	Data._retain_immutable(result)
+	if not changed:
+		result = template
+	else:
+		# Original children belong to a validated immutable template. New
+		# children change scalar flags only.
+		result.make_read_only()
+		Data._retain_immutable(result)
+	if certificate is Dictionary:
+		_certify_price_bounds(result, categories, stocks, team, certificate)
 	return result
+
+static func _certify_price_bounds(template: Dictionary, categories: Array, stocks: Dictionary, team: int, certificate: Dictionary) -> void:
+	# Above the lower bounds all accepted commands stay affordable. For each
+	# rejected command one deficient resource supplies an exclusive upper
+	# bound. Stock changes inside this region cannot change any result.
+	var lower: Dictionary = {}
+	var upper: Dictionary = {}
+	for category in categories:
+		for option in template.get(category, []):
+			if String(option.get("reason", "")) not in ["", "insufficient_resources"]: continue
+			var cost: Dictionary = option.get("cost", {})
+			if bool(option.get("accepted", false)):
+				for resource_id in cost:
+					var id := int(resource_id)
+					lower[id] = maxi(int(lower.get(id, 0)), int(cost[resource_id]))
+			else:
+				var witness := false
+				for resource_id in cost:
+					var id := int(resource_id)
+					var required := int(cost[resource_id])
+					if int(stocks.get(id, 0)) < required:
+						upper[id] = mini(int(upper.get(id, required)), required)
+						witness = true
+						break
+				if not witness:
+					certificate.clear()
+					return
+	certificate["template"] = template
+	certificate["categories"] = categories.duplicate()
+	certificate["team"] = team
+	certificate["lower"] = lower
+	certificate["upper"] = upper
+	certificate["captures"] = int(certificate.get("captures", 0)) + 1
 
 static func _remember_command_rules(cache: Dictionary, key: Array, value: Dictionary) -> void:
 	var bytes := var_to_bytes(value).size() + var_to_bytes(key).size() + 96
@@ -352,10 +431,13 @@ static func _remember_command_rules(cache: Dictionary, key: Array, value: Dictio
 		cache["bytes"] -= cache["sizes"][expired]
 		cache["entries"].erase(expired)
 		cache["sizes"].erase(expired)
+		cache.get("price_bounds", {}).erase(expired)
 	# A lineage array in the live actor can change on upgrade. Dictionary keys
 	# must own their immutable copy rather than retain that mutable array.
 	var frozen_key: Array = Data.capture_frozen({"key":key})["key"]
 	cache["entries"][frozen_key] = value
 	cache["sizes"][frozen_key] = bytes
+	if not cache.has("price_bounds"): cache["price_bounds"] = {}
+	if not cache["price_bounds"].has(frozen_key): cache["price_bounds"][frozen_key] = {}
 	cache["bytes"] += bytes
 	Data._retain_immutable(value)

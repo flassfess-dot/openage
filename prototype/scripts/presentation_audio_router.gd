@@ -6,6 +6,7 @@ const CATEGORY_COOLDOWNS := {
 	"voice_command": 0.12,
 	"production": 0.10,
 	"combat": 0.08,
+	"attack_alarm": 2.0,
 }
 
 var runtime_catalog: Dictionary = {}
