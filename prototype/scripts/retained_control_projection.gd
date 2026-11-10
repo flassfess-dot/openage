@@ -10,6 +10,7 @@ var certified := false
 var entries: Dictionary = {}
 var seen: Dictionary = {}
 var counters: Dictionary = {}
+var pending_building_fields: Array = []
 var world_id := -1
 var epoch := -1
 var certified_units: Array = []
@@ -34,6 +35,7 @@ var ui_versions_supported := false
 var source_journal: Variant
 
 func clear() -> void:
+	pending_building_fields.clear()
 	entries.clear()
 	seen.clear()
 	counters.clear()
@@ -50,6 +52,7 @@ func clear() -> void:
 	source_journal = null
 
 func begin(world, tick: int) -> void:
+	pending_building_fields.clear()
 	if world_id != world.get_instance_id() or epoch != int(world.entity_changes.epoch):
 		clear()
 		world_id = world.get_instance_id()
@@ -162,13 +165,72 @@ func seal_units(rows: Array) -> void:
 func retain_units(rows: Array) -> void:
 	if certified and is_same(rows, certified_units): Data._retain_immutable(rows)
 
+
+func publish_unit_menus(world, source: Array, team: int, eligible: Dictionary, commands: Dictionary) -> Array:
+	var rows := source.duplicate()
+	for index in range(rows.size()):
+		var base: Dictionary = rows[index]
+		var id := int(base.get("id", -1))
+		if int(base.get("team", 0)) != team or not eligible.has(id) or not world.entity_is_worker(base): continue
+		var entry: Dictionary = entries.get(id, {})
+		if is_same(entry.get("menu_base"), base) and is_same(entry.get("menu_commands"), commands):
+			rows[index] = entry["menu_row"]
+		else:
+			var row := base.duplicate()
+			row["command_options"] = commands
+			row.make_read_only()
+			rows[index] = row
+			if base.is_read_only() and entries.has(id):
+				entry["menu_base"] = base
+				entry["menu_commands"] = commands
+				entry["menu_row"] = row
+	seal_units(rows)
+	return rows
+
+
+func compose_building(base: Dictionary, fields: Dictionary, index: int) -> Dictionary:
+	var id := int(base["id"])
+	var entry: Dictionary = entries.get(id, {})
+	var keys: Array = entry.get("enriched_keys", [])
+	if is_same(entry.get("enriched_base"), base) and keys.size() == fields.size():
+		var previous: Dictionary = entry["enriched_row"]
+		var matches := true
+		for key in keys:
+			if not fields.has(key) or previous[key] != fields[key]:
+				matches = false
+				break
+		if matches:
+			counters["building_fields_reused"] = int(counters.get("building_fields_reused", 0)) + 1
+			if compare_building_rows and compare_generation:
+				var reference := base.duplicate()
+				reference.merge(fields, true)
+				counters["building_field_comparisons"] = int(counters.get("building_field_comparisons", 0)) + 1
+				if reference != previous:
+					counters["building_field_mismatches"] = int(counters.get("building_field_mismatches", 0)) + 1
+					push_error("Building fields differ from current observation for entity %d" % id)
+			return previous
+	var row := base.duplicate()
+	row.merge(fields, true)
+	if base.is_read_only() and is_same(entry.get("record"), base):
+		pending_building_fields.append({"index":index, "entry":entry, "base":base, "keys":fields.keys()})
+	return row
+
+
 func seal_buildings(rows: Array) -> Array:
 	if not building_rows_native: return rows
 	var expected: Array = Data.capture_frozen({"rows":rows}).get("rows", []) if compare_building_rows and compare_generation else []
 	var completed: Array = kernel.capture_building_control_rows(rows, counters)
 	if completed.size() != rows.size() or not completed.is_read_only():
 		counters["building_row_fallbacks"] = int(counters.get("building_row_fallbacks", 0)) + 1
+		pending_building_fields.clear()
 		return rows
+	# Keep only the fully detached row produced by the existing native capture.
+	for pending in pending_building_fields:
+		var entry: Dictionary = pending["entry"]
+		entry["enriched_base"] = pending["base"]
+		entry["enriched_keys"] = pending["keys"]
+		entry["enriched_row"] = completed[pending["index"]]
+	pending_building_fields.clear()
 	if compare_building_rows and compare_generation:
 		counters["building_row_comparisons"] = int(counters.get("building_row_comparisons", 0)) + rows.size()
 		if completed != expected:

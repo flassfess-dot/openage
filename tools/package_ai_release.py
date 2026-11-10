@@ -1,5 +1,6 @@
 """Copy a clean, relocatable local AI Release and verify its ZIP round trip."""
 import argparse,json,shutil,subprocess,zipfile
+import re
 from pathlib import Path
 import ai_competitive as ai
 
@@ -73,7 +74,13 @@ if __name__=='__main__':
         dist = ai.ROOT / 'dist'
         marker = dist / 'current-release.txt'
         slot = marker.read_text(encoding='utf-8-sig').strip() if marker.exists() else 'primary'
-        if slot not in ('primary', 'alternate'):
+        if slot == 'primary':
+            parent = dist
+        elif slot == 'alternate':
+            parent = dist / 'releases'
+        elif re.fullmatch(r'slot-[1-9][0-9]*', slot):
+            parent = dist / 'releases' / slot
+        else:
             parser.error(f'Unknown release slot in {marker}')
-        args.source = (dist if slot == 'primary' else dist / 'releases') / 'Rise of Rome Prototype'
+        args.source = parent / 'Rise of Rome Prototype'
     package(args.source,args.destination,args.zip)

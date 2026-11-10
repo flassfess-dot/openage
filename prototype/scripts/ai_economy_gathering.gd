@@ -152,6 +152,7 @@ static func gather(
 	index.rebuild(resources, ["land", "water"], false, true)
 	var by_id: Dictionary = resource_view["by_id"]
 	var saturation: Dictionary = {}
+	var gatherer_limits: Dictionary = snapshot.get("gatherer_limits_by_kind", {})
 	for worker in units:
 		if String(worker.get("task", "")) == "gather":
 			var id := int(worker.get("resource_id", -1))
@@ -226,6 +227,11 @@ static func gather(
 			):
 				candidates.append(current)
 			for resource in candidates:
+				var resource_id := int(resource.get("id", -1))
+				var assigned := maxi(0, int(saturation.get(resource_id, 0)) - int(active_current and resource_id == int(current.get("id", -2))))
+				var capacity := int(gatherer_limits.get(String(resource.get("kind", "")), 0))
+				if capacity > 0 and assigned >= capacity:
+					continue
 				# The adaptive blacklist owns retry lifetime. A completed order must
 				# not permanently veto the resource after its stored failure expires.
 				if policy.get("failed_gather_targets", {}).get(worker_id, {}).has(int(resource.get("id", -1))) or state.cooldowns.has("gather:%d:%d" % [worker_id, int(resource.get("id", -1))]) or not Rules.resource_has_reachable_approach(resource, worker, reachable):
@@ -241,10 +247,6 @@ static func gather(
 					drop_distance = minf(drop_distance, position.distance_to(Vector2(drop.get("pos", Vector2.ZERO))))
 				if not is_finite(drop_distance):
 					drop_distance = 12.0
-				var resource_id := int(resource.get("id", -1))
-				var assigned := maxi(
-					0, int(saturation.get(resource_id, 0)) - (1 if active_current and resource_id == int(current.get("id", -2)) else 0)
-				)
 				var candidate_score := (
 					20.0
 					+ minf(200.0, need) * 0.08

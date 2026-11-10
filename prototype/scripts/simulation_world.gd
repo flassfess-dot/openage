@@ -3546,6 +3546,17 @@ func can_unit_reach_entity(unit: Dictionary, target: Dictionary) -> bool:
 		return true
 	if entity_is_static(unit):
 		return false
+	# A generic path to the nearest shore tile can still end outside melee
+	# reach. After an actual failed attack, reacquire on a usable contact side.
+	var last_order: Dictionary = unit.get("components", {}).get("order", {})
+	var failed_contact := (
+		float(unit.get("attack_range", 0.0)) <= 1.0
+		and bool(last_order.get("completed", false)) and String(last_order.get("type", "")) == "attack"
+		and int(last_order.get("target_entity_id", -1)) == int(target.get("id", -1))
+		and String(last_order.get("completion_reason", "")) in ["no_path", "target_unreachable", "stuck_stopped_nearest_valid"]
+	)
+	if failed_contact:
+		return combat_system.can_retry_melee_contact(unit, target)
 	var start := Vector2(unit.get("pos", Vector2.ZERO))
 	var goal := Vector2(target.get("pos", Vector2.ZERO))
 	return pathfinder.can_reach(start, goal, String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1)), float(unit.get("footprint_radius", 0.3)))

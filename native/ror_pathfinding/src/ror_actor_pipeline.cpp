@@ -33,6 +33,13 @@ bool RoRReadModelKernel::prepare_actor_batch(ActorBatchContext &batch, const Dic
         bool(batch.gathering->get(ROR_PROPERTY("native_recovery_supported"))) && !bool(batch.gathering->get(ROR_PROPERTY("profile_gather_portions"))) &&
         kernel && Object::cast_to<RoRReadModelKernel>(kernel) && (script.get_type() == Variant::NIL || (script.get_type() == Variant::OBJECT && !static_cast<Object *>(script)));
     batch.repository = batch.world->get(ROR_PROPERTY("data_repository"));
+    if (batch.native_gather) {
+        // The owner mutates these indices in place during an actor span. A load
+        // or world replacement takes place outside the span and rebinds them.
+        batch.resource_nodes = batch.world->get(ROR_PROPERTY("resource_nodes_by_id"));
+        batch.buildings = batch.world->get(ROR_PROPERTY("buildings_by_id"));
+        batch.resource_slots = batch.world->get(ROR_PROPERTY("resource_approach_slots"));
+    }
     batch.approach = batch.world->get(ROR_PROPERTY("approach_system"));
     const Variant gather_script_value = RoRScriptBoundaryProfile::call(batch.gathering, "get_script");
     Object *gather_script = gather_script_value.get_type() == Variant::OBJECT ? static_cast<Object *>(gather_script_value) : nullptr;
@@ -150,17 +157,17 @@ int64_t RoRReadModelKernel::advance_actor_pipeline(Dictionary unit, double delta
             movement.bindings_fresh = false;
         }
         int64_t result = -1;
-        if (!waiting) {
+        const Variant target_resource = String(unit[stage]) == ROR_TEXT("returning") ? Variant() : gather_target(unit[ROR_FIELD("resource_id")], batch);
+        if (!waiting && target_resource.get_type() == Variant::DICTIONARY) {
             RoRActorStageScope recovery_scope(batch.profile_stages, batch.stage_ns[4], batch.stage_calls[4]);
-            const Dictionary resources = batch.world->get(ROR_PROPERTY("resource_nodes_by_id")), reservations = batch.world->get(ROR_PROPERTY("resource_approach_slots"));
-            const int64_t mask = advance_harvesting_recovery(unit, resources, reservations);
+            const int64_t mask = advance_harvesting_at_target(unit, target_resource, batch.resource_slots);
             if (mask >= 0) { publish(mask); result = batch.gather_action; ++batch.gather_recoveries; }
         }
         if (result < 0) {
             RoRActorStageScope continuation_scope(batch.profile_stages, batch.stage_ns[5], batch.stage_calls[5]);
             Variant value;
             if (batch.gather_controller) {
-                value = advance_gather_controller(unit, delta, waiting, batch, movement);
+                value = advance_gather_controller(unit, delta, waiting, target_resource, batch, movement);
             } else {
                 movement.bindings_fresh = false;
                 value = RoRScriptBoundaryProfile::invoke(batch.gather_continue, "gather_continuation", unit, delta, waiting);

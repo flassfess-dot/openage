@@ -148,7 +148,7 @@ function Get-RoRCurrentReleaseSlot {
     $marker = Join-Path $RepositoryRoot "dist\current-release.txt"
     if (-not [IO.File]::Exists($marker)) { return "primary" }
     $slot = [IO.File]::ReadAllText($marker).Trim()
-    if ($slot -notin @("primary", "alternate")) { throw "Unknown release slot in $marker" }
+    if ($slot -notin @("primary", "alternate") -and $slot -cnotmatch '^slot-[1-9][0-9]*$') { throw "Unknown release slot in $marker" }
     return $slot
 }
 
@@ -156,6 +156,7 @@ function Get-RoRReleaseDirectory {
     param([string]$RepositoryRoot, [string]$Slot)
     if (-not $Slot) { $Slot = Get-RoRCurrentReleaseSlot $RepositoryRoot }
     if ($Slot -eq "alternate") { return (Join-Path $RepositoryRoot "dist\releases\Rise of Rome Prototype") }
+    if ($Slot -cmatch '^slot-[1-9][0-9]*$') { return (Join-Path $RepositoryRoot "dist\releases\$Slot\Rise of Rome Prototype") }
     if ($Slot -ne "primary") { throw "Unknown release slot $Slot" }
     return (Join-Path $RepositoryRoot "dist\Rise of Rome Prototype")
 }
@@ -175,10 +176,17 @@ function Start-RoRReleaseBuild {
             $current = "alternate"
             Publish-RoRReleaseBuild ([pscustomobject]@{ Slot = $current; Marker = $marker })
         }
-        $next = if ($current -eq "primary") { "alternate" } else { "primary" }
-        $directory = Get-RoRReleaseDirectory $RepositoryRoot $next
-        Assert-ApplicationNotRunning -Application (Join-Path $directory "Rise of Rome Prototype.exe")
-        return [pscustomobject]@{ Directory = $directory; Slot = $next; Marker = $marker; Lock = $buildLock }
+        # Existing shortcuts can leave an older release open across several
+        # exports. Reuse the first inactive directory that has no running game.
+        for ($index = 1; ; $index++) {
+            $next = if ($index -eq 1) { "primary" } elseif ($index -eq 2) { "alternate" } else { "slot-$index" }
+            if ($next -eq $current) { continue }
+            $directory = Get-RoRReleaseDirectory $RepositoryRoot $next
+            $application = Join-Path $directory "Rise of Rome Prototype.exe"
+            if (@(Get-RoRApplicationUsers $application).Count -eq 0) {
+                return [pscustomobject]@{ Directory = $directory; Slot = $next; Marker = $marker; Lock = $buildLock }
+            }
+        }
     } catch {
         $buildLock.Dispose()
         throw
@@ -201,18 +209,21 @@ function Publish-RoRReleaseBuild {
     }
 }
 
-function Assert-ApplicationNotRunning {
+function Get-RoRApplicationUsers {
     param([string]$Application)
-    # WMI/CIM process inspection is denied in some managed Windows sessions.
-    # The packaged executable has a unique process name, so the ordinary
-    # process API provides the same overwrite guard without elevated access.
-    $running = @(Get-Process -Name "Rise of Rome Prototype" -ErrorAction SilentlyContinue | Where-Object {
+    Get-Process -Name "Rise of Rome Prototype" -ErrorAction SilentlyContinue | Where-Object {
         if (-not $Application) { return $true }
         try {
             $path = $_.Path
-            return (-not $path -or [string]::Equals($path, [IO.Path]::GetFullPath($Application), [StringComparison]::OrdinalIgnoreCase))
-        } catch { return $true }
-    })
+            if ($path) { return [string]::Equals($path, [IO.Path]::GetFullPath($Application), [StringComparison]::OrdinalIgnoreCase) }
+        } catch {}
+        return [IO.File]::Exists($Application)
+    }
+}
+
+function Assert-ApplicationNotRunning {
+    param([string]$Application)
+    $running = @(Get-RoRApplicationUsers $Application)
     if ($running.Count -eq 0) {
         return
     }

@@ -384,23 +384,8 @@ func frame_info(unit: Dictionary, state: String, animation_time: float = -1.0, a
 	if not textures.get(texture_key, {}).has(state):
 		ensure_loaded(texture_key, fallback_state)
 	var time := float(unit.get("anim", 0.0)) if animation_time < 0.0 else animation_time
-	var pose_key: Array = [texture_key, state, int(unit.get("facing", 0)), time]
-	var base: Dictionary = pose_records.get(pose_key, {}) if pose_cache_enabled else {}
-	if base.is_empty():
-		base = _pose_frame_info(texture_key, state, fallback_state, int(unit.get("facing", 0)), time)
-		if base.is_empty(): return {}
-		if pose_cache_enabled:
-			pose_cache_misses += 1
-			for part in base["composite_parts"]: part.make_read_only()
-			base["composite_parts"].make_read_only()
-			base.make_read_only()
-			pose_records[pose_key] = base
-			while pose_records.size() > MAX_POSE_RECORDS:
-				for oldest in pose_records:
-					pose_records.erase(oldest)
-					break
-	else:
-		pose_cache_hits += 1
+	var base := _pose_frame_info(texture_key, state, fallback_state, int(unit.get("facing", 0)), time)
+	if base.is_empty(): return {}
 	var hp := float(unit.get("hp", 0.0))
 	var max_hp := maxf(1.0, float(unit.get("max_hp", 1.0)))
 	if corpse_requested or death_requested or effect_presentations == null or hp + 0.0001 >= max_hp:
@@ -426,18 +411,30 @@ func _pose_frame_info(texture_key: String, state: String, fallback_state: String
 	var animation_sets: Dictionary = textures.get(texture_key, {})
 	var resolved_state := state if animation_sets.has(state) else fallback_state
 	var frames: Array = animation_sets.get(resolved_state, [])
-	var graphic_descriptor = descriptor(texture_key, resolved_state)
+	var graphic_descriptor = descriptors.get(texture_key, {}).get(resolved_state)
 	if frames.is_empty() or graphic_descriptor == null:
 		return {}
 	if (state == "corpse" or state.ends_with("_corpse")) and resolved_state != state:
 		time = float(graphic_descriptor.frames_per_angle) * float(graphic_descriptor.frame_duration)
+	# Several simulation times can show the same image. A composite may have
+	# its own rate, replay delay or final frame, so include each visible layer.
+	var animation_frame: int = graphic_descriptor.animation_frame_at(time)
+	var layers: Array = composite_parts.get(texture_key, {}).get(resolved_state, [])
+	var layer_frames := PackedInt32Array()
+	for layer in layers:
+		var descriptor_for_layer = layer.get("descriptor")
+		layer_frames.append(descriptor_for_layer.animation_frame_at(time) if descriptor_for_layer != null else -1)
+	var pose_key: Array = [texture_key, resolved_state, facing, animation_frame, layer_frames]
+	if pose_cache_enabled and pose_records.has(pose_key):
+		pose_cache_hits += 1
+		return pose_records[pose_key]
 	var graphic_facing := FacingConvention.for_angle_count(facing, graphic_descriptor.logical_angle_count)
-	var resolved: Dictionary = graphic_descriptor.resolve(graphic_facing, time, frames.size())
+	var resolved: Dictionary = graphic_descriptor.resolve_frame(graphic_facing, animation_frame, frames.size())
 	var frame_index := int(resolved["frame_index"])
 	var texture: Texture2D = frames[frame_index]
 	var graphic_id := int(graphic_ids.get(texture_key, {}).get(resolved_state, -1))
-	var resolved_parts := _resolved_composite_parts(texture_key, resolved_state, facing, time)
-	return {
+	var resolved_parts := _resolved_composite_parts(layers, facing, layer_frames)
+	var result := {
 		"texture": texture,
 		"frame_index": frame_index,
 		"asset_name": graphic_descriptor.asset_name,
@@ -450,6 +447,17 @@ func _pose_frame_info(texture_key: String, state: String, fallback_state: String
 		"composite_parts": resolved_parts,
 		"damage_graphic_id": -1,
 	}
+	if pose_cache_enabled:
+		pose_cache_misses += 1
+		for part in resolved_parts: part.make_read_only()
+		resolved_parts.make_read_only()
+		result.make_read_only()
+		pose_records[pose_key] = result
+		if pose_records.size() > MAX_POSE_RECORDS:
+			for oldest in pose_records:
+				pose_records.erase(oldest)
+				break
+	return result
 
 
 func archetype_for_unit(alias: String) -> Dictionary:
@@ -571,16 +579,16 @@ func _load_composite_parts(texture_key: String, state: String, team: int, state_
 	composite_parts[texture_key][state] = loaded_parts
 
 
-func _resolved_composite_parts(texture_key: String, state: String, facing: int, animation_time: float) -> Array:
+func _resolved_composite_parts(layers: Array, facing: int, layer_frames: PackedInt32Array) -> Array:
 	var result: Array = []
-	for loaded_value in composite_parts.get(texture_key, {}).get(state, []):
-		var loaded: Dictionary = loaded_value
+	for index in range(layers.size()):
+		var loaded: Dictionary = layers[index]
 		var frames: Array = loaded.get("frames", [])
 		var part_descriptor = loaded.get("descriptor")
 		if frames.is_empty() or part_descriptor == null:
 			continue
 		var part_facing := FacingConvention.for_angle_count(facing, part_descriptor.logical_angle_count)
-		var resolved: Dictionary = part_descriptor.resolve(part_facing, animation_time, frames.size())
+		var resolved: Dictionary = part_descriptor.resolve_frame(part_facing, layer_frames[index], frames.size())
 		var frame_index := int(resolved.get("frame_index", 0))
 		var texture: Texture2D = frames[frame_index]
 		result.append({

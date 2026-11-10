@@ -2597,6 +2597,7 @@ func selectable_player_ids() -> Array[int]:
 	ids.sort()
 	return ids
 
+
 func unit_at_screen(mouse: Vector2, team: int):
 	for hit_value in pick_stack_at(mouse):
 		var hit: Dictionary = hit_value
@@ -2762,7 +2763,9 @@ func _apply_presentation_snapshot(snapshot: Dictionary, snapshot_bounds: Rect2i,
 	overview_units = overview.get("units", units)
 	overview_resource_nodes = overview.get("resources", resource_nodes)
 	overview_buildings = overview.get("buildings", presentation_snapshot.get("buildings", []))
-	if not selected_ids.is_empty():
+	# The projected scene has already visited every selected visible row.
+	# Only missing ids need the broader, less frequently updated overview.
+	if not selected_ids.is_empty() and snapshot.get("_observed_selection") != selected_ids:
 		player_control_state.prune(selectable_player_ids())
 	battle_over = bool(presentation_snapshot.get("battle_over", false))
 	var now_spectator := String(presentation_snapshot.get("player_state", {}).get("status", "active")) in ["resigned", "defeated"]

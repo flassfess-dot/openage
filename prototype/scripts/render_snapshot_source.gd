@@ -73,6 +73,7 @@ func capture(world, tick: int, team: int, selected_ids: Array, bounds: Rect2, di
 	var refresh := overview_tick < 0 or tick < overview_tick or tick - overview_tick >= OVERVIEW_REFRESH_TICKS
 	var next_resource_revision := int(world.known_resource_revision(team))
 	var refresh_resources := refresh and (old_overview.is_empty() or next_resource_revision != resource_revision)
+	var camera_bounds := bounds
 	if full_scene:
 		controls_projection.begin(world, tick)
 		bounds = Rect2(Vector2.ZERO, Vector2(world.map_size))
@@ -90,11 +91,20 @@ func capture(world, tick: int, team: int, selected_ids: Array, bounds: Rect2, di
 		options["_scene_worker_publication"] = {"commands":_scene_worker_commands(world, team)}
 	if full_scene and controls_projection.supported: options["_scene_controls"] = controls_projection
 	if full_scene and controls_projection.supported: options["_scene_unit_metadata"] = true
+	if full_scene and controls_projection.supported and camera_bounds.has_area(): options["_scene_clocks"] = {"bounds":camera_bounds, "samples":{}}
+	if full_scene and controls_projection.certified: options["_scene_worker_publication"]["publish_rows"] = true
+	if full_scene and controls_projection.building_rows_native: options["_scene_building_fields"] = {}
 	if probe != null:
 		options["performance_probe"] = probe
 		options["performance_prefix"] = "presentation.local.snapshot"
 	var captured: Dictionary = Snapshot.with_queries(world, tick, team, options)
 	var result: Dictionary = publication.publish(captured, selected_ids, coordinator) if not diagnostics else captured
+	if options.has("_scene_clocks"):
+		var clocks: Dictionary = options["_scene_clocks"]["samples"]
+		if not clocks.is_empty():
+			clocks.make_read_only()
+			result["unit_animation_clocks"] = clocks
+			if probe != null: probe.increment("presentation.scene.deferred_animation_clocks", clocks.size())
 	if full_scene and not controls_projection.ui_reference_units.is_empty():
 		result["_diagnostic_full_unit_controls"] = controls_projection.ui_reference_units.duplicate()
 	if refresh:

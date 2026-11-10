@@ -107,6 +107,7 @@ public:
     void cache_sprite_items(const Array &items, double scale, const Vector2 &origin, const Callable &atlas, Dictionary cache) const;
     bool matches_combat_classification(const Dictionary &entity, const Array &classification) const;
     int64_t advance_harvesting_recovery(Dictionary worker, const Dictionary &resources, const Dictionary &reservations) const;
+    int64_t advance_harvesting_at_target(Dictionary worker, const Dictionary &resource, const Dictionary &reservations) const;
     int64_t integrate_unit_motion(Dictionary unit, double delta, const Vector2i &map_size, const Dictionary &vertex_levels, const String &reason) const;
     Vector2 constrain_mobile_velocity(const Dictionary &unit, const Vector2 &velocity, const Array &neighbors, double delta) const;
     Vector3 formation_yield_velocity(Dictionary unit, const Array &neighbors, double delta, Object *planner) const;
@@ -139,6 +140,7 @@ public:
     Array known_resources_in_bounds(const Dictionary &known, const Dictionary &chunks, const Rect2i &bounds, int32_t chunk_size) const;
     Array sort_render_items(const Array &items) const;
     Array merge_render_items(const Array &first, const Array &second) const;
+    bool render_items_in_order(const Array &items) const;
     PackedInt32Array advance_idle_animation(const Array &entities, double delta) const;
     Dictionary patch_render(const Dictionary &source, const Dictionary &previous, int64_t mask, const Dictionary &groups) const;
     Dictionary project_render(const Dictionary &source, const Dictionary &previous, const Array &fields, const Array &nested_fields, int64_t schema) const;
@@ -243,6 +245,7 @@ private:
         bool gather_controller = false;
         Object *repository = nullptr, *approach = nullptr;
         Dictionary maximum_gatherers;
+        Dictionary resource_nodes, buildings, resource_slots;
         int64_t gather_controller_calls = 0, gather_controller_moves = 0, gather_controller_returns = 0;
         int64_t gather_controller_transitions = 0, gather_controller_adoptions = 0;
         int64_t gather_controller_blocked_adoptions = 0;
@@ -260,7 +263,8 @@ private:
     };
     bool prepare_actor_batch(ActorBatchContext &batch, const Dictionary &context) const;
     int64_t advance_actor_pipeline(Dictionary unit, double delta, ActorBatchContext &batch, MovementBatchContext &movement) const;
-    int64_t advance_gather_controller(Dictionary unit, double delta, bool waiting, ActorBatchContext &batch, MovementBatchContext &movement) const;
+    static Variant gather_target(const Variant &id, const ActorBatchContext &batch);
+    int64_t advance_gather_controller(Dictionary unit, double delta, bool waiting, const Variant &target, ActorBatchContext &batch, MovementBatchContext &movement) const;
     Variant adopt_gather_resource(Dictionary unit, Dictionary requested, ActorBatchContext &batch, MovementBatchContext &movement) const;
     int64_t maximum_gatherers(const Dictionary &resource, ActorBatchContext &batch) const;
     Vector4 advance_gather_motion(Dictionary unit, double delta, ActorBatchContext &batch, MovementBatchContext &movement) const;

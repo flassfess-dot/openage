@@ -134,7 +134,19 @@ Variant RoRReadModelKernel::adopt_gather_resource(Dictionary unit, Dictionary re
     return Variant();
 }
 
-int64_t RoRReadModelKernel::advance_gather_controller(Dictionary unit, double delta, bool waiting,
+Variant RoRReadModelKernel::gather_target(const Variant &id, const ActorBatchContext &batch) {
+    const Variant node = batch.resource_nodes.get(id, Variant());
+    if (node.get_type() != Variant::NIL) return node;
+    const Variant entity = batch.buildings.get(id, Variant());
+    if (entity.get_type() != Variant::DICTIONARY) return Variant();
+    const Dictionary building = entity;
+    if (bool(building.get(ROR_FIELD("harvestable"), false)) &&
+            String(building.get(ROR_FIELD("state"), ROR_TEXT("complete"))) == ROR_TEXT("complete") &&
+            double(building.get(ROR_FIELD("hp"), 0.0)) > 0.0) return entity;
+    return Variant();
+}
+
+int64_t RoRReadModelKernel::advance_gather_controller(Dictionary unit, double delta, bool waiting, const Variant &target,
         ActorBatchContext &batch, MovementBatchContext &movement) const {
     ++batch.gather_controller_calls;
     const auto continuation = [&]() -> int64_t {
@@ -161,8 +173,7 @@ int64_t RoRReadModelKernel::advance_gather_controller(Dictionary unit, double de
         RoRActorStageScope returning_scope(batch.profile_stages, batch.gather_ns[6], batch.gather_calls[6]);
         ++batch.gather_controller_returns;
         if (double(unit[ROR_FIELD("carried_amount")]) <= 0.0) return continuation();
-        const Dictionary buildings = batch.world->get(ROR_PROPERTY("buildings_by_id"));
-        const Variant value = buildings.get(unit[ROR_FIELD("dropoff_id")], Variant());
+        const Variant value = batch.buildings.get(unit[ROR_FIELD("dropoff_id")], Variant());
         if (value.get_type() != Variant::DICTIONARY) return continuation();
         const Dictionary dropoff = value;
         if (double(dropoff[ROR_FIELD("hp")]) <= 0.0 || unit[ROR_FIELD("dropoff_position")].get_type() != Variant::VECTOR2) return continuation();
@@ -195,10 +206,8 @@ int64_t RoRReadModelKernel::advance_gather_controller(Dictionary unit, double de
 
     RoRActorStageScope resource_scope(batch.profile_stages, batch.gather_ns[8], batch.gather_calls[8]);
     const double capacity = std::max(0.0, double(unit[ROR_FIELD("carry_capacity")]));
-    const Dictionary resources = batch.world->get(ROR_PROPERTY("resource_nodes_by_id"));
-    const Variant value = resources.get(unit[ROR_FIELD("resource_id")], Variant());
-    if (value.get_type() != Variant::DICTIONARY) return continuation();
-    Dictionary resource = value;
+    if (target.get_type() != Variant::DICTIONARY) return continuation();
+    Dictionary resource = target;
     if (int64_t(resource[ROR_FIELD("amount")]) <= 0 || (capacity > 0.0 && double(unit[ROR_FIELD("carried_amount")]) >= capacity - 0.0001)) return continuation();
     if (waiting) {
         if (double(unit[ROR_FIELD("work")]) > 0.0) return IDLE;
@@ -235,14 +244,15 @@ int64_t RoRReadModelKernel::advance_gather_controller(Dictionary unit, double de
         const bool prepared = RoRScriptBoundaryProfile::call(batch.gathering, "prepare_group_gather_approach", unit, resource);
         movement.bindings_fresh = false;
         if (!prepared) { RoRScriptBoundaryProfile::call(batch.gathering, "finish_gather_order", unit, ROR_TEXT("no_approach_slot")); return IDLE; }
-        const Dictionary live_resources = batch.world->get(ROR_PROPERTY("resource_nodes_by_id"));
-        resource = live_resources[unit[ROR_FIELD("resource_id")]];
+        const Variant assigned = gather_target(unit[ROR_FIELD("resource_id")], batch);
+        if (assigned.get_type() != Variant::DICTIONARY) return continuation();
+        resource = assigned;
     }
     const Variant slot = unit[ROR_FIELD("resource_approach_slot")];
     if (slot.get_type() == Variant::VECTOR2) {
         const Vector2 position = unit[ROR_FIELD("pos")];
         bool at_slot = position.distance_squared_to(Vector2(slot)) <= 0.0144;
-        const Dictionary all_reservations = batch.world->get(ROR_PROPERTY("resource_approach_slots"));
+        const Dictionary &all_reservations = batch.resource_slots;
         Dictionary reservations = all_reservations.get(unit[ROR_FIELD("resource_id")], Dictionary());
         const double minimum = double(resource.get(ROR_FIELD("footprint_radius"), 0.2)) + double(unit.get(ROR_FIELD("footprint_radius"), 0.3)) + 0.12;
         if (!at_slot && in_range && position.distance_squared_to(Vector2(resource[ROR_FIELD("pos")])) >= minimum * minimum && reservations.size() > 1) {

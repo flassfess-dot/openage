@@ -337,6 +337,7 @@ Dictionary RoRReadModelKernel::project_ai(const Dictionary &source, const Dictio
             row[k_target_entity_id] = int64_t(order.get(k_target_entity_id, -1));
             row[k_completed] = bool(order.get(k_completed, true));
             row[k_completion_reason] = String(order.get(k_completion_reason, ROR_FIELD("")));
+            if (order.has(ROR_FIELD("revision"))) row[ROR_FIELD("revision")] = int64_t(order[ROR_FIELD("revision")]);
             projected[k_order] = row;
         }
     }

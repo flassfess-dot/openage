@@ -271,6 +271,17 @@ Array RoRReadModelKernel::project_cached_render_entities(const Array &entities, 
     Dictionary records = cache[ROR_FIELD("records")], cached_versions = cache[ROR_FIELD("versions")], categories = cache[ROR_FIELD("categories")];
     const Array fields = cache[ROR_FIELD("fields")], nested = cache[ROR_FIELD("nested")];
     const int64_t schema = cache[ROR_FIELD("schema")], capacity = cache[ROR_FIELD("capacity")];
+    const Variant scope_value = cache.get(ROR_FIELD("scene_clocks"), Variant());
+    Dictionary samples;
+    Rect2 view;
+    if (scope_value.get_type() == Variant::DICTIONARY) {
+        const Dictionary scope = scope_value;
+        const Variant bounds = scope.get(ROR_FIELD("bounds"), Variant()), values = scope.get(ROR_FIELD("samples"), Variant());
+        if (bounds.get_type() == Variant::RECT2 && values.get_type() == Variant::DICTIONARY && !Dictionary(values).is_read_only()) {
+            view = bounds;
+            samples = values;
+        }
+    }
     Array result; result.resize(entities.size());
     for (int64_t i = 0; i < entities.size(); ++i) {
         const Dictionary source = entities[i];
@@ -287,8 +298,17 @@ Array RoRReadModelKernel::project_cached_render_entities(const Array &entities, 
             for (int64_t g = 0; g < versions.size; ++g) if (g >= old_size || versions.values[g] != old_values[g]) mask |= int64_t(1) << g;
         }
         if (previous.is_empty() || (mask & (1 | 128 | 32)) || versions.size == 0) projected = project_render(source, previous, fields, nested, schema);
-        else if (!mask && double(previous.get(anim, 0.0)) == double(source.get(anim, 0.0)) && previous.get(previous_pos, Variant()) == source.get(previous_pos, Variant())) projected = previous;
-        else projected = patch_render(source, previous, mask, groups);
+        else if (!mask && previous.get(previous_pos, Variant()) == source.get(previous_pos, Variant())) {
+            const double clock = source.get(anim, 0.0);
+            if (double(previous.get(anim, 0.0)) == clock) {
+                projected = previous;
+            } else if (id >= 0 && view.has_area() && !view.has_point(source.get(ROR_FIELD("pos"), Vector2()))) {
+                // A complete scene also serves immediate camera jumps. Keep
+                // the exact clock separately until a client selects this row.
+                samples[id] = clock;
+                projected = previous;
+            } else projected = patch_render(source, previous, mask, groups);
+        } else projected = patch_render(source, previous, mask, groups);
         if (id >= 0 && (records.has(id) || records.size() < capacity)) {
             records[id] = projected;
             cached_versions[id] = mask || versions.size != old_size ? journal.retain(versions) : old;
@@ -675,15 +695,17 @@ bool RoRReadModelKernel::matches_combat_classification(const Dictionary &entity,
 }
 
 int64_t RoRReadModelKernel::advance_harvesting_recovery(Dictionary worker, const Dictionary &resources, const Dictionary &reservations) const {
+    const Variant target = resources.get(worker.get(ROR_FIELD("resource_id"), -1), Variant());
+    return target.get_type() == Variant::DICTIONARY ? advance_harvesting_at_target(worker, target, reservations) : -1;
+}
+
+int64_t RoRReadModelKernel::advance_harvesting_at_target(Dictionary worker, const Dictionary &resource, const Dictionary &reservations) const {
     static const Variant components("components"), worker_key("worker"), enabled("enabled"), stage("gather_stage"), work("work"), resource_id("resource_id");
     static const Variant amount("amount"), capacity("carry_capacity"), carried("carried_amount"), pos("pos"), domain("movement_domain"), radius("footprint_radius"), slot_key("resource_approach_slot");
     static const Variant order_key("order"), completed("completed"), phase("phase"), history("history");
     if (double(worker.get(work, 0.0)) <= 0.0 || String(worker.get(stage, ROR_FIELD(""))) == ROR_TEXT("returning")) return -1;
     const Dictionary parts = worker.get(components, Dictionary()), role = parts.get(worker_key, Dictionary());
     if (!bool(role.get(enabled, false))) return -1;
-    const Variant resource_value = resources.get(worker.get(resource_id, -1), Variant());
-    if (resource_value.get_type() != Variant::DICTIONARY) return -1;
-    const Dictionary resource = resource_value;
     if (int64_t(resource.get(amount, 0)) <= 0) return -1;
     const double limit = std::max(0.0, double(worker.get(capacity, 0.0)));
     if (limit > 0.0 && double(worker.get(carried, 0.0)) >= limit - 0.0001) return -1;
@@ -2049,17 +2071,19 @@ Array RoRReadModelKernel::sort_render_items(const Array &items) const {
     return result;
 }
 
-Array RoRReadModelKernel::merge_render_items(const Array &first, const Array &second) const {
-    static const Variant layer("layer"), y("screen_y"), elevation("elevation"), sub("sub_order");
-    static const Variant wall("wall_depth_tie"), anchor("world_anchor"), id("stable_id");
-    struct Head { Dictionary row; int64_t layer; double depth; };
-    const auto read = [&](const Array &items, int64_t index) {
-        Head head; head.row = items[index]; head.layer = head.row[layer]; head.depth = head.row[y]; return head;
-    };
-    const auto less = [&](const Head &left, const Head &right) {
-        if (left.layer != right.layer) return left.layer < right.layer;
-        if (!Math::is_equal_approx(left.depth, right.depth)) return left.depth < right.depth;
-        const Dictionary &a = left.row, &b = right.row;
+struct RenderOrderHead {
+    Dictionary row;
+    int64_t layer;
+    double depth;
+
+    explicit RenderOrderHead(const Dictionary &item) :
+        row(item), layer(item[ROR_FIELD("layer")]), depth(item[ROR_FIELD("screen_y")]) {}
+
+    bool before(const RenderOrderHead &other) const {
+        if (layer != other.layer) return layer < other.layer;
+        if (!Math::is_equal_approx(depth, other.depth)) return depth < other.depth;
+        static const Variant elevation("elevation"), sub("sub_order"), wall("wall_depth_tie"), anchor("world_anchor"), id("stable_id");
+        const Dictionary &a = row, &b = other.row;
         const double ae = a[elevation], be = b[elevation];
         if (!Math::is_equal_approx(ae, be)) return ae < be;
         const int64_t as = a.get(sub, 0), bs = b.get(sub, 0);
@@ -2072,18 +2096,33 @@ Array RoRReadModelKernel::merge_render_items(const Array &first, const Array &se
             if (!Math::is_equal_approx(double(ap.y), double(bp.y))) return ap.y < bp.y;
         }
         return int64_t(a[id]) < int64_t(b[id]);
-    };
+    }
+};
+
+bool RoRReadModelKernel::render_items_in_order(const Array &items) const {
+    if (items.size() < 2) return true;
+    RenderOrderHead previous(items[0]);
+    for (int64_t i = 1; i < items.size(); ++i) {
+        RenderOrderHead next(items[i]);
+        // A tie uses the original stable sort and merge precedence.
+        if (!previous.before(next)) return false;
+        previous = next;
+    }
+    return true;
+}
+
+Array RoRReadModelKernel::merge_render_items(const Array &first, const Array &second) const {
     Array result; result.resize(first.size() + second.size());
     int64_t a = 0, b = 0, output = 0;
     if (!first.is_empty() && !second.is_empty()) {
-        Head left = read(first, 0), right = read(second, 0);
+        RenderOrderHead left(first[0]), right(second[0]);
         while (a < first.size() && b < second.size()) {
-            if (less(left, right)) {
+            if (left.before(right)) {
                 result[output++] = first[a++];
-                if (a < first.size()) left = read(first, a);
+                if (a < first.size()) left = RenderOrderHead(first[a]);
             } else {
                 result[output++] = second[b++];
-                if (b < second.size()) right = read(second, b);
+                if (b < second.size()) right = RenderOrderHead(second[b]);
             }
         }
     }
@@ -2768,6 +2807,7 @@ void RoRReadModelKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("cache_sprite_items", "items", "scale", "origin", "atlas", "cache"), &RoRReadModelKernel::cache_sprite_items);
     ClassDB::bind_method(D_METHOD("matches_combat_classification", "entity", "classification"), &RoRReadModelKernel::matches_combat_classification);
     ClassDB::bind_method(D_METHOD("advance_harvesting_recovery", "worker", "resources", "reservations"), &RoRReadModelKernel::advance_harvesting_recovery);
+    ClassDB::bind_method(D_METHOD("advance_harvesting_at_target", "worker", "resource", "reservations"), &RoRReadModelKernel::advance_harvesting_at_target);
     ClassDB::bind_method(D_METHOD("integrate_unit_motion", "unit", "delta", "map_size", "vertex_levels", "reason"), &RoRReadModelKernel::integrate_unit_motion);
     ClassDB::bind_method(D_METHOD("constrain_mobile_velocity", "unit", "velocity", "neighbors", "delta"), &RoRReadModelKernel::constrain_mobile_velocity);
     ClassDB::bind_method(D_METHOD("formation_yield_velocity", "unit", "neighbors", "delta", "planner"), &RoRReadModelKernel::formation_yield_velocity);
@@ -2786,6 +2826,7 @@ void RoRReadModelKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sort_render_items", "items"), &RoRReadModelKernel::sort_render_items);
     ClassDB::bind_method(D_METHOD("reproject_static_items", "items", "origin", "previous_origin", "previous_scale", "scale"), &RoRReadModelKernel::reproject_static_items);
     ClassDB::bind_method(D_METHOD("merge_render_items", "first", "second"), &RoRReadModelKernel::merge_render_items);
+    ClassDB::bind_method(D_METHOD("render_items_in_order", "items"), &RoRReadModelKernel::render_items_in_order);
     ClassDB::bind_method(D_METHOD("advance_idle_animation", "entities", "delta"), &RoRReadModelKernel::advance_idle_animation);
     ClassDB::bind_method(D_METHOD("patch_render", "source", "previous", "mask", "groups"), &RoRReadModelKernel::patch_render);
     ClassDB::bind_method(D_METHOD("project_render", "source", "previous", "fields", "nested_fields", "schema"), &RoRReadModelKernel::project_render);

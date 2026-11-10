@@ -11,14 +11,16 @@ static func role_for(unit: Dictionary) -> String:
 
 static func destination(unit: Dictionary, target: Dictionary) -> Vector2:
 	var approach: Vector2 = unit.get("combat_approach", unit["pos"] - target["pos"])
+	return slot_destination(unit, target, approach, int(unit.get("combat_slot_index", 0)), int(unit.get("combat_slot_count", 1)))
+
+
+static func slot_destination(unit: Dictionary, target: Dictionary, approach: Vector2, index: int, count: int) -> Vector2:
 	if approach.length_squared() <= 0.0001:
 		approach = Vector2(-1, 0)
 	approach = approach.normalized()
 	var lateral := Vector2(-approach.y, approach.x)
-	var index := int(unit.get("combat_slot_index", 0))
 	if role_for(unit) == "ranged":
-		var count := maxi(1, int(unit.get("combat_slot_count", 1)))
-		var offset := (float(index) - float(count - 1) * 0.5) * RANGED_LATERAL_SPACING
+		var offset := (float(index) - float(maxi(1, count) - 1) * 0.5) * RANGED_LATERAL_SPACING
 		var minimum_range := float(unit.get("components", {}).get("combat", {}).get("range_min", 0.0))
 		var occupied_radius := float(target.get("footprint_radius", 0.3)) + float(unit.get("footprint_radius", 0.3))
 		var stand_off := maxf(maxf(1.2, float(unit.get("attack_range", 1.2)) * 0.82), minimum_range + occupied_radius + 0.15)

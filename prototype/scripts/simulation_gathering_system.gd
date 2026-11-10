@@ -44,7 +44,7 @@ func _init(simulation_world) -> void:
 
 
 func _refresh_native_capabilities() -> void:
-	native_recovery_supported = recovery_kernel != null and recovery_kernel.has_method("advance_harvesting_recovery")
+	native_recovery_supported = recovery_kernel != null and recovery_kernel.has_method("advance_harvesting_at_target")
 	native_resource_queries_supported = recovery_kernel != null and recovery_kernel.has_method("resources_in_radius")
 
 
@@ -108,7 +108,8 @@ func update_gather_order(worker: Dictionary, delta: float) -> int:
 	if not waiting_for_slot and native_recovery_enabled and native_recovery_supported:
 		assert(simulation_world.read_generation_pins == 0, "Pinned observation generation is immutable")
 		var native_started := Time.get_ticks_usec() if probe != null else 0
-		var changed_mask: int = recovery_kernel.advance_harvesting_recovery(worker, simulation_world.resource_nodes_by_id, simulation_world.resource_approach_slots)
+		var resource: Variant = simulation_world.find_resource(int(worker["resource_id"]))
+		var changed_mask: int = recovery_kernel.advance_harvesting_at_target(worker, resource, simulation_world.resource_approach_slots) if resource != null else -1
 		if probe != null: probe.observe_microseconds("simulation.gather.recovery.native_success" if changed_mask >= 0 else "simulation.gather.recovery.native_rejected", Time.get_ticks_usec() - native_started)
 		if changed_mask >= 0:
 			if changed_mask != 0: simulation_world.notify_entity_changed(worker, changed_mask)

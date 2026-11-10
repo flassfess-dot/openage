@@ -81,7 +81,7 @@ var cached_building_records: Dictionary = {}
 var rally_drawables: Array = []
 var camera_cache_ready := false
 var camera_actor_items: Array = []
-var camera_actor_statics: Array = []
+var camera_actor_statics: Variant = null
 var current_projection_origin := Vector2.ZERO
 var cached_refresh_input: Array = []
 var cached_refresh_static: Array = []
@@ -101,7 +101,7 @@ func clear_caches() -> void:
 	cached_building_records.clear()
 	camera_cache_ready = false
 	camera_actor_items = []
-	camera_actor_statics = []
+	camera_actor_statics = null
 	cached_refresh_input = []
 	cached_refresh_static = []
 	cached_refresh_moving = []
@@ -380,21 +380,13 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	drawables = native_render_kernel.sort_render_items(drawables) if native_render_kernel != null and native_render_kernel.has_method("sort_render_items") else _sort_drawables_by_layer(drawables)
 	camera_actor_items = drawables
-	camera_actor_statics = []
+	camera_actor_statics = null
 	if affine_static_projection and sprite_scale > 0.0 and native_render_kernel != null and native_render_kernel.has_method("project_visible_static_items"):
 		camera_actor_statics = native_render_kernel.partition_render_items(camera_actor_items)["static"]
 		native_render_kernel.project_visible_static_items(camera_actor_statics, current_projection_origin, sprite_scale, Rect2())
 	camera_cache_ready = true
 	if sprite_scale > 0.0:
-		if native_buildings_enabled and native_render_kernel != null and native_render_kernel.has_method("clip_building_render_items"):
-			drawables = native_render_kernel.clip_building_render_items(drawables, viewport)
-		else:
-			var visible: Array = []
-			for item in drawables:
-				if String(item["kind"]) in ["building", "building_part"]:
-					if viewport.has_area() and item.has("sprite_command") and not viewport.intersects(item["sprite_command"][1], true): continue
-				visible.append(item)
-			drawables = visible
+		drawables = _visible_actor_drawables(drawables, viewport)
 	_observe_stage("sort", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	var result: Array = drawables
@@ -828,7 +820,7 @@ func refresh_camera_drawables(world_to_screen: Callable, interpolation_alpha: fl
 	cached_environment_origin = current_projection_origin
 	cached_resource_scale = sprite_scale
 	cached_environment_scale = sprite_scale
-	if camera_actor_statics.is_empty():
+	if camera_actor_statics == null:
 		camera_actor_statics = native_render_kernel.partition_render_items(camera_actor_items)["static"]
 	native_render_kernel.project_visible_static_items(camera_actor_statics, current_projection_origin, sprite_scale, Rect2())
 	refresh_world_drawables(camera_actor_items, world_to_screen, interpolation_alpha, false, true)
@@ -836,13 +828,21 @@ func refresh_camera_drawables(world_to_screen: Callable, interpolation_alpha: fl
 		if not record["items"].is_empty():
 			record["screen"] = record["items"][0]["screen_position"]
 			record["scale"] = sprite_scale
-	var actors: Array = []
-	for item in camera_actor_items:
-		if String(item["kind"]) in ["building", "building_part"] and item.has("sprite_command") and not viewport.intersects(item["sprite_command"][1], true): continue
-		actors.append(item)
+	var actors := _visible_actor_drawables(camera_actor_items, viewport)
 	var resources := _visible_static_drawables(cached_resource_drawables, viewport, cached_resource_clip)
 	var environment := _visible_static_drawables(cached_environment_drawables, viewport, cached_environment_clip)
 	return merge_sorted_drawables(merge_sorted_drawables(actors, environment), resources)
+
+
+func _visible_actor_drawables(items: Array, viewport: Rect2) -> Array:
+	if not viewport.has_area() or (camera_actor_statics != null and camera_actor_statics.is_empty()): return items
+	if native_buildings_enabled and native_render_kernel != null and native_render_kernel.has_method("clip_building_render_items"):
+		return native_render_kernel.clip_building_render_items(items, viewport)
+	var visible := []
+	for item in items:
+		if String(item["kind"]) in ["building", "building_part"] and item.has("sprite_command") and not viewport.intersects(item["sprite_command"][1], true): continue
+		visible.append(item)
+	return visible
 
 
 func _visible_static_drawables(items: Array, viewport: Rect2, cache: Dictionary) -> Array:
@@ -1193,6 +1193,9 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		cached_resource_clip.clear()
 		cached_environment_clip.clear()
 	if moved:
+		if native_render_kernel != null and native_render_kernel.has_method("render_items_in_order") and native_render_kernel.render_items_in_order(drawables):
+			if performance_probe != null: performance_probe.increment("presentation.render_order_retained")
+			return drawables
 		if native_render_kernel != null and native_render_kernel.has_method("sort_render_items"):
 			cached_refresh_moving = native_render_kernel.sort_render_items(cached_refresh_moving)
 		else: cached_refresh_moving.sort_custom(RenderItem.less)

@@ -73,7 +73,12 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 		var build_cache: Dictionary=options.get("_ai_build_options_cache",{})
 		builder_rates=build_cache.get("builder_rates",{})
 		if options.has("_ai_build_options_cache"): build_cache["builder_rates"]=builder_rates
-	for row_value in ([] if keep_actors else snapshot.get("units", [])):
+	var select_in_view := bool(options.get("full_render_scene", false)) and options.has("_scene_control_ids")
+	var scene_menu: Dictionary = options.get("_scene_worker_publication", {})
+	var publish_ui_menus := not keep_actors and bool(scene_menu.get("publish_rows", false))
+	if publish_ui_menus:
+		units = options["_scene_controls"].publish_unit_menus(world, snapshot["units"], team, command_ids, scene_menu["commands"])
+	for row_value in ([] if keep_actors or publish_ui_menus else snapshot.get("units", [])):
 		var row: Dictionary = row_value
 		if int(row.get("team", 0)) == team and (not restricted or command_ids.has(int(row.get("id", -1)))) and world.entity_is_worker(row):
 			row = row.duplicate()
@@ -104,41 +109,49 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 			row["ai_profile"] = AiProfile.actor(world, row, team, profile_cache)
 		units.append(row)
 	if keep_actors: units = snapshot.get("units", [])
-	if options.has("_scene_controls") and options.has("_scene_worker_publication") and not bool(options.get("include_ai_profiles", false)) and not include_builder_productivity:
+	if not publish_ui_menus and options.has("_scene_controls") and options.has("_scene_worker_publication") and not bool(options.get("include_ai_profiles", false)) and not include_builder_productivity:
 		options["_scene_controls"].seal_units(units)
 	result["units"] = units
 	var buildings: Array = []
-	for row_value in ([] if keep_actors else snapshot.get("buildings", [])):
+	var scene_building_fields: Dictionary = options.get("_scene_building_fields", {})
+	var keep_buildings := keep_actors and scene_building_fields.is_empty()
+	for row_value in ([] if keep_buildings else snapshot.get("buildings", [])):
 		var row: Dictionary = row_value
+		var building_id := int(row.get("id", -1))
+		var deferred: Variant = scene_building_fields.get(building_id)
 		if int(row.get("team", 0)) == team and not bool(row.get("last_known", false)) and (not restricted or command_ids.has(int(row.get("id", -1)))):
 			var source: Variant = world.find_building(int(row.get("id", -1)))
 			if source != null:
-				row = row.duplicate()
-				row["builder_count"] = source.get("builders", {}).size()
+				var fields: Dictionary = deferred if deferred is Dictionary else row.duplicate()
+				fields["builder_count"] = source.get("builders", {}).size()
 				# Private own construction work is finer than visible HP/stages.
 				# Long builds can remain below the first HP threshold for minutes.
 				if String(source.get("state","complete"))=="foundation":
-					row["construction_progress"]=float(source.get("construction_progress",0.0))
-					if include_builder_productivity: row["construction_required"]=float(source.get("construction_required",1.0))
+					fields["construction_progress"]=float(source.get("construction_progress",0.0))
+					if include_builder_productivity: fields["construction_required"]=float(source.get("construction_required",1.0))
 				if not bool(options.get("skip_builder_reachability_queries", false)) and not bool(options.get("tactical_only",false)) and String(source.get("state", "complete")) == "foundation" and (not bool(options.get("recover_abandoned_foundations_only", false)) or foundation_needs_recovery(source, options.get("foundation_units", units))):
-					row["reachable_builder_ids"] = world.reachable_builder_ids(source)
+					fields["reachable_builder_ids"] = world.reachable_builder_ids(source)
 				if not bool(options.get("tactical_only",false)):
-					row["command_options"] = building_command_options(world,source,team,options,options.get("foundation_units",units),profile_cache)
+					fields["command_options"] = building_command_options(world,source,team,options,options.get("foundation_units",units),profile_cache)
 				if bool(options.get("include_ai_profiles", false)):
-					row["ai_drop_site"] = world.entity_has_behavior_tag(source, "drop_site")
+					fields["ai_drop_site"] = world.entity_has_behavior_tag(source, "drop_site")
 					var accepted: Array = []
 					for type_id in range(4):
 						if world.dropoff_accepts_resource(source, type_id): accepted.append(type_id)
-					row["ai_drop_resources"] = accepted
+					fields["ai_drop_resources"] = accepted
+				if not deferred is Dictionary: row = fields
 			replacements[int(row.get("id", -1))] = row
+		if deferred is Dictionary:
+			row = options["_scene_controls"].compose_building(row, deferred, buildings.size())
+			replacements[building_id] = row
 		if bool(options.get("include_ai_profiles", false)) and not row.has("ai_profile") and (not restricted or command_ids.has(int(row.get("id", -1)))):
 			row = row.duplicate()
 			row["ai_profile"] = AiProfile.actor(world, row, team, profile_cache)
 		buildings.append(row)
-	if keep_actors: buildings = snapshot.get("buildings", [])
+	if keep_buildings: buildings = snapshot.get("buildings", [])
 	if options.has("_scene_controls"): buildings = options["_scene_controls"].seal_buildings(buildings)
 	result["buildings"] = buildings
-	for category in ([] if keep_actors else ["control_units", "control_buildings"]):
+	for category in ([] if keep_actors or select_in_view else ["control_units", "control_buildings"]):
 		if snapshot.has(category):
 			var controls: Array = []
 			for row in snapshot[category]:
@@ -150,6 +163,7 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, world.get_fog_of_war(), team, probe) if bool(options.get("include_navigation", true)) else {}
 	result["navigation"] = navigation
 	if bool(options.get("include_ai_profiles", false)):
+		result["gatherer_limits_by_kind"] = world.data_repository.gatherer_limits_by_kind
 		var visible: Dictionary = {}
 		var fog = world.get_fog_of_war()
 		for id in options.get("ai_memory_positions", {}):

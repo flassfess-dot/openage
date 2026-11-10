@@ -32,7 +32,7 @@ func erase(entity_id: int) -> void:
 	projections_by_id.erase(entity_id)
 	categories_by_id.erase(entity_id)
 
-func project_many(entities: Array, journal) -> Array:
+func project_many(entities: Array, journal, scene_clocks: Variant = null) -> Array:
 	if journal == null or native_kernel == null or not native_kernel.has_method("project_cached_render_entities") or not Contract.native_enabled:
 		var result: Array = []
 		for entity in entities: result.append(_project_script(entity, journal))
@@ -41,8 +41,9 @@ func project_many(entities: Array, journal) -> Array:
 	if epoch != int(journal.epoch):
 		clear()
 		epoch = int(journal.epoch)
-	var result: Array = _project_native_rows(entities, journal)
+	var result: Array = _project_native_rows(entities, journal, scene_clocks)
 	if result.size() == entities.size(): return result
+	if scene_clocks is Dictionary: scene_clocks["samples"].clear()
 	result = []
 	for entity in entities: result.append(_project_script(entity, journal))
 	return result
@@ -67,9 +68,12 @@ func _native_context(journal) -> Dictionary:
 	return native_context
 
 
-func _project_native_rows(entities: Array, journal) -> Array:
+func _project_native_rows(entities: Array, journal, scene_clocks: Variant = null) -> Array:
 	if compare_native_versions: native_version_queries += 1
 	var context := _native_context(journal)
+	if scene_clocks is Dictionary:
+		context = context.duplicate()
+		context["scene_clocks"] = scene_clocks
 	var reference := {}
 	if compare_native_versions and journal.native_active and native_version_comparisons < 64 and (native_version_comparisons < 8 or native_version_queries % 128 == 0):
 		reference = context.duplicate()

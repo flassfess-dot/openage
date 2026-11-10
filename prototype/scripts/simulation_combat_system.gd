@@ -5,6 +5,7 @@ const AnimationController := preload("res://scripts/animation_controller.gd")
 const CombatRules := preload("res://scripts/combat_rules.gd")
 const EntityComponents := preload("res://scripts/entity_components.gd")
 const FormationCombat := preload("res://scripts/formation_combat.gd")
+const Footprint := preload("res://scripts/footprint.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 const ProjectileMotion := preload("res://scripts/projectile_motion.gd")
 const Garrison := preload("res://scripts/tower_garrison.gd")
@@ -142,7 +143,7 @@ func assign_command_attack(selected: Array, target_id: int, policy: Dictionary =
 			world.transition_entity_order(unit, OrderPipeline.MOVE_INTO_RANGE)
 			world.transition_entity_order(unit, OrderPipeline.FACE_TARGET)
 			resolved_count += 1
-		elif not static_attacker and world.assign_unit_destination(unit, unit["combat_destination"]):
+		elif not static_attacker and _approach_attack_target(unit, target):
 			resolved_count += 1
 		else:
 			finish_combat(unit, "target_unreachable")
@@ -154,6 +155,71 @@ func assign_command_attack(selected: Array, target_id: int, policy: Dictionary =
 			"trigger": String(policy.get("trigger", "explicit")),
 		})
 	return resolved_count > 0
+
+
+func _approach_attack_target(unit: Dictionary, target: Dictionary) -> bool:
+	var preferred: Vector2 = unit["combat_approach"]
+	var index := int(unit["combat_slot_index"])
+	var count := int(unit["combat_slot_count"])
+	var direction: Variant = _reachable_attack_side(unit, target, preferred, index, count, true)
+	if direction is Vector2 and direction != preferred:
+		world.set_entity_field(unit, "combat_approach", direction)
+		world.set_entity_field(unit, "combat_destination", FormationCombat.slot_destination(unit, target, direction, index, count))
+	return world.assign_unit_destination(unit, unit["combat_destination"])
+
+
+func can_retry_melee_contact(unit: Dictionary, target: Dictionary) -> bool:
+	var approach := Vector2(unit["pos"]) - Vector2(target["pos"])
+	return _reachable_attack_side(unit, target, approach.normalized(), 0, 1, false) != null
+
+
+func _reachable_attack_side(unit: Dictionary, target: Dictionary, preferred: Vector2, index: int, count: int, check_occupants: bool) -> Variant:
+	var planner = world.movement_system.knowledge.planner(world, int(unit.get("team", 0)))
+	var origin := Vector2(unit["pos"])
+	var domain := String(unit.get("movement_domain", "land"))
+	var restriction := int(unit.get("terrain_restriction", -1))
+	var radius := float(unit.get("footprint_radius", 0.3))
+	var first := FormationCombat.slot_destination(unit, target, preferred, index, count)
+	if planner.is_position_walkable(first, radius, domain, restriction) and planner.can_reach(origin, first, domain, restriction, radius):
+		if not check_occupants or _attack_slot_is_free(unit, target, first, planner): return preferred
+	var candidates: Array[Vector2] = []
+	var directions: Array[Vector2] = []
+	if preferred.is_zero_approx(): preferred = Vector2.LEFT
+	# Keep the original combat ring and weapon stand-off. Only its facing
+	# changes when the assigned contact lies in water, a building or a crowd.
+	for step in range(1, 16):
+		var direction := preferred.rotated(TAU * float(step) / 16.0)
+		directions.append(direction)
+		candidates.append(FormationCombat.slot_destination(unit, target, direction, index, count))
+	var walkable: PackedByteArray = planner.position_walkability(candidates, radius, domain, restriction)
+	var best_distance := INF
+	var best: Variant = null
+	for n in range(candidates.size()):
+		var point := candidates[n]
+		var distance := origin.distance_squared_to(point)
+		if walkable[n] == 0 or distance >= best_distance: continue
+		if not planner.can_reach(origin, point, domain, restriction, radius): continue
+		if not check_occupants: return directions[n]
+		if _attack_slot_is_free(unit, target, point, planner):
+			best_distance = distance
+			best = directions[n]
+	return best
+
+
+func _attack_slot_is_free(unit: Dictionary, target: Dictionary, point: Vector2, planner) -> bool:
+	var radius := float(unit.get("footprint_radius", 0.3))
+	var domain := String(unit.get("movement_domain", "land"))
+	if not world.destination_reservations.can_reserve(int(unit["id"]), point, radius, planner.grid, domain, int(unit.get("terrain_restriction", -1))):
+		return false
+	var team := int(unit["team"])
+	for other in world.query_units_near(point, radius + float(world.spatial_index.maximum_unit_radius) + float(world.spatial_index.maximum_unit_clearance)):
+		var other_id := int(other["id"])
+		if other_id == int(unit["id"]) or other_id == int(target["id"]): continue
+		if float(other.get("hp", 0.0)) <= 0.0 or String(other.get("movement_domain", "land")) != domain: continue
+		var distance := Footprint.separation_distance(unit, other)
+		if point.distance_squared_to(Vector2(other["pos"])) < distance * distance:
+			if int(other.get("team", 0)) == team or world.is_entity_visible_to(team, other): return false
+	return true
 
 
 func finish_combat(unit: Dictionary, reason: String = "target_unavailable") -> void:

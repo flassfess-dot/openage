@@ -63,9 +63,9 @@ func find_unit(world, id: int) -> Variant:
 func find_resource(world, id: int) -> Variant:
 	if resource_nodes_by_id.has(id):
 		return resource_nodes_by_id[id]
-	for building in buildings:
-		if int(building.get("id", -1)) == id and bool(building.get("harvestable", false)) and String(building.get("state", "complete")) == "complete" and float(building.get("hp", 0.0)) > 0.0:
-			return building
+	var building: Variant = buildings_by_id.get(id)
+	if building != null and bool(building.get("harvestable", false)) and String(building.get("state", "complete")) == "complete" and float(building.get("hp", 0.0)) > 0.0:
+		return building
 	return null
 
 

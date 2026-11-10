@@ -48,6 +48,22 @@ func hotspot_for(frame_index: int, fallback: Vector2) -> Vector2:
 	return hotspots[frame_index] if frame_index >= 0 and frame_index < hotspots.size() else fallback
 
 func resolve(logical_facing: int, animation_time: float, available_frame_count: int) -> Dictionary:
+	return resolve_frame(logical_facing, animation_frame_at(animation_time), available_frame_count)
+
+
+func animation_frame_at(animation_time: float) -> int:
+	var local_time := maxf(0.0, animation_time)
+	if loop:
+		var animation_duration := float(frames_per_angle) * frame_duration
+		var cycle_duration := animation_duration + replay_delay
+		local_time = fmod(local_time, maxf(frame_duration, cycle_duration))
+		if local_time >= animation_duration:
+			local_time = 0.0
+	var elapsed_frame := maxi(0, floori(local_time / frame_duration))
+	return elapsed_frame % frames_per_angle if loop else mini(elapsed_frame, frames_per_angle - 1)
+
+
+func resolve_frame(logical_facing: int, animation_frame: int, available_frame_count: int) -> Dictionary:
 	var facing := posmod(logical_facing, logical_angle_count)
 	var direction_degrees := slp_direction_order[facing]
 	var source_direction := facing
@@ -58,15 +74,6 @@ func resolve(logical_facing: int, animation_time: float, available_frame_count: 
 	if source_direction >= stored_angle_count:
 		source_direction = stored_angle_count - 1
 
-	var local_time := maxf(0.0, animation_time)
-	if loop:
-		var animation_duration := float(frames_per_angle) * frame_duration
-		var cycle_duration := animation_duration + replay_delay
-		local_time = fmod(local_time, maxf(frame_duration, cycle_duration))
-		if local_time >= animation_duration:
-			local_time = 0.0
-	var elapsed_frame := maxi(0, floori(local_time / frame_duration))
-	var animation_frame := elapsed_frame % frames_per_angle if loop else mini(elapsed_frame, frames_per_angle - 1)
 	var frame_index := source_direction * frames_per_angle + animation_frame
 	frame_index = clampi(frame_index, 0, maxi(0, available_frame_count - 1))
 	return {

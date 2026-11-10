@@ -3,6 +3,7 @@ extends RefCounted
 ## No world, controller, source cache, or owner-thread index is retained here.
 const CHUNK_SIZE := 8
 const Contract := preload("res://scripts/entity_read_contract.gd")
+const Picking := preload("res://scripts/picking_service.gd")
 var scene: Dictionary = {}
 var kernel = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 var cached_chunks: Dictionary = {}
@@ -36,8 +37,10 @@ func select(bounds: Rect2i, selected_ids: Array) -> Dictionary:
 	queries += 1
 	var selected := {}
 	for id in selected_ids: selected[int(id)] = true
+	var missing := selected.duplicate()
 	var result := scene.duplicate()
 	var rectangle := Rect2(Vector2(bounds.position), Vector2(bounds.size))
+	var clocks: Dictionary = scene.get("unit_animation_clocks", {})
 	for category in ["units", "buildings"]:
 		var rows: Array = []
 		var controls: Array = []
@@ -47,14 +50,18 @@ func select(bounds: Rect2i, selected_ids: Array) -> Dictionary:
 			var chosen := selected.has(id)
 			if chosen or rectangle.has_point(Vector2(row["pos"])):
 				var presented: Dictionary = row
-				if category == "units" and (prediction_limits.has(id) or (chosen and unit_metadata.has(id))):
+				if category == "units" and (prediction_limits.has(id) or (chosen and unit_metadata.has(id)) or clocks.has(id)):
 					presented = row.duplicate()
 					if chosen and unit_metadata.has(id):
 						presented.merge(unit_metadata[id], true)
 						Contract.redact_foreign_control(presented, int(scene["observer_team"]))
 					if prediction_limits.has(id): presented["render_prediction_alpha_limit"] = prediction_limits[id]
+					if clocks.has(id): presented["anim"] = clocks[id]
 				rows.append(presented)
-				if chosen: controls.append(presented)
+				if chosen:
+					controls.append(presented)
+					if float(presented.get("hp", 0.0)) > 0.0 and not bool(presented.get("last_known", false)):
+						missing.erase(id)
 		result[category] = rows
 		result["control_" + category] = controls
 	var chunks: Dictionary = scene["resource_chunks"]
@@ -66,12 +73,18 @@ func select(bounds: Rect2i, selected_ids: Array) -> Dictionary:
 	result["resources"] = cached_resources
 	var control_resources: Array = []
 	for row in cached_resources:
-		if selected.has(int(row["id"])): control_resources.append(row)
+		var id := int(row["id"])
+		if selected.has(id):
+			control_resources.append(row)
+			if Picking.resource_is_selectable(row): missing.erase(id)
 	result["control_resources"] = control_resources
+	if not selected.is_empty() and missing.is_empty():
+		result["_observed_selection"] = selected_ids.duplicate()
 	result["resource_delta"] = {}
 	result.erase("resource_chunks")
 	result.erase("render_units")
 	result.erase("split_unit_metadata")
+	result.erase("unit_animation_clocks")
 	return result
 
 func _resources(chunks: Dictionary, bounds: Rect2i) -> Array:

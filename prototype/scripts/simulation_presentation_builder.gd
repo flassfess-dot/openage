@@ -166,7 +166,7 @@ func project_units() -> void:
 		var kernel: Variant = world.render_entity_projection_cache.native_kernel
 		if kernel != null and kernel.has_method("filter_visible_entities"):
 			var visible: Array = detail_units if scene_controls and not use_bounded_unit_query else kernel.filter_visible_entities(detail_units, observer_team, observer_states, fog_map_size)
-			units = world.render_entity_projection_cache.project_many(visible, world.entity_changes)
+			units = world.render_entity_projection_cache.project_many(visible, world.entity_changes, options.get("_scene_clocks"))
 			if split_metadata:
 				render_units = units
 				render_units.make_read_only()
@@ -183,7 +183,7 @@ func project_units() -> void:
 				var control = options["_scene_controls"].project(visible[index], rendered_row, observer_team, split_metadata) if options.has("_scene_controls") else EntityProjection._compact_control_entity(visible[index], observer_team, Callable(), rendered_row)
 				if split_metadata: units.append(control)
 				else: units[index] = control
-				control_units.append(control)
+				if not scene_controls: control_units.append(control)
 				if snapshot_probe != null: unit_control_projection_microseconds += Time.get_ticks_usec()-projection_started
 			detail_units = []
 	for unit in detail_units:
@@ -229,7 +229,7 @@ func project_units() -> void:
 					allied_cargo["count"] = unit.get("components", {}).get("cargo", {}).get("passenger_ids", []).size()
 			if split_metadata: render_units.append(render_pose)
 			units.append(presentation_unit)
-			if always_include_entity_lookup.has(unit_id):
+			if not scene_controls and always_include_entity_lookup.has(unit_id):
 				control_units.append(presentation_unit)
 	if snapshot_probe != null:
 		unit_detail_loop_microseconds = Time.get_ticks_usec() - unit_substage_started
@@ -389,23 +389,30 @@ func project_buildings() -> void:
 					compact_render_entities,
 					compact_render_projector
 				)
+			# Full render scenes add current prices, production and construction
+			# fields in the query stage. Accumulate both sets of additions before
+			# making a copy of the immutable legal building record.
+			var defer_fields := visible_now and not compact_entities and options.has("_scene_building_fields") and presentation_building.is_read_only()
+			var fields := presentation_building
 			if visible_now:
-				presentation_building = presentation_building.duplicate()
-				presentation_building["target_domains"] = world.combat_target_domains(building)
+				fields = {} if defer_fields else presentation_building.duplicate()
+				fields["target_domains"] = world.combat_target_domains(building)
 			if visible_now and world.trade_system.is_trade_dock(building):
-				presentation_building["trade"] = world.trade_system.presentation_for_dock(building)
+				fields["trade"] = world.trade_system.presentation_for_dock(building)
 			if compact_entities and observer_team > 0 and int(building.get("team", 0)) == observer_team:
-				presentation_building["production_queue"] = presentation_building.get("production_queue", []).duplicate(true)
-				for order_value in presentation_building.get("production_queue", []):
+				fields["production_queue"] = fields.get("production_queue", []).duplicate(true)
+				for order_value in fields.get("production_queue", []):
 					var projected_order: Dictionary = order_value
 					if String(projected_order.get("order_type", "unit")) == "unit":
 						projected_order["population_points_cost"] = world.unit_population_points_cost(String(projected_order.get("kind", "")), observer_team)
 			if observer_team > 0 and int(building.get("team", 0)) == observer_team and (not restrict_command_options or command_option_entity_lookup.has(int(building.get("id", -1)))):
-				presentation_building["builder_count"] = building.get("builders", {}).size()
+				fields["builder_count"] = building.get("builders", {}).size()
 			if Garrison.is_tower(building) and (observer_team <= 0 or int(building.get("team", 0)) == observer_team) and (not restrict_command_options or command_option_entity_lookup.has(building_id)):
-				presentation_building["garrison"] = Garrison.presentation(world, building)
+				fields["garrison"] = Garrison.presentation(world, building)
+			if defer_fields: options["_scene_building_fields"][building_id] = fields
+			else: presentation_building = fields
 			buildings.append(presentation_building)
-			if always_include_entity_lookup.has(building_id):
+			if not scene_controls and always_include_entity_lookup.has(building_id):
 				control_buildings.append(presentation_building)
 	if observer_team > 0:
 		var missing_ids: Array = remembered_buildings.keys()

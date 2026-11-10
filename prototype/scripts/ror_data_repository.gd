@@ -8,11 +8,19 @@ var object_catalog: Dictionary = {}
 var compatibility_gamespec: Dictionary = {}
 var revision := 0
 var rule_fingerprints: Dictionary = {}
+var gatherer_limits_by_kind: Dictionary = {}
 
 
 func configure_runtime(data: Dictionary) -> void:
 	GateCatalog.install_runtime(data)
 	runtime_catalog = data
+	var limits: Dictionary = {}
+	for kind in data.get("archetypes", {}):
+		var maximum := int(data["archetypes"][kind].get("runtime", {}).get("max_gatherers", 0))
+		if maximum > 0:
+			limits[kind] = maximum
+	limits.make_read_only()
+	gatherer_limits_by_kind = limits
 	rule_fingerprints["runtime"] = JSON.stringify(data, "", true, true).sha256_text()
 	revision += 1
 

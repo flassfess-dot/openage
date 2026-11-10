@@ -4,6 +4,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/vector4i.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -93,6 +94,74 @@ struct Rank {
     }
 };
 
+// One numeric summary per four-tile sector. A negative broad-phase answer
+// never skips target ranking, fog or diplomacy for an occupied foreign sector.
+class CombatSectorOccupancy {
+    static constexpr uint64_t RETALIATION = uint64_t(1) << 62;
+    static constexpr uint64_t OTHER_TEAMS = uint64_t(1) << 63;
+    static constexpr int64_t MAX_SECTORS = 1024 * 1024;
+    Vector2i size;
+    PackedInt64Array masks;
+    const int64_t *read = nullptr;
+    std::vector<Vector2i> dirty;
+
+    static uint64_t team_bit(int64_t team) {
+        if (team <= 0) return 0;
+        return team <= 62 ? uint64_t(1) << (team - 1) : OTHER_TEAMS;
+    }
+    bool contains(const Vector2i &point) const {
+        return point.x >= 0 && point.x < size.x && point.y >= 0 && point.y < size.y;
+    }
+    bool may_contain(const Vector2i &point, uint64_t wanted) const {
+        return !read || !contains(point) || (uint64_t(read[int64_t(point.y) * size.x + point.x]) & wanted) != 0;
+    }
+    void refresh_cell(int64_t *write, const Vector2i &point, const Dictionary &buckets, const Dictionary &retaliation) {
+        if (!contains(point)) return;
+        uint64_t mask = retaliation.has(point) ? RETALIATION : 0;
+        if (buckets.has(point)) {
+            const Dictionary teams = buckets[point];
+            const Array keys = teams.keys();
+            for (int64_t n = 0; n < keys.size(); ++n) mask |= team_bit(keys[n]);
+        }
+        write[int64_t(point.y) * size.x + point.x] = int64_t(mask);
+    }
+public:
+    void changed(const Vector2i &point) { dirty.push_back(point); }
+    bool may_have_target(const Vector2i &point, int64_t observer) const {
+        // The overflow bit can represent multiple teams, including the observer.
+        const uint64_t self = observer > 0 && observer <= 62 ? team_bit(observer) : 0;
+        return may_contain(point, ~(RETALIATION | self));
+    }
+    bool may_have_retaliation(const Vector2i &point) const { return may_contain(point, RETALIATION); }
+
+    void prepare(Dictionary index, const Dictionary &buckets, const Dictionary &retaliation,
+            const Vector2i &map_size, int64_t previous, int64_t revision, bool full) {
+        if (map_size.x <= 0 || map_size.y <= 0) return;
+        size = Vector2i((int64_t(map_size.x) + 3) / 4, (int64_t(map_size.y) + 3) / 4);
+        const int64_t count = int64_t(size.x) * size.y;
+        if (count > MAX_SECTORS) return;
+        const bool reuse = !full && index.get(ROR_FIELD("sector_map_size"), Vector2i()) == Variant(size) &&
+                int64_t(index.get(ROR_FIELD("sector_revision"), -2)) == previous;
+        if (reuse) masks = index.get(ROR_FIELD("sector_masks"), PackedInt64Array());
+        if (masks.size() != count) {
+            masks.resize(count);
+            masks.fill(0);
+            int64_t *write = masks.ptrw();
+            for (const Dictionary *cells : {&buckets, &retaliation}) {
+                const Array keys = cells->keys();
+                for (int64_t n = 0; n < keys.size(); ++n) refresh_cell(write, keys[n], buckets, retaliation);
+            }
+        } else if (!dirty.empty()) {
+            int64_t *write = masks.ptrw();
+            for (const Vector2i &point : dirty) refresh_cell(write, point, buckets, retaliation);
+        }
+        index[ROR_FIELD("sector_masks")] = masks;
+        index[ROR_FIELD("sector_map_size")] = size;
+        index[ROR_FIELD("sector_revision")] = revision;
+        read = masks.ptr();
+    }
+};
+
 // All references and fog views are owner-pass scoped. The retained indexes are
 // the existing awareness dictionaries, not a second actor/world representation.
 class AwarenessPass {
@@ -101,6 +170,8 @@ class AwarenessPass {
     Dictionary units, buildings, attackers, membership, metadata, classes, sources;
     Dictionary assigned_targets, retaliation, lanes_by_id, index, buckets;
     Dictionary relations, alliances, candidate_cache;
+    CombatSectorOccupancy occupancy;
+    int64_t candidate_sectors_skipped = 0, assistance_sectors_skipped = 0;
     Array lanes;
     bool order_dirty = false;
     struct Vision { PackedByteArray bytes; const uint8_t *data = nullptr; Vector2i size; };
@@ -160,7 +231,7 @@ class AwarenessPass {
             const Array old = membership[id];
             Dictionary bucket = buckets[old[0]];
             Array rows = bucket[old[1]]; rows.erase(old[2]);
-            if (rows.is_empty()) bucket.erase(old[1]);
+            if (rows.is_empty()) { bucket.erase(old[1]); occupancy.changed(old[0]); }
             if (bucket.is_empty()) buckets.erase(old[0]);
             membership.erase(id);
         }
@@ -174,7 +245,7 @@ class AwarenessPass {
             }
             if (bool(previous[ROR_FIELD("retaliation")])) {
                 Array rows = retaliation[previous[ROR_FIELD("cell")]]; rows.erase(previous[ROR_FIELD("row")]);
-                if (rows.is_empty()) retaliation.erase(previous[ROR_FIELD("cell")]);
+                if (rows.is_empty()) { retaliation.erase(previous[ROR_FIELD("cell")]); occupancy.changed(previous[ROR_FIELD("cell")]); }
             }
             metadata.erase(id);
         }
@@ -191,7 +262,7 @@ class AwarenessPass {
         if (!tags(row).has(ROR_FIELD("noncombat_target"))) {
             if (!buckets.has(position)) buckets[position] = Dictionary();
             Dictionary bucket = buckets[position];
-            if (!bucket.has(team)) bucket[team] = Array();
+            if (!bucket.has(team)) { bucket[team] = Array(); occupancy.changed(position); }
             Array rows = bucket[team]; rows.append(row);
             Array entry; entry.append(position); entry.append(team); entry.append(row); membership[id] = entry;
             index[ROR_FIELD("maximum_radius")] = std::max(double(index.get(ROR_FIELD("maximum_radius"), 0.0)), double(row.get(ROR_FIELD("footprint_radius"), 0.0)));
@@ -204,7 +275,7 @@ class AwarenessPass {
         if (assigned >= 0) assigned_targets[assigned] = int64_t(assigned_targets.get(assigned, 0)) + 1;
         const bool retaliating = int64_t(row.get(ROR_FIELD("retaliation_target_id"), -1)) >= 0;
         if (retaliating) {
-            if (!retaliation.has(position)) retaliation[position] = Array();
+            if (!retaliation.has(position)) { retaliation[position] = Array(); occupancy.changed(position); }
             Array rows = retaliation[position]; rows.append(row);
         }
         Dictionary entry; entry[ROR_FIELD("assigned")] = assigned; entry[ROR_FIELD("retaliation")] = retaliating; entry[ROR_FIELD("cell")] = position; entry[ROR_FIELD("row")] = row;
@@ -307,7 +378,9 @@ class AwarenessPass {
         const double radius = row.get(ROR_FIELD("acquisition_range"), 0.0);
         const Vector2i minimum = cell(position - Vector2(radius, radius)), maximum = cell(position + Vector2(radius, radius));
         for (int32_t y = minimum.y; y <= maximum.y; ++y) for (int32_t x = minimum.x; x <= maximum.x; ++x) {
-            const Array rows = retaliation.get(Vector2i(x, y), Array());
+            const Vector2i sector(x, y);
+            if (!occupancy.may_have_retaliation(sector)) { ++assistance_sectors_skipped; continue; }
+            const Array rows = retaliation.get(sector, Array());
             for (int64_t n = 0; n < rows.size(); ++n) {
                 const Dictionary ally = rows[n]; const int64_t ally_id = ally.get(ROR_FIELD("id"), -1);
                 if (ally_id == id || double(ally.get(ROR_FIELD("hp"), 0.0)) <= 0.0 || !allied(team, ally.get(ROR_FIELD("team"), 0))) continue;
@@ -333,7 +406,9 @@ class AwarenessPass {
         const Vector2i minimum = cell(center - Vector2(extent, extent)), maximum = cell(center + Vector2(extent, extent));
         Array result;
         for (int32_t y = minimum.y; y <= maximum.y; ++y) for (int32_t x = minimum.x; x <= maximum.x; ++x) {
-            const Dictionary teams = buckets.get(Vector2i(x, y), Dictionary()); const Array ids = teams.keys();
+            const Vector2i sector(x, y);
+            if (!occupancy.may_have_target(sector, team)) { ++candidate_sectors_skipped; continue; }
+            const Dictionary teams = buckets.get(sector, Dictionary()); const Array ids = teams.keys();
             for (int64_t n = 0; n < ids.size(); ++n) {
                 const int64_t other = ids[n];
                 if (other <= 0 || other == team) continue;
@@ -388,7 +463,10 @@ public:
         }
     }
     Dictionary run(const Dictionary &delta, int64_t tick) {
+        const int64_t previous = state->get("cursor");
         refresh(delta, tick);
+        occupancy.prepare(index, buckets, retaliation, world->get(ROR_PROPERTY("map_size")), previous,
+                delta[ROR_FIELD("revision")], bool(delta[ROR_FIELD("full")]));
         const Dictionary wake = lanes[mod(tick, 4)]; const Array rows = wake.values();
         std::vector<Dictionary> ordered; ordered.reserve(rows.size());
         for (int64_t n = 0; n < rows.size(); ++n) ordered.push_back(rows[n]);
@@ -444,6 +522,8 @@ public:
         stats[ROR_FIELD("calls")] = 1; stats[ROR_FIELD("roster_updates")] = changed; stats[ROR_FIELD("due_observers")] = observers;
         stats[ROR_FIELD("target_validations")] = validations; stats[ROR_FIELD("acquisitions")] = acquisitions;
         stats[ROR_FIELD("candidate_queries")] = candidate_cache.size(); stats[ROR_FIELD("candidates_tested")] = tested;
+        stats[ROR_FIELD("candidate_sectors_skipped")] = candidate_sectors_skipped;
+        stats[ROR_FIELD("assistance_sectors_skipped")] = assistance_sectors_skipped;
         stats[ROR_FIELD("reachability_queries")] = reachability; stats[ROR_FIELD("assistance_queries")] = assistance;
         stats[ROR_FIELD("commands")] = decisions.size();
         stats[ROR_FIELD("position_classification_checks")] = position_checks;

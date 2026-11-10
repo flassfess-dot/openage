@@ -15,7 +15,8 @@ var accepts_time := false
 var offered_seconds := 0.0
 var offered_frame := 0
 var preview: Dictionary = {}
-const MAX_SLICES_PER_HANDOFF := 3
+const MIN_STREAM_SLICES := 3
+const HANDOFF_SERVICE_USEC := 180000
 var request: Array = []
 var result: Dictionary = {}
 var autosave_service: RefCounted
@@ -113,10 +114,16 @@ func _run() -> void:
 		request = []
 		var state := {}
 		var last_packet := {}
-		for slice in range(MAX_SLICES_PER_HANDOFF):
+		var service_due := Time.get_ticks_usec() + HANDOFF_SERVICE_USEC
+		var slices := 0
+		while true:
 			state = _advance(job)
 			if state.has("presentation"): last_packet = state["presentation"]
-			if slice + 1 >= MAX_SLICES_PER_HANDOFF or not _can_publish_between_steps(job, state): break
+			slices += 1
+			# A fast owner can stream more poses while the renderer handles
+			# input. Explicit handoffs, a settled clock or a world change end
+			# the stream at the next boundary regardless of this service window.
+			if (slices >= MIN_STREAM_SLICES and Time.get_ticks_usec() >= service_due) or not _can_publish_between_steps(job, state): break
 			var preview_data := _preview_packet(job, state)
 			var controller = job[0]
 			var speed: float = controller.get_speed_multiplier()

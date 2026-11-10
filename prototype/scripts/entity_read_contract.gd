@@ -196,6 +196,8 @@ static func ai_reference(entity: Dictionary, observer_team: int = 0, previous: D
 				"completed": bool(order.get("completed", true)),
 				"completion_reason": String(order.get("completion_reason", "")),
 			}
+			if order.has("revision"):
+				components["order"]["revision"] = int(order["revision"])
 	var healing: Dictionary = entity.get("components", {}).get("healing", {})
 	if bool(healing.get("enabled", false)):
 		components["healing"] = {"enabled": true}

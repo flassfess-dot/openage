@@ -343,12 +343,9 @@ func _expire_failed_gathers(snapshot: Dictionary) -> void:
 			failed_gather_seen.erase(worker)
 			failed_gather_expiry.erase(worker)
 			failed_gather_targets.erase(worker)
-	var navigation: Dictionary = snapshot.get("navigation", {})
-	var topology: Variant = hash([navigation.get("land", []), navigation.get("water", []), navigation.get("reachable", {})])
-	if topology != null and last_gather_topology != null and topology != last_gather_topology:
-		failed_gather_targets.clear()
-		failed_gather_expiry.clear()
-	last_gather_topology = topology
+	# Keep the legacy field when restoring a pending decision. New decisions
+	# compare the access to each failed target in _remember_failed_gather_targets.
+	last_gather_topology = null
 	for worker in failed_gather_expiry.keys():
 		for resource in failed_gather_expiry[worker].keys():
 			if tick >= int(failed_gather_expiry[worker][resource]):
@@ -358,55 +355,92 @@ func _expire_failed_gathers(snapshot: Dictionary) -> void:
 
 
 func _remember_failed_gather_targets(snapshot: Dictionary) -> void:
-	if not failed_gather_targets.is_empty():
-		var live_workers: Dictionary = {}
-		for unit_value in snapshot.get("units", []):
-			var unit: Dictionary = unit_value
-			if int(unit.get("team", 0)) == team and float(unit.get("hp", 0.0)) > 0.0:
-				live_workers[int(unit.get("id", -1))] = true
-		var available_resources: Dictionary = {}
-		for resource_value in snapshot.get("resources", []):
-			if int(resource_value.get("amount", 0)) > 0:
-				available_resources[int(resource_value.get("id", -1))] = true
-		if bool(economic_policy.get("adaptive_strategy", false)):
-			for building in snapshot.get("buildings", []):
-				if int(building.get("team", 0)) == team and bool(building.get("harvestable", false)) and int(building.get("amount", 0)) > 0:
-					available_resources[int(building.get("id", -1))] = true
-		for worker_id_value in failed_gather_targets.keys():
-			if not live_workers.has(int(worker_id_value)):
-				failed_gather_targets.erase(worker_id_value)
-				failed_gather_expiry.erase(worker_id_value)
-				failed_gather_seen.erase(worker_id_value)
-				continue
-			var failures: Dictionary = failed_gather_targets[worker_id_value]
-			for resource_id_value in failures.keys():
-				if not available_resources.has(int(resource_id_value)):
-					failures.erase(resource_id_value)
-			if failures.is_empty():
-				failed_gather_targets.erase(worker_id_value)
-	for unit_value in snapshot.get("units", []):
-		var unit: Dictionary = unit_value
-		if int(unit.get("team", 0)) != team:
-			continue
+	var adaptive := bool(economic_policy.get("adaptive_strategy", false))
+	var own_units: Dictionary = {}
+	var assignments: Dictionary = {}
+	var completed: Array = []
+	for unit in snapshot.get("units", []):
+		if int(unit.get("team", 0)) != team or float(unit.get("hp", 0.0)) <= 0.0: continue
+		own_units[int(unit["id"])] = unit
+		if String(unit.get("task", "")) == "gather":
+			var active_id := int(unit.get("resource_id", -1))
+			assignments[active_id] = int(assignments.get(active_id, 0)) + 1
 		var order: Dictionary = unit.get("components", {}).get("order", {})
-		if String(order.get("type", "")) != "gather" or not bool(order.get("completed", false)) or String(order.get("completion_reason", "")) not in ["no_approach_slot", "no_path", "local_blocked", "local_obstacle"]:
+		if String(order.get("type", "")) == "gather" and bool(order.get("completed", false)) and String(order.get("completion_reason", "")) in ["no_approach_slot", "no_path", "local_blocked", "local_obstacle"]:
+			completed.append(unit)
+	if completed.is_empty() and failed_gather_targets.is_empty(): return
+
+	var available: Dictionary = {}
+	for resource in snapshot.get("resources", []):
+		if int(resource.get("amount", 0)) > 0: available[int(resource["id"])] = resource
+	if adaptive:
+		for building in snapshot.get("buildings", []):
+			if int(building.get("team", 0)) == team and bool(building.get("harvestable", false)) and int(building.get("amount", 0)) > 0:
+				available[int(building["id"])] = building
+	var navigation: Dictionary = snapshot.get("navigation", {})
+	var reachable: Dictionary = {}
+	if adaptive:
+		reachable = snapshot["_economy_reachable_cells"] if snapshot.has("_economy_reachable_cells") else EconomicPlanner._reachable_cells_by_domain(navigation)
+	var regions: Dictionary = navigation.get("unit_regions", {})
+	for worker_id in failed_gather_targets.keys():
+		if not own_units.has(worker_id):
+			failed_gather_targets.erase(worker_id)
+			failed_gather_expiry.erase(worker_id)
+			failed_gather_seen.erase(worker_id)
 			continue
+		var failures: Dictionary = failed_gather_targets[worker_id]
+		var expiry: Dictionary = failed_gather_expiry.get(worker_id, {})
+		for target_id in failures.keys():
+			if not available.has(target_id):
+				failures.erase(target_id)
+				expiry.erase(target_id)
+			elif adaptive:
+				var access := _gather_access(own_units[worker_id], available[target_id], reachable, regions, assignments)
+				if failures[target_id] is Array and failures[target_id] != access:
+					failures.erase(target_id)
+					expiry.erase(target_id)
+				else:
+					# Legacy saves retained the failure and expiry without a local observation.
+					failures[target_id] = access
+		if failures.is_empty(): failed_gather_targets.erase(worker_id)
+		if expiry.is_empty(): failed_gather_expiry.erase(worker_id)
+	for unit in completed:
+		var order: Dictionary = unit["components"]["order"]
 		var target_id := int(order.get("target_entity_id", -1))
-		if target_id < 0:
-			continue
+		if target_id < 0 or not available.has(target_id): continue
 		var worker_id := int(unit.get("id", -1))
 		var failures: Dictionary = failed_gather_targets.get(worker_id, {})
-		if bool(economic_policy.get("adaptive_strategy", false)):
+		if adaptive:
 			var expiry: Dictionary = failed_gather_expiry.get(worker_id, {})
-			# A completed order remains visible after failure. Remember its path
-			# request so it cannot renew the blacklist on every observation.
-			var token := [target_id, int(unit.get("path_request_id", 0))]
-			if failed_gather_seen.get(worker_id, []) == token: continue
+			# A failed slot search may never issue a path request. A new order
+			# still has a fresh revision, whereas a retained completed order does not.
+			var legacy := [target_id, int(unit.get("path_request_id", 0))]
+			var token := legacy.duplicate()
+			if order.has("revision"): token.append(int(order["revision"]))
+			var seen: Array = failed_gather_seen.get(worker_id, [])
+			if seen == token: continue
 			failed_gather_seen[worker_id] = token
+			if seen == legacy: continue
 			expiry[target_id] = int(snapshot.get("tick", 0)) + int(economic_policy.get("gather_retry_ticks", 200))
 			failed_gather_expiry[worker_id] = expiry
-		failures[target_id] = true
+			failures[target_id] = _gather_access(unit, available[target_id], reachable, regions, assignments)
+		else:
+			failures[target_id] = true
 		failed_gather_targets[worker_id] = failures
+
+
+static func _gather_access(unit: Dictionary, resource: Dictionary, reachable: Dictionary, regions: Dictionary, assignments: Dictionary) -> Array:
+	var domain := String(unit.get("movement_domain", "land"))
+	var cell := Vector2i(Vector2(resource.get("pos", Vector2.ZERO)))
+	var mask := -1
+	if reachable.has(domain):
+		var cells: Dictionary = reachable[domain]
+		mask = 0
+		for y in range(-2, 3):
+			for x in range(-2, 3):
+				mask = (mask << 1) | int(cells.has(cell + Vector2i(x, y)))
+	var origin: Variant = regions.get(int(unit["id"]), Vector2i(Vector2(unit.get("pos", Vector2.ZERO))))
+	return [domain, origin, cell, mask, int(assignments.get(int(resource["id"]), 0))]
 
 
 func _plan_tribute(snapshot: Dictionary, tick: int) -> Variant:
@@ -602,7 +636,12 @@ func canonical_state() -> Dictionary:
 	for worker_id in worker_ids:
 		var resource_ids: Array = failed_gather_targets[worker_id].keys()
 		resource_ids.sort()
-		failed_gathers.append({"worker_id": int(worker_id), "resource_ids": resource_ids})
+		var record := {"worker_id": int(worker_id), "resource_ids": resource_ids}
+		var access: Dictionary = {}
+		for id in resource_ids:
+			if failed_gather_targets[worker_id][id] is Array: access[id] = failed_gather_targets[worker_id][id].duplicate()
+		if not access.is_empty(): record["access"] = access
+		failed_gathers.append(record)
 	var result := {
 		"team": team,
 		"enabled": enabled,
@@ -676,7 +715,8 @@ func restore_state(data: Dictionary) -> bool:
 			continue
 		var failed: Dictionary = {}
 		for resource_id in entry.get("resource_ids", []):
-			failed[int(resource_id)] = true
+			var access: Variant = entry.get("access", {}).get(int(resource_id))
+			failed[int(resource_id)] = access.duplicate() if access is Array else true
 		failed_gather_targets[worker_id] = failed
 	return true
 
