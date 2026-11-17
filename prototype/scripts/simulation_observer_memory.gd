@@ -35,14 +35,15 @@ func restore_last_known_buildings(world, encoded: Dictionary) -> void:
 		last_known_buildings_by_player[observer_team] = restored
 
 
-func known_resource_memory_state(world) -> Dictionary:
+func known_resource_memory_state(world, detached: bool = true) -> Dictionary:
 	var result: Dictionary = {}
 	var observers: Array = known_resources_by_player.keys()
 	for observer_value in observers:
 		var observer_team = int(observer_value)
 		world.get_known_resources(observer_team)
 		var cached: Dictionary = known_resources_by_player[observer_value]
-		result[observer_team] = cached.get("resources", []).duplicate(true)
+		var rows: Array = cached.get("resources", [])
+		result[observer_team] = rows.duplicate(true) if detached else rows
 	return result
 
 
@@ -247,32 +248,38 @@ func _empty_known_resource_cache(world, alliance_signature: int) -> Dictionary:
 	}
 
 
-func _refresh_known_resource_cache(world, observer_team: int, cached: Dictionary, fog) -> void:
+func _refresh_known_resource_cache(world, observer_team: int, cached: Dictionary, fog, sampled: Dictionary = {}) -> void:
+	var dirty_ids: Dictionary = cached["dirty_ids"]
+	if dirty_ids.is_empty() and fog.newly_explored_cells_by_player.get(observer_team, []).is_empty() and fog.newly_visible_cells_by_player.get(observer_team, {}).is_empty():
+		return
 	var changed = false
 	var allies: Dictionary = fog.shared_vision_by_player.get(observer_team, {})
+	var remembered_by_cell: Dictionary = cached["by_cell"]
+	var resources_by_cell: Dictionary = world.resource_nodes_by_cell
+	var sight: PackedByteArray = fog.states_by_player[observer_team]
 	var candidate_cells: Dictionary = {}
 	for cell_index_value in fog.consume_newly_explored_cells(observer_team):
 		candidate_cells[int(cell_index_value)] = true
 	for cell_index_value in fog.consume_newly_visible_cells(observer_team):
 		candidate_cells[int(cell_index_value)] = true
-	for cell_index_value in candidate_cells.keys():
+	for cell_index_value in candidate_cells:
 		var cell_index = int(cell_index_value)
-		var cell = Vector2i(cell_index % world.map_size.x, cell_index / world.map_size.x)
-		if fog.state_at_cell(observer_team, cell) != FogOfWar.VISIBLE:
+		if not resources_by_cell.has(cell_index) and not remembered_by_cell.has(cell_index):
+			continue
+		if cell_index < 0 or cell_index >= sight.size() or sight[cell_index] != FogOfWar.VISIBLE:
 			continue
 		var live_ids: Dictionary = {}
-		for resource_value in world.resource_nodes_by_cell.get(cell_index, []):
+		for resource_value in resources_by_cell.get(cell_index, []):
 			var resource: Dictionary = resource_value
 			var resource_id = int(resource.get("id", -1))
 			live_ids[resource_id] = true
-			changed = world._remember_known_resource(cached, resource) or changed
-		var remembered_in_cell: Dictionary = cached.get("by_cell", {}).get(cell_index, {})
+			changed = _remember_known_resource(world, cached, resource, false, sampled) or changed
+		var remembered_in_cell: Dictionary = remembered_by_cell.get(cell_index, {})
 		for resource_id_value in remembered_in_cell.keys():
 			var resource_id = int(resource_id_value)
 			if not live_ids.has(resource_id):
 				changed = world._forget_known_resource(cached, resource_id) or changed
-	var dirty_ids: Dictionary = cached.get("dirty_ids", {})
-	for resource_id_value in dirty_ids.keys():
+	for resource_id_value in dirty_ids:
 		var resource_id = int(resource_id_value)
 		var live: Variant = world.resource_nodes_by_id.get(resource_id)
 		var remembered: Variant = cached.get("ids", {}).get(resource_id)
@@ -289,7 +296,7 @@ func _refresh_known_resource_cache(world, observer_team: int, cached: Dictionary
 		if not allied_resource and fog.state_at_world(observer_team, position) != FogOfWar.VISIBLE:
 			continue
 		if live is Dictionary:
-			changed = world._remember_known_resource(cached, live) or changed
+			changed = _remember_known_resource(world, cached, live, false, sampled) or changed
 		else:
 			changed = world._forget_known_resource(cached, resource_id) or changed
 	dirty_ids.clear()
@@ -312,17 +319,24 @@ func _mark_known_resource_dirty(world, resource: Dictionary) -> void:
 		cached["dirty_ids"] = dirty_ids
 
 
-func _remember_known_resource(world, cached: Dictionary, resource: Dictionary, compact_source: bool = false) -> bool:
+func _remember_known_resource(world, cached: Dictionary, resource: Dictionary, compact_source: bool = false, sampled: Variant = null) -> bool:
 	var resource_id = int(resource.get("id", -1))
 	if resource_id < 0:
 		return false
 	if int(resource.get("amount", 0)) <= 0 and not bool(resource.get("visible_when_depleted", false)):
 		return world._forget_known_resource(cached, resource_id)
-	var memory: Dictionary = EntityReadContract.render(resource) if compact_source else world.render_entity_projection_cache.project(resource)
+	# All observers sample the same unchanged source in this visibility pass.
+	# Only its immutable render row is shared; each observer owns its memory.
+	var memory: Dictionary
+	if sampled is Dictionary and sampled.has(resource_id):
+		memory = sampled[resource_id]
+	else:
+		memory = EntityReadContract.render(resource) if compact_source else world.render_entity_projection_cache.project(resource)
+		if sampled is Dictionary: sampled[resource_id] = memory
 	var ids: Dictionary = cached.get("ids", {})
 	var existing: Variant = ids.get(resource_id)
 	if existing is Dictionary:
-		if existing == memory:
+		if is_same(existing, memory) or existing == memory:
 			return false
 		if existing.get("pos") != memory.get("pos") or (int(existing.get("amount", 0)) > 0) != (int(memory.get("amount", 0)) > 0):
 			world._mark_known_resource_marker_changed(cached, resource_id)
@@ -367,10 +381,10 @@ func _forget_known_resource(world, cached: Dictionary, resource_id: int) -> bool
 	_mark_scene_chunk(cached, world._resource_chunk_key(memory))
 	world._mark_resource_view_changed(cached, resource_id)
 	var known: Array = cached.get("resources", [])
-	known.erase(memory)
+	_remove_known_resource(known, resource_id)
 	if cached.has("ai_projection"):
 		var projected: Dictionary = cached["ai_projection"]
-		projected["resources"].erase(projected["ids"].get(resource_id))
+		_remove_known_resource(projected["resources"], resource_id)
 		projected["ids"].erase(resource_id)
 		if projected.has("publication"):
 			projected["publication"].erase(resource_id)
@@ -547,16 +561,26 @@ func _mark_resource_view_changed(world, cached: Dictionary, id: int) -> void:
 	if not view.is_empty(): view["dirty"][id] = true
 
 
-func _replace_known_resource(world, known: Array, replacement: Dictionary) -> void:
-	var id = int(replacement["id"])
-	var low = 0
-	var high = known.size()
+static func _resource_index(known: Array, id: int) -> int:
+	var low := 0
+	var high := known.size()
 	while low < high:
-		var middle = (low + high) / 2
+		var middle := (low + high) >> 1
 		if int(known[middle]["id"]) < id:
 			low = middle + 1
 		else:
 			high = middle
+	return low
+
+
+static func _remove_known_resource(known: Array, id: int) -> void:
+	var index := _resource_index(known, id)
+	if index < known.size() and int(known[index]["id"]) == id: known.remove_at(index)
+
+
+func _replace_known_resource(world, known: Array, replacement: Dictionary) -> void:
+	var id := int(replacement["id"])
+	var low := _resource_index(known, id)
 	if low < known.size() and int(known[low]["id"]) == id:
 		known[low] = replacement
 	else:
@@ -565,6 +589,10 @@ func _replace_known_resource(world, known: Array, replacement: Dictionary) -> vo
 
 func _insert_known_resource_sorted(world, known: Array, resource: Dictionary) -> void:
 	var resource_id = int(resource.get("id", -1))
+	# Restoring an ordered memory or discovering monotonically assigned IDs.
+	if known.is_empty() or int(known.back()["id"]) <= resource_id:
+		known.append(resource)
+		return
 	var lower = 0
 	var upper = known.size()
 	while lower < upper:

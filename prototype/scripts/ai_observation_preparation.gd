@@ -51,21 +51,80 @@ func _command_rule_cache(world, team: int, units: Array, options: Dictionary) ->
 		command_rule_caches[team] = retained
 	return retained
 
+func _options(ai, apply_tick: int, probe: Variant) -> Dictionary:
+	var options: Dictionary = ai.decision_options(apply_tick) if ai.has_method("decision_options") else ai.presentation_options()
+	options["defer_build_sites"] = true
+	options["build_site_filter_in_worker"] = true
+	options["_ai_profile_cache"] = {"_catalog_stats":actor_catalog_stats}
+	options["_ai_build_options_cache"] = {}
+	options["_ai_command_options_cache"] = {}
+	if probe != null:
+		options["performance_probe"] = probe
+		options["performance_prefix"] = "presentation.ai.observation"
+	return options
+
+# Capture legal actors, their command capabilities, and current economic facts
+# on their observation tick. No mutable entity or generation token survives
+# this call. Navigation and build-site inputs have separate sampling ticks.
+func capture_facts(world, store, ai, source_tick: int, target: int, navigation: Dictionary, probe: Variant) -> Dictionary:
+	if probe == null and profile_input_stages: probe = world.tick_pipeline.stage_observer
+	var started := Time.get_ticks_usec()
+	var team := int(ai.team)
+	var options := _options(ai, target, probe)
+	options["_publish_factual_units"] = true
+	var projection := {}
+	var token: Dictionary = world.pin_read_generation()
+	while not store.prepare_projection(world, team, projection, 65536): pass
+	var facts: Dictionary = store.observe(world, source_tick, team, options, projection)
+	world.release_read_generation(token)
+	projection.clear()
+	options["_ai_command_rule_cache"] = _command_rule_cache(world, team, facts["units"], options)
+	options["foundation_units"] = facts["units"]
+	options["_published_navigation"] = navigation
+	options["defer_site_capture"] = true
+	var unit_inputs_started := Time.get_ticks_usec() if probe != null else 0
+	options["_planner_unit_inputs"] = Queries.AiProfile.capture_unit_inputs(world, team, facts["units"], options)
+	if probe != null and not options["_planner_unit_inputs"].is_empty():
+		probe.observe_microseconds("presentation.ai.unit_profile_inputs", Time.get_ticks_usec() - unit_inputs_started)
+		probe.increment("ai.worker_profile_units", facts["units"].size())
+	var knowledge := Queries.enrich(world, facts, options)
+	var actors := Data.freeze_owned({"units":knowledge["units"], "buildings":knowledge["buildings"]})
+	if actors.is_empty(): return {}
+	knowledge["units"] = actors["units"]
+	knowledge["buildings"] = actors["buildings"]
+	for key in ["units","buildings","resources","navigation","_planner_unit_facts"]:
+		var publication: Variant = knowledge.get(key)
+		if (publication is Dictionary or publication is Array) and publication.is_read_only():
+			Data._retain_immutable(publication)
+	var result := Planning.capture(ai, knowledge, target, true)
+	if probe != null: probe.observe_microseconds("presentation.ai.published_facts", Time.get_ticks_usec() - started)
+	return result
+
+func capture_sites(world, ai, input: Dictionary, tick: int) -> Dictionary:
+	var knowledge: Dictionary = input["snapshot"].duplicate()
+	var kinds: Array = knowledge["_pending_build_site_kinds"]
+	knowledge.erase("_pending_build_site_kinds")
+	var options := _options(ai, int(input["tick"]), null)
+	knowledge["build_site_queries"] = Queries.capture_deferred_sites(world, {"observer_team":ai.team, "tick":tick}, kinds, options)
+	var result := input.duplicate()
+	result.erase(Data.SEAL_KEY)
+	result["snapshot"] = knowledge
+	# Copy mutable query envelopes privately; the earlier facts remain shared.
+	for key in ["definition","state"]:
+		if input[key].is_read_only(): Data._retain_immutable(input[key])
+	for key in ["units","buildings","resources","navigation","_planner_unit_facts"]:
+		var publication: Variant = knowledge.get(key)
+		if (publication is Dictionary or publication is Array) and publication.is_read_only():
+			Data._retain_immutable(publication)
+	return Data.seal(Data.capture_frozen(result))
+
 func capture(world, store, ai, source_tick: int, apply_tick: int, probe: Variant = null, budget_usec: int = CAPTURE_BUDGET_USEC) -> Dictionary:
 	if probe == null and profile_input_stages: probe = world.tick_pipeline.stage_observer
 	var team := int(ai.team)
 	var pending: Dictionary = captures.get(team, {})
 	if pending.is_empty():
 		assert(captures.size() < MAX_CAPTURES)
-		var initial_options: Dictionary = ai.decision_options(apply_tick) if ai.has_method("decision_options") else ai.presentation_options()
-		initial_options["defer_build_sites"] = true
-		initial_options["build_site_filter_in_worker"] = true
-		initial_options["_ai_profile_cache"] = {"_catalog_stats":actor_catalog_stats}
-		initial_options["_ai_build_options_cache"] = {}
-		initial_options["_ai_command_options_cache"] = {}
-		if probe != null:
-			initial_options["performance_probe"] = probe
-			initial_options["performance_prefix"] = "presentation.ai.observation"
+		var initial_options := _options(ai, apply_tick, probe)
 		pending = {"world": weakref(world), "token": world.pin_read_generation(), "source_tick": source_tick, "apply_tick": apply_tick, "options": initial_options, "phase": "actors", "projection": {}, "snapshot": {}, "unit_cursor": 0, "building_cursor": 0, "units": [], "buildings": [], "owner_us": 0, "prepare_us": 0, "snapshot_us": 0}
 		captures[team] = pending
 	if int(pending["source_tick"]) != source_tick or int(pending["apply_tick"]) != apply_tick or pending["world"].get_ref() != world or int(pending["token"]["epoch"]) != int(world.entity_changes.epoch):

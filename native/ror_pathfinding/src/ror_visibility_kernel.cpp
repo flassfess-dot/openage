@@ -19,6 +19,7 @@ void RoRVisibilityKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("apply_owned_source_deltas", "states_by_player", "counts_by_player", "observer", "input"), &RoRVisibilityKernel::apply_owned_source_deltas);
     ClassDB::bind_method(D_METHOD("apply_observer_source_deltas", "states_by_player", "counts_by_player", "input"), &RoRVisibilityKernel::apply_observer_source_deltas);
     ClassDB::bind_method(D_METHOD("collect_source_deltas", "input"), &RoRVisibilityKernel::collect_source_deltas);
+    ClassDB::bind_method(D_METHOD("collect_source_journal", "input"), &RoRVisibilityKernel::collect_source_journal);
 }
 
 void RoRVisibilityKernel::configure(int32_t width, int32_t height) {
@@ -244,28 +245,110 @@ Dictionary RoRVisibilityKernel::apply_source_deltas_internal(const Dictionary &i
     return result;
 }
 Dictionary RoRVisibilityKernel::collect_source_deltas(const Dictionary &input) const {
+    return collect_sources(input, false);
+}
+
+Dictionary RoRVisibilityKernel::collect_source_journal(const Dictionary &input) const {
+    return collect_sources(input, true);
+}
+
+Dictionary RoRVisibilityKernel::collect_sources(const Dictionary &input, bool from_journal) const {
     static const Variant hp("hp"), components_key("components"), vision_key("vision"), range("range"), enabled("enabled"), state("state");
     static const Variant team_key("team"), id_key("id"), pos("pos"), radius_key("radius"), center_key("center"), cells_key("cells");
     static const Variant seen_generation("seen_generation"), entity_key("entity"), source_revision("source_revision");
-    const Array entities = input[ROR_FIELD("entities")];
     Dictionary sources = input[ROR_FIELD("sources")], states = input[ROR_FIELD("states")], personal = input[ROR_FIELD("personal")];
     Array added = input[ROR_FIELD("added")], previous_rows = input[ROR_FIELD("previous")], current_rows = input[ROR_FIELD("current")];
     const Callable ensure_player = input[ROR_FIELD("ensure_player")];
-    const int64_t category = input[ROR_FIELD("category")], generation = input[ROR_FIELD("generation")];
-    const int64_t buckets = std::max<int64_t>(1, input[ROR_FIELD("buckets")]), phase = input[ROR_FIELD("phase")];
-    int64_t regenerated = 0, vision_us = 0;
+    const int64_t generation = input[ROR_FIELD("generation")];
+    const int64_t buckets = std::max<int64_t>(1, input.get(ROR_FIELD("buckets"), 1)), phase = input.get(ROR_FIELD("phase"), 0);
+    int64_t regenerated = 0, vision_us = 0, roster_us = 0;
     const bool profile = input.get(ROR_FIELD("profile"), false);
-    for (int64_t index = 0; index < entities.size(); ++index) {
-        const Dictionary entity = entities[index];
-        if (double(entity.get(hp, 0.0)) <= 0.0 || String(entity.get(state, ROR_FIELD("complete"))) == "foundation") continue;
-        const Dictionary components = entity.get(components_key, Dictionary()), vision = components.get(vision_key, Dictionary());
-        const double radius = std::max(0.0, double(vision.get(range, 0.0)));
-        if (radius <= 0.0 || !bool(vision.get(enabled, false))) continue;
+    const Dictionary empty;
+    static const Variant foundation("foundation");
+    struct Source {
+        Dictionary entity;
+        int64_t stable;
+        int64_t key;
+        int64_t team;
+        double radius;
+    };
+    std::vector<Source> emitters[2];
+    Array removed = from_journal ? Array(input[ROR_FIELD("removed")]) : Array();
+    auto retire = [&](int64_t key) {
+        const Variant old = sources.get(key, Variant());
+        if (old.get_type() == Variant::DICTIONARY) {
+            removed.append(old);
+            sources.erase(key);
+        }
+    };
+    auto admit = [&](const Dictionary &entity, int64_t stable, int category) {
+        const int64_t key = (stable << 1) | category;
         const int64_t team = entity.get(team_key, 0);
-        if (team <= 0) continue;
+        if (team <= 0 || double(entity.get(hp, 0.0)) <= 0.0 || entity.get(state, ROR_FIELD("complete")) == foundation) {
+            if (from_journal) retire(key);
+            return;
+        }
+        const Dictionary components = entity.get(components_key, empty), vision = components.get(vision_key, empty);
+        const double radius = std::max(0.0, double(vision.get(range, 0.0)));
+        if (radius <= 0.0 || !bool(vision.get(enabled, false))) {
+            if (from_journal) retire(key);
+            return;
+        }
+        emitters[category].push_back({entity, stable, key, team, radius});
+    };
+    if (from_journal) {
+        const auto started = profile ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
+        const Dictionary journal = input[ROR_FIELD("journal")], masks = journal[ROR_FIELD("masks")];
+        const Array ids = journal[ROR_FIELD("ids")];
+        const Dictionary units = input[ROR_FIELD("units")], buildings = input[ROR_FIELD("buildings")];
+        Dictionary pending = input[ROR_FIELD("pending")];
+        const int64_t motion_buckets = input[ROR_FIELD("motion_buckets")], motion_phase = input[ROR_FIELD("motion_phase")];
+        std::vector<int64_t> changed;
+        const int64_t n = ids.size();
+        changed.reserve(n);
+        for (int64_t i = 0; i < n; ++i) {
+            const Variant &id = ids[i];
+            const int64_t mask = masks[id];
+            // Lifecycle, combat (including sight range), and ownership are immediate.
+            if (mask & (1 | 8 | 128)) changed.push_back(id);
+            else if (mask & 2) pending[id] = true;
+        }
+        const Array waiting = pending.keys();
+        const int64_t waiting_count = waiting.size();
+        for (int64_t i = 0; i < waiting_count; ++i) {
+            const int64_t id = waiting[i];
+            if (id % motion_buckets == motion_phase) {
+                changed.push_back(id);
+                pending.erase(id);
+            }
+        }
+        std::sort(changed.begin(), changed.end());
+        changed.erase(std::unique(changed.begin(), changed.end()), changed.end());
+        emitters[0].reserve(changed.size());
+        for (const int64_t id : changed) {
+            const Variant unit = units.get(id, Variant());
+            if (unit.get_type() == Variant::DICTIONARY) { admit(unit, id, 0); continue; }
+            const Variant building = buildings.get(id, Variant());
+            if (building.get_type() == Variant::DICTIONARY) { admit(building, id, 1); continue; }
+            retire(id << 1);
+            retire((id << 1) | 1);
+        }
+        if (profile) roster_us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started).count();
+    } else {
+        const int category = int64_t(input[ROR_FIELD("category")]) & 1;
+        const Array entities = input[ROR_FIELD("entities")];
+        const int64_t n = entities.size();
+        emitters[category].reserve(n);
+        for (int64_t i = 0; i < n; ++i) {
+            const Dictionary entity = entities[i];
+            const int64_t id = entity.get(id_key, -1);
+            admit(entity, id >= 0 ? id : i, category);
+        }
+    }
+    // The canonical publication processes units first, then buildings, each in ID order.
+    for (const auto &group : emitters) for (const Source &source : group) {
+        const auto &[entity, stable, key, team, radius] = source;
         if (!states.has(team)) ensure_player.call(team);
-        const int64_t id = entity.get(id_key, -1), stable = id >= 0 ? id : index;
-        const int64_t key = (stable << 1) | (category & 1);
         const Vector2 center = entity[pos];
         const Variant old_value = sources.get(key, Variant());
         const bool has_previous = old_value.get_type() == Variant::DICTIONARY;
@@ -307,6 +390,7 @@ Dictionary RoRVisibilityKernel::collect_source_deltas(const Dictionary &input) c
     }
     Dictionary result;
     result[ROR_FIELD("regenerated")] = regenerated; result[ROR_FIELD("vision_us")] = vision_us;
+    result[ROR_FIELD("roster_us")] = roster_us;
     return result;
 }
 bool RoRVisibilityKernel::is_configured() const {

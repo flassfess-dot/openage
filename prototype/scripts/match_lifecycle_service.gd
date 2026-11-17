@@ -82,14 +82,14 @@ func capture_save(world, controller, players: Array, decisions, path: String, sl
 func capture_save_header(controller, players: Array, decisions, path: String, slot_name: String, match_path: String, definition: Dictionary, view: Dictionary, runtime: Dictionary, include_replay: bool = true) -> Dictionary:
 	var ai_states: Array = []
 	for ai in players: ai_states.append(ai.canonical_state())
-	runtime = runtime.duplicate()
-	runtime["ai_decisions"] = decisions.canonical_state()
+	runtime = Data.copy(runtime)
+	runtime["_ai_decision_view"] = decisions.save_view()
 	var feedback: Array = []
 	for ai in players:
 		for entry in ai.strategy.pending:
 			var result: Dictionary = controller.get_command_result(int(entry["sequence"]))
 			if not result.is_empty() and int(result.get("issuer_id", -1)) == int(ai.team): feedback.append(result)
-	runtime["ai_feedback_results"] = feedback
+	runtime["ai_feedback_results"] = Data.copy(feedback)
 	# Capture one detached checkpoint at the completed source boundary. Its
 	# checksum, compression and archive encoding belong to the save worker.
-	return {"path": path, "slot_name": slot_name, "match_path": match_path, "definition": Data.copy(definition), "tick": controller.tick_index, "state_hash": "", "replay": controller.replay_recorder.to_dictionary() if include_replay else {}, "ai_states": Data.copy(ai_states), "view": Data.copy(view), "controller": Data.copy(runtime)}
+	return {"path": path, "slot_name": slot_name, "match_path": match_path, "definition": Data.copy(definition), "tick": controller.tick_index, "state_hash": "", "replay": controller.replay_recorder.to_dictionary() if include_replay else {}, "ai_states": Data.copy(ai_states), "view": Data.copy(view), "controller": runtime}

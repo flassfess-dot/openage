@@ -13,6 +13,8 @@
 
 namespace godot {
 
+class RoREntityChangeJournalKernel;
+
 // One configured map's immutable presentation rows. No simulation references.
 class RoREnvironmentQueryIndex : public RefCounted {
     GDCLASS(RoREnvironmentQueryIndex, RefCounted)
@@ -91,7 +93,7 @@ public:
     int64_t get_actor_pipeline_version() const { return 1; }
     Dictionary advance_ordered_unit_span(const Dictionary &context, double delta) const;
     Dictionary profile_storage_graph(const Dictionary &roots, int64_t node_limit = 32000000) const;
-    bool refresh_interpolated_items(const Array &items, const Callable &project, double alpha, const Dictionary &depth_index, double sprite_scale, const Array &camera = Array(), bool force_projection = true) const;
+    bool refresh_interpolated_items(const Array &items, const Callable &project, double alpha, const Dictionary &depth_index, double sprite_scale, const Array &camera = Array(), bool force_projection = true, bool preserve_motion = false) const;
     void cache_actor_sprites(const Array &items, double scale) const;
     void cache_actor_sprites_atlased(const Array &items, double scale, const Callable &atlas, Dictionary cache) const;
     Array changed_combat_ids(const Dictionary &delta, const Dictionary &units, const Dictionary &buildings, const Dictionary &sources, const Dictionary &classifications) const;
@@ -102,6 +104,7 @@ public:
     Array project_visible_static_items(const Array &items, const Vector2 &origin, double scale, const Rect2 &viewport, bool clip_buildings = false) const;
     Array merge_projected_static_items(const Array &first, const Array &second, const Vector2 &origin, double scale) const;
     Array create_unit_render_items(const Array &units, const Callable &project, const Callable &provider, const Callable &colors, double alpha, const Dictionary &depth_index, const Array &preview, const Array &selected, const Array &camera = Array()) const;
+    Array preserve_displayed_unit_motion(const Array &units, const Array &previous_items, double alpha) const;
     Dictionary create_building_render_items(const Array &buildings, const Callable &project, const Callable &provider, const Callable &colors, Dictionary records, const Array &preview, const Array &selected, int64_t observer, double scale, bool affine, const Callable &cache_sprite) const;
     Array clip_building_render_items(const Array &items, const Rect2 &viewport) const;
     void cache_sprite_items(const Array &items, double scale, const Vector2 &origin, const Callable &atlas, Dictionary cache) const;
@@ -116,7 +119,7 @@ public:
     Vector4 advance_native_motion(Dictionary unit, Object *movement_kernel, double delta, const Vector2i &map_size, const Dictionary &vertex_levels) const;
     Vector4 advance_native_group_motion(Dictionary unit, Object *movement_kernel, double delta, const Vector2i &map_size, const Dictionary &vertex_levels, const Array &neighbors, Object *planner, int64_t stop_tick) const;
     Vector4 advance_checked_move_order(Dictionary unit, Object *movement_kernel, double delta, const Vector2i &map_size, const Dictionary &vertex_levels, const Array &neighbors, Object *physical_planner, Object *knowledge_planner, int64_t stop_tick) const;
-    int64_t publish_active_unit_controls(const Array &units, const Dictionary &units_by_id, Object *journal, Object *activity) const;
+    int64_t publish_active_unit_controls(const Array &units, const Dictionary &units_by_id, Object *journal, Object *activity, const Dictionary &clock_only_workers = Dictionary()) const;
     int64_t set_motion_velocities(Dictionary unit, const Vector2 &desired, const Vector2 &actual) const;
     int64_t settle_mobile_contacts(const Dictionary &changes, const Array &active_units, const Array &all_units, const Dictionary &units_by_id,
         const Dictionary &buckets, const Array &entities, const Array &positions, const Array &radii,
@@ -128,6 +131,7 @@ public:
         const Callable &query_fallback, const Callable &separate, bool compare = false) const;
     Array resources_in_radius(const Dictionary &cells, const Vector2i &size, const Vector2 &origin, double radius) const;
     Dictionary owned_ai_actor_profile(const Dictionary &entity) const;
+    Dictionary capture_ai_unit_profile_inputs(const Array &visible, const Dictionary &units_by_id, int64_t observer, bool builder_rates) const;
     Dictionary partition_render_items(const Array &items) const;
     PackedInt64Array submit_world_queue(const RID &canvas, const Array &items, const Array &context, const Callable &fallback) const;
     int64_t submit_sprite_run(const RID &canvas, const Array &items, int64_t start) const;
@@ -163,6 +167,7 @@ public:
     Dictionary project_retained_control(const Dictionary &source, const Dictionary &rendered, int64_t observer, const Array &fields, const Array &private_trade_fields, Dictionary entry, Dictionary counters, bool metadata_only) const;
     Dictionary project_ui_control(const Dictionary &source, const Dictionary &rendered, int64_t observer, const Array &fields, const Dictionary &component_fields, const Array &private_trade_fields, Dictionary entry, Dictionary counters) const;
     Array capture_building_control_rows(const Array &rows, Dictionary counters) const;
+    Array project_scene_unit_controls(const Array &sources, const Array &rendered, int64_t observer, Dictionary eligible, const Dictionary &cache) const;
     void clear_control_row_certificates() { control_row_certificates.clear(); published_building_rows.clear(); }
     Dictionary project_control_legacy(const Dictionary &source, const Dictionary &rendered, int64_t observer, const Array &fields, const Array &private_trade_fields) const;
     Dictionary encode_replay_variant(const Variant &source, bool quantize_numbers = true) const;
@@ -237,22 +242,31 @@ private:
         int64_t id, stalled, group;
     };
     struct ActorBatchContext {
+        RoREntityChangeJournalKernel *journal = nullptr;
+        struct NavigationView {
+            Variant planner;
+            int64_t bindings = -1, revision = -1;
+        };
+        std::unordered_map<int64_t, NavigationView> navigation_views;
+        bool canonical_knowledge = false;
         Object *world = nullptr, *movement = nullptr, *gathering = nullptr, *conversion = nullptr, *knowledge = nullptr;
         Callable domain, gather_continue;
         Dictionary context, animation_clips, gather_visuals;
         Array result, animation_states;
         bool native_gather = false;
         bool gather_controller = false;
+        bool exhaustive_cluster_routes = false;
         Object *repository = nullptr, *approach = nullptr;
         Dictionary maximum_gatherers;
         Dictionary resource_nodes, buildings, resource_slots;
         int64_t gather_controller_calls = 0, gather_controller_moves = 0, gather_controller_returns = 0;
         int64_t gather_controller_transitions = 0, gather_controller_adoptions = 0;
         int64_t gather_controller_blocked_adoptions = 0;
+        int64_t worksite_clock_updates = 0, retained_worksites = 0, committed_worker_steps = 0;
+        int64_t worksite_ns = 0, worksite_calls = 0;
         int64_t gather_action = -1;
         Variant planner_value;
         Object *planner = nullptr;
-        int64_t planner_team = INT64_MIN;
         int64_t calls = 0, move_attempts = 0, direct_moves = 0, motion_updates = 0, candidates = 0;
         int64_t gather_recoveries = 0, gather_continuations = 0, domain_callbacks = 0;
         int64_t native_animations = 0, script_animations = 0;
@@ -262,8 +276,18 @@ private:
         int64_t gather_ns[10] = {}, gather_calls[10] = {};
     };
     bool prepare_actor_batch(ActorBatchContext &batch, const Dictionary &context) const;
+    int64_t select_actor_planner(int64_t team, ActorBatchContext &batch, MovementBatchContext &movement) const;
+    struct WorksiteClock {
+        int64_t worker = -1, revision = -1, resource = -1;
+        Vector2 resource_position;
+        bool needs_single_slot = false;
+    };
+    mutable std::vector<WorksiteClock> worksite_clocks;
+    mutable uint64_t worksite_journal_id = 0;
+    mutable int64_t worksite_epoch = -1;
     int64_t advance_actor_pipeline(Dictionary unit, double delta, ActorBatchContext &batch, MovementBatchContext &movement) const;
     static Variant gather_target(const Variant &id, const ActorBatchContext &batch);
+    bool advance_worksite_clock(Dictionary unit, int64_t id, double delta, ActorBatchContext &batch, MovementBatchContext &movement) const;
     int64_t advance_gather_controller(Dictionary unit, double delta, bool waiting, const Variant &target, ActorBatchContext &batch, MovementBatchContext &movement) const;
     Variant adopt_gather_resource(Dictionary unit, Dictionary requested, ActorBatchContext &batch, MovementBatchContext &movement) const;
     int64_t maximum_gatherers(const Dictionary &resource, ActorBatchContext &batch) const;
@@ -294,6 +318,13 @@ private:
     mutable int64_t prepared_shore_draws = 0;
     bool submit_cached_shadow(const RID &canvas, const Vector2 &center, float radius, const Color &color) const;
     bool submit_cached_selection_mesh(const RID &canvas, const Vector2 &center, const Color &color, const Vector2 &radius) const;
+    // Collision poses are numbers from the authoritative entity journal. The
+    // spatial owner supplies a separate, start-of-tick neighborhood generation.
+    struct ContactPose { Vector2 position; double radius = 0.0, indexed_radius = 0.0; };
+    mutable std::vector<ContactPose> contact_poses;
+    mutable uint64_t contact_spatial_owner = 0;
+    mutable int64_t contact_roster_revision = -1, contact_journal_revision = -1;
+    mutable int64_t contact_full_syncs = 0, contact_pose_reads = 0;
     mutable int64_t contact_frame_calls = 0, contact_frame_rows = 0, contact_frame_queries = 0, contact_frame_neighbors = 0;
     mutable int64_t contact_frame_fallbacks = 0, contact_frame_comparisons = 0, contact_frame_mismatches = 0;
     Vector4 advance_motion_internal(Dictionary unit, Object *movement_kernel, double delta, const Vector2i &map_size, const Dictionary &vertex_levels, const Array *neighbors, Object *planner, int64_t stop_tick, const MotionInputs *prepared = nullptr) const;

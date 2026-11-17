@@ -25,6 +25,9 @@ func configure(source_world, source_controller, source_players: Array, source_de
 	decisions = source_decisions
 	store = source_store
 	coordinator = source_coordinator
+	if decisions.active: decisions.prepare = Callable(self, "capture_ai")
+	decisions.prepare_navigation = Callable(self, "capture_navigation")
+	decisions.prepare_sites = Callable(self, "capture_sites")
 
 func shutdown() -> void:
 	preparation.clear()
@@ -39,7 +42,19 @@ func shutdown() -> void:
 	error = ""
 
 func capture_ai(ai, target_tick: int) -> Dictionary:
+	var record: Dictionary = decisions.record_for(ai)
+	if bool(record.get("split", false)):
+		return preparation.capture_facts(world, store, ai, controller.tick_index, target_tick, record["navigation"], controller.performance_probe)
 	return preparation.capture(world, store, ai, controller.tick_index, target_tick, controller.performance_probe, mini(capture_budget_override if capture_budget_override > 0 else Preparation.CAPTURE_BUDGET_USEC, decisions.preparation_usec_left))
+
+func capture_sites(ai, input: Dictionary, tick: int) -> Dictionary:
+	return preparation.capture_sites(world, ai, input, tick)
+
+func capture_navigation(ai, target_tick: int) -> Dictionary:
+	var options: Dictionary = ai.decision_options(target_tick) if ai.has_method("decision_options") else ai.presentation_options()
+	if not bool(options.get("include_navigation", true)):
+		return {"navigation":{}}
+	return world.ai_navigation_knowledge.capture_publication(world, world.get_fog_of_war(), int(ai.team))
 
 func next_decision_tick(ai, next_tick: int) -> int:
 	if not ai.enabled or world.player_registry.status(int(ai.team)) != "active":
@@ -53,26 +68,18 @@ func next_decision_tick(ai, next_tick: int) -> int:
 func queue_commands(next_tick: int = -1) -> Variant:
 	if next_tick < 0:
 		next_tick = controller.tick_index + 1
-	if decisions.active:
-		return _poll(next_tick)
-	# Live feedback is drained only between jobs. Captured input.state remains
-	# byte-for-byte stable until the source/apply barrier commits its output.
-	for ai in players: ai.collect_feedback(controller, controller.tick_index)
+	# Other teams may still be planning. Each observer retains its own input
+	# and drains feedback only when starting its next deterministic decision.
 	var horizon: int = controller.tick_index + AiDecisionQueue.LOOKAHEAD_TICKS
-	var target := horizon + 1
-	var due: Array = []
 	for ai in players:
+		if not decisions.record_for(ai).is_empty(): continue
+		ai.collect_feedback(controller, controller.tick_index)
 		var candidate := next_decision_tick(ai, next_tick)
 		if candidate < 0 or candidate > horizon:
 			continue
-		if candidate < target:
-			target = candidate
-			due = [ai]
-		elif candidate == target:
-			due.append(ai)
-	if due.is_empty():
+		decisions.schedule(ai, controller.tick_index, candidate, Callable(self, "capture_ai"), true)
+	if not decisions.active:
 		return false
-	decisions.begin(due, controller.tick_index, target, Callable(self, "capture_ai"))
 	return _poll(next_tick)
 func _poll(next_tick: int) -> Dictionary:
 	var status: Dictionary = decisions.poll(coordinator, controller.tick_index, render_frame_override if render_frame_override >= 0 else Engine.get_process_frames(), controller.performance_probe)

@@ -24,8 +24,8 @@ func _initialize() -> void:
 	var tick := int(game.game_controller.tick_index)
 	var original_definition: Dictionary = game.match_definition.duplicate(true)
 	var original_map: Dictionary = game.map_definition.duplicate(true)
-	var saved_hash := verifier.world_state_hash(game.simulation_world, tick, game.game_controller)
 	game.simulation_world.terrain_elevation.river_shape = {"size":Vector2i(2,2), "resolution":2, "samples":PackedFloat32Array([1,1,0,0,0,0,0,0,0,0,0,0])}
+	var saved_hash := verifier.world_state_hash(game.simulation_world, tick, game.game_controller)
 	check(game.save_game_to_path(PATH), "complete checkpoint writes")
 	var archive: Dictionary = Archive.read(PATH).get("archive", {})
 	check(int(archive.get("format_version", 0)) == Archive.FORMAT_VERSION and "world_checkpoint" in archive.get("schema_features", []), "new saves declare complete checkpoint schema")

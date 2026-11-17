@@ -2,6 +2,7 @@ class_name RoRGameSaveArchive
 extends RefCounted
 
 const ReplaySystem := preload("res://scripts/replay_system.gd")
+const DecisionQueue := preload("res://scripts/ai_decision_queue.gd")
 const Checkpoint := preload("res://scripts/game_checkpoint.gd")
 const SoundCueHistory := preload("res://scripts/sound_cue_history.gd")
 const FORMAT_VERSION := 8
@@ -20,6 +21,10 @@ static func create(match_path: String, match_definition: Dictionary, tick: int, 
 		push_error("Current save format requires a checkpoint")
 		return {}
 	var codec := ReplaySystem.new()
+	if controller_state.has("_ai_decision_view"):
+		controller_state = controller_state.duplicate()
+		controller_state["ai_decisions"] = DecisionQueue.encode_save_view(controller_state["_ai_decision_view"])
+		controller_state.erase("_ai_decision_view")
 	var saved_view := view_state.duplicate(true)
 	if not saved_view.has("sound_cue_history"):
 		saved_view["sound_cue_history"] = SoundCueHistory.empty_state()

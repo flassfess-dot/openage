@@ -104,6 +104,11 @@ func set_entity_field(world, entity: Dictionary, field: String, value: Variant) 
 	if resource_digest_job != null: resource_digest_job.before_change(int(entity.get("id", -1)))
 	if runtime_task_capture and field in ["task", "hp", "state", "combat_enabled"]:
 		_capture_runtime_field(world, entity, field, int(entity.get("id", -1)))
+	# The remaining worker timer is an authoritative scalar in checkpoints.
+	# HUD and AI read the action/phase; activity only needs its transition to zero.
+	if field == "work" and float(value) > 0.0 and float(entity.get(field, 0.0)) > 0.0:
+		entity[field] = value
+		return
 	entity[field] = value
 	var mask = EntityChangeJournal.field_mask(field)
 	entity_changes.mark(int(entity.get("id", -1)), mask)

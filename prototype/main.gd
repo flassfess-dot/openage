@@ -1270,6 +1270,12 @@ func _compare_producer_scene_view(bounds: Rect2i, selected: Array, tick: int) ->
 			push_error("Producer scene command availability differs: tick=%d building=%d" % [tick, int(row["id"])])
 			return
 	var expected_build: Variant = null
+	if published_render_scene.scene.has("worker_command_options"):
+		expected_build = simulation_world.get_build_options(local_player_team)
+		if published_render_scene.scene["worker_command_options"].get("build") != expected_build:
+			producer_scene_mismatches += 1
+			push_error("Published worker command availability differs at tick %d" % tick)
+			return
 	for row in published_render_scene.scene["units"]:
 		if int(row.get("team", 0)) != local_player_team or not row.get("command_options", {}).has("build"): continue
 		if expected_build == null: expected_build = simulation_world.get_build_options(local_player_team)
@@ -1990,7 +1996,6 @@ func _capture_save_input(path: String, slot_name: String = "Быстрое со�
 		# UI-owned fields are small and detached here. AI states, decision queues
 		# and the match definition are captured by the next owner at this tick.
 		return {"deferred_header": true, "path": path, "slot_name": slot_name, "match_path": match_path, "tick": game_controller.tick_index, "view": TaskData.copy(view_state), "controller": TaskData.copy(controller_state)}
-	controller_state["ai_decisions"] = ai_decision_queue.canonical_state()
 	if metadata_only:
 		return match_lifecycle.capture_save_header(game_controller, ai_players, ai_decision_queue, path, slot_name, match_path, match_definition, view_state, controller_state, false)
 	var input: Dictionary = match_lifecycle.capture_save(simulation_world, game_controller, ai_players, ai_decision_queue, path, slot_name, match_path, match_definition, map_definition, view_state, controller_state)
@@ -2019,9 +2024,7 @@ func _poll_autosave(delta: float) -> bool:
 		game_message = "Не удалось выполнить автосохранение. Повторим попытку."
 		message_time = 6.0
 	if not autosave.advance(delta, playable): return committed
-	# A pending AI observation can contain a whole navigation map. Wait for its
-	# normal publication instead of encoding it on the render thread.
-	if ai_decision_queue.active or background_saves.active_request >= 0 or not background_saves.waiting.is_empty(): return committed
+	if background_saves.active_request >= 0 or not background_saves.waiting.is_empty(): return committed
 	var started := Time.get_ticks_usec()
 	var defer_header := _can_use_simulation_owner() and autosave.supports_deferred_header()
 	var input := _capture_save_input(GameSaveArchive.AUTOSAVE_PATH, GameSaveArchive.AUTOSAVE_NAME, true, defer_header)
@@ -2359,6 +2362,10 @@ func current_world_drawables() -> Array:
 	var selected_ids := player_control_state.selected_ids()
 	var control_signature := hash([highlighted_ids, selected_ids])
 	var frame := Engine.get_process_frames()
+	var running := simulation_owner.pending or (game_controller != null and not game_controller.paused)
+	if render_world.continuous_unit_motion != running:
+		render_world.continuous_unit_motion = running
+		cached_world_drawables_revision = -1
 	# Hit testing and drawing use the same pose within a displayed frame.
 	if is_inside_tree() and last_drawables_frame == frame and last_drawables_viewport == viewport and cached_world_drawables_revision == presentation_revision and cached_world_drawables_control_signature == control_signature and cached_projection_offset == view_offset and cached_projection_zoom == view_zoom and render_world.camera_cache_ready:
 		return last_frame_drawables

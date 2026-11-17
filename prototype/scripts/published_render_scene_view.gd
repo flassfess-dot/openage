@@ -3,6 +3,7 @@ extends RefCounted
 ## No world, controller, source cache, or owner-thread index is retained here.
 const CHUNK_SIZE := 8
 const Contract := preload("res://scripts/entity_read_contract.gd")
+const Components := preload("res://scripts/entity_components.gd")
 const Picking := preload("res://scripts/picking_service.gd")
 var scene: Dictionary = {}
 var kernel = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
@@ -12,6 +13,7 @@ var cached_resources: Array = []
 var queries := 0
 var resource_queries := 0
 var unit_metadata: Dictionary = {}
+var metadata_indexed := false
 var prediction_limits: Dictionary = {}
 var has_prediction_limits := false
 
@@ -21,6 +23,7 @@ func clear() -> void:
 	cached_bounds = Rect2i()
 	cached_resources = []
 	unit_metadata.clear()
+	metadata_indexed = false
 	prediction_limits = {}
 	has_prediction_limits = false
 
@@ -29,8 +32,16 @@ func adopt(value: Dictionary, limits: Variant = null) -> void:
 	has_prediction_limits = limits is Dictionary
 	prediction_limits = limits if has_prediction_limits else {}
 	unit_metadata.clear()
-	if bool(scene.get("split_unit_metadata", false)):
-		for row in scene["units"]: unit_metadata[int(row["id"])] = row
+	metadata_indexed = false
+
+func _selected_metadata(id: int, slot: int) -> Variant:
+	var rows: Array = scene["units"]
+	if slot < rows.size() and int(rows[slot]["id"]) == id: return rows[slot]
+	# An externally supplied or reordered presentation may use different slots.
+	if not metadata_indexed:
+		for row in rows: unit_metadata[int(row["id"])] = row
+		metadata_indexed = true
+	return unit_metadata.get(id)
 
 func select(bounds: Rect2i, selected_ids: Array) -> Dictionary:
 	if scene.is_empty(): return {}
@@ -44,17 +55,22 @@ func select(bounds: Rect2i, selected_ids: Array) -> Dictionary:
 	for category in ["units", "buildings"]:
 		var rows: Array = []
 		var controls: Array = []
-		var source_rows: Array = scene["render_units"] if category == "units" and bool(scene.get("split_unit_metadata", false)) else scene[category]
-		for row in source_rows:
+		var split_units: bool = category == "units" and bool(scene.get("split_unit_metadata", false))
+		var source_rows: Array = scene["render_units"] if split_units else scene[category]
+		for slot in range(source_rows.size()):
+			var row: Dictionary = source_rows[slot]
 			var id: int = row["id"]
 			var chosen := selected.has(id)
 			if chosen or rectangle.has_point(Vector2(row["pos"])):
 				var presented: Dictionary = row
-				if category == "units" and (prediction_limits.has(id) or (chosen and unit_metadata.has(id)) or clocks.has(id)):
+				var metadata: Variant = _selected_metadata(id, slot) if split_units and chosen else null
+				if category == "units" and (prediction_limits.has(id) or metadata != null or clocks.has(id)):
 					presented = row.duplicate()
-					if chosen and unit_metadata.has(id):
-						presented.merge(unit_metadata[id], true)
+					if metadata != null:
+						presented.merge(metadata, true)
 						Contract.redact_foreign_control(presented, int(scene["observer_team"]))
+						if scene.has("worker_command_options") and int(presented.get("team", 0)) == int(scene["observer_team"]) and float(presented.get("hp", 0.0)) > 0.0 and Components.is_worker(presented):
+							presented["command_options"] = scene["worker_command_options"]
 					if prediction_limits.has(id): presented["render_prediction_alpha_limit"] = prediction_limits[id]
 					if clocks.has(id): presented["anim"] = clocks[id]
 				rows.append(presented)
@@ -85,6 +101,7 @@ func select(bounds: Rect2i, selected_ids: Array) -> Dictionary:
 	result.erase("render_units")
 	result.erase("split_unit_metadata")
 	result.erase("unit_animation_clocks")
+	result.erase("worker_command_options")
 	return result
 
 func _resources(chunks: Dictionary, bounds: Rect2i) -> Array:

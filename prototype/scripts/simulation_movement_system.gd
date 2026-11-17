@@ -79,6 +79,7 @@ var checked_move_sequence := 0
 var checked_move_tick_native := false
 var checked_move_attempts := 0
 var checked_move_updates := 0
+var clock_only_workers: Dictionary = {}
 # Whole-implementation diagnostic switch; no gameplay cases use it.
 # The shared stages are ready, but the native coordinator is not accepted yet.
 var common_movement_pipeline_enabled := OS.get_environment("ROR_DIAGNOSTIC_ENABLE_MOVEMENT_PIPELINE") == "1" and OS.get_environment("ROR_DIAGNOSTIC_DISABLE_MOVEMENT_PIPELINE") != "1"
@@ -171,6 +172,7 @@ func _refresh_native_capabilities() -> void:
 
 
 func prepare_unit_span(units: Array, enabled: bool, actor_context: Dictionary) -> Dictionary:
+	clock_only_workers.clear()
 	scoped_resource_digest_tick = scoped_resource_digest_requested and integration_kernel != null and integration_kernel.has_method("supports_scoped_resource_digest")
 	if profile_scoped_resource_digest:
 		scoped_resource_digest_sequence += 1
@@ -194,6 +196,7 @@ func prepare_unit_span(units: Array, enabled: bool, actor_context: Dictionary) -
 func advance_unit_span(context: Dictionary, delta: float) -> Dictionary:
 	var progress: Dictionary = integration_kernel.advance_ordered_unit_span(context, delta)
 	if progress.is_empty(): return progress
+	if progress.has("clock_only_workers"): clock_only_workers = progress["clock_only_workers"]
 	for key in progress.get("actor_key_counts", {}): cached_actor_key_counts[key] = int(cached_actor_key_counts.get(key, 0)) + int(progress["actor_key_counts"][key])
 	var count := int(progress["updates"])
 	for key in progress.get("actor_pipeline", {}):
@@ -220,7 +223,11 @@ func advance_unit_span(context: Dictionary, delta: float) -> Dictionary:
 func publish_active_controls(active_units: Array) -> bool:
 	if not native_control_publication_supported: return false
 	var simulation_world = world
-	var count: int = integration_kernel.publish_active_unit_controls(active_units, simulation_world.units_by_id, simulation_world.entity_changes, simulation_world.unit_activity_registry)
+	var count: int
+	if clock_only_workers.is_empty():
+		count = integration_kernel.publish_active_unit_controls(active_units, simulation_world.units_by_id, simulation_world.entity_changes, simulation_world.unit_activity_registry)
+	else:
+		count = integration_kernel.publish_active_unit_controls(active_units, simulation_world.units_by_id, simulation_world.entity_changes, simulation_world.unit_activity_registry, clock_only_workers)
 	if count < 0: return false
 	control_publication_batches += 1
 	return true
@@ -687,14 +694,20 @@ func _run_late_work_detour(unit: Dictionary, planner, yielding: bool, probe) -> 
 func _recover_route(unit: Dictionary, planner, global_repath: bool) -> void:
 	var started := Time.get_ticks_usec() if profile_recovery_cache else 0
 	var invalidated := 0
+	var previous_routes: Dictionary = {}
 	var local_route := _try_formation_transit_detour(unit, planner)
 	if global_repath and not local_route:
-		if profile_recovery_cache: invalidated = planner.cache.size() + planner.cell_cache.size() + planner.smoothed_cell_cache.size()
-		planner.clear_route_cache()
+		var planner_script = planner.get_script()
+		if planner_script != null and planner_script.resource_path == "res://scripts/pathfinder.gd":
+			previous_routes = planner.begin_recovery_routes()
+		else:
+			if profile_recovery_cache: invalidated = planner.cache.size() + planner.cell_cache.size() + planner.smoothed_cell_cache.size()
+			planner.clear_route_cache()
 	var cleared := Time.get_ticks_usec() if profile_recovery_cache else 0
 	if not local_route and not _try_formation_slot_exchange(unit, planner) and not _try_work_traffic_detour(unit, planner):
 		if not (global_repath and String(unit["task"]) == "gather" and world.gathering_system.replan_work_approach(unit)):
 			assign_unit_destination(unit, unit["destination"], false)
+	if not previous_routes.is_empty(): invalidated = planner.finish_recovery_routes(previous_routes, profile_recovery_cache)
 	if profile_recovery_cache:
 		var mode := "global" if global_repath else "local"
 		if not recovery_cache_counters.has(mode): recovery_cache_counters[mode] = {"calls":0,"invalidated":0,"clear_us":0,"total_us":0}

@@ -26,6 +26,10 @@ var _change_log: Array = []
 # Unlike the short route journal, it retains a page's last change indefinitely.
 var task_page_revisions: Dictionary = {}
 var task_full_revision := 0
+var _checkpoint_generation := 0
+var _checkpoint_revision := -1
+var _checkpoint_mask := PackedByteArray()
+var _checkpoint_indices := PackedInt32Array()
 var fast_region_queries_enabled := true
 var region_query_cache: Dictionary = {}
 var region_query_cache_revision := -1
@@ -36,6 +40,11 @@ func _record_change(cell: Vector2i) -> void:
 	region_query_cache.clear()
 	ChangeJournal.record_cell(_change_log, revision, cell, 96, 48)
 	task_page_revisions[Vector2i(cell.x / 16, cell.y / 16)] = revision + 1
+	if _checkpoint_revision >= 0 and contains(cell):
+		var index := cell.y * size.x + cell.x
+		if _checkpoint_mask[index] == 0:
+			_checkpoint_mask[index] = 1
+			_checkpoint_indices.append(index)
 
 
 func _record_full_change() -> void:
@@ -43,6 +52,35 @@ func _record_full_change() -> void:
 	ChangeJournal.record_full(_change_log, revision, revision + 1, 96)
 	task_page_revisions.clear()
 	task_full_revision = revision + 1
+	end_checkpoint_changes(_checkpoint_generation)
+
+
+# An autosave has a single loading checkpoint even when the short navigation
+# journal rolls over. Retain each edited cell once, bounded by the map area.
+func begin_checkpoint_changes() -> int:
+	_checkpoint_generation += 1
+	_checkpoint_revision = revision
+	_checkpoint_mask.resize(size.x * size.y)
+	_checkpoint_mask.fill(0)
+	_checkpoint_indices = PackedInt32Array()
+	return _checkpoint_generation
+
+
+func end_checkpoint_changes(generation: int) -> void:
+	if _checkpoint_revision < 0 or generation != _checkpoint_generation: return
+	_checkpoint_revision = -1
+	_checkpoint_mask = PackedByteArray()
+	_checkpoint_indices = PackedInt32Array()
+
+
+func checkpoint_changes_since(base_revision: int, generation: int) -> Variant:
+	if base_revision != _checkpoint_revision or generation != _checkpoint_generation: return null
+	var cells: Array[Vector2i] = []
+	cells.resize(_checkpoint_indices.size())
+	for offset in range(cells.size()):
+		var index := _checkpoint_indices[offset]
+		cells[offset] = Vector2i(index % size.x, index / size.x)
+	return cells
 
 
 func changed_task_pages_since(old_revision: int) -> Variant:

@@ -41,6 +41,7 @@ var geometry_metadata: Dictionary = {"world": {}, "cells": {}, "smooth": {}}
 var fallback_components: Dictionary = {}
 var resolved_endpoints: Dictionary = {}
 var endpoint_cache_revision := -1
+var route_cache_epoch := 0
 var profile_cache_eviction := "--profile-route-cache-eviction" in OS.get_cmdline_user_args()
 var cache_eviction_stats := {"calls":0,"reference_checks":0,"mismatches":0,"iterator_us":0,"keys_us":0,"entries_avoided":0}
 var cache_hits: int = 0
@@ -115,9 +116,7 @@ func clear_cache() -> void:
 
 
 func clear_route_cache() -> void:
-	# Stuck recovery needs a fresh route for one changed start/destination pair,
-	# but the revisioned walkability mask remains valid. Topology changes call
-	# clear_cache(), which additionally invalidates native kernels.
+	route_cache_epoch += 1
 	cache.clear()
 	resolved_endpoints.clear()
 	endpoint_cache_revision = -1
@@ -125,6 +124,48 @@ func clear_route_cache() -> void:
 	smoothed_cell_cache.clear()
 	geometry_metadata = {"world": {}, "cells": {}, "smooth": {}}
 	cache_hits = 0
+
+
+func begin_recovery_routes() -> Dictionary:
+	# A congested actor needs fresh geometry for every route it tries, including
+	# detours and alternative berths. Keep the owner's other routes off to the
+	# side by reference while this synchronous recovery runs.
+	var saved := {"grid": grid, "epoch": route_cache_epoch, "revision": route_cache_revision, "endpoint_revision": endpoint_cache_revision, "world": cache, "cells": cell_cache, "smooth": smoothed_cell_cache, "geometry": geometry_metadata, "endpoints": resolved_endpoints}
+	cache = {}
+	cell_cache = {}
+	smoothed_cell_cache = {}
+	resolved_endpoints = {}
+	geometry_metadata = {"world": {}, "cells": {}, "smooth": {}}
+	endpoint_cache_revision = -1
+	return saved
+
+
+func finish_recovery_routes(saved: Dictionary, profile: bool = false) -> int:
+	if saved["grid"] != grid or saved["epoch"] != route_cache_epoch or saved["revision"] != grid.revision:
+		return saved["world"].size() + saved["cells"].size() + saved["smooth"].size() if profile else 0
+	var replaced := 0
+	for name in ["world", "cells", "smooth"]:
+		var refreshed := _geometry_bucket(name)
+		var original: Dictionary = saved[name]
+		if profile:
+			for key in refreshed:
+				if original.has(key): replaced += 1
+		original.merge(refreshed, true)
+		saved["geometry"][name].merge(geometry_metadata[name], true)
+	cache = saved["world"]
+	cell_cache = saved["cells"]
+	smoothed_cell_cache = saved["smooth"]
+	geometry_metadata = saved["geometry"]
+	for name in ["world", "cells", "smooth"]:
+		while _geometry_bucket(name).size() > MAX_ROUTE_CACHE_ENTRIES: _trim_geometry_cache(name)
+	if saved["endpoint_revision"] == grid.revision:
+		var refreshed_endpoints := resolved_endpoints
+		resolved_endpoints = saved["endpoints"]
+		endpoint_cache_revision = grid.revision
+		for key in refreshed_endpoints:
+			if resolved_endpoints.has(key): resolved_endpoints[key] = refreshed_endpoints[key]
+			else: _remember_endpoint(key, refreshed_endpoints[key])
+	return replaced
 
 
 func set_native_enabled(enabled: bool) -> void:
@@ -369,14 +410,24 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 	if profile_movement_delta:
 		movement_delta_sequence += 1
 		native_delta = native_delta and ((movement_delta_sequence * 1103515245 + 12345) & 0xffff) >= 32768
-	var movement_delta: Array = movement_owner.collect_movement_delta(delta, world.units_by_id, movement_configuration_by_id) if native_delta else []
-	if native_delta and movement_delta.size() != 2:
-		movement_delta_counts["fallbacks"] += 1
-		native_delta = false
-	if native_delta:
-		changed = movement_delta[0]
-		rebuild = rebuild or bool(movement_delta[1])
-	else:
+	# Release duplicate generation references before the owner patches its
+	# numeric body table. A genuine worker reader still forces copy-on-write.
+	for kernel in movement_kernels:
+		if kernel != movement_owner: kernel.release_movement_snapshot()
+	var applied: Dictionary = {}
+	var fused_delta: bool = native_delta and not rebuild and not profile_movement_delta and movement_owner.has_method("apply_movement_journal")
+	if fused_delta:
+		applied = movement_owner.apply_movement_journal(delta, world.units_by_id)
+		rebuild = applied.is_empty()
+	elif native_delta:
+		var movement_delta: Array = movement_owner.collect_movement_delta(delta, world.units_by_id, movement_configuration_by_id)
+		if movement_delta.size() == 2:
+			changed = movement_delta[0]
+			rebuild = rebuild or bool(movement_delta[1])
+		else:
+			movement_delta_counts["fallbacks"] += 1
+			native_delta = false
+	if not native_delta:
 		for id in delta["ids"]:
 			var mask := int(delta["masks"][id])
 			if mask & 1 and (world.units_by_id.has(id) or movement_configuration_by_id.has(id)): rebuild = true
@@ -389,10 +440,6 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 	movement_delta_tick_native = native_delta
 	if profile_movement_delta: movement_delta_us["native" if native_delta else "script"] += Time.get_ticks_usec() - delta_started
 	if performance_probe != null: performance_probe.observe_microseconds("simulation.movement.delta.native" if native_delta else "simulation.movement.delta.script", Time.get_ticks_usec() - delta_started)
-	# Other terrain kernels drop borrowed owner generations before mutation.
-	# Worker batches have already joined at this owner-thread tick boundary.
-	for kernel in movement_kernels:
-		if kernel != movement_owner: kernel.release_movement_snapshot()
 	# Direct world updates also use this entry point. Retained movement kernels
 	# must observe removed resources and new buildings without another path query.
 	for key in movement_kernels_by_configuration:
@@ -412,6 +459,8 @@ func prepare_native_movement_snapshot(units: Array) -> void:
 		movement_kernels = movement_kernels_by_configuration.values()
 		movement_unit_kernels.clear()
 		for id in movement_configuration_by_id: movement_unit_kernels[id] = movement_kernels_by_configuration[movement_configuration_by_id[id]]
+	elif fused_delta:
+		_record_movement_snapshot_stats(applied)
 	else:
 		_record_movement_snapshot_stats(movement_owner.update_movement_entities(changed))
 	for kernel in movement_kernels:

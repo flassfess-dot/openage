@@ -81,6 +81,10 @@ var cached_building_records: Dictionary = {}
 var rally_drawables: Array = []
 var camera_cache_ready := false
 var camera_actor_items: Array = []
+var continuous_unit_motion := true
+var displayed_unit_tick := -1
+var displayed_observer := -1
+var displayed_unit_items: Array = []
 var camera_actor_statics: Variant = null
 var current_projection_origin := Vector2.ZERO
 var cached_refresh_input: Array = []
@@ -101,6 +105,9 @@ func clear_caches() -> void:
 	cached_building_records.clear()
 	camera_cache_ready = false
 	camera_actor_items = []
+	displayed_unit_tick = -1
+	displayed_observer = -1
+	displayed_unit_items = []
 	camera_actor_statics = null
 	cached_refresh_input = []
 	cached_refresh_static = []
@@ -180,6 +187,10 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	var source_markers: Array = world_source.get("markers", []) if from_snapshot else []
 	var source_environment: Array = world_source.get("environment", []) if from_snapshot else []
 	var source_units: Array = world_source.get("units", []) if from_snapshot else world_source.get_units()
+	if from_snapshot and continuous_unit_motion and displayed_unit_tick >= 0 and int(presentation_tick) >= displayed_unit_tick and displayed_observer == observer_team:
+		source_units = _preserve_displayed_unit_motion(source_units, alpha)
+	displayed_unit_tick = int(presentation_tick) if from_snapshot and continuous_unit_motion else -1
+	displayed_observer = observer_team
 	var resource_drawables: Array = _snapshot_resource_drawables(source_resources, world_to_screen, frame_info_provider, preview_ids + selected_ids, sprite_scale, world_source.get("resource_delta", {}), viewport) if from_snapshot and world_source.has("resources") else []
 	if performance_probe != null: performance_probe.observe_microseconds("presentation.resources.snapshot", Time.get_ticks_usec() - stage_started)
 	var resource_clip_started := Time.get_ticks_usec() if performance_probe != null else 0
@@ -328,15 +339,17 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 	_observe_stage("static_entities", stage_started)
 	stage_started = Time.get_ticks_usec() if performance_probe != null else 0
 	if from_snapshot and native_render_kernel != null and native_render_kernel.has_method("create_unit_render_items"):
-		drawables.append_array(native_render_kernel.create_unit_render_items(source_units, world_to_screen, frame_info_provider, Callable(self, "team_color"), alpha, cached_building_depth_index, preview_ids, selected_ids, camera_projection))
+		displayed_unit_items = native_render_kernel.create_unit_render_items(source_units, world_to_screen, frame_info_provider, Callable(self, "team_color"), alpha, cached_building_depth_index, preview_ids, selected_ids, camera_projection)
+		drawables.append_array(displayed_unit_items)
 	else:
+		var first_unit_item := drawables.size()
 		for unit in source_units:
 			var death_phase := String(unit.get("death_phase", "alive"))
 			if unit["hp"] > 0.0 or death_phase in ["dying", "corpse"]:
 				if not from_snapshot and observer_team > 0 and not world_source.is_entity_visible_to(observer_team, unit):
 					continue
 				var previous_position: Vector2 = unit.get("previous_pos", unit["pos"])
-				var render_position: Vector2 = previous_position.lerp(unit["pos"], minf(alpha, float(unit.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA))))
+				var render_position: Vector2 = previous_position.lerp(unit["pos"], _pose_alpha(unit, alpha))
 				var unit_screen: Vector2 = world_to_screen.call(render_position)
 				var unit_sort_screen := unit_screen
 				var depth_offset := _unit_building_depth_offset(render_position, unit_screen.y, cached_building_depth_index, world_to_screen)
@@ -366,6 +379,7 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
 				if death_phase == "alive" and highlighted:
 					drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
+		displayed_unit_items = drawables.slice(first_unit_item)
 	if sprite_scale > 0.0 and native_render_kernel != null:
 		if native_render_kernel.has_method("cache_actor_sprites_atlased"):
 			# Actors use the same bounded atlas/template cache as static sprites.
@@ -1149,7 +1163,10 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		# Camera refresh uses force_resort and must reproject every actor. During
 		# a fixed immutable publication only changing unit poses need interpolation.
 		var interpolation_items: Array = cached_refresh_moving if force_resort or not stationary_interpolation_skip_enabled else cached_refresh_interpolating
-		moved = bool(native_render_kernel.refresh_interpolated_items(interpolation_items, world_to_screen, alpha, cached_building_depth_index, cached_sprite_scale, camera_projection, force_resort)) or moved
+		if native_render_kernel.has_method("preserve_displayed_unit_motion"):
+			moved = bool(native_render_kernel.refresh_interpolated_items(interpolation_items, world_to_screen, alpha, cached_building_depth_index, cached_sprite_scale, camera_projection, force_resort, continuous_unit_motion)) or moved
+		else:
+			moved = bool(native_render_kernel.refresh_interpolated_items(interpolation_items, world_to_screen, alpha, cached_building_depth_index, cached_sprite_scale, camera_projection, force_resort)) or moved
 		refresh_items = cached_refresh_ambient
 	for drawable_value in refresh_items:
 		var drawable: Dictionary = drawable_value
@@ -1161,7 +1178,14 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 			position = ambient_actor_position(data, ambient_tick)
 			data["movement_direction"] = ambient_actor_direction(data, ambient_tick)
 		elif _is_interpolated_drawable(kind, data):
-			position = Vector2(data.get("previous_pos", data.get("pos", Vector2.ZERO))).lerp(Vector2(data.get("pos", Vector2.ZERO)), minf(alpha, float(data.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA))))
+			var destination := Vector2(data.get("pos", Vector2.ZERO))
+			var origin := Vector2(data.get("previous_pos", destination))
+			position = origin.lerp(destination, minf(alpha, float(data.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA))))
+			if continuous_unit_motion:
+				var step := destination - origin
+				var shown := Vector2(drawable["world_anchor"])
+				if (shown - Vector2(position)).dot(step) > 0.00000001 and step.length_squared() > 0.00000001:
+					position = origin.lerp(destination, _pose_alpha(data, (shown - origin).dot(step) / step.length_squared()))
 		if position == null:
 			# Static drawables keep their world anchor; their screen position only
 			# changes with the camera, and the affine pan/zoom projection preserves
@@ -1202,6 +1226,42 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 		var merged := merge_sorted_drawables(cached_refresh_static, cached_refresh_moving)
 		drawables.assign(merged)
 	return drawables
+
+
+static func _pose_alpha(row: Dictionary, alpha: float) -> float:
+	return minf(maxf(alpha, float(row.get("render_prediction_alpha_floor", 0.0))), float(row.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA)))
+
+
+# A newer publication can contain the same movement segment for an individual
+# actor. Keep its actual displayed progress on that segment when the global
+# interpolation clock resets. A new position pair uses the new clock directly.
+func _preserve_displayed_unit_motion(units: Array, alpha: float) -> Array:
+	if native_render_kernel != null and native_render_kernel.has_method("preserve_displayed_unit_motion"):
+		return native_render_kernel.preserve_displayed_unit_motion(units, displayed_unit_items, alpha)
+	var ahead := {}
+	for item in displayed_unit_items:
+		if item["kind"] != "unit": continue
+		var row: Dictionary = item["data"]
+		var destination := Vector2(row["pos"])
+		var origin := Vector2(row.get("previous_pos", destination))
+		var step := destination - origin
+		if step.length_squared() <= 0.00000001: continue
+		var shown := Vector2(item["world_anchor"])
+		if (shown - origin.lerp(destination, alpha)).dot(step) <= 0.00000001: continue
+		ahead[int(item["stable_id"])] = [origin, destination, (shown - origin).dot(step) / step.length_squared()]
+	if ahead.is_empty(): return units
+	var result := units
+	for index in range(units.size()):
+		var row: Dictionary = units[index]
+		var old: Array = ahead.get(int(row["id"]), [])
+		if old.is_empty() or old[0] != row.get("previous_pos", row["pos"]) or old[1] != row["pos"]: continue
+		var minimum := minf(old[2], float(row.get("render_prediction_alpha_limit", MAX_INTERPOLATION_ALPHA)))
+		if minimum <= alpha: continue
+		if is_same(result, units): result = units.duplicate(false)
+		var bounded := row.duplicate(false)
+		bounded["render_prediction_alpha_floor"] = minimum
+		result[index] = bounded
+	return result
 
 
 func _is_interpolated_drawable(kind: String, data: Dictionary) -> bool:

@@ -33,8 +33,7 @@ func run() -> void:
 	service._stage = base
 	for record in service._seed["replay"].get("commands",[]): last_sequence=maxi(last_sequence,int(record.get("sequence_id",0)))
 	if relay.start(_relay,Thread.PRIORITY_LOW)!=OK: get_tree().quit(1);return
-	# The exact existing recovery loop owns one world and follows recorded
-	# commands. No AI planning, rendering or shared gameplay pool is added.
+	# This process stages the archive. Its parent publishes it atomically.
 	service._run()
 	relay.wait_to_finish()
 	if not relay_error.is_empty(): push_error(relay_error)

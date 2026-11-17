@@ -98,6 +98,11 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}, pre
 		seen_unit_ids[unit_id] = true
 	_prune_entity_cache(cache["units"], seen_unit_ids)
 	_sort_by_entity_id_if_needed(units)
+	if bool(options.get("_publish_factual_units", false)):
+		# Each element came directly from ReadContract.ai, which publishes
+		# detached, recursively frozen rows. Only this array was constructed here.
+		units.make_read_only()
+		ReadContract.Data._retain_immutable(units)
 	_observe_stage(probe, prefix + ".units", stage_started)
 	stage_started = Time.get_ticks_usec() if probe != null else 0
 
@@ -132,6 +137,8 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}, pre
 	var remembered_buildings: Dictionary = world.last_known_buildings_by_player.get(observer_team, {})
 	var blocked_population_queues := 0
 	var building_rows: Array = legal["buildings"] if legal.has("buildings") else world.entity_read_index.legal_entities(world, observer_team, "buildings")
+	var memory_cursor: Dictionary = world.entity_read_index.memory_cursors.get(observer_team, {})
+	var memory_current: bool = not world.entity_changes.is_dirty() and memory_cursor.get("entity", -1) == world.entity_changes.revision and memory_cursor.get("fog", -1) == fog.revision_for_player(observer_team)
 	for building_value in building_rows:
 		var building: Dictionary = building_value
 		var building_id := int(building.get("id", -1))
@@ -143,7 +150,9 @@ func observe(world, tick: int, observer_team: int, options: Dictionary = {}, pre
 		var visible_now := prepared_ready or _entity_visible(building, observer_team, observer_states, fog_map_size)
 		var knowledge: Dictionary = building
 		if visible_now:
-			_remember_visible_building(remembered_buildings, building_id, building)
+			var sampled: Dictionary = remembered_buildings.get(building_id, {})
+			if not memory_current or not ReadContract.is_render_record(sampled) or sampled.get("anim") != building.get("anim") or sampled.get("previous_pos") != building.get("previous_pos"):
+				_remember_visible_building(remembered_buildings, building_id, building)
 		else:
 			knowledge = remembered_buildings.get(building_id, {})
 			if knowledge.is_empty():
@@ -317,6 +326,7 @@ func _remember_visible_building(memories: Dictionary, building_id: int, building
 
 
 func _add_population_point_costs(world, projected: Dictionary, observer_team: int) -> void:
+	if projected.has("production_queue") and projected["production_queue"].is_empty(): return
 	projected["production_queue"] = projected.get("production_queue", []).duplicate(true)
 	for order_value in projected.get("production_queue", []):
 		var order: Dictionary = order_value

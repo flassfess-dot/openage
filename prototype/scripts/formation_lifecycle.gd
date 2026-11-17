@@ -15,9 +15,22 @@ static func evaluate(group, members: Array, target_provider: Callable = Callable
 	var previous := String(group.state)
 	if members.is_empty():
 		return transition(group, DISBAND, "no_members")
-	var has_combat := members.any(func(unit): return String(unit.get("task", "")) == "attack")
-	var any_moving := members.any(func(unit): return String(unit.get("task", "")) in ["move", "attack_move"])
-	var maximum_slot_error := _maximum_slot_error(group, members)
+	var has_combat := false
+	var any_moving := false
+	var maximum_squared := 0.0
+	var assignments: Dictionary = group.assignments
+	var slots: Array = group.slots
+	for unit in members:
+		var task: String = unit.get("task", "")
+		has_combat = has_combat or task == "attack"
+		any_moving = any_moving or task == "move" or task == "attack_move"
+		var slot := int(assignments.get(unit.get("id", -1), -1))
+		if slot < 0 or slot >= slots.size() or slots[slot].is_empty():
+			maximum_squared = INF
+		else:
+			var position: Vector2 = unit.get("pos", Vector2.ZERO)
+			maximum_squared = maxf(maximum_squared, position.distance_squared_to(slots[slot]["world"]))
+	var maximum_slot_error := sqrt(maximum_squared)
 	var at_slots := maximum_slot_error <= SLOT_TOLERANCE
 	var desired := previous
 	var reason := "stable"
@@ -79,17 +92,6 @@ static func slot_mode_for(state: String) -> String:
 		REFORM: return "hard"
 		ASSEMBLE, TRAVEL, REGROUP, DEPLOY: return "soft"
 		_: return "none"
-
-
-static func _maximum_slot_error(group, members: Array) -> float:
-	var maximum := 0.0
-	for unit_value in members:
-		var unit: Dictionary = unit_value
-		var slot: Dictionary = group.slot_for(int(unit.get("id", -1)))
-		if slot.is_empty():
-			return INF
-		maximum = maxf(maximum, Vector2(unit.get("pos", Vector2.ZERO)).distance_to(Vector2(slot["world"])))
-	return maximum
 
 
 static func _engagement_forward(group, members: Array, target_provider: Callable) -> Vector2:

@@ -52,6 +52,7 @@ var observer_batch_reference_usec := 0
 var observer_batch_comparison_limit := 4096 if "--compare-all-observer-fog-batches" in OS.get_cmdline_user_args() else 32
 var native_available: bool = false
 var native_kernel: Variant = null
+var native_source_journal_available := false
 var source_scan_generation: int = 0
 
 
@@ -61,6 +62,7 @@ func _init(world_size: Vector2i = Vector2i.ONE) -> void:
 	if native_available:
 		native_kernel = ClassDB.instantiate("RoRVisibilityKernel")
 		native_kernel.configure(map_size.x, map_size.y)
+		native_source_journal_available = native_kernel.has_method("collect_source_journal")
 
 
 func reset() -> void:
@@ -929,6 +931,33 @@ func _record_exploration_index(changes: Dictionary, index: int) -> void:
 func exploration_changes_since(observer: int, previous_revision: int) -> Dictionary:
 	return ChangeJournal.delta(exploration_change_history.get(observer, []), previous_revision, exploration_revision_for_player(observer))
 
+
+func uses_native_source_journal() -> bool:
+	return native_deltas_enabled and native_enabled and native_source_journal_available
+
+
+func apply_source_journal(delta: Dictionary, units: Dictionary, buildings: Dictionary, pending: Dictionary, motion_buckets: int, motion_phase: int) -> void:
+	var started := Time.get_ticks_usec() if performance_probe != null else 0
+	var removed: Array[Dictionary] = []
+	var added: Array[Dictionary] = []
+	var previous: Array[Dictionary] = []
+	var current: Array[Dictionary] = []
+	var result: Dictionary = native_kernel.collect_source_journal({
+		"journal": delta, "units": units, "buildings": buildings, "pending": pending,
+		"motion_buckets": motion_buckets, "motion_phase": motion_phase,
+		"sources": vision_sources, "states": states_by_player, "personal": personally_explored_by_player,
+		"generation": source_scan_generation, "profile": performance_probe != null,
+		"removed": removed, "added": added, "previous": previous, "current": current,
+		"ensure_player": Callable(self, "ensure_player"),
+	})
+	vision_cells_microseconds = int(result["vision_us"])
+	regenerated_sources = int(result["regenerated"])
+	if performance_probe != null:
+		var roster_us := int(result["roster_us"])
+		performance_probe.observe_microseconds("simulation.fog.delta.roster", roster_us)
+		performance_probe.observe_microseconds("simulation.fog.delta.collect", Time.get_ticks_usec() - started - roster_us)
+	_publish_entity_changes(removed, added, previous, current)
+
 # Called with source event deltas, never a partial roster requiring retirement.
 func apply_entity_changes(units: Array, buildings: Array, removed_keys: Array) -> void:
 	var phase_started := Time.get_ticks_usec() if performance_probe != null else 0
@@ -946,7 +975,11 @@ func apply_entity_changes(units: Array, buildings: Array, removed_keys: Array) -
 	_collect_source_deltas(buildings, 1, 1, 0, added, previous, current)
 	if performance_probe != null:
 		performance_probe.observe_microseconds("simulation.fog.delta.collect", Time.get_ticks_usec() - phase_started)
-		phase_started = Time.get_ticks_usec()
+	_publish_entity_changes(removed, added, previous, current)
+
+
+func _publish_entity_changes(removed: Array[Dictionary], added: Array[Dictionary], previous: Array[Dictionary], current: Array[Dictionary]) -> void:
+	var phase_started := Time.get_ticks_usec() if performance_probe != null else 0
 	var changed: Dictionary = _apply_source_deltas(removed, added, previous, current)
 	if performance_probe != null: performance_probe.observe_microseconds("simulation.fog.delta.apply", Time.get_ticks_usec() - phase_started)
 	if not changed.is_empty():

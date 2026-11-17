@@ -11,9 +11,11 @@ var entries: Dictionary = {}
 var seen: Dictionary = {}
 var counters: Dictionary = {}
 var pending_building_fields: Array = []
+var pending_static_buildings: Dictionary = {}
 var world_id := -1
 var epoch := -1
 var certified_units: Array = []
+var unit_batch_ordered := false
 var certified_buildings: Array = []
 var building_rows_enabled := OS.get_environment("ROR_DIAGNOSTIC_BUILDING_ROW_CAPTURE") != "0"
 var building_rows_supported: bool = supported and kernel.has_method("capture_building_control_rows")
@@ -36,6 +38,7 @@ var source_journal: Variant
 
 func clear() -> void:
 	pending_building_fields.clear()
+	pending_static_buildings.clear()
 	entries.clear()
 	seen.clear()
 	counters.clear()
@@ -53,6 +56,7 @@ func clear() -> void:
 
 func begin(world, tick: int) -> void:
 	pending_building_fields.clear()
+	pending_static_buildings.clear()
 	if world_id != world.get_instance_id() or epoch != int(world.entity_changes.epoch):
 		clear()
 		world_id = world.get_instance_id()
@@ -61,6 +65,7 @@ func begin(world, tick: int) -> void:
 	source_journal = world.entity_changes
 	certified = supported and Contract.native_enabled
 	certified_units = []
+	unit_batch_ordered = false
 	certified_buildings = []
 	publication_sequence += 1
 	ui_reference_units = {}
@@ -72,6 +77,19 @@ func begin(world, tick: int) -> void:
 	if compare_generation:
 		comparison_generations += 1
 		counters["comparison_generations"] = comparison_generations
+
+func project_scene_units(sources: Array, rendered: Array, team: int, eligible: Dictionary) -> Array:
+	if not compact_ui_tick or not ui_versions_supported or compare_generation or not kernel.has_method("project_scene_unit_controls"):
+		return []
+	var publication: Dictionary = {}
+	var rows: Array = kernel.project_scene_unit_controls(sources, rendered, team, eligible, {
+		"entries":entries, "seen":seen, "counters":counters, "versions":ui_versions, "capacity":MAX_ENTRIES,
+		"fields":Contract.UI_CONTROL_FIELDS, "schema":Contract.UI_COMPONENT_FIELDS, "private":Contract.PRIVATE_TRADE_FIELDS,
+		"publication":publication,
+	})
+	unit_batch_ordered = bool(publication.get("ordered", false))
+	if rows.is_read_only() and rows.size() == sources.size(): certified_units = rows
+	return rows
 
 func project(entity: Dictionary, rendered: Dictionary, team: int, metadata_only: bool = false) -> Dictionary:
 	var id := int(entity.get("id", -1))
@@ -157,6 +175,7 @@ func seal_units(rows: Array) -> void:
 	# only adds the factory-frozen shared worker menu to shallow row copies.
 	# This certificate is issued only for the canonical UI options below.
 	if not certified: return
+	if is_same(rows, certified_units): return
 	for row in rows:
 		if not row.is_read_only(): row.make_read_only()
 	rows.make_read_only()
@@ -188,8 +207,37 @@ func publish_unit_menus(world, source: Array, team: int, eligible: Dictionary, c
 	return rows
 
 
+func static_building_row(id: int, base: Dictionary, menu_generation: int) -> Variant:
+	var entry: Variant = entries.get(id)
+	if not certified or entry == null or not base.is_read_only(): return null
+	var version := int(entry.get("building_version", -1))
+	if version < 0: return null
+	var previous: Variant = entry.get("static_publication")
+	if previous != null and int(previous["version"]) == version and int(previous["menu"]) == menu_generation and is_same(previous["base"], base):
+		return previous["row"]
+	pending_static_buildings[id] = {"base":base, "version":version, "menu":menu_generation, "slot":-1}
+	return null
+
+
+func last_known_building(id: int, memory: Dictionary) -> Dictionary:
+	var entry: Dictionary = entries.get(id, {})
+	if is_same(entry.get("last_known_source"), memory):
+		seen[id] = true
+		return entry["last_known_row"]
+	var row := EntityProjection._compact_render_entity(memory).duplicate()
+	row["last_known"] = true
+	row = Data.capture_frozen(row)
+	if memory.is_read_only() and (entries.has(id) or entries.size() < MAX_ENTRIES):
+		entry["last_known_source"] = memory
+		entry["last_known_row"] = row
+		entries[id] = entry
+		seen[id] = true
+	return row
+
+
 func compose_building(base: Dictionary, fields: Dictionary, index: int) -> Dictionary:
 	var id := int(base["id"])
+	if pending_static_buildings.has(id): pending_static_buildings[id]["slot"] = index
 	var entry: Dictionary = entries.get(id, {})
 	var keys: Array = entry.get("enriched_keys", [])
 	if is_same(entry.get("enriched_base"), base) and keys.size() == fields.size():
@@ -231,6 +279,13 @@ func seal_buildings(rows: Array) -> Array:
 		entry["enriched_keys"] = pending["keys"]
 		entry["enriched_row"] = completed[pending["index"]]
 	pending_building_fields.clear()
+	for id in pending_static_buildings:
+		var certificate: Dictionary = pending_static_buildings[id]
+		var slot := int(certificate["slot"])
+		if slot >= 0:
+			certificate["row"] = completed[slot]
+			entries[id]["static_publication"] = certificate
+	pending_static_buildings.clear()
 	if compare_building_rows and compare_generation:
 		counters["building_row_comparisons"] = int(counters.get("building_row_comparisons", 0)) + rows.size()
 		if completed != expected:
@@ -239,10 +294,20 @@ func seal_buildings(rows: Array) -> Array:
 	certified_buildings = completed
 	return completed
 
+
+func seal_completed_buildings(rows: Array) -> Array:
+	# Every entry is an immutable publication from seal_buildings or last_known_building.
+	rows.make_read_only()
+	certified_buildings = rows
+	return rows
+
 func retain_buildings(rows: Array) -> void:
 	if building_rows_native and is_same(rows, certified_buildings): Data._retain_immutable(rows)
 
 func finish() -> void:
 	source_journal = null
+	# Below capacity every certified, seen row has a cache entry. Equal
+	# cardinality then proves there are no retired IDs to evict.
+	if certified and entries.size() < MAX_ENTRIES and entries.size() == seen.size(): return
 	for id in entries.keys():
 		if not seen.has(id): entries.erase(id)

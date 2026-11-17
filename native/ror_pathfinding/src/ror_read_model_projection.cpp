@@ -480,6 +480,64 @@ Dictionary RoRReadModelKernel::capture_frozen(const Variant &source, const Array
     return result;
 }
 
+Array RoRReadModelKernel::project_scene_unit_controls(const Array &sources, const Array &rendered, int64_t observer,
+        Dictionary eligible, const Dictionary &cache) const {
+    Array result;
+    if (sources.size() != rendered.size()) return result;
+    Dictionary entries = cache["entries"], seen = cache["seen"], counters = cache["counters"];
+    const Dictionary versions = cache["versions"], schema = cache["schema"];
+    const Array fields = cache["fields"], private_fields = cache["private"];
+    const int64_t capacity = cache["capacity"];
+    const int64_t count = sources.size();
+    bool ordered = true, immutable = true;
+    int64_t previous_id = -1;
+    int64_t hits = 0, calls = 0;
+    result.resize(count);
+    for (int64_t i = 0; i < count; ++i) {
+        const Dictionary source = sources[i];
+        const Variant id = source[ROR_FIELD("id")];
+        const int64_t entity_id = id;
+        ordered = ordered && previous_id <= entity_id;
+        previous_id = entity_id;
+        if (double(source.get(ROR_FIELD("hp"), 0.0)) > 0.0) eligible[id] = true;
+        else if (!eligible.has(id)) {
+            const Dictionary pose = rendered[i];
+            immutable = immutable && pose.is_read_only();
+            result[i] = pose;
+            continue;
+        }
+        ++calls;
+        seen[id] = true;
+        Dictionary entry;
+        if (entries.has(id)) entry = entries[id];
+        else if (entries.size() < capacity) entries[id] = entry;
+        const int64_t version = versions.get(id, 0);
+        const bool own = observer <= 0 || int64_t(source.get(ROR_FIELD("team"), 0)) == observer;
+        if (entry.has(ROR_FIELD("ui_record")) && int64_t(entry.get(ROR_FIELD("ui_cached_version"), -1)) == version &&
+                bool(entry.get(ROR_FIELD("ui_own"), !own)) == own &&
+                UtilityFunctions::is_same(entry.get(ROR_FIELD("ui_cached_schema"), Variant()), schema) &&
+                UtilityFunctions::is_same(entry.get(ROR_FIELD("ui_cached_fields"), Variant()), fields)) {
+            result[i] = entry[ROR_FIELD("ui_record")];
+            ++hits;
+            continue;
+        }
+        const Dictionary control = project_ui_control(source, rendered[i], observer, fields, schema, private_fields, entry, counters);
+        if (control.is_empty()) return Array();
+        entry[ROR_FIELD("ui_cached_version")] = version;
+        entry[ROR_FIELD("ui_cached_schema")] = schema;
+        entry[ROR_FIELD("ui_cached_fields")] = fields;
+        result[i] = control;
+    }
+    counters[ROR_FIELD("calls")] = int64_t(counters.get(ROR_FIELD("calls"), 0)) + calls;
+    counters[ROR_FIELD("ui_version_hits")] = int64_t(counters.get(ROR_FIELD("ui_version_hits"), 0)) + hits;
+    if (cache.has(ROR_FIELD("publication"))) {
+        Dictionary publication = cache[ROR_FIELD("publication")];
+        publication[ROR_FIELD("ordered")] = ordered;
+        if (immutable) result.make_read_only();
+    }
+    return result;
+}
+
 Dictionary RoRReadModelKernel::project_ui_control(const Dictionary &source, const Dictionary &rendered,
         int64_t observer, const Array &fields, const Dictionary &component_fields, const Array &private_trade_fields,
         Dictionary entry, Dictionary counters) const {

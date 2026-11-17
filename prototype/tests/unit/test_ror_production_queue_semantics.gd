@@ -98,13 +98,20 @@ func test_mixed_research_queue(catalog) -> void:
 	assert_equal(upgrades.get_resource_amount(1, 0), 925, "cancelling refunds only the remaining upgrade")
 	assert_true(not upgrades.technology_system.is_researching(1, 41), "cancelling releases its reservation")
 	assert_true(upgrades.enqueue_research(750, 1, 41) != null, "cancelled research can be queued again")
+	var capacity = original_world(catalog)
+	capacity.set_resource_amount(1, 0, 10000)
+	capacity.grant_technology(1, 0)
+	capacity.grant_technology(1, 10)
+	var producer: Dictionary = capacity.add_building(751, "town_center", Vector2(10, 10), 1)
 	for _index in range(14):
 		# Fill the same producer with ordinary paid units to exercise the shared limit.
-		upgrades.set_resource_amount(1, 0, 10000)
-		upgrades.production_system.enqueue_unit(750, 1, "clubman", false)
-	assert_equal(pit["production_queue"].size(), 15, "units and research share the fifteen-order limit")
-	assert_true(upgrades.enqueue_research(750, 1, 46) == null, "full mixed queue rejects additional research")
-	assert_equal(upgrades.last_research_failure, "queue_full", "shared queue reports capacity explicitly")
+		assert_true(capacity.enqueue_unit_production(751, 1, "clubman") != null, "capacity fixture uses the public paid queue")
+	assert_true(capacity.enqueue_research(751, 1, 101) != null, "legal research fills the final shared queue slot")
+	assert_equal(producer["production_queue"].size(), 15, "units and research share the fifteen-order limit")
+	assert_true(capacity.cancel_production(751, 14), "cancelling waiting research frees a shared slot")
+	assert_true(capacity.enqueue_unit_production(751, 1, "clubman") != null, "an ordinary unit reuses the freed research slot")
+	assert_true(capacity.enqueue_research(751, 1, 101) == null, "full shared queue rejects research")
+	assert_equal(capacity.last_research_failure, "queue_full", "shared queue reports capacity explicitly")
 
 func test_building_loss_refunds_only_waiting_orders(catalog) -> void:
 	for loss_reason in ["destroyed", "converted"]:

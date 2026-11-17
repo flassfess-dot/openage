@@ -39,6 +39,11 @@ struct RoRJournalVersionReader {
         return result;
     }
     bool maximum(int64_t id, int64_t &revision) const {
+        if (native) {
+            const auto *versions = native->version_row(id);
+            revision = versions ? *std::max_element(versions->begin(), versions->end()) : -1;
+            return true;
+        }
         const Row row = read(id);
         if (!row.valid) return false;
         revision = -1;

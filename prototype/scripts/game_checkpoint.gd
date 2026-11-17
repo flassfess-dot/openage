@@ -99,27 +99,32 @@ static func capture(world, controller, definition: Dictionary, map: Dictionary, 
 		indices[name] = []
 		for entity in world.get(name): indices[name].append(int(entity["id"]))
 	var fog := _capture_fields(world.fog_of_war, FOG_FIELDS, detached)
-	fog["transient_visible_by_player"] = world.fog_of_war.transient_visible_by_player.duplicate(true)
+	fog["transient_visible_by_player"] = world.fog_of_war.transient_visible_by_player.duplicate(true) if detached else world.fog_of_war.transient_visible_by_player
 	fog["sources"] = {}
 	for key in world.fog_of_war.vision_sources:
-		var source: Dictionary = world.fog_of_war.vision_sources[key].duplicate(true)
+		var source: Dictionary = world.fog_of_war.vision_sources[key].duplicate(false)
 		source["entity_id"] = int(source.get("entity", {}).get("id", -1))
 		source.erase("entity")
-		fog["sources"][key] = source
+		fog["sources"][key] = source.duplicate(true) if detached else source
 	var knowledge := {}
 	for team in world.movement_system.knowledge.entries:
 		var entry: Dictionary = world.movement_system.knowledge.entries[team]
 		var grid := _capture_fields(entry["grid"], GRID_FIELDS, detached)
-		grid["learned"] = entry["grid"].learned.duplicate()
+		grid["learned"] = entry["grid"].learned.duplicate() if detached else entry["grid"].learned
 		knowledge[team] = {"grid": grid, "source_revision": entry["source_revision"], "fog_revision": entry.get("fog_revision", -1), "gate_revision": entry.get("gate_revision", -1)}
 	var world_state := _capture_fields(world, WORLD_FIELDS, detached)
-	if not detached:
-		world_state["units"] = world.units.duplicate(false)
-		for index in range(world.units.size()): world_state["units"][index] = world.units[index].duplicate(false)
-	for unit in world_state["units"]:
+	if not detached: world_state["units"] = world.units.duplicate(false)
+	for index in range(world_state["units"].size()):
+		var unit: Dictionary = world_state["units"][index]
+		if not unit.has("_formation_path_cache") and not unit.has("formation_steering_target"): continue
+		if not detached:
+			unit = unit.duplicate(false)
+			world_state["units"][index] = unit
 		unit.erase("_formation_path_cache")
 		unit.erase("formation_steering_target")
-	return {"version": VERSION, "match_statistics": world.match_statistics.state(), "runtime": _capture_runtime(world, controller), "observation_memory": {"buildings": world.last_known_buildings_by_player.duplicate(true), "resources": world.known_resource_memory_state()}, "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true), "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS, detached), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true)}
+	var buildings: Dictionary = world.last_known_buildings_by_player
+	var memory := {"buildings":buildings.duplicate(true) if detached else buildings, "resources":world.known_resource_memory_state(detached)}
+	return {"version": VERSION, "match_statistics": world.match_statistics.state(), "runtime": _capture_runtime(world, controller), "observation_memory": memory, "match_definition": definition.duplicate(true), "map_definition": map.duplicate(true) if detached else map, "world": world_state, "systems": systems, "indices": indices, "fog": fog, "grid": _capture_fields(world.navigation_grid, GRID_FIELDS, detached), "knowledge": knowledge, "controller": Snapshot._controller_state(controller), "rng_state": world.simulation_rng.state, "next_entity_id": world.entity_id_sequence.peek(), "next_path_request": world.navigation_service.next_request_id, "event_sequence": controller.event_stream.latest_sequence(), "wildlife_homes": controller.wildlife_behavior.coastal_homes.duplicate(true) if detached else controller.wildlife_behavior.coastal_homes}
 
 static func _digest(bytes: PackedByteArray) -> String:
 	var hashing := HashingContext.new()

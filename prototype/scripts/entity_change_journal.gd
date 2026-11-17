@@ -97,6 +97,7 @@ static func field_mask(field: String) -> int:
 		"task": return ACTIVITY | COMBAT | CONTROL
 		"order": return ACTIVITY | CONTROL
 		"hp": return COMBAT | CONTROL
+		"kind", "solid_animal": return COMBAT | APPEARANCE | CONTROL
 		"team": return OWNERSHIP | ACTIVITY | COMBAT | ECONOMY | APPEARANCE | CONTROL
 	match field:
 		"previous_pos", "anim", "anim_event_frame": return 0

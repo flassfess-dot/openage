@@ -54,6 +54,7 @@ void RoRPathKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("configure_movement_snapshot", "ids", "positions", "radii", "clearances", "priorities", "health", "solid_animals"), &RoRPathKernel::configure_movement_snapshot, DEFVAL(PackedByteArray()));
     ClassDB::bind_method(D_METHOD("configure_movement_entities", "units", "incremental"), &RoRPathKernel::configure_movement_entities, DEFVAL(true));
     ClassDB::bind_method(D_METHOD("update_movement_entities", "units"), &RoRPathKernel::update_movement_entities);
+    ClassDB::bind_method(D_METHOD("apply_movement_journal", "delta", "units_by_id"), &RoRPathKernel::apply_movement_journal);
     ClassDB::bind_method(D_METHOD("collect_movement_delta", "delta", "units_by_id", "configurations"), &RoRPathKernel::collect_movement_delta);
     ClassDB::bind_method(D_METHOD("release_movement_snapshot"), &RoRPathKernel::release_movement_snapshot);
     ClassDB::bind_method(D_METHOD("share_movement_snapshot", "source"), &RoRPathKernel::share_movement_snapshot);
@@ -133,6 +134,8 @@ void RoRPathKernel::configure_movement_snapshot(
         const PackedInt32Array &priorities,
         const PackedFloat32Array &health,
         const PackedByteArray &solid_animals) {
+    movement_domains_.clear();
+    movement_restrictions_.clear();
     auto next = std::make_shared<MovementSnapshot>();
     const int64_t count = std::min({ids.size(), positions.size(), radii.size(), clearances.size(), priorities.size(), health.size()});
     next->ids.resize(static_cast<size_t>(count));
@@ -189,7 +192,12 @@ Array RoRPathKernel::collect_movement_delta(const Dictionary &delta, const Dicti
     const Dictionary masks = masks_value;
     Array changed;
     bool rebuild = delta.get(full_key, false);
-    for (int64_t index = 0; index < ids.size(); ++index) {
+    // A formation usually has hundreds of actors and one or two movement
+    // configurations. Construct the script's roster key once per combination.
+    struct Configuration { Variant domain; int64_t restriction; String key; };
+    std::vector<Configuration> known;
+    const int64_t count = ids.size();
+    for (int64_t index = 0; index < count; ++index) {
         const Variant id = ids[index];
         if (id.get_type() != Variant::INT) return Array();
         const Variant mask_value = masks.get(id, Variant());
@@ -203,27 +211,68 @@ Array RoRPathKernel::collect_movement_delta(const Dictionary &delta, const Dicti
         const Variant domain = unit.get(domain_key, Variant()), restriction = unit.get(restriction_key, Variant());
         if (domain.get_type() != Variant::STRING || restriction.get_type() != Variant::INT) return Array();
         changed.append(unit);
-        const String configuration = String(domain) + ":" + String::num_int64(int64_t(restriction));
-        if (String(configurations.get(id, String())) != configuration) rebuild = true;
+        if (rebuild) continue;
+        const int64_t restriction_id = restriction;
+        auto found = std::find_if(known.begin(), known.end(), [&](const Configuration &entry) {
+            return entry.restriction == restriction_id && entry.domain == domain;
+        });
+        if (found == known.end()) {
+            String key = String(domain) + ":" + String::num_int64(restriction_id);
+            if (known.size() >= 32) known.clear();
+            known.push_back({domain, restriction_id, key});
+            found = std::prev(known.end());
+        }
+        if (configurations.get(id, Variant()) != found->key) rebuild = true;
     }
     Array result;
     result.append(changed); result.append(rebuild);
     return result;
 }
+// Consume changed IDs once. Resolve the slot, check its terrain configuration
+// and choose the changed physical fields before touching a shared generation.
+// Empty output asks the owner to rebuild on a spawn, death or new configuration.
+Dictionary RoRPathKernel::apply_movement_journal(const Dictionary &delta, const Dictionary &units_by_id) {
+    if (bool(delta.get(ROR_FIELD("full"), true)) || movement_domains_.size() != movement_->ids.size() ||
+            movement_restrictions_.size() != movement_->ids.size()) return {};
+    const Variant data = delta.get(ROR_FIELD("ids"), Variant()), changes = delta.get(ROR_FIELD("masks"), Variant());
+    if (data.get_type() != Variant::ARRAY || changes.get_type() != Variant::DICTIONARY) return {};
+    const Array ids = data;
+    const Dictionary masks = changes;
+    const int64_t count = ids.size();
+    if (count > 65536) return {};
+    std::vector<MovementEntityChange> updates;
+    updates.reserve(size_t(count));
+    for (int64_t index = 0; index < count; ++index) {
+        const Variant &id = ids[index];
+        if (id.get_type() != Variant::INT) return {};
+        const int64_t mask = masks.get(id, 0);
+        // Motion/priority can change during an activity transition. Hit
+        // points and animal/ownership policy have COMBAT or OWNERSHIP.
+        if (!(mask & (1 | 2 | 4 | 8 | 128))) continue;
+        const auto existing = movement_->index_by_id.find(int32_t(int64_t(id)));
+        const Variant value = units_by_id.get(id, Variant());
+        if ((mask & 1) && (existing != movement_->index_by_id.end() || value.get_type() != Variant::NIL)) return {};
+        if (value.get_type() == Variant::NIL) continue;
+        if (value.get_type() != Variant::DICTIONARY || existing == movement_->index_by_id.end()) return {};
+        const size_t slot = size_t(existing->second);
+        const Dictionary entity = value;
+        const bool geometry = (mask & 2) != 0;
+        if (geometry && (movement_domains_[slot] != String(entity[ROR_FIELD("movement_domain")]) ||
+                movement_restrictions_[slot] != int64_t(entity[ROR_FIELD("terrain_restriction")]))) return {};
+        updates.push_back({entity, slot, (mask & (2 | 4)) != 0, (mask & (8 | 128)) != 0});
+    }
+    return apply_movement_entities(updates, int64_t(updates.size()));
+}
 void RoRPathKernel::release_movement_snapshot() {
-    movement_ = std::make_shared<MovementSnapshot>();
+    static const auto empty = std::make_shared<const MovementSnapshot>();
+    movement_ = empty;
+    movement_domains_.clear();
+    movement_restrictions_.clear();
 }
 Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, bool incremental, bool delta) {
-    static const String k_id("id");
-    static const String k_pos("pos");
-    static const String k_footprint_radius("footprint_radius");
-    static const String k_minimum_clearance("minimum_clearance");
-    static const String k_push_priority("push_priority");
-    static const String k_hp("hp");
-    static const String k_behavior_tags("behavior_tags");
-    static const String k_kind("kind");
-    static const String k_solid_animal("solid_animal");
-    static const String k_team("team");
+    static const Variant k_id("id"), k_pos("pos"), k_footprint_radius("footprint_radius");
+    static const Variant k_minimum_clearance("minimum_clearance"), k_push_priority("push_priority"), k_hp("hp");
+    static const Variant k_behavior_tags("behavior_tags"), k_kind("kind"), k_solid_animal("solid_animal"), k_team("team");
     const int64_t count = units.size();
     bool stable = delta || (incremental && count <= 65536 && movement_->ids.size() == static_cast<size_t>(count));
     for (int64_t i = 0; !delta && stable && i < count; ++i) {
@@ -241,10 +290,15 @@ Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, boo
         PackedVector2Array positions;
         PackedFloat32Array radii, clearances, health;
         PackedByteArray solid;
+        std::vector<String> domains;
+        domains.resize(size_t(count));
+        std::vector<int64_t> restrictions(size_t(count), -1);
         ids.resize(count); positions.resize(count); radii.resize(count);
         clearances.resize(count); priorities.resize(count); health.resize(count); solid.resize(count);
         for (int64_t i = 0; i < count; ++i) {
             const Dictionary unit = units[i];
+            domains[i] = unit.get(ROR_FIELD("movement_domain"), String());
+            restrictions[i] = unit.get(ROR_FIELD("terrain_restriction"), -1);
             ids[i] = int64_t(unit[k_id]); positions[i] = unit[k_pos];
             radii[i] = double(unit[k_footprint_radius]); clearances[i] = double(unit[k_minimum_clearance]);
             priorities[i] = int64_t(unit[k_push_priority]); health[i] = double(unit[k_hp]);
@@ -256,30 +310,52 @@ Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, boo
                 ((kind == "gazelle" || kind == "elephant" || kind == "lion" || kind == "alligator" || kind == "crocodile") && int64_t(unit.get(k_team, 0)) == 0);
         }
         configure_movement_snapshot(ids, positions, radii, clearances, priorities, health, solid);
+        movement_domains_.swap(domains);
+        movement_restrictions_.swap(restrictions);
         stats[ROR_FIELD("updated")] = count; stats[ROR_FIELD("bucket_updates")] = count;
         return stats;
     }
-    std::shared_ptr<MovementSnapshot> next;
-    int64_t updated = 0, bucket_updates = 0;
-    bool maxima_dirty = false;
-    bool copied_generation = false;
+    std::vector<MovementEntityChange> changes;
+    changes.reserve(size_t(count));
     for (int64_t i = 0; i < count; ++i) {
         const Dictionary unit = units[i];
-        const auto found = movement_->index_by_id.find(static_cast<int32_t>(int64_t(unit[k_id])));
-        if (delta && found == movement_->index_by_id.end()) continue;
-        const size_t slot = delta ? static_cast<size_t>(found->second) : static_cast<size_t>(i);
-        const Vector2 position = unit[k_pos];
-        const float radius = std::max(0.0f, static_cast<float>(double(unit[k_footprint_radius])));
-        const float clearance = std::max(0.0f, static_cast<float>(double(unit[k_minimum_clearance])));
-        const int32_t priority = int64_t(unit[k_push_priority]);
-        const float health = double(unit[k_hp]);
-        uint8_t solid;
-        if (unit.has(k_solid_animal)) solid = bool(unit[k_solid_animal]);
-        else {
-            const Array tags = unit.get(k_behavior_tags, Array());
-            const String kind = unit.get(k_kind, String());
-            solid = tags.has(ROR_FIELD("predator")) || tags.has(ROR_FIELD("huntable")) ||
-                ((kind == "gazelle" || kind == "elephant" || kind == "lion" || kind == "alligator" || kind == "crocodile") && int64_t(unit.get(k_team, 0)) == 0);
+        size_t slot = size_t(i);
+        if (delta) {
+            const auto found = movement_->index_by_id.find(int32_t(int64_t(unit[k_id])));
+            if (found == movement_->index_by_id.end()) continue;
+            slot = size_t(found->second);
+        }
+        changes.push_back({unit, slot, true, true});
+    }
+    // A public caller may replace/reconfigure individual units directly.
+    // A later journal update without its authoritative roster must rebuild.
+    movement_domains_.clear();
+    movement_restrictions_.clear();
+    return apply_movement_entities(changes, count);
+}
+
+Dictionary RoRPathKernel::apply_movement_entities(const std::vector<MovementEntityChange> &changes, int64_t checked) {
+    std::shared_ptr<MovementSnapshot> next;
+    int64_t updated = 0, bucket_updates = 0;
+    bool maxima_dirty = false, copied_generation = false;
+    for (const MovementEntityChange &change : changes) {
+        const Dictionary &unit = change.entity;
+        const size_t slot = change.slot;
+        const Vector2 position = change.geometry ? Vector2(unit[ROR_FIELD("pos")]) : movement_->positions[slot];
+        const float radius = change.geometry ? std::max(0.0f, float(double(unit[ROR_FIELD("footprint_radius")]))) : movement_->radii[slot];
+        const float clearance = change.geometry ? std::max(0.0f, float(double(unit[ROR_FIELD("minimum_clearance")]))) : movement_->clearances[slot];
+        const int32_t priority = change.geometry ? int32_t(int64_t(unit[ROR_FIELD("push_priority")])) : movement_->priorities[slot];
+        const float health = change.health ? float(double(unit[ROR_FIELD("hp")])) : movement_->health[slot];
+        uint8_t solid = movement_->solid_animals[slot];
+        if (change.health) {
+            const Variant explicit_solid = unit.get(ROR_FIELD("solid_animal"), Variant());
+            if (explicit_solid.get_type() != Variant::NIL) solid = bool(explicit_solid);
+            else {
+                const Array tags = unit.get(ROR_FIELD("behavior_tags"), Array());
+                const String kind = unit.get(ROR_FIELD("kind"), String());
+                solid = tags.has(ROR_FIELD("predator")) || tags.has(ROR_FIELD("huntable")) ||
+                    ((kind == "gazelle" || kind == "elephant" || kind == "lion" || kind == "alligator" || kind == "crocodile") && int64_t(unit.get(ROR_FIELD("team"), 0)) == 0);
+            }
         }
         if (movement_->positions[slot] == position && movement_->radii[slot] == radius &&
             movement_->clearances[slot] == clearance && movement_->priorities[slot] == priority &&
@@ -309,6 +385,10 @@ Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, boo
         next->positions[slot] = position; next->radii[slot] = radius; next->clearances[slot] = clearance;
         next->priorities[slot] = priority; next->health[slot] = health; next->solid_animals[slot] = solid;
     }
+    Dictionary stats;
+    stats[ROR_FIELD("checked")] = checked;
+    stats[ROR_FIELD("full_rebuilds")] = 0;
+    stats[ROR_FIELD("generation_copies")] = copied_generation ? 1 : 0;
     if (next) {
         if (maxima_dirty) {
             next->maximum_radius = 0.0f; next->maximum_clearance = 0.0f;
@@ -318,14 +398,17 @@ Dictionary RoRPathKernel::configure_movement_entity_rows(const Array &units, boo
             }
         }
         movement_ = next;
-        stats[ROR_FIELD("generation_copies")] = copied_generation ? 1 : 0;
     }
     stats[ROR_FIELD("updated")] = updated; stats[ROR_FIELD("bucket_updates")] = bucket_updates;
     return stats;
 }
 
 void RoRPathKernel::share_movement_snapshot(const Ref<RoRPathKernel> &source) {
-    if (source.is_valid()) movement_ = source->movement_;
+    if (source.is_valid() && source.ptr() != this) {
+        movement_ = source->movement_;
+        movement_domains_.clear();
+        movement_restrictions_.clear();
+    }
 }
 
 Vector4 RoRPathKernel::calculate_movement(int32_t unit_id, const Vector2 &target, double speed, double cohesion_scale, double delta) const {

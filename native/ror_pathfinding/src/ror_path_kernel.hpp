@@ -45,6 +45,7 @@ public:
     Dictionary configure_movement_entities(const Array &units, bool incremental = true);
     Dictionary update_movement_entities(const Array &units);
     Array collect_movement_delta(const Dictionary &delta, const Dictionary &units_by_id, const Dictionary &configurations) const;
+    Dictionary apply_movement_journal(const Dictionary &delta, const Dictionary &units_by_id);
     Dictionary configure_movement_entity_rows(const Array &units, bool incremental, bool delta);
     void release_movement_snapshot();
     void share_movement_snapshot(const Ref<RoRPathKernel> &source);
@@ -146,6 +147,14 @@ private:
         float maximum_clearance = 0.0f;
     };
     std::shared_ptr<const MovementSnapshot> movement_ = std::make_shared<MovementSnapshot>();
+    struct MovementEntityChange {
+        Dictionary entity;
+        size_t slot;
+        bool geometry, health;
+    };
+    std::vector<String> movement_domains_;
+    std::vector<int64_t> movement_restrictions_;
+    Dictionary apply_movement_entities(const std::vector<MovementEntityChange> &changes, int64_t checked);
 
     bool contains(int32_t x, int32_t y) const;
     bool cell_walkable(int32_t x, int32_t y) const;

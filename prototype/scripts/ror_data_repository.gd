@@ -9,20 +9,44 @@ var compatibility_gamespec: Dictionary = {}
 var revision := 0
 var rule_fingerprints: Dictionary = {}
 var gatherer_limits_by_kind: Dictionary = {}
+var dropoff_resource_ids: Dictionary = {}
+var target_domains_by_kind: Dictionary = {}
 
 
 func configure_runtime(data: Dictionary) -> void:
 	GateCatalog.install_runtime(data)
 	runtime_catalog = data
 	var limits: Dictionary = {}
+	dropoff_resource_ids.clear()
+	target_domains_by_kind.clear()
 	for kind in data.get("archetypes", {}):
-		var maximum := int(data["archetypes"][kind].get("runtime", {}).get("max_gatherers", 0))
+		var runtime: Dictionary = data["archetypes"][kind].get("runtime", {})
+		var maximum := int(runtime.get("max_gatherers", 0))
 		if maximum > 0:
 			limits[kind] = maximum
+		var accepted := {}
+		for id in runtime.get("accepted_resource_type_ids", []): accepted[int(id)] = true
+		if not accepted.is_empty():
+			accepted.make_read_only()
+			dropoff_resource_ids[kind] = accepted
+		target_domains_by_kind[kind] = _static_target_domains(runtime.get("placement", {}))
 	limits.make_read_only()
 	gatherer_limits_by_kind = limits
 	rule_fingerprints["runtime"] = JSON.stringify(data, "", true, true).sha256_text()
 	revision += 1
+
+
+func _static_target_domains(placement: Dictionary) -> Array[String]:
+	var result: Array[String] = []
+	for value in placement.get("required_adjacent_domains", []):
+		var domain := String(value)
+		if domain in ["land", "water"] and domain not in result: result.append(domain)
+	if result.is_empty():
+		var domain := String(placement.get("domain", "land"))
+		result.append(domain if domain in ["land", "water"] else "land")
+	result.sort()
+	result.make_read_only()
+	return result
 
 
 func configure_objects(data: Dictionary) -> void:

@@ -190,7 +190,7 @@ struct RoRReadModelKernel::FrameProjection {
     }
 };
 
-bool RoRReadModelKernel::refresh_interpolated_items(const Array &items, const Callable &project, double alpha, const Dictionary &depth_index, double sprite_scale, const Array &camera, bool force_projection) const {
+bool RoRReadModelKernel::refresh_interpolated_items(const Array &items, const Callable &project, double alpha, const Dictionary &depth_index, double sprite_scale, const Array &camera, bool force_projection, bool preserve_motion) const {
     static const Variant kind("kind"), data("data"), id("stable_id"), pos("pos"), previous("previous_pos"), anchor("world_anchor"), screen_key("screen_position"), y("screen_y"), depth("depth_offset"), command("sprite_command");
     const FrameProjection projection(project, camera);
     struct Projected { Dictionary source; Vector2 position, screen; double depth = 0; bool projected = false; };
@@ -206,8 +206,14 @@ bool RoRReadModelKernel::refresh_interpolated_items(const Array &items, const Ca
         auto found = projected.find(entity_id);
         if (found == projected.end() || !UtilityFunctions::is_same(found->second.source, source)) {
             Projected point; point.source = source;
-            const double bounded_alpha = std::min(alpha, double(source.get(ROR_FIELD("render_prediction_alpha_limit"), MAX_INTERPOLATION_ALPHA)));
-            point.position = Vector2(source.get(previous, source.get(pos, Vector2()))).lerp(source.get(pos, Vector2()), real_t(bounded_alpha));
+            const Vector2 to = source.get(pos, Vector2()), from = source.get(previous, to);
+            const double limit = source.get(ROR_FIELD("render_prediction_alpha_limit"), MAX_INTERPOLATION_ALPHA);
+            point.position = from.lerp(to, real_t(std::min(alpha, limit)));
+            if (preserve_motion) {
+                const Vector2 shown = item[anchor], step = to - from;
+                if ((shown - point.position).dot(step) > 0.00000001 && step.length_squared() > 0.00000001)
+                    point.position = from.lerp(to, real_t(std::min(limit, double((shown - from).dot(step)) / step.length_squared())));
+            }
             projected[entity_id] = point;
             found = projected.find(entity_id);
         }
@@ -423,6 +429,39 @@ Array RoRReadModelKernel::merge_projected_static_items(const Array &first, const
     return result;
 }
 
+Array RoRReadModelKernel::preserve_displayed_unit_motion(const Array &units, const Array &previous_items, double alpha) const {
+    struct Span { Vector2 from, to; double shown; };
+    std::unordered_map<int64_t, Span> ahead;
+    for (int64_t i = 0; i < previous_items.size(); ++i) {
+        const Dictionary item = previous_items[i];
+        if (String(item[ROR_FIELD("kind")]) != ROR_TEXT("unit")) continue;
+        const Dictionary row = item[ROR_FIELD("data")];
+        const Vector2 to = row[ROR_FIELD("pos")], from = row.get(ROR_FIELD("previous_pos"), to);
+        const Vector2 step = to - from;
+        if (step.length_squared() <= 0.00000001) continue;
+        const Vector2 shown = item[ROR_FIELD("world_anchor")];
+        if ((shown - from.lerp(to, real_t(alpha))).dot(step) <= 0.00000001) continue;
+        ahead.emplace(int64_t(item[ROR_FIELD("stable_id")]), Span{from, to, double((shown - from).dot(step)) / step.length_squared()});
+    }
+    if (ahead.empty()) return units;
+    Array result = units;
+    bool copied = false;
+    for (int64_t i = 0; i < units.size(); ++i) {
+        const Dictionary row = units[i];
+        const auto old = ahead.find(int64_t(row[ROR_FIELD("id")]));
+        if (old == ahead.end()) continue;
+        const Vector2 to = row[ROR_FIELD("pos")], from = row.get(ROR_FIELD("previous_pos"), to);
+        if (old->second.from != from || old->second.to != to) continue;
+        const double floor = std::min(old->second.shown, double(row.get(ROR_FIELD("render_prediction_alpha_limit"), MAX_INTERPOLATION_ALPHA)));
+        if (floor <= alpha) continue;
+        if (!copied) { result = units.duplicate(false); copied = true; }
+        Dictionary bounded = row.duplicate(false);
+        bounded[ROR_FIELD("render_prediction_alpha_floor")] = floor;
+        result[i] = bounded;
+    }
+    return result;
+}
+
 Array RoRReadModelKernel::create_unit_render_items(const Array &units, const Callable &project, const Callable &provider, const Callable &colors,
         double alpha, const Dictionary &depth_index, const Array &preview, const Array &selected, const Array &camera) const {
     const FrameProjection projection(project, camera);
@@ -449,7 +488,8 @@ Array RoRReadModelKernel::create_unit_render_items(const Array &units, const Cal
         const Dictionary unit = units[i];
         const String death = unit.get(phase, ROR_FIELD("alive"));
         if (double(unit.get(hp, 0.0)) <= 0.0 && death != ROR_TEXT("dying") && death != ROR_TEXT("corpse")) continue;
-		const double bounded_alpha = std::min(std::max(0.0, std::min(MAX_INTERPOLATION_ALPHA, alpha)), double(unit.get(ROR_FIELD("render_prediction_alpha_limit"), MAX_INTERPOLATION_ALPHA)));
+		const double bounded_alpha = std::min(std::max(double(unit.get(ROR_FIELD("render_prediction_alpha_floor"), 0.0)),
+			std::clamp(alpha, 0.0, MAX_INTERPOLATION_ALPHA)), double(unit.get(ROR_FIELD("render_prediction_alpha_limit"), MAX_INTERPOLATION_ALPHA)));
 		const Vector2 position = Vector2(unit.get(previous, unit[pos])).lerp(unit[pos], real_t(bounded_alpha));
         const Vector2 screen = projection.screen(position);
         const double offset = projected_unit_depth_offset(position, screen.y, depth_index, projection);
@@ -709,18 +749,16 @@ int64_t RoRReadModelKernel::advance_harvesting_at_target(Dictionary worker, cons
     if (int64_t(resource.get(amount, 0)) <= 0) return -1;
     const double limit = std::max(0.0, double(worker.get(capacity, 0.0)));
     if (limit > 0.0 && double(worker.get(carried, 0.0)) >= limit - 0.0001) return -1;
-    const Vector2 position = worker[pos], target = resource[pos], local = position - Vector2(Vector2i(position));
-    bool in_range = true;
-    if (String(worker.get(domain, ROR_FIELD("land"))) != ROR_TEXT("water") && (Vector2i(position) == Vector2i(target) || local.x < 0.12 || local.x > 0.88 || local.y < 0.12 || local.y > 0.88)) in_range = false;
-    const double reach = std::max(0.5, double(resource.get(radius, 0.2))) + double(worker.get(radius, 0.3)) + 0.32;
-    in_range = in_range && position.distance_squared_to(target) <= reach * reach;
+    const Vector2 position = worker[pos], target = resource[pos];
     const Variant slot = worker.get(slot_key, Variant());
-    if (slot.get_type() == Variant::VECTOR2) {
-        const bool at_slot = position.distance_squared_to(slot) <= 0.0144;
-        const Dictionary assigned = reservations.get(worker[resource_id], Dictionary());
-        in_range = assigned.size() > 1 ? at_slot : in_range || at_slot;
+    const bool at_slot = slot.get_type() == Variant::VECTOR2 && position.distance_squared_to(slot) <= 0.0144;
+    if (!at_slot) {
+        const double reach = std::max(0.5, double(resource.get(radius, 0.2))) + double(worker.get(radius, 0.3)) + 0.32;
+        if (position.distance_squared_to(target) > reach * reach) return -1;
+        const Vector2 local = position - Vector2(Vector2i(position));
+        if (String(worker.get(domain, ROR_FIELD("land"))) != ROR_TEXT("water") && (Vector2i(position) == Vector2i(target) || local.x < 0.12 || local.x > 0.88 || local.y < 0.12 || local.y > 0.88)) return -1;
+        if (slot.get_type() == Variant::VECTOR2 && Dictionary(reservations.get(worker[resource_id], Dictionary())).size() > 1) return -1;
     }
-    if (!in_range) return -1;
     Dictionary order = parts.get(order_key, Dictionary());
     if (order.is_empty()) return -1;
     int64_t mask = 0;
@@ -737,7 +775,10 @@ int64_t RoRReadModelKernel::advance_harvesting_at_target(Dictionary worker, cons
         mask |= 68; // ACTIVITY | CONTROL, sampled at the owner-thread boundary.
     };
     put(stage, ROR_TEXT("harvesting"), 96);
-    transition("FaceTarget");
+    // Recover lasts until the next harvest action. Only a new approach
+    // enters FaceTarget; elapsed recovery time is not another order event.
+    const bool entering_recovery = String(order.get(phase, ROR_FIELD(""))) != ROR_TEXT("Recover");
+    if (entering_recovery) transition("FaceTarget");
     const Vector2 difference = target - position;
     if (difference.length_squared() > 0.0001) {
         const Vector2 screen((difference.x - difference.y) * 32.0, (difference.x + difference.y) * 16.0);
@@ -746,7 +787,7 @@ int64_t RoRReadModelKernel::advance_harvesting_at_target(Dictionary worker, cons
         put(ROR_TEXT("action_facing"), facing, 96);
         put(ROR_TEXT("facing"), facing, 2);
     }
-    transition("Recover");
+    if (entering_recovery) transition("Recover");
     return mask;
 }
 
@@ -933,11 +974,12 @@ Dictionary RoRReadModelKernel::advance_ordered_unit_span(const Dictionary &conte
     int64_t coalesced_deferred_skips = 0;
     const bool coalesced_activity = activity->get(ROR_PROPERTY("coalesced_boundaries_enabled"));
     const bool profile_move_fallbacks = context.get(ROR_FIELD("profile_move_fallbacks"), false);
-    Dictionary move_fallbacks;
+    Dictionary move_fallbacks, clock_only_workers;
     bool failed = false;
     std::unordered_map<int64_t, int64_t> stop_ticks;
     const auto finish = [&]() {
         Dictionary result;
+        if (!clock_only_workers.is_empty()) result[ROR_FIELD("clock_only_workers")] = clock_only_workers;
         if (key_scope.profile) result[ROR_FIELD("actor_key_counts")] = key_scope.stats();
         result[index_key] = cursor; result[order_key] = last_order;
         result[updates_key] = updates + actor_batch.direct_moves; result[ROR_FIELD("motion_updates")] = motion_updates + actor_batch.motion_updates; result[ROR_FIELD("pipeline_calls")] = pipeline_calls + actor_batch.direct_moves; result[candidates_key] = candidates + actor_batch.candidates; result[ROR_FIELD("attempts")] = attempts + actor_batch.move_attempts; result[ROR_FIELD("failed")] = failed;
@@ -949,6 +991,11 @@ Dictionary RoRReadModelKernel::advance_ordered_unit_span(const Dictionary &conte
             counters[ROR_FIELD("actors")] = actor_batch.calls; counters[ROR_FIELD("gather_recoveries")] = actor_batch.gather_recoveries;
             counters[ROR_FIELD("coalesced_deferred_updates_skipped")] = coalesced_deferred_skips;
             counters[ROR_FIELD("gather_controller_calls")] = actor_batch.gather_controller_calls;
+            counters[ROR_FIELD("worksite_clock_updates")] = actor_batch.worksite_clock_updates;
+            counters[ROR_FIELD("retained_worksites")] = actor_batch.retained_worksites;
+            counters[ROR_FIELD("committed_worker_steps")] = actor_batch.committed_worker_steps;
+            counters[ROR_FIELD("worksite_clock_ns")] = actor_batch.worksite_ns;
+            counters[ROR_FIELD("worksite_clock_calls")] = actor_batch.worksite_calls;
             counters[ROR_FIELD("gather_controller_moves")] = actor_batch.gather_controller_moves;
             counters[ROR_FIELD("gather_controller_returns")] = actor_batch.gather_controller_returns;
             counters[ROR_FIELD("gather_controller_transitions")] = actor_batch.gather_controller_transitions;
@@ -987,6 +1034,15 @@ Dictionary RoRReadModelKernel::advance_ordered_unit_span(const Dictionary &conte
         return result;
     };
     auto *native_journal = native_entity_journal(journal);
+    if (full_actor_pipeline && native_journal) {
+        actor_batch.journal = native_journal;
+        const uint64_t journal_id = native_journal->get_instance_id();
+        if (worksite_journal_id != journal_id || worksite_epoch != native_journal->get_epoch()) {
+            worksite_journal_id = journal_id;
+            worksite_epoch = native_journal->get_epoch();
+            worksite_clocks.assign(1024, WorksiteClock());
+        }
+    }
     const bool journal_native_active = bool(journal->get("native_active"));
     const auto publish = [&](const Dictionary &unit, int64_t id, int64_t mask) {
         if (!mask) return;
@@ -1066,6 +1122,13 @@ Dictionary RoRReadModelKernel::advance_ordered_unit_span(const Dictionary &conte
         int32_t failure_reason = 18;
         const String task = unit.get(task_key, String());
         if (full_actor_pipeline) {
+            if (task == ROR_TEXT("gather") && actor_batch.gather_controller &&
+                    advance_worksite_clock(unit, id, delta, actor_batch, movement_batch)) {
+                if (actor_batch.journal && coalesced_activity) clock_only_workers[id] = true;
+                ++cursor;
+                last_order = order;
+                continue;
+            }
             const int64_t completed = advance_actor_pipeline(unit, delta, actor_batch, movement_batch);
             if (completed >= 0) {
                 ++cursor; last_order = order;
@@ -1295,10 +1358,10 @@ Vector4 RoRReadModelKernel::advance_checked_move_order_internal(Dictionary unit,
     return result;
 }
 
-int64_t RoRReadModelKernel::publish_active_unit_controls(const Array &units, const Dictionary &units_by_id, Object *journal, Object *activity) const {
-    // Exact owner-only bulk form of notify_entity_changed(unit, ACTIVITY|CONTROL)
-    // while activity membership is deferred until finish_tick(). No callback or
-    // observer can run inside this pass. Unsupported inputs precede all writes.
+int64_t RoRReadModelKernel::publish_active_unit_controls(const Array &units, const Dictionary &units_by_id, Object *journal, Object *activity, const Dictionary &clock_only_workers) const {
+    // Script/domain callbacks can edit nested controls directly. Their blanket
+    // publication is needed only for actors not fully accounted for by the
+    // ordered span. Subsequent contacts and commands publish their own changes.
     if (!journal || !activity || units.size() > 65536 || !bool(activity->get("tick_prepared"))) return -1;
     const Variant probe = journal->get("performance_probe");
     if (probe.get_type() == Variant::OBJECT && static_cast<Object *>(probe)) return -1;
@@ -1307,6 +1370,21 @@ int64_t RoRReadModelKernel::publish_active_unit_controls(const Array &units, con
         const Variant value = activity->get("pending_units");
         if (!native_journal || value.get_type() != Variant::DICTIONARY || Dictionary(value).is_read_only()) return -1;
         Dictionary deferred = value;
+        const bool coalesced = activity->get(ROR_PROPERTY("coalesced_boundaries_enabled"));
+        if (coalesced) {
+            // finish_tick consumes these same journal marks. Only explicit
+            // refreshes without a mark need a separate pending_units entry.
+            std::vector<int64_t> changed;
+            changed.reserve(size_t(units.size()));
+            for (int64_t i = 0; i < units.size(); ++i) {
+                if (units[i].get_type() != Variant::DICTIONARY) return -1;
+                const Variant id = Dictionary(units[i]).get(ROR_FIELD("id"), int64_t(-1));
+                if (id.get_type() != Variant::INT) return -1;
+                if (!clock_only_workers.has(id)) changed.push_back(int64_t(id));
+            }
+            for (int64_t id : changed) native_journal->mark(id, 68);
+            return units.size();
+        }
         std::vector<std::pair<int64_t, Dictionary>> native_rows;
         native_rows.reserve(size_t(units.size()));
         for (int64_t i = 0; i < units.size(); ++i) {
@@ -1688,6 +1766,74 @@ Dictionary RoRReadModelKernel::owned_ai_actor_profile(const Dictionary &entity) 
     result[carried] = double(entity.get(carried, 0.0));
     result[resource_type] = int64_t(entity.get(resource_type, -1));
     result[stage] = String(entity.get(stage, ROR_FIELD("")));
+    return result;
+}
+
+Dictionary RoRReadModelKernel::capture_ai_unit_profile_inputs(const Array &visible, const Dictionary &units_by_id,
+        int64_t observer, bool builder_rates) const {
+    Array facts;
+    facts.resize(visible.size());
+    Dictionary public_types, carriers, builders;
+    for (int64_t index = 0; index < visible.size(); ++index) {
+        const Dictionary row = visible[index];
+        const int64_t owner = row.get(ROR_FIELD("team"), 0);
+        if (owner != observer) {
+            // Enemy capabilities are public catalog estimates. Never resolve an enemy's live entity.
+            const int64_t type = row.get(ROR_FIELD("source_unit_id"), -1);
+            public_types[Vector2i(owner, type)] = true;
+            continue;
+        }
+        const int64_t id = row.get(ROR_FIELD("id"), -1);
+        const Variant found = units_by_id.get(id, Variant());
+        if (found.get_type() != Variant::DICTIONARY) return {};
+        const Dictionary unit = found;
+        if (int64_t(unit.get(ROR_FIELD("team"), 0)) != observer) return {};
+        Dictionary profile = owned_ai_actor_profile(unit);
+        if (profile.is_empty() || row.has(ROR_FIELD("ai_profile"))) return {};
+        const Dictionary components = unit[ROR_FIELD("components")];
+        const Dictionary order = components.get(ROR_FIELD("order"), Dictionary());
+        const Dictionary combat = components[ROR_FIELD("combat")];
+        const Dictionary conversion = components.get(ROR_FIELD("conversion"), Dictionary());
+        profile[ROR_FIELD("conversion")] = conversion.duplicate(true);
+        profile[ROR_FIELD("cooldown")] = double(unit.get(ROR_FIELD("cooldown"), 0.0));
+        profile[ROR_FIELD("action_phase")] = String(order.get(ROR_FIELD("phase"), ROR_TEXT("")));
+        profile[ROR_FIELD("blast_range")] = double(unit.get(ROR_FIELD("blast_range"), combat.get(ROR_FIELD("blast_range"), 0.0)));
+        const Dictionary worker = components.get(ROR_FIELD("worker"), Dictionary());
+        const String kind = row.get(ROR_FIELD("kind"), ROR_TEXT(""));
+        if (bool(worker.get(ROR_FIELD("enabled"), false))) {
+            const Array allowed = worker.get(ROR_FIELD("drop_site_ids"), Array());
+            profile[ROR_FIELD("_drop_site_ids")] = allowed.duplicate();
+            profile[ROR_FIELD("waiting_for_resource_slot")] = unit.get(ROR_FIELD("task"), Variant()) == ROR_TEXT("gather") &&
+                    profile[ROR_FIELD("gather_stage")] == ROR_TEXT("approaching") && unit.get(ROR_FIELD("resource_approach_slot"), Variant()).get_type() != Variant::VECTOR2;
+            if (double(profile[ROR_FIELD("carried_amount")]) > 0.0 && int64_t(unit.get(ROR_FIELD("worker_role_source_unit_id"), -1)) < 0) {
+                Dictionary resources = carriers.get(kind, Dictionary());
+                const int64_t type = profile[ROR_FIELD("carried_resource_type_id")];
+                resources[type] = id;
+                carriers[kind] = resources;
+                profile[ROR_FIELD("_delivery_resource")] = type;
+            }
+        }
+        if (builder_rates && row.get(ROR_FIELD("movement_domain"), ROR_TEXT("land")) == ROR_TEXT("land")) {
+            const Dictionary projected_components = row.get(ROR_FIELD("components"), Dictionary());
+            const Dictionary projected_worker = projected_components.get(ROR_FIELD("worker"), Dictionary());
+            const Array tags = row.get(ROR_FIELD("behavior_tags"), Array());
+            if (bool(projected_worker.get(ROR_FIELD("enabled"), false)) || (tags.is_empty() && kind == ROR_TEXT("villager"))) {
+                const Dictionary base = unit.get(ROR_FIELD("_worker_base_task"), Dictionary());
+                const Dictionary role = base.get(ROR_FIELD("worker_component"), worker);
+                const double rate = role.get(ROR_FIELD("work_rate"), 1.0);
+                Dictionary rates = builders.get(kind, Dictionary());
+                rates[rate] = id;
+                builders[kind] = rates;
+                profile[ROR_FIELD("_base_build_rate")] = rate;
+            }
+        }
+        facts[index] = profile;
+    }
+    Dictionary result;
+    result[ROR_FIELD("profiles")] = facts;
+    result[ROR_FIELD("public_types")] = public_types;
+    result[ROR_FIELD("carriers")] = carriers;
+    result[ROR_FIELD("builders")] = builders;
     return result;
 }
 
@@ -2753,6 +2899,7 @@ void RoRReadModelKernel::submit_selection_ellipse(const RID &canvas, const Vecto
 void RoRReadModelKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("supports_actor_key_cache"), &RoRReadModelKernel::supports_actor_key_cache);
     ClassDB::bind_method(D_METHOD("capture_building_control_rows", "rows", "counters"), &RoRReadModelKernel::capture_building_control_rows);
+    ClassDB::bind_method(D_METHOD("project_scene_unit_controls", "sources", "rendered", "observer", "eligible", "cache"), &RoRReadModelKernel::project_scene_unit_controls);
     ClassDB::bind_method(D_METHOD("clear_control_row_certificates"), &RoRReadModelKernel::clear_control_row_certificates);
     ClassDB::bind_method(D_METHOD("set_selection_meshes_enabled", "enabled"), &RoRReadModelKernel::set_selection_meshes_enabled);
     ClassDB::bind_method(D_METHOD("selection_mesh_stats"), &RoRReadModelKernel::selection_mesh_stats);
@@ -2770,7 +2917,7 @@ void RoRReadModelKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("advance_checked_move_order", "unit", "movement_kernel", "delta", "map_size", "vertex_levels", "neighbors", "physical_planner", "knowledge_planner", "stop_tick"), &RoRReadModelKernel::advance_checked_move_order);
     ClassDB::bind_method(D_METHOD("get_actor_pipeline_version"), &RoRReadModelKernel::get_actor_pipeline_version);
     ClassDB::bind_method(D_METHOD("advance_ordered_unit_span", "context", "delta"), &RoRReadModelKernel::advance_ordered_unit_span);
-    ClassDB::bind_method(D_METHOD("publish_active_unit_controls", "units", "units_by_id", "journal", "activity"), &RoRReadModelKernel::publish_active_unit_controls);
+    ClassDB::bind_method(D_METHOD("publish_active_unit_controls", "units", "units_by_id", "journal", "activity", "clock_only_workers"), &RoRReadModelKernel::publish_active_unit_controls, DEFVAL(Dictionary()));
     ClassDB::bind_method(D_METHOD("submit_selection_run", "canvas", "items", "first", "selected", "preview", "hover", "feedback", "feedback_time", "semantic", "zoom", "shift_pressed"), &RoRReadModelKernel::submit_selection_run);
     ClassDB::bind_method(D_METHOD("submit_selection_ellipse", "canvas", "center", "color", "radius", "zoom"), &RoRReadModelKernel::submit_selection_ellipse);
     ClassDB::bind_method(D_METHOD("settle_mobile_contacts", "changes", "active_units", "all_units", "units_by_id", "buckets", "entities", "positions", "radii", "cell_size", "maximum_radius", "delta", "pending", "query_fallback", "separate"), &RoRReadModelKernel::settle_mobile_contacts);
@@ -2788,7 +2935,7 @@ void RoRReadModelKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("remap_player_image", "blue", "red", "source_ramp", "target_ramp"), &RoRReadModelKernel::remap_player_image);
     ClassDB::bind_method(D_METHOD("rasterize_minimap_fog", "size", "rectangle", "center", "scale", "fog"), &RoRReadModelKernel::rasterize_minimap_fog);
     ClassDB::bind_method(D_METHOD("capture_navigation_pages", "sources", "previous", "keys", "size"), &RoRReadModelKernel::capture_navigation_pages);
-    ClassDB::bind_method(D_METHOD("refresh_interpolated_items", "items", "project", "alpha", "depth_index", "sprite_scale", "camera", "force_projection"), &RoRReadModelKernel::refresh_interpolated_items, DEFVAL(Array()), DEFVAL(true));
+    ClassDB::bind_method(D_METHOD("refresh_interpolated_items", "items", "project", "alpha", "depth_index", "sprite_scale", "camera", "force_projection", "preserve_motion"), &RoRReadModelKernel::refresh_interpolated_items, DEFVAL(Array()), DEFVAL(true), DEFVAL(false));
     ClassDB::bind_method(D_METHOD("cache_actor_sprites", "items", "scale"), &RoRReadModelKernel::cache_actor_sprites);
     ClassDB::bind_method(D_METHOD("cache_actor_sprites_atlased", "items", "scale", "atlas", "cache"), &RoRReadModelKernel::cache_actor_sprites_atlased);
     ClassDB::bind_method(D_METHOD("changed_combat_ids", "delta", "units", "buildings", "sources", "classifications"), &RoRReadModelKernel::changed_combat_ids);
@@ -2802,6 +2949,7 @@ void RoRReadModelKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("project_visible_static_items", "items", "origin", "scale", "viewport", "clip_buildings"), &RoRReadModelKernel::project_visible_static_items, DEFVAL(false));
     ClassDB::bind_method(D_METHOD("merge_projected_static_items", "first", "second", "origin", "scale"), &RoRReadModelKernel::merge_projected_static_items);
     ClassDB::bind_method(D_METHOD("create_unit_render_items", "units", "project", "provider", "colors", "alpha", "depth_index", "preview", "selected", "camera"), &RoRReadModelKernel::create_unit_render_items, DEFVAL(Array()));
+    ClassDB::bind_method(D_METHOD("preserve_displayed_unit_motion", "units", "previous_items", "alpha"), &RoRReadModelKernel::preserve_displayed_unit_motion);
     ClassDB::bind_method(D_METHOD("create_building_render_items", "buildings", "project", "provider", "colors", "records", "preview", "selected", "observer", "scale", "affine", "cache_sprite"), &RoRReadModelKernel::create_building_render_items);
     ClassDB::bind_method(D_METHOD("clip_building_render_items", "items", "viewport"), &RoRReadModelKernel::clip_building_render_items);
     ClassDB::bind_method(D_METHOD("cache_sprite_items", "items", "scale", "origin", "atlas", "cache"), &RoRReadModelKernel::cache_sprite_items);
@@ -2817,6 +2965,7 @@ void RoRReadModelKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_motion_velocities", "unit", "desired", "actual"), &RoRReadModelKernel::set_motion_velocities);
     ClassDB::bind_method(D_METHOD("resources_in_radius", "cells", "size", "origin", "radius"), &RoRReadModelKernel::resources_in_radius);
     ClassDB::bind_method(D_METHOD("owned_ai_actor_profile", "entity"), &RoRReadModelKernel::owned_ai_actor_profile);
+    ClassDB::bind_method(D_METHOD("capture_ai_unit_profile_inputs", "visible", "units_by_id", "observer", "builder_rates"), &RoRReadModelKernel::capture_ai_unit_profile_inputs);
     ClassDB::bind_method(D_METHOD("partition_render_items", "items"), &RoRReadModelKernel::partition_render_items);
     ClassDB::bind_method(D_METHOD("submit_sprite_run", "canvas", "items", "start"), &RoRReadModelKernel::submit_sprite_run);
     ClassDB::bind_method(D_METHOD("submit_sprite_batches", "canvas", "items", "start"), &RoRReadModelKernel::submit_sprite_batches);

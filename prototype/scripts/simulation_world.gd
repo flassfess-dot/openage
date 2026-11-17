@@ -131,6 +131,9 @@ var runtime_actor_eligibility: Dictionary:
 	set(value):
 		entity_mutations.runtime_actor_eligibility = value
 var terrain_revision: int = 0
+# Raw map terrain changes only on map replacement. Forest visibility and
+# navigation edits also advance terrain_revision during ordinary play.
+var map_data_revision := 0
 var terrain_change_history: Array = []
 var units: Array:
 	get:
@@ -709,6 +712,7 @@ func cache_changes(domain: String, previous: Variant, observer_team: int = 0) ->
 	return CacheDependency.changes(self, domain, previous, observer_team)
 
 func configure_map_data(map_data: Dictionary) -> void:
+	map_data_revision += 1
 	_record_terrain_change()
 	map_terrain_ids.clear()
 	map_reserved_foundation_cells.clear()
@@ -883,10 +887,7 @@ func entity_has_behavior_tag(entity: Dictionary, tag: String) -> bool:
 
 
 func entity_is_worker(entity: Dictionary) -> bool:
-	if bool(entity.get("components", {}).get("worker", {}).get("enabled", false)):
-		return true
-	# Compatibility for worlds configured only with gamespec-prototype v4.
-	return entity.get("behavior_tags", []).is_empty() and String(entity.get("kind", "")) == "villager"
+	return EntityComponents.is_worker(entity)
 
 
 func combat_source_context(entity: Dictionary) -> Dictionary:
@@ -935,20 +936,9 @@ func combat_target_domains(entity: Dictionary) -> Array[String]:
 	if not entity_is_static(entity):
 		var movement_domain := String(entity.get("movement_domain", entity.get("components", {}).get("movement", {}).get("domain", "land")))
 		return [movement_domain] if movement_domain in ["land", "water"] else ["land"]
-	var placement: Dictionary = data_repository.archetype(String(entity.get("kind", ""))).get("runtime", {}).get("placement", {})
-	var result: Array[String] = []
-	for domain_value in placement.get("required_adjacent_domains", []):
-		var domain := String(domain_value)
-		if domain in ["land", "water"] and domain not in result:
-			result.append(domain)
-	if result.is_empty():
-		var placement_domain := String(placement.get("domain", "land"))
-		if placement_domain in ["land", "water"]:
-			result.append(placement_domain)
-	if result.is_empty():
-		result.append("land")
-	result.sort()
-	return result
+	var kind: String = entity.get("kind", "")
+	if data_repository.target_domains_by_kind.has(kind): return data_repository.target_domains_by_kind[kind]
+	return ["land"]
 
 
 func refresh_building_connectivity() -> void:
@@ -1502,10 +1492,11 @@ func _tick_fog(context: Dictionary) -> void:
 	# Resource memory is sampled at the exact visibility transition. This keeps
 	# hidden state frozen even when an AI snapshot is requested less often than
 	# the simulation tick.
-	for observer_value in known_resources_by_player.keys():
+	var sampled_resources := {}
+	for observer_value in known_resources_by_player:
 		var observer_team := int(observer_value)
 		var cached: Dictionary = known_resources_by_player[observer_value]
-		_refresh_known_resource_cache(observer_team, cached, fog)
+		observer_memory._refresh_known_resource_cache(self, observer_team, cached, fog, sampled_resources)
 	if probe != null: probe.observe_microseconds("simulation.fog.resource_memory", Time.get_ticks_usec() - stage_started)
 
 func query_units_near(position: Vector2, radius: float) -> Array:
@@ -3333,8 +3324,8 @@ func get_resources() -> Array:
 	return entity_store.get_resources(self)
 
 
-func known_resource_memory_state() -> Dictionary:
-	return observer_memory.known_resource_memory_state(self)
+func known_resource_memory_state(detached: bool = true) -> Dictionary:
+	return observer_memory.known_resource_memory_state(self, detached)
 
 
 func known_resource_revision(observer_team: int) -> int:

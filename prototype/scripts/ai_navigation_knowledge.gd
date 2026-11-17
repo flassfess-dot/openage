@@ -100,6 +100,11 @@ func snapshot(world, fog, team: int, probe: Variant = null, maximum_region_units
 	return entry["result"]
 
 
+# The map loader prepares cold topology. Subsequent publications reuse the
+# observer's immutable buckets and update changed cells and own unit regions.
+func capture_publication(world, fog, team: int) -> Dictionary:
+	return {"navigation":snapshot(world, fog, team)}
+
 # Both full and exact incremental updates retain bounded cell portions.
 func prepare_snapshot(world, fog, team: int, maximum_cells: int = DEFAULT_PREPARE_CELLS, budget_usec: int = 4000) -> bool:
 	var portion_started := Time.get_ticks_usec()
@@ -443,13 +448,14 @@ func _region_targets(world, team: int, entry: Dictionary, maximum_units: int = 9
 		signatures[config] = [domain, restriction, radius]
 	var recovery: Dictionary = pending["recovery"]
 	var live_recovery_ids: Dictionary = pending["live_recovery_ids"]
+	var recovery_inputs: Dictionary = pending.get("recovery_inputs", {"neighbors":{}, "known_cells":{}, "connectivity":{}})
 	var recovery_cache: Dictionary = entry.get("recovery_cache", {})
 	entry["recovery_cache"] = recovery_cache
 	for unit in units:
 		if not preload("res://scripts/ai_navigation_policy.gd").is_failure(String(unit.get("diagnostic_reason", ""))): continue
 		var unit_id := int(unit["id"])
 		live_recovery_ids[unit_id] = true
-		var dependency: Array = _recovery_dependency(world, team, entry, planner, unit, pending.get("recovery_inputs")) if recovery_cache_enabled else []
+		var dependency: Array = _recovery_dependency(world, team, entry, planner, unit, recovery_inputs) if recovery_cache_enabled else []
 		var cached: Dictionary = recovery_cache.get(unit_id, {})
 		if recovery_cache_enabled and not cached.is_empty() and cached["dependency"] == dependency:
 			if cached["position"] != null: recovery[unit_id] = cached["position"]

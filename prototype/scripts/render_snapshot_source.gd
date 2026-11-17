@@ -14,6 +14,8 @@ var epoch := -1
 var published_overview: Dictionary = {}
 var scene_rule_signature: Array = []
 var scene_rules: Dictionary = {}
+var scene_menu_generation := 0
+var scene_menu_stocks: Dictionary = {}
 var scene_worker_menu: Dictionary = {}
 var scene_worker_price_bounds: Dictionary = {}
 var scene_menu_counters: Dictionary = {}
@@ -30,6 +32,8 @@ func clear() -> void:
 	controls_projection.clear()
 	scene_rule_signature = []
 	scene_rules = {}
+	scene_menu_generation += 1
+	scene_menu_stocks.clear()
 	scene_worker_menu = {}
 	scene_worker_price_bounds.clear()
 	scene_menu_counters.clear()
@@ -43,9 +47,14 @@ func _retained_scene_rules(world, team: int) -> Dictionary:
 	if signature != scene_rule_signature:
 		scene_menu_counters["schema_rebuilds"] = int(scene_menu_counters.get("schema_rebuilds", 0)) + 1
 		scene_rule_signature = signature
+		scene_menu_generation += 1
 		scene_rules = {"entries":{},"sizes":{},"bytes":0}
 		scene_worker_menu = {}
 		scene_worker_price_bounds.clear()
+	var stocks: Dictionary = world.economy_system.resource_stockpiles_by_team.get(team, {})
+	if scene_menu_stocks != stocks:
+		scene_menu_stocks = stocks.duplicate()
+		scene_menu_generation += 1
 	return scene_rules
 
 
@@ -93,7 +102,11 @@ func capture(world, tick: int, team: int, selected_ids: Array, bounds: Rect2, di
 	if full_scene and controls_projection.supported: options["_scene_unit_metadata"] = true
 	if full_scene and controls_projection.supported and camera_bounds.has_area(): options["_scene_clocks"] = {"bounds":camera_bounds, "samples":{}}
 	if full_scene and controls_projection.certified: options["_scene_worker_publication"]["publish_rows"] = true
-	if full_scene and controls_projection.building_rows_native: options["_scene_building_fields"] = {}
+	if full_scene and controls_projection.building_rows_native:
+		options["_scene_building_fields"] = {}
+		if controls_projection.certified and not controls_projection.compare_generation:
+			options["_scene_building_generation"] = scene_menu_generation
+			options["_scene_ready_buildings"] = {}
 	if probe != null:
 		options["performance_probe"] = probe
 		options["performance_prefix"] = "presentation.local.snapshot"

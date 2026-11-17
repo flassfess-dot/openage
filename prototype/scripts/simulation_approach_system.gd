@@ -25,7 +25,9 @@ func assign_reachable_slot(worker: Dictionary, candidates: Array[Vector2], reser
 		# a map-sized detour. Minimize actual route length among bounded slots.
 		var origin:=Vector2(worker["pos"])
 		var planner=world.movement_system.knowledge.planner(world,int(worker["team"]))
-		var best: Variant=null; var best_cost:=INF
+		var best: Variant = null
+		var best_cost := INF
+		var best_route: Array[Vector2] = []
 		if probe != null: portion_started = Time.get_ticks_usec()
 		for candidate in available.slice(0,32):
 			if origin.distance_to(candidate)>=best_cost: break
@@ -33,9 +35,12 @@ func assign_reachable_slot(worker: Dictionary, candidates: Array[Vector2], reser
 			if route.is_empty() or route.back().distance_squared_to(candidate)>0.0144: continue
 			var cursor:=origin; var cost:=0.0
 			for point in route: cost+=cursor.distance_to(point); cursor=point
-			if cost<best_cost: best=candidate; best_cost=cost
+			if cost < best_cost:
+				best = candidate
+				best_cost = cost
+				best_route = route
 		if probe != null: probe.observe_microseconds("simulation.approach.routes", Time.get_ticks_usec() - portion_started)
-		if best is Vector2 and resume(worker,best): return best
+		if best is Vector2 and resume(worker, best, best_route): return best
 		return null
 	for candidate in available:
 		if resume(worker, candidate):
@@ -94,7 +99,7 @@ func available_slots(worker: Dictionary, candidates: Array[Vector2], reservation
 	return result
 
 
-func resume(worker: Dictionary, slot: Vector2) -> bool:
+func resume(worker: Dictionary, slot: Vector2, route: Array[Vector2] = []) -> bool:
 	if Vector2(worker.get("pos", Vector2.ZERO)).distance_squared_to(slot) <= 0.0144:
 		world.set_entity_field(worker, "destination", slot)
 		world.set_entity_field(worker, "target", slot)
@@ -109,10 +114,19 @@ func resume(worker: Dictionary, slot: Vector2) -> bool:
 	var domain := String(worker.get("movement_domain", "land"))
 	var restriction := int(worker.get("terrain_restriction", -1))
 	var radius := float(worker.get("footprint_radius", 0.3))
-	var planner = simulation_world.movement_system.knowledge.planner(simulation_world, int(worker.get("team", 0)))
-	var route: Array[Vector2] = planner.find_path(Vector2(worker["pos"]), slot, domain, restriction, radius)
+	if route.is_empty():
+		var planner = simulation_world.movement_system.knowledge.planner(simulation_world, int(worker.get("team", 0)))
+		route = planner.find_path(Vector2(worker["pos"]), slot, domain, restriction, radius)
+	return assign_resolved_route(worker, slot, route)
+
+
+func assign_resolved_route(worker: Dictionary, slot: Vector2, route: Array[Vector2]) -> bool:
 	if route.is_empty() or route.back().distance_squared_to(slot) > 0.0144:
 		return false
+	var simulation_world = world
+	var domain := String(worker.get("movement_domain", "land"))
+	var restriction := int(worker.get("terrain_restriction", -1))
+	var radius := float(worker.get("footprint_radius", 0.3))
 	var purpose := "replan" if not worker.get("path", []).is_empty() else String(worker.get("task", "move"))
 	var prepared: Dictionary = simulation_world.navigation_service.register_resolved_path(int(worker["id"]), worker["pos"], slot, route, domain, restriction, purpose, radius)
 	if not simulation_world.movement_system.assign_unit_destination(worker, slot, false, false, prepared):

@@ -1,5 +1,6 @@
 #include "ror_read_model_kernel.hpp"
-#include "ror_actor_motion_frame.hpp"
+#include <godot_cpp/core/gdextension_interface_loader.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/variant_internal.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <algorithm>
@@ -25,15 +26,6 @@ double contact_number_value(const Variant *value) {
 const Variant *contact_array_values(const Array &source) {
     return source.is_empty() ? nullptr : reinterpret_cast<const Variant *>(gdextension_interface::array_operator_index_const(source._native_ptr(), 0));
 }
-struct ContactRow {
-    int64_t id;
-    Dictionary entity;
-    Vector2 indexed, position;
-    double indexed_radius, radius, hp;
-    String domain;
-    bool present, isolated;
-};
-
 // The spatial index already assigns a single cell to each slot. Build flat
 // chains from those cells instead of copying every Godot bucket and allocating
 // a second vector for it. Ordinary maps have a small rectangular grid.
@@ -111,62 +103,73 @@ int64_t RoRReadModelKernel::settle_mobile_contacts_flat(const Dictionary &change
 
     static const Variant id_key("id"), hp_key("hp"), pos_key("pos"), radius_key("footprint_radius");
     static const Variant domain_key("movement_domain"), isolated_key("formation_shared_isolated");
-    static const Variant land("land"), no_health(0.0), not_isolated(false);
-    // Admission borrows array/field storage only while it is read-only. No
-    // borrowed pointer is used after pending.clear() or any correction call.
-    const Variant *entity_values = contact_array_values(entities);
-    const Variant *position_values = contact_array_values(positions);
-    const Variant *radius_values = contact_array_values(radii);
-    std::vector<ContactRow> rows;
-    rows.reserve(size_t(entities.size()));
-    std::unordered_map<int64_t, int32_t> slots;
-    slots.reserve(size_t(entities.size()));
-    double maximum_live_radius = 0.0;
-    for (int64_t i = 0; i < entities.size(); ++i) {
-        if (entity_values[i].get_type() != Variant::DICTIONARY || position_values[i].get_type() != Variant::VECTOR2 || !contact_number(radius_values[i])) return reject();
-        const Dictionary &row = *VariantInternal::get_dictionary(&entity_values[i]);
-        const Variant *id = RoRActorMotionFrame::find_field(row, id_key), *hp = RoRActorMotionFrame::find_field(row, hp_key);
-        const Variant *position = RoRActorMotionFrame::find_field(row, pos_key), *radius = RoRActorMotionFrame::find_field(row, radius_key);
-        const Variant *domain = RoRActorMotionFrame::find_field(row, domain_key), *isolated = RoRActorMotionFrame::find_field(row, isolated_key);
-        if (!hp) hp = &no_health;
-        if (!domain) domain = &land;
-        if (!isolated) isolated = &not_isolated;
-        if (!id || !position || !radius || id->get_type() != Variant::INT || !contact_number(*hp) || position->get_type() != Variant::VECTOR2 ||
-                !contact_number(*radius) || domain->get_type() != Variant::STRING || isolated->get_type() != Variant::BOOL) return reject();
-        const Vector2 indexed = *VariantInternal::get_vector2(&position_values[i]), factual = *VariantInternal::get_vector2(position);
-        const double indexed_radius = contact_number_value(&radius_values[i]), live_radius = contact_number_value(radius), health = contact_number_value(hp);
-        if (!std::isfinite(indexed.x) || !std::isfinite(indexed.y) || !std::isfinite(factual.x) || !std::isfinite(factual.y) ||
-                !std::isfinite(indexed_radius) || indexed_radius < 0.0 || !std::isfinite(live_radius) || live_radius < 0.0 || !std::isfinite(health)) return reject();
-        const double coordinate_limit = double(std::numeric_limits<int32_t>::max()) - 4096.0;
-        if (std::abs(double(indexed.x) / cell_size) > coordinate_limit || std::abs(double(indexed.y) / cell_size) > coordinate_limit ||
-                std::abs(double(factual.x) / cell_size) > coordinate_limit || std::abs(double(factual.y) / cell_size) > coordinate_limit) return reject();
-        const int64_t actor_id = *VariantInternal::get_int(id);
-        if (!slots.emplace(actor_id, int32_t(i)).second) return reject();
-        rows.push_back({actor_id, row, indexed, factual, indexed_radius, live_radius, health, *VariantInternal::get_string(domain),
-            units_by_id.has(*id), *VariantInternal::get_bool(isolated)});
-        maximum_live_radius = std::max(maximum_live_radius, live_radius);
+    static const Variant land("land");
+    // The spatial owner maintains both directions of the dense roster as it
+    // inserts/removes units. Reuse them instead of rebuilding an ID table and
+    // decoding collision policy for every idle body on every tick.
+    const PackedInt64Array roster = spatial->get("unit_ids");
+    const Dictionary slots = spatial->get("unit_index_by_id");
+    if (roster.size() != entities.size() || slots.size() != entities.size()) return reject();
+    const int64_t *roster_ids = roster.ptr();
+    const int64_t count = entities.size();
+    const int64_t revision = changes.get("revision", -1);
+    const int64_t roster_revision = spatial->get("unit_roster_revision");
+    const bool full = changes.get("full", false);
+    const bool rebuild = full || revision < 0 || contact_journal_revision < 0 ||
+            contact_spatial_owner != spatial->get_instance_id() || contact_roster_revision != roster_revision ||
+            contact_journal_revision != int64_t(system->get("collision_cursor")) || int64_t(contact_poses.size()) != count;
+    // A rejected or interrupted admission forces a full refresh next time.
+    contact_journal_revision = -1;
+    if (rebuild) contact_poses.resize(size_t(count));
+    const double coordinate_limit = double(std::numeric_limits<int32_t>::max()) - 4096.0;
+    const auto read_pose = [&](int64_t slot) -> bool {
+        const Variant &value = entities[slot];
+        if (value.get_type() != Variant::DICTIONARY) return false;
+        const Dictionary &row = *VariantInternal::get_dictionary(&value);
+        const Variant position = row.get(pos_key, Variant()), radius = row.get(radius_key, Variant());
+        if (position.get_type() != Variant::VECTOR2 || !contact_number(radius)) return false;
+        const Vector2 factual = *VariantInternal::get_vector2(&position);
+        const double live_radius = contact_number_value(&radius);
+        if (!std::isfinite(factual.x) || !std::isfinite(factual.y) || !std::isfinite(live_radius) || live_radius < 0.0 ||
+                std::abs(double(factual.x) / cell_size) > coordinate_limit || std::abs(double(factual.y) / cell_size) > coordinate_limit) return false;
+        ContactPose &pose = contact_poses[slot];
+        pose.position = factual;
+        pose.radius = live_radius;
+        ++contact_pose_reads;
+        return true;
+    };
+    if (rebuild) {
+        ++contact_full_syncs;
+        const Variant *indexed_radii = contact_array_values(radii);
+        for (int64_t i = 0; i < count; ++i) {
+            if (!read_pose(i) || !contact_number(indexed_radii[i])) return reject();
+            contact_poses[i].indexed_radius = contact_number_value(&indexed_radii[i]);
+            if (!std::isfinite(contact_poses[i].indexed_radius) || contact_poses[i].indexed_radius < 0.0) return reject();
+        }
     }
-    // Keep every possible query bounded, including a later corrected center.
-    const double width = std::ceil(2.0 * (maximum_live_radius + 0.25 + maximum_radius) / cell_size) + 3.0;
-    if (width * width > 4096.0) return reject();
     const Array cells = spatial->get("unit_cells");
     ContactGrid grid;
     if (cells.size() != entities.size() || !grid.build(cells)) return reject();
-    std::unordered_set<int64_t> candidates;
-    candidates.reserve(size_t(active_units.size()) + size_t(pending.size()));
+
+    std::vector<int32_t> ordered;
+    ordered.reserve(size_t(active_units.size() + pending.size()));
+    std::vector<uint8_t> selected(size_t(count), 0);
+    std::unordered_set<int64_t> retired;
     const auto add = [&](const Dictionary &row, bool force) -> bool {
         const Variant id = row.get(id_key, Variant());
         if (id.get_type() != Variant::INT) return false;
-        const auto found = slots.find(int64_t(id));
-        if (found == slots.end()) {
-            // A newly added live entity needs the complete scalar path until
-            // the spatial index contains it. Retired/dead pending rows expire.
+        const int64_t slot = slots.get(id, -1);
+        if (slot < 0) {
+            // The spatial owner has not admitted this newly spawned actor yet.
             if (units_by_id.has(id) && double(row.get(hp_key, 0.0)) > 0.0) return false;
-            if (force || !bool(row.get(isolated_key, false))) candidates.insert(id);
+            if (force || !bool(row.get(isolated_key, false))) retired.insert(int64_t(id));
             return true;
         }
-        const ContactRow &record = rows[found->second];
-        if (force || !record.isolated) candidates.insert(id);
+        if (slot >= count || roster_ids[slot] != int64_t(id)) return false;
+        if (!selected[slot] && (force || !bool(row.get(isolated_key, false)))) {
+            selected[slot] = 1;
+            ordered.push_back(int32_t(slot));
+        }
         return true;
     };
     const Array pending_ids = pending.keys();
@@ -175,7 +178,6 @@ int64_t RoRReadModelKernel::settle_mobile_contacts_flat(const Dictionary &change
         const Variant value = pending[pending_ids[i]];
         if (value.get_type() != Variant::DICTIONARY || Dictionary(value).get(id_key, Variant()) != pending_ids[i] || !add(value, true)) return reject();
     }
-    const bool full = changes.get("full", false);
     const Array &source = full ? all_units : active_units;
     for (int64_t i = 0; i < source.size(); ++i) {
         if (source[i].get_type() != Variant::DICTIONARY || !add(source[i], full)) return reject();
@@ -186,75 +188,85 @@ int64_t RoRReadModelKernel::settle_mobile_contacts_flat(const Dictionary &change
         for (int64_t i = 0; i < ids.size(); ++i) {
             if (ids[i].get_type() != Variant::INT) return reject();
             if (!(int64_t(masks.get(ids[i], 0)) & 3)) continue;
-            const auto found = slots.find(int64_t(ids[i]));
-            if (found != slots.end()) {
-                const ContactRow &row = rows[found->second];
-                if (row.present && !row.isolated) candidates.insert(row.id);
-            } else {
-                const Variant value = units_by_id.get(ids[i], Variant());
-                if (value.get_type() != Variant::NIL && (value.get_type() != Variant::DICTIONARY || !add(value, false))) return reject();
-            }
+            const int64_t slot = slots.get(ids[i], -1);
+            if (slot >= count || (slot >= 0 && roster_ids[slot] != int64_t(ids[i]))) return reject();
+            if (!rebuild && slot >= 0 && !read_pose(slot)) return reject();
+            if (slot >= 0 && selected[slot]) continue;
+            const Variant value = units_by_id.get(ids[i], Variant());
+            if (value.get_type() != Variant::NIL && (value.get_type() != Variant::DICTIONARY || !add(value, false))) return reject();
         }
     }
-    if (candidates.size() > 65536) return reject();
-    std::vector<int64_t> ordered(candidates.begin(), candidates.end());
-    std::sort(ordered.begin(), ordered.end());
+    if (ordered.size() + retired.size() > 65536) return reject();
+    for (const int32_t slot : ordered) {
+        const double width = std::ceil(2.0 * (contact_poses[slot].radius + 0.25 + maximum_radius) / cell_size) + 3.0;
+        if (width * width > 4096.0) return reject();
+    }
+    std::sort(ordered.begin(), ordered.end(), [&](int32_t a, int32_t b) { return roster_ids[a] < roster_ids[b]; });
     // Admission is complete. No rejection/restart is possible after writes.
-    ++contact_frame_calls; contact_frame_rows += int64_t(rows.size());
+    ++contact_frame_calls; contact_frame_rows += count;
     pending.clear();
     std::unordered_set<uint64_t> pairs;
     std::vector<int32_t> neighbors;
     Array reference;
-    const auto correct = [&](ContactRow &row, const Vector2 &offset) -> double {
-        const double moved = separate.call(row.entity, offset);
-        row.position = row.entity[pos_key];
+    const auto correct = [&](ContactPose &row, const Dictionary &entity, const Vector2 &offset) -> double {
+        const double moved = separate.call(entity, offset);
+        row.position = entity[pos_key];
         return moved;
     };
-    for (const int64_t id : ordered) {
-        const auto found = slots.find(id);
-        if (found == slots.end()) continue;
-        ContactRow &unit = rows[found->second];
-        if (unit.hp <= 0.0 || !unit.present) continue;
+    for (int32_t candidate_slot : ordered) {
+        ContactPose &unit = contact_poses[candidate_slot];
+        const int64_t id = roster_ids[candidate_slot];
+        const Dictionary source_unit = entities[candidate_slot];
+        if (double(source_unit.get(hp_key, 0.0)) <= 0.0 || !units_by_id.has(id)) continue;
         const double radius = unit.radius + 0.25, extent = radius + maximum_radius;
         const Vector2 minimum = (unit.position - Vector2(1, 1) * real_t(extent)) / real_t(cell_size);
         const Vector2 maximum = (unit.position + Vector2(1, 1) * real_t(extent)) / real_t(cell_size);
         neighbors.clear();
+        // Typed Array[Vector2] belongs to the spatial owner. Borrow only
+        // until this query finishes, before any script correction.
+        const Variant *indexed = contact_array_values(positions);
         for (int y = int(std::floor(minimum.y)); y <= int(std::floor(maximum.y)); ++y) {
             for (int x = int(std::floor(minimum.x)); x <= int(std::floor(maximum.x)); ++x) {
                 for (int32_t slot = grid.first(x, y); slot >= 0; slot = grid.next[slot]) {
-                    const ContactRow &other = rows[slot];
-                    const double allowed = radius + other.indexed_radius;
-                    if (other.id != id && unit.position.distance_squared_to(other.indexed) <= allowed * allowed) neighbors.push_back(slot);
+                    const double allowed = radius + contact_poses[slot].indexed_radius;
+                    if (slot != candidate_slot && unit.position.distance_squared_to(*VariantInternal::get_vector2(&indexed[slot])) <= allowed * allowed)
+                        neighbors.push_back(slot);
                 }
             }
         }
-        std::stable_sort(neighbors.begin(), neighbors.end(), [&](int32_t left, int32_t right) { return rows[left].id < rows[right].id; });
+        std::stable_sort(neighbors.begin(), neighbors.end(), [&](int32_t left, int32_t right) { return roster_ids[left] < roster_ids[right]; });
         ++contact_frame_queries; contact_frame_neighbors += int64_t(neighbors.size());
         if (compare && contact_frame_comparisons < 512 && (contact_frame_comparisons < 8 || contact_frame_queries % 512 == 0)) {
-            bool equal = spatial_unit_neighbors(unit.entity, radius, Variant(), buckets, entities, positions, radii, cell_size, maximum_radius, reference);
+            bool equal = spatial_unit_neighbors(source_unit, radius, Variant(), buckets, entities, positions, radii, cell_size, maximum_radius, reference);
             equal = equal && reference.size() == int64_t(neighbors.size());
-            for (int64_t j = 0; equal && j < reference.size(); ++j) equal = int64_t(Dictionary(reference[j])[id_key]) == rows[neighbors[size_t(j)]].id;
+            for (int64_t j = 0; equal && j < reference.size(); ++j) equal = int64_t(Dictionary(reference[j])[id_key]) == roster_ids[neighbors[size_t(j)]];
             ++contact_frame_comparisons;
             if (!equal) { ++contact_frame_mismatches; UtilityFunctions::push_error("Contact frame neighbor query differs from its spatial generation"); }
         }
         for (const int32_t slot : neighbors) {
-            ContactRow &other = rows[slot];
-            if (other.hp <= 0.0 || other.domain != unit.domain) continue;
+            ContactPose &other = contact_poses[slot];
             const Vector2 gap = unit.position - other.position;
             const double sum = unit.radius + other.radius;
             if (gap.length_squared() >= (sum - 0.001) * (sum - 0.001)) continue;
-            const uint64_t pair = contact_cell(int32_t(std::min(id, other.id)), int32_t(std::max(id, other.id)));
+            // Health and movement domain are needed only for a penetrating
+            // pair. Corrections below alter position/targets only.
+            const Dictionary other_unit = entities[slot];
+            if (double(other_unit.get(hp_key, 0.0)) <= 0.0 || other_unit.get(domain_key, land) != source_unit.get(domain_key, land)) continue;
+            const uint64_t pair = contact_cell(std::min(candidate_slot, slot), std::max(candidate_slot, slot));
             if (!pairs.insert(pair).second) continue;
-            pending[id] = unit.entity; pending[other.id] = other.entity;
+            pending[id] = source_unit; pending[roster_ids[slot]] = other_unit;
             const double distance = gap.length();
-            const Vector2 normal = distance > 0.0001 ? gap / real_t(distance) : Vector2(0, id < other.id ? -1 : 1);
+            const Vector2 normal = distance > 0.0001 ? gap / real_t(distance) : Vector2(0, id < roster_ids[slot] ? -1 : 1);
             const double correction = std::min(sum - distance + 0.002, std::max(0.01, delta * 2.0));
-            const double first = correct(unit, normal * real_t(correction * 0.5));
-            const double second = correct(other, -normal * real_t(correction - first));
-            if (second < correction * 0.5) correct(unit, normal * real_t(correction * 0.5 - second));
+            const double first = correct(unit, source_unit, normal * real_t(correction * 0.5));
+            const double second = correct(other, other_unit, -normal * real_t(correction - first));
+            if (second < correction * 0.5) correct(unit, source_unit, normal * real_t(correction * 0.5 - second));
         }
     }
-    return int64_t(ordered.size());
+    contact_spatial_owner = spatial->get_instance_id();
+    contact_roster_revision = roster_revision;
+    contact_journal_revision = revision;
+    return int64_t(ordered.size() + retired.size());
 }
 
 Dictionary RoRReadModelKernel::contact_frame_stats() const {
@@ -262,6 +274,7 @@ Dictionary RoRReadModelKernel::contact_frame_stats() const {
     result["calls"] = contact_frame_calls; result["rows"] = contact_frame_rows;
     result["queries"] = contact_frame_queries; result["neighbors"] = contact_frame_neighbors;
     result["fallbacks"] = contact_frame_fallbacks;
+    result["full_pose_syncs"] = contact_full_syncs; result["pose_reads"] = contact_pose_reads;
     result["comparisons"] = contact_frame_comparisons; result["mismatches"] = contact_frame_mismatches;
     return result;
 }

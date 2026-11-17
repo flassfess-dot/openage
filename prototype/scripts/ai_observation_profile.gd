@@ -52,6 +52,88 @@ static func actor(world, row: Dictionary, team: int, generation_cache: Variant =
 		_compare_owned_catalog(data, live, world, generation_cache)
 	return data
 
+# Collect only owner-private facts here. Foreign units use their visible rows
+# and public catalog records. Worker roles and depot rules are resolved once
+# per distinct kind/resource/rate, then expanded by the isolated planner.
+static func capture_unit_inputs(world, team: int, units: Array, options: Dictionary) -> Dictionary:
+	if not bool(options.get("include_ai_profiles", false)) or compare_actor_catalog or not native_actor_enabled or not ClassDB.class_exists("RoRReadModelKernel"):
+		return {}
+	if actor_kernel == null: actor_kernel = ClassDB.instantiate("RoRReadModelKernel")
+	if not actor_kernel.has_method("capture_ai_unit_profile_inputs"): return {}
+	var rates := bool(options.get("include_builder_productivity",false)) and not bool(options.get("tactical_only",false))
+	var inputs: Dictionary = actor_kernel.capture_ai_unit_profile_inputs(units, world.units_by_id, team, rates)
+	if inputs.is_empty(): return {}
+	var public_types: Dictionary = inputs["public_types"]
+	for key: Vector2i in public_types:
+		var source: Dictionary = world.object_record_by_id(key.y, key.x)
+		var combat: Dictionary = source.get("combat", {})
+		public_types[key] = {
+			"speed":source.get("speed",0.0), "health":source.get("health",1.0),
+			"combat":{"attacks":combat.get("attacks",[]).duplicate(true), "armors":combat.get("armors",[]).duplicate(true),
+				"base_armor":combat.get("base_armor",0.0), "attack_period":combat.get("attack_period",2.0),
+				"range_max":combat.get("range_max",0.0), "blast_range":combat.get("blast_range",0.0)}}
+	var carriers: Dictionary = inputs["carriers"]
+	for kind in carriers:
+		for type in carriers[kind]:
+			var carrier: Dictionary = world.units_by_id[carriers[kind][type]]
+			var role: Dictionary = world.worker_role_system.profile_for_resource_type(carrier, type)
+			var role_id := int(role.get("role_source_unit_id", -1))
+			var source: Dictionary = world.object_record_by_id(role_id, team) if role_id >= 0 else {}
+			var allowed: Variant = source.get("resources", {}).get("drop_site_ids")
+			carriers[kind][type] = allowed.duplicate() if allowed is Array else null
+	var builders: Dictionary = inputs["builders"]
+	for kind in builders:
+		for rate in builders[kind]:
+			var builder: Dictionary = world.units_by_id[builders[kind][rate]]
+			builders[kind][rate] = world.worker_role_system.expected_task_work_rate(builder, "build")
+	var depots := {}
+	for kind in ["town_center","granary","storage_pit","dock"]:
+		depots[kind] = int(world.object_record_for(kind, team).get("unit_id", -2))
+	inputs["depots"] = depots
+	return inputs
+
+static func materialize_units(snapshot: Dictionary) -> Array:
+	var inputs: Dictionary = snapshot["_planner_unit_facts"]
+	var profiles: Array = inputs["profiles"]
+	var units: Array = snapshot["units"]
+	var decorated: Array = []
+	decorated.resize(units.size())
+	var depot_rules := {}
+	for index in units.size():
+		var row: Dictionary = units[index].duplicate()
+		var kind: String = row.get("kind", "")
+		if profiles[index] == null:
+			var public_type := Vector2i(int(row.get("team",0)),int(row.get("source_unit_id",-1)))
+			row["ai_profile"] = from_record(inputs["public_types"][public_type], row)
+		else:
+			var profile: Dictionary = profiles[index].duplicate()
+			if profile.has("_drop_site_ids"):
+				var allowed: Array = profile["_drop_site_ids"]
+				var delivery: Variant = inputs["carriers"].get(kind, {}).get(profile.get("_delivery_resource")) if profile.has("_delivery_resource") else null
+				profile["drop_site_kinds"] = _depot_kinds(allowed, inputs["depots"], depot_rules)
+				profile["delivery_drop_site_kinds"] = _depot_kinds(delivery if delivery is Array else allowed, inputs["depots"], depot_rules)
+				profile.erase("_drop_site_ids")
+				profile.erase("_delivery_resource")
+			if profile.has("_base_build_rate"):
+				row["construction_work_rate"] = inputs["builders"][kind][profile["_base_build_rate"]]
+				profile.erase("_base_build_rate")
+			if inputs.has("commands") and preload("res://scripts/entity_components.gd").is_worker(row):
+				row["command_options"] = inputs["commands"]
+			row["ai_profile"] = profile
+		decorated[index] = row
+	return decorated
+
+static func _depot_kinds(allowed: Array, catalog: Dictionary, cache: Dictionary) -> Array:
+	if cache.has(allowed): return cache[allowed]
+	var result: Array = []
+	for kind in ["town_center","granary","storage_pit","dock"]:
+		for id in allowed:
+			if int(id) == int(catalog[kind]):
+				result.append(kind)
+				break
+	cache[allowed] = result
+	return result
+
 static func _compare_owned_catalog(data: Dictionary, actor: Dictionary, world, generation_cache: Variant) -> void:
 	if not compare_actor_catalog or not data.has("drop_site_kinds") or not generation_cache is Dictionary: return
 	var stats: Dictionary = generation_cache.get("_catalog_stats", {})
@@ -72,6 +154,7 @@ static func _owned_tactical(data: Dictionary, actor: Dictionary, world, generati
 	data["conversion"] = actor.get("components",{}).get("conversion",{}).duplicate(true)
 	var worker: Dictionary=actor.get("components",{}).get("worker",{})
 	if bool(worker.get("enabled",false)):
+		data["waiting_for_resource_slot"] = actor.get("task") == "gather" and actor.get("gather_stage") == "approaching" and not actor.get("resource_approach_slot") is Vector2
 		var allowed: Array=worker.get("drop_site_ids",[])
 		var delivery_allowed: Array = allowed
 		# ReturnResources restores a generic carrier's resource task before

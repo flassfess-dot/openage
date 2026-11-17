@@ -19,9 +19,10 @@ var recovery_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if Clas
 	set(value):
 		recovery_kernel = value
 		_refresh_native_capabilities()
-var dropoff_building_ids: Dictionary = {}
+var dropoff_building_profiles: Dictionary = {}
 var dropoff_roster_epoch := -1
 var dropoff_roster_revision := -1
+var dropoff_catalog_revision := -1
 var cluster_route_checks: Dictionary = {}
 var exhaustive_cluster_routes := OS.get_environment("ROR_DIAGNOSTIC_EXHAUSTIVE_CLUSTER_ROUTES") == "1"
 var cluster_route_search_stats := {"checks":0,"queries":0,"sufficient_routes":0,"reviewed_routes_reused":0}
@@ -215,10 +216,12 @@ func _perform_gather_action(worker: Dictionary, resource: Dictionary, capacity: 
 	var simulation_world = world
 	if not worker["path"].is_empty() or Vector2(worker["actual_velocity"])!=Vector2.ZERO: simulation_world.movement_system.stop_unit_motion(worker,false)
 	simulation_world.set_entity_field(worker, "gather_stage", "harvesting")
-	simulation_world.transition_entity_order(worker, OrderPipeline.FACE_TARGET)
+	var recovering := float(worker["work"]) > 0.0
+	var entering_recovery := recovering and OrderPipeline.phase(worker) != OrderPipeline.RECOVER
+	if entering_recovery: simulation_world.transition_entity_order(worker, OrderPipeline.FACE_TARGET)
 	simulation_world.movement_system.face_unit_toward(worker, resource["pos"])
-	if float(worker["work"]) > 0.0:
-		simulation_world.transition_entity_order(worker, OrderPipeline.RECOVER)
+	if recovering:
+		if entering_recovery: simulation_world.transition_entity_order(worker, OrderPipeline.RECOVER)
 		return GATHER_UPDATE_ACTION
 
 	simulation_world.restart_entity_order(worker)
@@ -246,6 +249,8 @@ func _shorten_cluster_route(worker: Dictionary,requested: Dictionary) -> Variant
 	if not exhaustive_cluster_routes and worker.get("gather_route_review", []) == review:
 		cluster_route_search_stats["reviewed_routes_reused"] += 1
 		return null
+	if not exhaustive_cluster_routes:
+		simulation_world.set_entity_field(worker, "gather_route_review", review)
 	var origin:=Vector2(worker["pos"]); var cursor:=origin; var current_cost:=0.0
 	# The path keeps its visited prefix. Counting that prefix from the worker's
 	# current position invents a return trip and repeatedly triggers new routes.
@@ -261,8 +266,6 @@ func _shorten_cluster_route(worker: Dictionary,requested: Dictionary) -> Variant
 		if cluster_route_checks.has(key): return null
 		if cluster_route_checks.size()>=512: cluster_route_checks.erase(cluster_route_checks.keys()[0])
 		cluster_route_checks[key]=true
-	else:
-		simulation_world.set_entity_field(worker, "gather_route_review", review)
 	cluster_route_search_stats["checks"] += 1
 	var best: Dictionary={}; var best_cost:=current_cost*0.85
 	var sufficient_route := false
@@ -279,7 +282,7 @@ func _shorten_cluster_route(worker: Dictionary,requested: Dictionary) -> Variant
 			cursor=origin; var cost:=0.0
 			for waypoint in route: cost+=cursor.distance_to(waypoint); cursor=waypoint
 			if cost<best_cost:
-				best={"resource":candidate,"slot":point}; best_cost=cost
+				best={"resource":candidate,"slot":point,"route":route}; best_cost=cost
 				# A clear, short approach already improves the current detour by
 				# at least 15%. Do not search every other tree/slot for a marginal
 				# improvement while the whole simulation waits for this worker.
@@ -289,7 +292,7 @@ func _shorten_cluster_route(worker: Dictionary,requested: Dictionary) -> Variant
 					break
 		if sufficient_route: break
 	if best.is_empty(): return null
-	if not simulation_world.approach_system.resume(worker,best["slot"]): return null
+	if not simulation_world.approach_system.resume(worker,best["slot"],best["route"]): return null
 	release_resource_approach_slot(worker)
 	var resource: Dictionary=best["resource"]
 	simulation_world.set_entity_field(worker,"resource_id",int(resource["id"]))
@@ -304,7 +307,10 @@ func _shorten_cluster_route(worker: Dictionary,requested: Dictionary) -> Variant
 
 
 func _cluster_route_review(worker: Dictionary, resource: Dictionary) -> Array:
-	return [int(resource["id"]), int(worker["team"]), int(worker.get("components", {}).get("order", {}).get("revision", 0)), hash(worker["path"])]
+	var route: Array = worker["path"]
+	var request := int(worker.get("path_request_id", -1))
+	var route_id := request if request > 0 else -1 - route.hash()
+	return [int(resource["id"]), int(worker["team"]), int(worker.get("components", {}).get("order", {}).get("revision", 0)), route_id, route.back() if not route.is_empty() else null]
 
 
 func _adopt_reached_cluster_resource(worker: Dictionary, requested: Dictionary) -> Variant:
@@ -414,7 +420,7 @@ func _complete_resource_deposit(worker: Dictionary, dropoff: Dictionary) -> int:
 		return GATHER_UPDATE_IDLE
 	simulation_world.transition_entity_order(worker, OrderPipeline.RECOVER)
 	var resource: Variant = simulation_world.find_resource(int(worker["resource_id"]))
-	if resource != null and prepare_group_gather_approach(worker, resource):
+	if resource != null and (_resume_productive_site(worker, resource) or prepare_group_gather_approach(worker, resource)):
 		simulation_world.restart_entity_order(worker)
 		return GATHER_UPDATE_IDLE
 	if resource != null and _wait_for_shared_resource(worker, resource):
@@ -422,6 +428,28 @@ func _complete_resource_deposit(worker: Dictionary, dropoff: Dictionary) -> int:
 		return GATHER_UPDATE_IDLE
 	finish_gather_order(worker, "resource_depleted")
 	return GATHER_UPDATE_IDLE
+
+
+func _resume_productive_site(worker: Dictionary, resource: Dictionary) -> bool:
+	var previous: Array = worker.get("previous_gather_site", [])
+	if previous.size() != 3 or previous[0] != resource["id"] or previous[1] != resource["pos"]:
+		return false
+	var simulation_world = world
+	if int(resource.get("amount", 0)) <= 0 or not simulation_world.resource_accessible_to_team(resource, int(worker["team"])) or not simulation_world.resource_allows_worker(resource, worker):
+		return false
+	var reservations: Dictionary = simulation_world.resource_approach_slots.get(int(resource["id"]), {})
+	var capacity := int(simulation_world.data_repository.runtime_field(String(resource["kind"]), "max_gatherers", 0))
+	if capacity > 0 and reservations.size() >= capacity: return false
+	# The berth is a preference for the next trip. It remains free while its
+	# previous user carries cargo, and the ordinary live occupancy checks apply.
+	var candidate: Array[Vector2] = [previous[2]]
+	if simulation_world.approach_system.available_slots(worker, candidate, reservations, true).is_empty(): return false
+	if not simulation_world.approach_system.resume(worker, candidate[0]): return false
+	reservations[int(worker["id"])] = candidate[0]
+	simulation_world.resource_approach_slots[int(resource["id"])] = reservations
+	simulation_world.set_entity_field(worker, "gather_stage", "approaching")
+	simulation_world.set_entity_field(worker, "resource_approach_slot", candidate[0])
+	return true
 
 
 func _worker_in_dropoff_range(worker: Dictionary, building: Dictionary) -> bool:
@@ -566,10 +594,10 @@ func replan_work_approach(worker: Dictionary) -> bool:
 		var dropoff: Variant = world.find_building(int(worker.get("dropoff_id", -1)))
 		if dropoff == null: return false
 		var previous: Variant = worker.get("dropoff_position")
-		var destination: Variant = dropoff_approach_position(worker, dropoff, previous)
-		if not destination is Vector2: return false
-		world.set_entity_field(worker, "dropoff_position", destination)
-		return world.assign_unit_destination(worker, destination, false)
+		var delivery := _reserve_dropoff_route(worker, dropoff, previous)
+		if delivery.is_empty(): return false
+		world.set_entity_field(worker, "dropoff_position", delivery["position"])
+		return _assign_delivery_route(worker, delivery)
 	var resource: Variant = world.find_resource(int(worker.get("resource_id", -1)))
 	var previous: Variant = worker.get("resource_approach_slot")
 	if resource == null or not previous is Vector2 or int(resource.get("amount", 0)) <= 0: return false
@@ -735,6 +763,12 @@ func release_resource_approach_slot(worker: Dictionary) -> void:
 
 
 func begin_resource_return(worker: Dictionary) -> bool:
+	if worker.get("resource_approach_slot") is Vector2 and String(worker.get("gather_stage", "")) == "harvesting":
+		var resource: Variant = world.find_resource(int(worker["resource_id"]))
+		if resource != null and int(resource.get("amount", 0)) > 0:
+			var site := [worker["resource_id"], resource["pos"], worker["resource_approach_slot"]]
+			if worker.get("previous_gather_site", []) != site:
+				world.set_entity_field(worker, "previous_gather_site", site)
 	release_resource_approach_slot(worker)
 	var delivery := _reachable_dropoff(worker)
 	if delivery.is_empty(): return false
@@ -755,7 +789,7 @@ func begin_resource_return(worker: Dictionary) -> bool:
 		world.set_entity_field(worker, "path_status", "idle")
 		world.set_entity_field(worker, "diagnostic_reason", "")
 		return true
-	return world.assign_unit_destination(worker, worker["dropoff_position"], false)
+	return _assign_delivery_route(worker, delivery)
 
 
 func _resources_near(origin: Vector2, radius: float) -> Array:
@@ -782,35 +816,60 @@ func _resources_near(origin: Vector2, radius: float) -> Array:
 	return resources
 
 
+func _refresh_dropoff_building(id: int, building: Variant) -> void:
+	var profile: Dictionary = dropoff_building_profiles.get(id, {})
+	if building == null or String(building.get("state", "complete")) != "complete" or float(building.get("hp", 0.0)) <= 0.0:
+		if profile.is_empty(): return
+		dropoff_building_profiles.erase(id)
+	else:
+		var team := int(building.get("team", 0))
+		var kind := String(building.get("kind", ""))
+		var accepts_generic: bool = world.entity_has_behavior_tag(building, "drop_site")
+		var lineage: Array = building.get("unit_lineage", [int(building.get("components", {}).get("identity", {}).get("source_unit_id", -1))])
+		if not profile.is_empty() and is_same(profile["building"], building) and profile["team"] == team and profile["kind"] == kind and profile["generic"] == accepts_generic and profile["lineage"] == lineage: return
+		# Lineage can grow in place during a technology upgrade.
+		dropoff_building_profiles[id] = {"building": building, "team": team, "kind": kind, "generic": accepts_generic, "lineage": lineage.duplicate()}
+	# A deposit only depends on this building's eligibility for a given worker.
+	# Farm food, production queues, positive HP changes and animation never
+	# reach this update. A conversion removes it from one team and adds it to the other.
+	for roster: Dictionary in dropoff_rosters.values():
+		if building != null and int(building.get("team", 0)) == int(roster["team"]) and dropoff_accepts_resource(building, int(roster["resource"]), roster["allowed"]):
+			roster["members"][id] = building
+		else:
+			roster["members"].erase(id)
+
+
 func _dropoff_candidates(team: int, resource_type: int, allowed: Dictionary) -> Array:
 	var simulation_world = world
 	var journal = simulation_world.entity_changes
-	var delta: Dictionary = journal.read_changes_since(dropoff_roster_revision if dropoff_roster_epoch == journal.epoch else -1)
-	var changed: bool = bool(delta["full"])
-	if not changed:
-		for id in delta["ids"]:
-			if simulation_world.buildings_by_id.has(id) or dropoff_building_ids.has(id):
-				changed = true
-				break
-	if changed:
+	var catalog_revision: int = simulation_world.data_repository.revision
+	if catalog_revision != dropoff_catalog_revision:
 		dropoff_rosters.clear()
-		dropoff_building_ids.clear()
-		for building in simulation_world.get_buildings():
-			dropoff_building_ids[int(building["id"])] = true
+		dropoff_catalog_revision = catalog_revision
+	var delta: Dictionary = journal.read_changes_since(dropoff_roster_revision if dropoff_roster_epoch == journal.epoch else -1)
+	if bool(delta["full"]):
+		dropoff_rosters.clear()
+		dropoff_building_profiles.clear()
+		for building in simulation_world.get_buildings(): _refresh_dropoff_building(int(building["id"]), building)
+	else:
+		for id in delta["ids"]:
+			var building: Variant = simulation_world.buildings_by_id.get(id)
+			if building != null or dropoff_building_profiles.has(id): _refresh_dropoff_building(int(id), building)
 	dropoff_roster_epoch = journal.epoch
 	dropoff_roster_revision = int(delta["revision"])
 	var source_ids: Array = allowed.keys()
 	source_ids.sort()
 	var key := str([team, resource_type, source_ids])
 	if not dropoff_rosters.has(key):
-		var candidates: Array = []
-		for building in simulation_world.get_buildings():
-			if int(building.get("team", 0)) == team and dropoff_accepts_resource(building, resource_type, allowed):
-				candidates.append(building)
+		var members := {}
+		for profile: Dictionary in dropoff_building_profiles.values():
+			var building: Dictionary = profile["building"]
+			if int(profile["team"]) == team and dropoff_accepts_resource(building, resource_type, allowed):
+				members[int(building["id"])] = building
 		if dropoff_rosters.size() >= MAX_DROPOFF_ROSTERS:
 			dropoff_rosters.erase(dropoff_rosters.keys()[0])
-		dropoff_rosters[key] = candidates
-	return dropoff_rosters[key]
+		dropoff_rosters[key] = {"team": team, "resource": resource_type, "allowed": allowed, "members": members}
+	return dropoff_rosters[key]["members"].values()
 
 
 func nearest_dropoff(worker: Dictionary) -> Variant:
@@ -842,10 +901,11 @@ func dropoff_accepts_resource(building: Dictionary, resource_type_id: int, worke
 	# generic stockpile categories (Hunter food is delivered to Storage Pit).
 	if not worker_allowed_source_ids.is_empty():
 		var lineage: Array = building.get("unit_lineage", [source_id])
-		return lineage.any(func(value): return worker_allowed_source_ids.has(int(value)))
-	var accepted_resource_ids: Array = world.data_repository.runtime_field(String(building.get("kind", "")), "accepted_resource_type_ids", [])
-	if not accepted_resource_ids.is_empty():
-		return accepted_resource_ids.any(func(value): return int(value) == resource_type_id)
+		for value in lineage:
+			if worker_allowed_source_ids.has(int(value)): return true
+		return false
+	var accepted: Variant = world.data_repository.dropoff_resource_ids.get(building.get("kind", ""))
+	if accepted is Dictionary: return accepted.has(resource_type_id)
 	return world.entity_has_behavior_tag(building, "drop_site")
 
 
@@ -875,17 +935,28 @@ func assign_command_return_resources(selected: Array, target_building_id: int = 
 		world.set_entity_field(worker, "pending_hunt_target_id", -1)
 		world.set_entity_field(worker, "gather_stage", "returning")
 		world.set_entity_field(worker, "dropoff_id", int(dropoff["id"]))
-		world.set_entity_field(worker, "dropoff_position", dropoff_approach_position(worker, dropoff) if target_building_id >= 0 else delivery["position"])
+		if target_building_id >= 0: delivery = _reserve_dropoff_route(worker, dropoff)
+		world.set_entity_field(worker, "dropoff_position", delivery.get("position"))
 		if not worker["dropoff_position"] is Vector2:
 			finish_gather_order(worker, "no_dropoff_slot")
 			continue
 		world.begin_entity_order(worker, "return_resources", int(dropoff["id"]), worker["dropoff_position"], false)
-		world.assign_unit_destination(worker, worker["dropoff_position"], false)
+		_assign_delivery_route(worker, delivery)
 		assigned += 1
 	return assigned > 0
 
 
 func dropoff_approach_position(worker: Dictionary, building: Dictionary, avoid: Variant = null) -> Variant:
+	return _reserve_dropoff_route(worker, building, avoid).get("position")
+
+
+func _assign_delivery_route(worker: Dictionary, delivery: Dictionary) -> bool:
+	var route: Array[Vector2] = delivery["route"]
+	if route.is_empty(): return world.assign_unit_destination(worker, delivery["position"], false)
+	return world.approach_system.assign_resolved_route(worker, delivery["position"], route)
+
+
+func _reserve_dropoff_route(worker: Dictionary, building: Dictionary, avoid: Variant = null) -> Dictionary:
 	world.release_building_approach_slot(worker)
 	var building_id := int(building["id"])
 	var reservations: Dictionary = world.building_approach_slots.get(building_id, {})
@@ -916,6 +987,7 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary, avoid: 
 		candidates.assign(candidates.filter(func(point): return point.distance_squared_to(avoid) > 0.0625))
 	var best: Variant = null
 	var best_length := INF
+	var best_route: Array[Vector2] = []
 	var origin := Vector2(worker["pos"])
 	var planner = world.movement_system.knowledge.planner(world, int(worker.get("team", 0)))
 	for candidate in candidates:
@@ -925,6 +997,7 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary, avoid: 
 		if origin.distance_squared_to(candidate) <= 0.0144:
 			best = candidate
 			best_length = 0.0
+			best_route = []
 			break
 		var route: Array[Vector2] = planner.find_path(origin, candidate, String(worker.get("movement_domain", "land")), int(worker.get("terrain_restriction", -1)), float(worker.get("footprint_radius", 0.3)))
 		if route.is_empty() and origin.distance_squared_to(candidate) > 0.0144:
@@ -939,13 +1012,14 @@ func dropoff_approach_position(worker: Dictionary, building: Dictionary, avoid: 
 		if length < best_length:
 			best_length = length
 			best = candidate
+			best_route = route
 	if best is Vector2:
 		reservations[int(worker["id"])] = best
 		world.building_approach_slots[building_id] = reservations
 		world.set_entity_field(worker, "target_building_id", building_id)
 		world.set_entity_field(worker, "building_approach_slot", best)
-		return best
-	return null
+		return {"building": building, "position": best, "route": best_route}
+	return {}
 
 
 func finish_gather_order(worker: Dictionary, reason: String) -> void:
@@ -1071,13 +1145,13 @@ func _reachable_dropoff(worker: Dictionary) -> Dictionary:
 	var allowed: Dictionary = {}
 	for id in worker.get("components", {}).get("worker", {}).get("drop_site_ids", []):
 		if int(id) >= 0: allowed[int(id)] = true
-	var candidates: Array = _dropoff_candidates(int(worker["team"]), int(worker["carried_resource_type_id"]), allowed).duplicate()
+	var candidates: Array = _dropoff_candidates(int(worker["team"]), int(worker["carried_resource_type_id"]), allowed)
 	var origin := Vector2(worker["pos"])
 	candidates.sort_custom(func(a, b):
 		var ad := origin.distance_squared_to(a["pos"])
 		var bd := origin.distance_squared_to(b["pos"])
 		return ad < bd if not is_equal_approx(ad, bd) else int(a["id"]) < int(b["id"]))
 	for building in candidates:
-		var position: Variant = dropoff_approach_position(worker, building)
-		if position is Vector2: return {"building":building, "position":position}
+		var delivery := _reserve_dropoff_route(worker, building)
+		if not delivery.is_empty(): return delivery
 	return {}

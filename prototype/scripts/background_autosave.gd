@@ -1,10 +1,11 @@
 extends RefCounted
-# A private simulation follows the recorded commands from one detached loading
-# checkpoint. Capturing/compressing the large world never runs in a game frame.
+# The writer owns the loading checkpoint. It applies authoritative changes, or
+# follows recorded commands on platforms without the checkpoint capture kernel.
 const World := preload("res://scripts/simulation_world.gd")
 const Controller := preload("res://scripts/game_controller.gd")
 const Replay := preload("res://scripts/replay_system.gd")
 const Checkpoint := preload("res://scripts/game_checkpoint.gd")
+const CheckpointDelta := preload("res://scripts/checkpoint_delta.gd")
 const Loading := preload("res://scripts/navigation_loading.gd")
 const SaveTask := preload("res://scripts/background_save_task.gd")
 const Archive := preload("res://scripts/game_save_archive.gd")
@@ -32,6 +33,7 @@ var _mutex := Mutex.new()
 var _wake := Semaphore.new()
 var _stop := false
 var _seed: Dictionary = {}
+var _checkpoint_delta: RefCounted
 var _job: Dictionary = {}
 var _result: Dictionary = {}
 var _stage := ""
@@ -63,7 +65,21 @@ func seed_from(world, controller, definition: Dictionary, map: Dictionary, catal
 	# must be detached before the live match resumes.
 	_process_channel = ProcessChannel.new()
 	var process_available: bool = _process_channel.supported()
-	_seed = {"checkpoint": Checkpoint.capture(world, controller, definition, map, not process_available), "catalogs": catalogs if process_available else catalogs.duplicate(true), "replay": controller.replay_recorder.to_dictionary(), "recovery_full_ai_views": recovery_full_ai_views}
+	var checkpoint := Checkpoint.capture(world, controller, definition, map, false)
+	var args := OS.get_cmdline_user_args()
+	var replay_diagnostic := "--compare-actor-owner-replay" in args or "--compare-combat-awareness-owner-replay" in args or "--profile-replay-autosave" in args
+	var delta := CheckpointDelta.new()
+	_seed = {"replay":controller.replay_recorder.to_dictionary()}
+	if not replay_diagnostic and delta.configure(world):
+		_checkpoint_delta = delta
+		var base := CheckpointDelta.base_state(checkpoint)
+		_seed["checkpoint"] = base if process_available else base.duplicate(true)
+		_seed["authoritative_checkpoints"] = true
+	else:
+		_seed["checkpoint"] = checkpoint if process_available else Checkpoint.capture(world, controller, definition, map)
+		_seed["catalogs"] = catalogs if process_available else catalogs.duplicate(true)
+		_seed["recovery_full_ai_views"] = recovery_full_ai_views
+	checkpoint = {}
 	# Checkpoint.capture already detached this definition during loading. Retain
 	# that immutable copy for owner-thread headers instead of borrowing the UI.
 	_header_definition = _seed["checkpoint"]["match_definition"]
@@ -77,11 +93,16 @@ func seed_from(world, controller, definition: Dictionary, map: Dictionary, catal
 		_seed = {}
 	else:
 		if process_available:
-			_seed["checkpoint"]=Checkpoint.capture(world,controller,definition,map)
-			_seed["catalogs"]=catalogs.duplicate(true)
+			if _checkpoint_delta != null:
+				_seed["checkpoint"] = _seed["checkpoint"].duplicate(true)
+			else:
+				_seed["checkpoint"] = Checkpoint.capture(world,controller,definition,map)
+				_seed["catalogs"] = catalogs.duplicate(true)
 		_process_channel = null
 	var error := _thread.start(_run_process if _process_channel != null else _run, Thread.PRIORITY_LOW)
 	if error != OK:
+		if _checkpoint_delta != null: _checkpoint_delta.release()
+		_checkpoint_delta = null
 		_seed = {}
 		last_error = "autosave_thread:%d" % error
 		push_warning(last_error)
@@ -100,14 +121,19 @@ func submit(input: Dictionary, world, controller, deferred: bool = false) -> boo
 	input["new_commands"] = recorder.issuance_records.slice(_sent_commands).duplicate(true)
 	input["sent_until"] = recorder.issuance_records.size()
 	next_save = elapsed + INTERVAL_SECONDS
-	if deferred and ClassDB.class_exists("RoRResourceDigest"):
+	if deferred and (_checkpoint_delta != null or ClassDB.class_exists("RoRResourceDigest")):
 		_capture_input = input
 		_capture_world = weakref(world)
 		_capture_epoch = world.cache_epoch
 		busy = true
 	else:
-		input["anchor"] = state_anchor(world, controller)
-		_publish_capture(input)
+		if _checkpoint_delta != null:
+			_capture_input = input
+			busy = true
+			_capture_checkpoint(world, controller)
+		else:
+			input["anchor"] = state_anchor(world, controller)
+			_publish_capture(input)
 	last_capture_us = Time.get_ticks_usec() - started
 	return true
 
@@ -126,7 +152,20 @@ func needs_owner_capture() -> bool:
 
 
 func supports_deferred_header() -> bool:
-	return ClassDB.class_exists("RoRResourceDigest") and not _header_definition.is_empty()
+	return (_checkpoint_delta != null or ClassDB.class_exists("RoRResourceDigest")) and not _header_definition.is_empty()
+
+
+func _capture_checkpoint(world, controller) -> void:
+	var start := Time.get_ticks_usec()
+	var patch: Dictionary = _checkpoint_delta.capture(world, controller)
+	if patch.is_empty():
+		_fail_capture(world, "autosave_checkpoint_capture")
+		return
+	var input := _capture_input
+	_clear_capture()
+	input["checkpoint_patch"] = patch
+	last_capture_us = Time.get_ticks_usec() - start
+	_publish_capture(input)
 
 
 func prepare_capture_on_owner(world, controller, runtime = null) -> void:
@@ -141,6 +180,9 @@ func prepare_capture_on_owner(world, controller, runtime = null) -> void:
 		var request := _capture_input
 		_capture_input = Lifecycle.new().capture_save_header(controller, runtime.players, runtime.decisions, request["path"], request["slot_name"], request["match_path"], _header_definition, request["view"], request["controller"], false)
 		for field in ["sent_from", "sent_until", "new_commands"]: _capture_input[field] = request[field]
+	if _checkpoint_delta != null:
+		_capture_checkpoint(world, controller)
+		return
 	var job: Variant = ClassDB.instantiate("RoRResourceDigest")
 	if not job.begin(world.get_resources()):
 		var input := _capture_input
@@ -262,9 +304,9 @@ func _run_process() -> void:
 		if _cancelled(): break
 		# A platform/job restriction preserves the existing thread fallback.
 		if bool(result.get("unavailable",false)):
-			var seed_message := ProcessChannel.read_message(_stage+".seed")
-			if seed_message.get("seed") is Dictionary:
-				_seed=seed_message["seed"]
+			var seed := preload("res://scripts/autosave_seed_transport.gd").decode(ProcessChannel.read_message(_stage+".seed"))
+			if not seed.is_empty():
+				_seed=seed
 				_mutex.lock()
 				_process_fallback=true
 				_sent_commands=int(input["sent_until"])
@@ -282,6 +324,9 @@ func _run_process() -> void:
 	_process_channel.stop()
 
 func _run() -> void:
+	if bool(_seed.get("authoritative_checkpoints", false)):
+		_run_checkpoint_writer()
+		return
 	# Do not allocate a second world until an autosave is actually due.
 	_wake.wait()
 	if _cancelled(): return
@@ -356,11 +401,7 @@ func _run() -> void:
 		var started := Time.get_ticks_usec()
 		var target := int(input["tick"])
 		var records: Array = input["new_commands"]
-		history["commands"].append_array(records)
-		history["commands"].sort_custom(func(a, b):
-			if int(a["tick"]) != int(b["tick"]): return int(a["tick"]) < int(b["tick"])
-			return int(a["sequence_id"]) < int(b["sequence_id"])
-		)
+		_append_history(history, records)
 		var cursor := 0
 		var slice_started := Time.get_ticks_usec()
 		while valid and controller.tick_index <= target and not _cancelled():
@@ -436,6 +477,54 @@ func _run() -> void:
 	world.shutdown_derived_state()
 
 
+static func _append_history(history: Dictionary, records: Array) -> void:
+	if records.is_empty(): return
+	history["commands"].append_array(records)
+	history["commands"].sort_custom(func(a, b):
+		if int(a["tick"]) != int(b["tick"]): return int(a["tick"]) < int(b["tick"])
+		return int(a["sequence_id"]) < int(b["sequence_id"])
+	)
+
+
+func _run_checkpoint_writer() -> void:
+	var initialized := Time.get_ticks_usec()
+	var base: Dictionary = _seed["checkpoint"]
+	var history: Dictionary = _seed["replay"]
+	var resources := CheckpointDelta.index_resources(base)
+	_seed = {}
+	var initialization_us := Time.get_ticks_usec() - initialized
+	while true:
+		_wake.wait()
+		if _cancelled(): return
+		_mutex.lock()
+		var input := _job
+		_job = {}
+		_mutex.unlock()
+		if input.is_empty(): continue
+		var start := Time.get_ticks_usec()
+		var tick := int(input["tick"])
+		_append_history(history, input["new_commands"])
+		var result := {"tick":tick, "error":int(ERR_INVALID_DATA), "detail":"autosave_checkpoint_materialization"}
+		if input.get("checkpoint_patch") is Dictionary:
+			var checkpoint := CheckpointDelta.materialize(base, resources, input["checkpoint_patch"])
+			input.erase("checkpoint_patch")
+			if not checkpoint.is_empty() and int(checkpoint["controller"]["tick"]) == tick:
+				input["path"] = _stage
+				input["atomic_replace"] = true
+				input["replay"] = history
+				input["checkpoint"] = checkpoint
+				result = SaveTask.run(input)
+				if not defer_commit_to_parent: _commit_result(result)
+		input = {}
+		result["worker_us"] = Time.get_ticks_usec() - start
+		result["initialization_us"] = initialization_us
+		result["worker_pool_shared"] = false
+		result["authoritative_checkpoint"] = true
+		_mutex.lock()
+		_result = result
+		_mutex.unlock()
+
+
 static func _diagnose_fields(before: Variant, after: Variant, path: String, result: Array, depth: int) -> void:
 	if result.size() >= 128: return
 	if typeof(before) == typeof(after) and before == after and hash(before) == hash(after): return
@@ -467,6 +556,8 @@ func _clean_abandoned_staging() -> void:
 
 func shutdown() -> void:
 	_clear_capture()
+	if _checkpoint_delta != null: _checkpoint_delta.release()
+	_checkpoint_delta = null
 	_header_definition = {}
 	if _thread.is_started():
 		_mutex.lock()

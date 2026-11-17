@@ -152,11 +152,15 @@ static func gather(
 	index.rebuild(resources, ["land", "water"], false, true)
 	var by_id: Dictionary = resource_view["by_id"]
 	var saturation: Dictionary = {}
+	var recently_full := {}
+	var retry_ticks := maxi(1, int(policy.get("gather_retry_ticks", 200)))
 	var gatherer_limits: Dictionary = snapshot.get("gatherer_limits_by_kind", {})
 	for worker in units:
 		if String(worker.get("task", "")) == "gather":
 			var id := int(worker.get("resource_id", -1))
 			saturation[id] = int(saturation.get(id, 0)) + 1
+			if worker.get("ai_profile", {}).get("waiting_for_resource_slot", false):
+				state.cooldowns["gather_slot:%s:%d" % [worker.get("movement_domain", "land"), id]] = tick + retry_ticks
 	var reachable: Dictionary = snapshot["_economy_reachable_cells"] if snapshot.has("_economy_reachable_cells") else Rules.reachable_cells_by_domain(snapshot.get("navigation", {}), EconomicPlanner.native_reachable_lookup_enabled)
 	var drops: Array = Common.own(snapshot.get("buildings", []), team).filter(
 		func(b): return bool(b.get("ai_drop_site", false)) and String(b.get("state", "complete")) == "complete"
@@ -197,11 +201,16 @@ static func gather(
 		var worker_id := int(worker.get("id", -1))
 		var current: Dictionary = by_id.get(int(worker.get("resource_id", -1)), {})
 		var domain := String(worker.get("movement_domain", "land"))
+		if not recently_full.has(domain): recently_full[domain] = {}
+		var full_for_domain: Dictionary = recently_full[domain]
 		var current_type := int(current.get("resource_type_id", -1))
 		var active_current := String(worker.get("task", "idle")) == "gather" and not current.is_empty()
+		var productive_current := active_current and not bool(worker.get("ai_profile", {}).get("waiting_for_resource_slot", false))
 		var current_failed: bool = policy.get("failed_gather_targets", {}).get(worker_id, {}).has(int(current.get("id", -1)))
 		var current_cooling: bool = state.cooldowns.has("gather:%d:%d" % [worker_id, int(current.get("id", -1))])
-		if active_current and not current_failed and not current_cooling and int(type_load.get(current_type, 0)) <= float(quotas.get(current_type, 0.0)) + 0.5 and state.danger(Vector2(current.get("pos", Vector2.ZERO)), int(snapshot.get("tick", 0)), policy, domain) <= float(policy.get("maximum_economic_danger", 8.0)): continue
+		var approaching: bool = worker.get("ai_profile", {}).get("gather_stage", "") == "approaching"
+		var within_quota: bool = int(type_load.get(current_type, 0)) <= float(quotas.get(current_type, 0.0)) + 0.5
+		if productive_current and not current_failed and not current_cooling and (approaching or within_quota) and state.danger(Vector2(current.get("pos", Vector2.ZERO)), int(snapshot.get("tick", 0)), policy, domain) <= float(policy.get("maximum_economic_danger", 8.0)): continue
 		var best: Dictionary = {}
 		var score := -INF
 		var current_score := -INF
@@ -228,6 +237,13 @@ static func gather(
 				candidates.append(current)
 			for resource in candidates:
 				var resource_id := int(resource.get("id", -1))
+				# A worker has already tried this site and found every approach
+				# occupied. Existing producers keep their slots while waiting
+				# workers can take a different known job this planning cycle.
+				if not full_for_domain.has(resource_id):
+					full_for_domain[resource_id] = state.cooldowns.has("gather_slot:%s:%d" % [domain, resource_id])
+				if full_for_domain[resource_id] and not (productive_current and resource_id == int(current["id"])):
+					continue
 				var assigned := maxi(0, int(saturation.get(resource_id, 0)) - int(active_current and resource_id == int(current.get("id", -2))))
 				var capacity := int(gatherer_limits.get(String(resource.get("kind", "")), 0))
 				if capacity > 0 and assigned >= capacity:

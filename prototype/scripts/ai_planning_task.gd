@@ -7,11 +7,11 @@ const Replay := preload("res://scripts/replay_system.gd")
 const BuildSites := preload("res://scripts/build_site_task.gd")
 const Data := preload("res://scripts/isolated_task_data.gd")
 
-static func capture(ai, snapshot: Dictionary, tick: int) -> Dictionary:
-	var frozen_snapshot := Data.capture_frozen(snapshot)
-	if not snapshot.is_empty() and frozen_snapshot.is_empty():
-		return {}
-	var settings: Dictionary = Data.copy(ai.economic_policy)
+static func capture(ai, snapshot: Dictionary, tick: int, publish: bool = false) -> Dictionary:
+	# Runtime publication detaches the whole input once, including any values
+	# still borrowed by a legacy AI's canonical state. Direct callers keep
+	# their own mutable definition and state alongside a frozen observation.
+	var settings: Dictionary = ai.economic_policy.duplicate() if publish else Data.copy(ai.economic_policy)
 	for field in ["enabled", "formation_name", "profile", "initial_attack_delay", "attack_separation", "minimum_attack_group_size", "maximum_attack_group_size", "enemy_response_distance", "use_workers_in_attack_groups"]:
 		var key := String(field)
 		if key == "formation_name":
@@ -21,7 +21,15 @@ static func capture(ai, snapshot: Dictionary, tick: int) -> Dictionary:
 		settings[key] = ai.get(field)
 	settings["economic_interval_ticks"] = ai.economic_interval
 	settings["military_interval_ticks"] = ai.military_interval
-	return {"definition": {"team": ai.team, "ai": settings, "source_ai": Data.copy(ai.source_contract)}, "state": Data.copy(ai.canonical_state()), "snapshot": frozen_snapshot, "tick": tick}
+	var state: Dictionary = ai.canonical_state()
+	var input := {"definition":{"team":ai.team, "ai":settings, "source_ai":ai.source_contract}, "state":state, "snapshot":snapshot, "tick":tick}
+	if publish:
+		var frozen := Data.capture_frozen(input)
+		return Data.seal(frozen) if not frozen.is_empty() else {}
+	input["state"] = Data.copy(state)
+	input["definition"]["source_ai"] = Data.copy(ai.source_contract)
+	input["snapshot"] = Data.capture_frozen(snapshot)
+	return {} if not snapshot.is_empty() and input["snapshot"].is_empty() else input
 
 # One private build planner per queued AI, retained between non-overlapping jobs.
 # It owns mutable derived caches; no live world or previous DTO is mutated.
@@ -88,6 +96,12 @@ static func run(input: Dictionary, executor: Variant = null) -> Dictionary:
 		return {"valid": false}
 	metrics["restore"] = Time.get_ticks_usec() - phase_started
 	var snapshot: Dictionary = input["snapshot"]
+	if snapshot.has("_planner_unit_facts"):
+		phase_started = Time.get_ticks_usec()
+		snapshot = snapshot.duplicate()
+		snapshot["units"] = preload("res://scripts/ai_observation_profile.gd").materialize_units(snapshot)
+		snapshot.erase("_planner_unit_facts")
+		metrics["unit_profiles"] = Time.get_ticks_usec() - phase_started
 	var cache_updates: Array = []
 	if snapshot.has("build_site_queries"):
 		snapshot = snapshot.duplicate()

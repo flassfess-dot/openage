@@ -77,8 +77,23 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	var scene_menu: Dictionary = options.get("_scene_worker_publication", {})
 	var publish_ui_menus := not keep_actors and bool(scene_menu.get("publish_rows", false))
 	if publish_ui_menus:
-		units = options["_scene_controls"].publish_unit_menus(world, snapshot["units"], team, command_ids, scene_menu["commands"])
-	for row_value in ([] if keep_actors or publish_ui_menus else snapshot.get("units", [])):
+		if bool(snapshot.get("split_unit_metadata", false)):
+			# The selected control record is assembled on the camera thread.
+			# Every eligible own worker shares this exact generation's menu.
+			units = snapshot["units"]
+			options["_scene_controls"].seal_units(units)
+			result["worker_command_options"] = scene_menu["commands"]
+		else:
+			units = options["_scene_controls"].publish_unit_menus(world, snapshot["units"], team, command_ids, scene_menu["commands"])
+	var planner_unit_inputs: Dictionary = options.get("_planner_unit_inputs", {})
+	if not planner_unit_inputs.is_empty():
+		units = snapshot["units"]
+		if not requested_options.is_empty():
+			planner_unit_inputs["commands"] = worker_build_commands
+		elif bool(options.get("include_worker_command_options", true)):
+			planner_unit_inputs["commands"] = Data.capture_frozen({"build":world.get_build_options(team)})
+		result["_planner_unit_facts"] = Data.freeze_owned(planner_unit_inputs)
+	for row_value in ([] if keep_actors or publish_ui_menus or not planner_unit_inputs.is_empty() else snapshot.get("units", [])):
 		var row: Dictionary = row_value
 		if int(row.get("team", 0)) == team and (not restricted or command_ids.has(int(row.get("id", -1)))) and world.entity_is_worker(row):
 			row = row.duplicate()
@@ -114,10 +129,15 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	result["units"] = units
 	var buildings: Array = []
 	var scene_building_fields: Dictionary = options.get("_scene_building_fields", {})
-	var keep_buildings := keep_actors and scene_building_fields.is_empty()
+	var ready_buildings: Dictionary = options.get("_scene_ready_buildings", {})
+	var all_buildings_ready: bool = options.has("_scene_ready_buildings") and ready_buildings.size() == snapshot["buildings"].size()
+	var keep_buildings := all_buildings_ready or (keep_actors and scene_building_fields.is_empty())
 	for row_value in ([] if keep_buildings else snapshot.get("buildings", [])):
 		var row: Dictionary = row_value
 		var building_id := int(row.get("id", -1))
+		if ready_buildings.has(building_id):
+			buildings.append(row)
+			continue
 		var deferred: Variant = scene_building_fields.get(building_id)
 		if int(row.get("team", 0)) == team and not bool(row.get("last_known", false)) and (not restricted or command_ids.has(int(row.get("id", -1)))):
 			var source: Variant = world.find_building(int(row.get("id", -1)))
@@ -149,7 +169,8 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 			row["ai_profile"] = AiProfile.actor(world, row, team, profile_cache)
 		buildings.append(row)
 	if keep_buildings: buildings = snapshot.get("buildings", [])
-	if options.has("_scene_controls"): buildings = options["_scene_controls"].seal_buildings(buildings)
+	if all_buildings_ready: buildings = options["_scene_controls"].seal_completed_buildings(buildings)
+	elif options.has("_scene_controls"): buildings = options["_scene_controls"].seal_buildings(buildings)
 	result["buildings"] = buildings
 	for category in ([] if keep_actors or select_in_view else ["control_units", "control_buildings"]):
 		if snapshot.has(category):
@@ -160,7 +181,9 @@ static func enrich(world, snapshot: Dictionary, options: Dictionary = {}) -> Dic
 	_observe(probe, prefix + ".commands", started)
 	if bool(options.get("skip_spatial_queries", false)): return result
 	started = Time.get_ticks_usec() if probe != null else 0
-	var navigation: Dictionary = world.ai_navigation_knowledge.snapshot(world, world.get_fog_of_war(), team, probe) if bool(options.get("include_navigation", true)) else {}
+	var navigation: Dictionary = options.get("_published_navigation", {})
+	if not options.has("_published_navigation") and bool(options.get("include_navigation", true)):
+		navigation = world.ai_navigation_knowledge.snapshot(world, world.get_fog_of_war(), team, probe)
 	result["navigation"] = navigation
 	if bool(options.get("include_ai_profiles", false)):
 		result["gatherer_limits_by_kind"] = world.data_repository.gatherer_limits_by_kind

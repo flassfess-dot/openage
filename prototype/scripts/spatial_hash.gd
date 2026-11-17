@@ -5,6 +5,8 @@ var buckets: Dictionary = {}
 var unit_buckets: Dictionary = {}
 var unit_entities: Array = []
 var unit_index_by_id: Dictionary = {}
+var unit_ids := PackedInt64Array()
+var unit_roster_revision := 0
 var unit_positions: Array[Vector2] = []
 var unit_radii: Array[float] = []
 var unit_cells: Array[Vector2i] = []
@@ -41,10 +43,12 @@ func _init(bucket_size: float = 2.0) -> void:
 	native_sync_supported = query_kernel != null and query_kernel.has_method("synchronize_spatial_units_prefix") and query_kernel.get_script() == null
 
 func clear() -> void:
+	unit_roster_revision += 1
 	buckets.clear()
 	unit_buckets.clear()
 	unit_entities.clear()
 	unit_index_by_id.clear()
+	unit_ids.clear()
 	unit_positions.clear()
 	unit_radii.clear()
 	unit_cells.clear()
@@ -54,12 +58,15 @@ func clear() -> void:
 
 func insert(entity: Dictionary, position: Vector2, radius: float, category: String) -> void:
 	if category == "unit":
+		unit_roster_revision += 1
 		var mobile_radius := maxf(0.0, radius)
 		maximum_unit_radius = maxf(maximum_unit_radius, mobile_radius)
 		maximum_unit_clearance = maxf(maximum_unit_clearance, float(entity.get("minimum_clearance", 0.0)))
 		var unit_index := unit_entities.size()
+		var unit_id := int(entity.get("id", -1))
 		unit_entities.append(entity)
-		unit_index_by_id[int(entity.get("id", -1))] = unit_index
+		unit_index_by_id[unit_id] = unit_index
+		unit_ids.append(unit_id)
 		unit_positions.append(position)
 		unit_radii.append(mobile_radius)
 		var unit_cell := cell_for(position)

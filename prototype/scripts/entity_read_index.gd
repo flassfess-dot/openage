@@ -327,6 +327,8 @@ func update_building_memory(world, before_visibility: bool, sample: Dictionary =
 	for team_value in fog.states_by_player:
 		var team := int(team_value)
 		if team <= 0: continue
+		var sight: PackedByteArray = fog.states_by_player[team]
+		var map_size: Vector2i = fog.map_size
 		var state: Dictionary = memory_cursors.get(team, {"entity": -1, "fog": -1})
 		var source_revision := int(state["entity"])
 		if not building_changes.has(source_revision):
@@ -338,10 +340,24 @@ func update_building_memory(world, before_visibility: bool, sample: Dictionary =
 				else:
 					for id in source_delta["ids"]:
 						if world.buildings_by_id.has(id): changed_buildings.append(id)
+				changed_buildings.sort()
+				if before_visibility and changed_buildings.size() > 1:
+					# Capture each changed source once. The observer's sight below
+					# still decides whether its remembered row may be updated.
+					var sources: Array = []
+					for id in changed_buildings:
+						if not rows.has(id): sources.append(world.buildings_by_id[id])
+					if not sources.is_empty():
+						var rendered: Array = world.render_entity_projection_cache.project_many(sources, world.entity_changes)
+						for i in range(sources.size()): rows[sources[i]["id"]] = rendered[i]
 			building_changes[source_revision] = {"delta": source_delta, "buildings": changed_buildings}
 		var change: Dictionary = building_changes[source_revision]
 		var delta: Dictionary = change["delta"]
 		var memories: Dictionary = world.last_known_buildings_by_player.get(team, {})
+		if before_visibility and not bool(delta["full"]) and change["buildings"].is_empty():
+			sample["before"][team] = source_revision
+			world.last_known_buildings_by_player[team] = memories
+			continue
 		var candidates: Dictionary = {}
 		var observed_before: bool = not before_visibility and sample["before"].get(team) == source_revision
 		if observed_before:
@@ -352,14 +368,24 @@ func update_building_memory(world, before_visibility: bool, sample: Dictionary =
 		elif bool(delta["full"]):
 			for row in world.get_buildings(): candidates[int(row["id"])] = true
 		else:
-			var changed_ids: Array = change["buildings"].duplicate()
-			for id in memories:
-				if not world.buildings_by_id.has(id) and delta["masks"].has(id): changed_ids.append(id)
-			# Preserve the original sorted delta order before visibility candidates.
-			changed_ids.sort()
-			for id in changed_ids: candidates[id] = true
+			for id in change["buildings"]: candidates[id] = true
+			if not before_visibility:
+				for id in delta["removed_ids"]:
+					if memories.has(id): candidates[id] = true
 		var visibility: Dictionary = {}
 		if not before_visibility:
+			# Only a destroyed remembered building needs a visibility check
+			# without a live spatial entry. Keep those IDs until the observer
+			# sees the empty tile, including ghosts loaded from old saves.
+			var missing: Dictionary = state.get("missing_buildings", {})
+			if bool(delta["full"]) or not state.has("missing_buildings"):
+				missing = {}
+				for id in memories:
+					if not world.buildings_by_id.has(id): missing[id] = true
+			else:
+				for id in delta["removed_ids"]:
+					if memories.has(id) and not world.buildings_by_id.has(id): missing[id] = true
+			state["missing_buildings"] = missing
 			visibility = fog.visibility_changes_since(team, int(state["fog"]))
 			if bool(visibility["full"]) or overflow:
 				for row in world.get_buildings(): candidates[int(row["id"])] = true
@@ -376,17 +402,18 @@ func update_building_memory(world, before_visibility: bool, sample: Dictionary =
 							if String(categories[id]) == "buildings": candidates[id] = true
 			else:
 				for row in in_bounds(visibility["region"], "buildings"): candidates[int(row["id"])] = true
-			# Known destroyed buildings need no live spatial entry. Visit only
-			# remembered IDs when visibility actually changed.
 			if int(state["fog"]) != int(visibility["revision"]):
-				for id in memories:
-					if not world.buildings_by_id.has(id) and fog.state_at_world(team, Vector2(memories[id]["pos"])) == 2: candidates[id] = true
+				for id in missing.keys():
+					if not memories.has(id) or world.buildings_by_id.has(id): missing.erase(id)
+					elif _visible_building_tile(sight, map_size, memories[id]["pos"]): candidates[id] = true
 		for id in candidates:
-			var row: Variant = world.find_building(int(id))
-			if row != null and (int(row.get("team", 0)) == team or fog.state_at_world(team, Vector2(row["pos"])) == 2):
+			var row: Variant = world.buildings_by_id.get(id)
+			if row != null and (int(row.get("team", 0)) == team or _visible_building_tile(sight, map_size, row["pos"])):
 				if not rows.has(id): rows[id] = world.compact_render_projection(row)
 				memories[id] = rows[id]
-			elif not before_visibility and memories.has(id) and fog.state_at_world(team, Vector2(memories[id]["pos"])) == 2: memories.erase(id)
+			elif not before_visibility and memories.has(id) and _visible_building_tile(sight, map_size, memories[id]["pos"]):
+				memories.erase(id)
+				state["missing_buildings"].erase(id)
 		world.last_known_buildings_by_player[team] = memories
 		if before_visibility:
 			sample["before"][team] = source_revision
@@ -397,6 +424,11 @@ func update_building_memory(world, before_visibility: bool, sample: Dictionary =
 	if probe != null:
 		probe.observe_microseconds("simulation.fog.building_memory.before" if before_visibility else "simulation.fog.building_memory.after", Time.get_ticks_usec() - phase_started)
 	return sample
+
+static func _visible_building_tile(sight: PackedByteArray, size: Vector2i, pos: Vector2) -> bool:
+	var x := floori(pos.x)
+	var y := floori(pos.y)
+	return x >= 0 and x < size.x and y >= 0 and y < size.y and sight[y * size.x + x] == 2
 
 func _overflow_versions(world, rows: Array) -> Array:
 	var result: Array = []

@@ -1,5 +1,6 @@
 #include "ror_script_boundary_profile.hpp"
 #include "ror_read_model_kernel.hpp"
+#include "ror_entity_change_journal.hpp"
 #include "ror_actor_keys.hpp"
 #include "ror_actor_stage_scope.hpp"
 #include "ror_path_kernel.hpp"
@@ -33,14 +34,122 @@ int64_t RoRReadModelKernel::maximum_gatherers(const Dictionary &resource, ActorB
     return batch.maximum_gatherers[kind];
 }
 
+bool RoRReadModelKernel::advance_worksite_clock(Dictionary unit, int64_t id, double delta,
+        ActorBatchContext &batch, MovementBatchContext &movement) const {
+    // A worker between two actions has only two advancing scalars. Finish at
+    // this actor's ordinary ordered position so depletion by an earlier worker
+    // or displacement by another unit takes effect on this very tick.
+    if (!movement.scoped_resource_digest || unit.is_read_only() ||
+            unit.get(ROR_FIELD("gather_stage"), Variant()) != ROR_FIELD("harvesting")) return false;
+    RoRActorStageScope clock_scope(batch.profile_stages, batch.worksite_ns, batch.worksite_calls);
+    const double work = unit.get(ROR_FIELD("work"), 0.0);
+    if (!(work > delta) || !std::isfinite(delta)) return false;
+    const int64_t resource_id = unit[ROR_FIELD("resource_id")];
+    const Variant target = gather_target(resource_id, batch);
+    if (target.get_type() != Variant::DICTIONARY) return false;
+    const Dictionary resource = target;
+    if (int64_t(resource[ROR_FIELD("amount")]) <= 0) return false;
+    const Vector2 resource_position = resource[ROR_FIELD("pos")];
+    const auto contested = [&]() {
+        const Variant slots = batch.resource_slots.get(resource_id, Variant());
+        return slots.get_type() == Variant::DICTIONARY && Dictionary(slots).size() > 1;
+    };
+    const auto advance_clocks = [&]() {
+        if (movement.resource_digest.is_valid()) movement.resource_digest->before_change(id);
+        unit[ROR_FIELD("work")] = work - delta;
+        unit[ROR_FIELD("anim")] = double(unit[ROR_FIELD("anim")]) + delta;
+        ++batch.worksite_clock_updates;
+        ++batch.calls;
+        ++batch.native_animations;
+    };
+    WorksiteClock *site = nullptr;
+    int64_t revision = -1;
+    if (batch.journal && !batch.journal->is_full()) {
+        site = &worksite_clocks[size_t(id) % worksite_clocks.size()];
+        revision = batch.journal->revision_for(id);
+        if (site->worker == id && site->revision == revision && site->resource == resource_id &&
+                site->resource_position == resource_position && (!site->needs_single_slot || !contested())) {
+            advance_clocks();
+            ++batch.retained_worksites;
+            return true;
+        }
+    }
+    if (unit.get(ROR_FIELD("anim_state"), Variant()) != ROR_FIELD("Gather") ||
+            double(unit.get(ROR_FIELD("hp"), 0.0)) <= 0.0 || double(unit.get(ROR_FIELD("cooldown"), 0.0)) > 0.0 ||
+            int64_t(unit.get(ROR_FIELD("retaliation_target_id"), -1)) >= 0) return false;
+    const Variant route = unit.get(ROR_FIELD("path"), Variant()), slot = unit.get(ROR_FIELD("resource_approach_slot"), Variant());
+    if (route.get_type() != Variant::ARRAY || !Array(route).is_empty() ||
+            Vector2(unit.get(ROR_FIELD("actual_velocity"), Vector2())) != Vector2()) return false;
+    const Vector2 position = unit[ROR_FIELD("pos")];
+    const bool at_slot = slot.get_type() == Variant::VECTOR2 && position.distance_squared_to(Vector2(slot)) <= 0.0144;
+    const bool needs_single_slot = !at_slot && slot.get_type() == Variant::VECTOR2;
+    if (!at_slot && (!in_resource_range(unit, resource) || (needs_single_slot && contested()))) return false;
+    const Dictionary parts = unit[ROR_FIELD("components")];
+    const Dictionary role = parts[ROR_FIELD("worker")], faith = parts[ROR_FIELD("conversion")], order = parts[ROR_FIELD("order")];
+    if (!bool(role[ROR_FIELD("enabled")]) || bool(faith[ROR_FIELD("enabled")]) ||
+            order.get(ROR_FIELD("phase"), Variant()) != ROR_FIELD("Recover")) return false;
+    const double capacity = unit[ROR_FIELD("carry_capacity")];
+    if (capacity > 0.0 && double(unit[ROR_FIELD("carried_amount")]) >= capacity - 0.0001) return false;
+    const Vector2 difference = resource_position - position;
+    if (difference.length_squared() > 0.0001) {
+        const double facing_angle = std::atan2(-double((difference.x - difference.y) * 32.0),
+                double((difference.x + difference.y) * 16.0));
+        const int64_t facing = (int64_t(std::round(facing_angle / (6.283185307179586476925286766559 / 8.0))) % 8 + 8) % 8;
+        if (unit[ROR_FIELD("facing")] != Variant(facing) || unit[ROR_FIELD("desired_facing")] != Variant(facing) ||
+                unit[ROR_FIELD("action_facing")] != Variant(facing)) return false;
+    }
+    // A revision in the open journal batch can still coalesce another change
+    // at that same number. Only a closed revision certifies later ticks.
+    if (site && revision >= 0 && revision <= batch.journal->get_revision())
+        *site = {id, revision, resource_id, resource_position, needs_single_slot};
+    advance_clocks();
+    return true;
+}
+
 Vector4 RoRReadModelKernel::advance_gather_motion(Dictionary unit, double delta,
         ActorBatchContext &batch, MovementBatchContext &movement) const {
     RoRActorStageScope scope(batch.profile_stages, batch.gather_ns[0], batch.gather_calls[0]);
     const int64_t team = unit.get(ROR_FIELD("team"), 0);
-    if (!batch.planner || batch.planner_team != team || !movement.bindings_fresh) {
-        batch.planner_value = RoRScriptBoundaryProfile::call(batch.knowledge, "planner", batch.world, team);
-        batch.planner = batch.planner_value.get_type() == Variant::OBJECT ? static_cast<Object *>(batch.planner_value) : nullptr;
-        batch.planner_team = team;
+    const int64_t revision = select_actor_planner(team, batch, movement);
+    const int64_t id = unit[ROR_FIELD("id")], stalled = unit[ROR_FIELD("stuck_ticks")];
+    const int64_t group = unit[ROR_FIELD("formation_group_id")];
+    const Vector2 position = unit[ROR_FIELD("pos")], waypoint = unit[ROR_FIELD("target")];
+    Object *kernel = movement.shared_kernel;
+    if (!kernel && movement.bindings_fresh) {
+        const Variant actor_kernel = movement.by_unit.get(id, Variant());
+        if (actor_kernel.get_type() == Variant::OBJECT) kernel = actor_kernel;
+    }
+    if (revision >= 0 && movement.motion_enabled && kernel && movement.publish &&
+            group < 0 && stalled < 4 && !movement.envelopes.has(id) &&
+            unit.get(ROR_FIELD("path_knowledge_revision"), int64_t(-1)) == Variant(revision) &&
+            position.distance_squared_to(waypoint) >= 0.001225 && !Array(unit[ROR_FIELD("path")]).is_empty()) {
+        // The committed route already supplies a waypoint. Use the same
+        // collision, terrain, progress and journal operations as every mover.
+        // Crossing a waypoint or changing topology goes through the planner.
+        const MotionInputs inputs{position, waypoint, id, stalled, group};
+        const Vector4 step = advance_motion_internal(unit, kernel, delta, movement.map_size,
+                movement.vertices, nullptr, nullptr, 30, &inputs);
+        if (step.x >= 0.0) {
+            ++batch.committed_worker_steps;
+            ++movement.operations;
+            const int64_t mask = int64_t(std::llround(step.x));
+            if (mask) movement.publish(unit, id, mask);
+            if (int64_t(std::llround(step.w)) != 0) {
+                movement.bindings_fresh = false;
+                RoRScriptBoundaryProfile::call(batch.movement, "_finish_native_move", unit, batch.planner, step, false, Variant(), stalled);
+                movement.bindings_fresh = false;
+            }
+            ++batch.motion_updates;
+            batch.candidates += int64_t(std::llround(step.y));
+            return Vector4(1, 1, step.y, 0);
+        }
+        // The solver rejected before writing. Continue from the same stage
+        // used by the general movement pipeline for a blocked step.
+        movement.bindings_fresh = false;
+        const bool moved = RoRScriptBoundaryProfile::call(batch.movement, "_advance_motion_body", unit, delta,
+                batch.planner, batch.world, Variant(), false);
+        movement.bindings_fresh = false;
+        return Vector4(moved ? 1 : 0, 0, 0, 0);
     }
     Vector4 step = advance_move_pipeline_internal(unit, delta, batch.planner, movement);
     if (step.x < 0.0) {
@@ -219,13 +328,19 @@ int64_t RoRReadModelKernel::advance_gather_controller(Dictionary unit, double de
         RoRActorStageScope shortening_scope(batch.profile_stages, batch.gather_ns[4], batch.gather_calls[4]);
         if (String(unit.get(ROR_FIELD("movement_domain"), ROR_FIELD("land"))) == ROR_TEXT("land") && maximum_gatherers(resource, batch) <= 0) {
             const Array route = unit[ROR_FIELD("path")];
-            Vector2 cursor = unit[ROR_FIELD("pos")];
-            double cost = 0.0;
-            for (int64_t index = std::max(int64_t(0), int64_t(unit.get(ROR_FIELD("path_index"), 0))); index < route.size(); ++index) {
-                const Vector2 point = route[index]; cost += cursor.distance_to(point); cursor = point;
+            const Variant reviewed = unit.get(ROR_FIELD("gather_route_review"), Variant());
+            bool needs_review = true;
+            if (!batch.exhaustive_cluster_routes && reviewed.get_type() == Variant::ARRAY) {
+                const Array key = reviewed;
+                const int64_t request = unit.get(ROR_FIELD("path_request_id"), -1);
+                const int64_t route_id = request > 0 ? request : -1 - int64_t(route.hash());
+                // A local same-cell endpoint adjustment can reuse a request.
+                // All other installed gather paths get a new navigation request.
+                needs_review = key.size() != 5 || key[0] != resource[ROR_FIELD("id")] ||
+                    key[1] != unit[ROR_FIELD("team")] || key[3] != Variant(route_id) || key[4] != route.back() ||
+                    key[2] != Dictionary(parts[ROR_FIELD("order")])[ROR_FIELD("revision")];
             }
-            const double threshold = std::max(12.0, double(Vector2(unit[ROR_FIELD("pos")]).distance_to(Vector2(resource[ROR_FIELD("pos")]))) * 1.5);
-            if (cost > threshold) {
+            if (needs_review) {
                 movement.bindings_fresh = false;
                 const Variant replacement = RoRScriptBoundaryProfile::call(batch.gathering, "_shorten_cluster_route", unit, resource);
                 movement.bindings_fresh = false;

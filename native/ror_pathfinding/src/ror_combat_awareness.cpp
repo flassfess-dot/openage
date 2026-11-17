@@ -468,12 +468,18 @@ public:
         occupancy.prepare(index, buckets, retaliation, world->get(ROR_PROPERTY("map_size")), previous,
                 delta[ROR_FIELD("revision")], bool(delta[ROR_FIELD("full")]));
         const Dictionary wake = lanes[mod(tick, 4)]; const Array rows = wake.values();
-        std::vector<Dictionary> ordered; ordered.reserve(rows.size());
-        for (int64_t n = 0; n < rows.size(); ++n) ordered.push_back(rows[n]);
-        std::sort(ordered.begin(), ordered.end(), [](const Dictionary &a, const Dictionary &b) { return int64_t(a[ROR_FIELD("id")]) < int64_t(b[ROR_FIELD("id")]); });
+        struct Acquisition {
+            int64_t id;
+            Dictionary row;
+            String stance;
+            double radius;
+            int64_t allowed;
+            Array nearby;
+        };
+        std::vector<Acquisition> pending;
         const bool battle_over = world->get("battle_over");
-        std::vector<Dictionary> acquisition;
-        for (const Dictionary &row : ordered) {
+        for (int64_t n = 0; n < rows.size(); ++n) {
+            const Dictionary row = rows[n];
             const String task = row.get(ROR_FIELD("task"), ROR_TEXT("idle"));
             if (task != ROR_TEXT("idle") && task != ROR_TEXT("attack_move") && !(task == ROR_TEXT("attack") && bool(row.get(ROR_FIELD("attack_autonomous"), false)))) continue;
             const String stance = stance_of(row);
@@ -481,26 +487,29 @@ public:
             const Dictionary parts = row.get(ROR_FIELD("components"), Dictionary()), order = parts.get(ROR_FIELD("order"), Dictionary());
             if (!Array(order.get(ROR_FIELD("queued"), Array())).is_empty() || !due(row, tick, stance) || !eligible(row, battle_over)) continue;
             ++observers;
-            const Variant target = find(row.get(ROR_FIELD("target_id"), -1));
-            if (task == ROR_TEXT("attack") && valid_target(row, target)) continue;
-            acquisition.push_back(row);
-        }
-        acquisitions = acquisition.size();
-        Dictionary assigned = assigned_targets.duplicate();
-        Array decisions;
-        for (const Dictionary &row : acquisition) {
-            const String stance = stance_of(row);
+            if (task == ROR_TEXT("attack") && valid_target(row, find(row.get(ROR_FIELD("target_id"), -1)))) continue;
+            ++acquisitions;
             const double radius = query_range(row, stance);
             int64_t allowed = -1;
             if (stance == ROR_TEXT("defensive")) {
                 allowed = row.get(ROR_FIELD("retaliation_target_id"), -1);
-                if (allowed < 0) allowed = assistance_target(row);
+                if (allowed < 0 && !retaliation.is_empty()) allowed = assistance_target(row);
                 if (allowed < 0) continue;
-            } else if (stance != ROR_TEXT("stand_ground")) {
-                const String task = row.get(ROR_FIELD("task"), ROR_TEXT("idle"));
-                if (task != ROR_TEXT("idle") && task != ROR_TEXT("move") && task != ROR_TEXT("attack_move") && task != ROR_TEXT("attack")) continue;
             }
             const Array nearby = candidates(row, radius + double(row.get(ROR_FIELD("footprint_radius"), 0.0)));
+            if (!nearby.is_empty()) pending.push_back({row[ROR_FIELD("id")], row, stance, radius, allowed, nearby});
+        }
+        // Only observers with possible targets contend for assignments. Discovery
+        // above is read-only. Rank and reserve in the original stable ID order.
+        std::sort(pending.begin(), pending.end(), [](const Acquisition &a, const Acquisition &b) { return a.id < b.id; });
+        Dictionary assigned = assigned_targets;
+        Array decisions;
+        for (const Acquisition &query : pending) {
+            const Dictionary &row = query.row;
+            const String &stance = query.stance;
+            const double radius = query.radius;
+            const int64_t allowed = query.allowed;
+            const Array &nearby = query.nearby;
             Variant best = best_pass(row, nearby, assigned, radius, stance, allowed, false);
             if (best.get_type() == Variant::NIL) continue;
             if (!static_entity(row)) {
@@ -516,6 +525,7 @@ public:
             policy[ROR_FIELD("leash_origin")] = origin;
             policy[ROR_FIELD("chase_range")] = double(row.get(ROR_FIELD("chase_range"), radius));
             Dictionary decision; decision[ROR_FIELD("unit_id")] = row[ROR_FIELD("id")]; decision[ROR_FIELD("target_id")] = target_id; decision[ROR_FIELD("policy")] = policy;
+            if (decisions.is_empty()) assigned = assigned_targets.duplicate();
             decisions.append(decision); assigned[target_id] = int64_t(assigned.get(target_id, 0)) + 1;
         }
         Dictionary stats;

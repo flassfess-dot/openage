@@ -67,6 +67,9 @@ func advance(context: Dictionary = {}) -> void:
 		if probe != null: probe.increment("fog.source_refresh.full")
 		pending_motion.clear()
 		fog.update(world.get_units(), world.get_buildings(), 1, 0)
+	elif fog.uses_native_source_journal():
+		if probe != null: probe.increment("fog.source_refresh.delta")
+		fog.apply_source_journal(delta, world.units_by_id, world.buildings_by_id, pending_motion, MOVEMENT_REFRESH_BUCKETS, movement_refresh_bucket)
 	else:
 		if probe != null: probe.increment("fog.source_refresh.delta")
 		var changed: Dictionary = {}

@@ -58,6 +58,7 @@ static func update_active_groups(
 		var group_id := int(group_id_value)
 		var group = group_records[group_id_value]
 		var members: Array = []
+		var marching := false
 		for member_id_value in group.member_ids:
 			var unit = units_by_id.get(int(member_id_value))
 			if unit == null or float(unit.get("hp", 0.0)) <= 0.0:
@@ -67,8 +68,17 @@ static func update_active_groups(
 			unit.erase("formation_steering_target")
 			unit["formation_shared_isolated"] = false
 			members.append(unit)
-		if not members.is_empty():
+			marching = marching or unit.get("task") in ["move", "attack_move"]
+		if members.is_empty(): continue
+		if marching:
 			groups[group_id] = members
+		else:
+			# A group left standing after its last order has no distances,
+			# steering targets, or shared motion to solve until a member moves.
+			group.march_speed = 0.0
+			for unit in members:
+				unit["cohesion_speed_scale"] = 1.0
+				unit["formation_shared_motion"] = false
 	for members_value in groups.values():
 		var members: Array = members_value
 		var group = group_records[int(members[0]["formation_group_id"])]

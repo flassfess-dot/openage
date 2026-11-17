@@ -41,6 +41,10 @@ bool RoRReadModelKernel::prepare_actor_batch(ActorBatchContext &batch, const Dic
         batch.resource_slots = batch.world->get(ROR_PROPERTY("resource_approach_slots"));
     }
     batch.approach = batch.world->get(ROR_PROPERTY("approach_system"));
+    if (batch.native_gather) batch.exhaustive_cluster_routes = bool(batch.gathering->get(ROR_PROPERTY("exhaustive_cluster_routes")));
+    const Variant knowledge_script = RoRScriptBoundaryProfile::call(batch.knowledge, "get_script");
+    Object *knowledge = knowledge_script.get_type() == Variant::OBJECT ? static_cast<Object *>(knowledge_script) : nullptr;
+    batch.canonical_knowledge = knowledge && String(knowledge->get(ROR_PROPERTY("resource_path"))) == ROR_TEXT("res://scripts/navigation_knowledge.gd");
     const Variant gather_script_value = RoRScriptBoundaryProfile::call(batch.gathering, "get_script");
     Object *gather_script = gather_script_value.get_type() == Variant::OBJECT ? static_cast<Object *>(gather_script_value) : nullptr;
     batch.gather_controller = batch.native_gather && bool(context.get(ROR_FIELD("gather_controller"), false)) && batch.repository && batch.approach &&
@@ -48,6 +52,27 @@ bool RoRReadModelKernel::prepare_actor_batch(ActorBatchContext &batch, const Dic
         batch.gather_action == 2 && batch.gathering->has_method("_perform_gather_action") &&
         batch.gathering->has_method("_complete_resource_deposit") && batch.gathering->has_method("_complete_cluster_adoption");
     return true;
+}
+
+int64_t RoRReadModelKernel::select_actor_planner(int64_t team, ActorBatchContext &batch, MovementBatchContext &movement) const {
+    if (!batch.canonical_knowledge || team < 0 || team > 16) {
+        batch.planner_value = RoRScriptBoundaryProfile::call(batch.knowledge, "planner", batch.world, team);
+        batch.planner = batch.planner_value.get_type() == Variant::OBJECT ? static_cast<Object *>(batch.planner_value) : nullptr;
+        return -1;
+    }
+    // A policy callback invalidates movement bindings before it can change
+    // terrain, gates or fog. Rebind each team's legal planner once afterwards.
+    if (!movement.bindings_fresh) refresh_movement_batch(movement);
+    auto &view = batch.navigation_views[team];
+    if (view.bindings != movement.binding_refreshes) {
+        view.planner = RoRScriptBoundaryProfile::call(batch.knowledge, "planner", batch.world, team);
+        Object *planner = view.planner.get_type() == Variant::OBJECT ? static_cast<Object *>(view.planner) : nullptr;
+        Object *grid = planner ? static_cast<Object *>(planner->get(ROR_PROPERTY("grid"))) : nullptr;
+        view.revision = grid ? int64_t(grid->get(ROR_PROPERTY("revision"))) : -1;
+        view.bindings = movement.binding_refreshes;
+    }
+    batch.planner = view.planner.get_type() == Variant::OBJECT ? static_cast<Object *>(view.planner) : nullptr;
+    return view.revision;
 }
 
 int64_t RoRReadModelKernel::advance_actor_animation(Dictionary unit, const String &requested, double delta,
@@ -107,11 +132,20 @@ int64_t RoRReadModelKernel::advance_actor_pipeline(Dictionary unit, double delta
     int64_t timer_mask = 0;
     const Variant digest = movement.scoped_resource_digest ? Variant() : batch.world->get(ROR_PROPERTY("resource_digest_job"));
     const bool digest_active = digest.get_type() == Variant::OBJECT && static_cast<Object *>(digest);
-    for (const char *name : {"cooldown", "work"}) {
-        const double value = unit.get(name, 0.0);
-        if (!(value > 0.0)) continue;
-        if (digest_active) RoRScriptBoundaryProfile::call(batch.world, "set_entity_field", unit, String(name), std::max(0.0, value-delta));
-        else { unit[String(name)] = std::max(0.0, value-delta); timer_mask |= 68; }
+    const double cooldown = unit.get(ROR_FIELD("cooldown"), 0.0);
+    if (cooldown > 0.0) {
+        const double remaining = std::max(0.0, cooldown - delta);
+        if (digest_active) RoRScriptBoundaryProfile::call(batch.world, "set_entity_field", unit, ROR_TEXT("cooldown"), remaining);
+        else { unit[ROR_FIELD("cooldown")] = remaining; timer_mask |= 68; }
+    }
+    const double previous_work = unit.get(work, 0.0);
+    const double work_remaining = std::max(0.0, previous_work - delta);
+    if (previous_work > 0.0) {
+        if (digest_active) RoRScriptBoundaryProfile::call(batch.world, "set_entity_field", unit, ROR_TEXT("work"), work_remaining);
+        else {
+            unit[work] = work_remaining;
+            if (work_remaining == 0.0) timer_mask |= 68;
+        }
     }
     publish(timer_mask);
     const Dictionary parts = partsv, faith = parts.get(conversion_key, Dictionary());
@@ -132,11 +166,7 @@ int64_t RoRReadModelKernel::advance_actor_pipeline(Dictionary unit, double delta
     if (task_name == ROR_TEXT("move") || task_name == ROR_TEXT("attack_move")) {
         RoRActorStageScope stage_scope(batch.profile_stages, batch.stage_ns[2], batch.stage_calls[2]);
         const int64_t team = unit.get(ROR_FIELD("team"), 0);
-        if (!batch.planner || batch.planner_team != team || !movement.bindings_fresh) {
-            batch.planner_value = RoRScriptBoundaryProfile::call(batch.knowledge, "planner", batch.world, team);
-            batch.planner = batch.planner_value.get_type() == Variant::OBJECT ? static_cast<Object *>(batch.planner_value) : nullptr;
-            batch.planner_team = team;
-        }
+        select_actor_planner(team, batch, movement);
         ++batch.move_attempts;
         const Vector4 step = advance_move_pipeline_internal(unit, delta, batch.planner, movement);
         if (step.x >= 0.0) {

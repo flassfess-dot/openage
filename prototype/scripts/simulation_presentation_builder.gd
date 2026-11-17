@@ -170,8 +170,11 @@ func project_units() -> void:
 			if split_metadata:
 				render_units = units
 				render_units.make_read_only()
-				units = []
-			for index in range(visible.size()):
+				var control_started := Time.get_ticks_usec() if snapshot_probe != null else 0
+				units = options["_scene_controls"].project_scene_units(visible, render_units, observer_team, always_include_entity_lookup)
+				if snapshot_probe != null: unit_control_projection_microseconds += Time.get_ticks_usec() - control_started
+			var controls_complete := split_metadata and units.size() == visible.size()
+			for index in range(0 if controls_complete else visible.size()):
 				var unit_id := int(visible[index].get("id", -1))
 				if scene_controls and float(visible[index].get("hp", 0.0)) > 0.0:
 					always_include_entity_lookup[unit_id] = true
@@ -393,6 +396,14 @@ func project_buildings() -> void:
 			# fields in the query stage. Accumulate both sets of additions before
 			# making a copy of the immutable legal building record.
 			var defer_fields := visible_now and not compact_entities and options.has("_scene_building_fields") and presentation_building.is_read_only()
+			# Towers and docks also expose passenger/trade state owned outside the
+			# building. Active producers and foundations have per-tick progress.
+			if defer_fields and options.has("_scene_building_generation") and float(building.get("hp", 0.0)) > 0.0 and String(building.get("state", "complete")) == "complete" and building.get("production_queue", []).is_empty() and building.get("builders", {}).is_empty() and not Garrison.is_tower(building) and not world.trade_system.is_trade_dock(building):
+				var published: Variant = options["_scene_controls"].static_building_row(building_id, presentation_building, int(options["_scene_building_generation"]))
+				if published != null:
+					options["_scene_ready_buildings"][building_id] = true
+					buildings.append(published)
+					continue
 			var fields := presentation_building
 			if visible_now:
 				fields = {} if defer_fields else presentation_building.duplicate()
@@ -432,6 +443,10 @@ func project_buildings() -> void:
 			if include_overview:
 				overview_buildings.append(EntityProjection._overview_entity(memory))
 			if not has_entity_bounds or EntityProjection._entity_in_bounds(memory, entity_bounds) or always_include_entity_lookup.has(missing_id):
+				if options.has("_scene_ready_buildings") and ReadContract.is_render_record(memory):
+					buildings.append(options["_scene_controls"].last_known_building(missing_id, memory))
+					options["_scene_ready_buildings"][missing_id] = true
+					continue
 				var last_known: Dictionary = EntityProjection._compact_ai_entity(memory, observer_team) if compact_entities else EntityProjection._compact_render_entity(memory)
 				last_known = last_known.duplicate()
 				last_known["last_known"] = true
@@ -473,14 +488,15 @@ func project_state() -> void:
 
 
 func compose() -> Dictionary:
-	var sorted_units = EntityProjection._sort_entity_copies(units)
+	var ordered_units: bool = options.has("_scene_controls") and options["_scene_controls"].unit_batch_ordered
+	var sorted_units = units if ordered_units else EntityProjection._sort_entity_copies(units)
 	# get_known_resources maintains its cache in stable entity-ID order. Avoid
 	# sorting thousands of copied forest nodes again for every AI decision.
 	var sorted_resources = resources if resources_are_preordered else EntityProjection._sort_entity_copies(resources)
 	var sorted_objectives = EntityProjection._sort_entity_copies(objectives)
 	var sorted_buildings = EntityProjection._sort_entity_copies(buildings)
 	var sorted_projectiles = EntityProjection._sort_entity_copies(projectiles)
-	var sorted_overview_units = EntityProjection._sort_entity_copies(overview_units)
+	var sorted_overview_units = overview_units if ordered_units else EntityProjection._sort_entity_copies(overview_units)
 	var sorted_overview_resources = overview_resources if resources_are_preordered else EntityProjection._sort_entity_copies(overview_resources)
 	var sorted_overview_buildings = EntityProjection._sort_entity_copies(overview_buildings)
 	if snapshot_probe != null:

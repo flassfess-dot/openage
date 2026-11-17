@@ -21,6 +21,12 @@ const COMPONENT_NAMES: Array[String] = [
 ]
 
 
+static func is_worker(entity: Dictionary) -> bool:
+	if bool(entity.get("components", {}).get("worker", {}).get("enabled", false)): return true
+	# Compatibility for worlds configured only with gamespec-prototype v4.
+	return entity.get("behavior_tags", []).is_empty() and String(entity.get("kind", "")) == "villager"
+
+
 static func for_unit(entity_id: int, team: int, civilization_id: int, kind: String, position: Vector2, elevation: float, stats: Dictionary, source: Dictionary, footprint: Dictionary, facing: int) -> Dictionary:
 	var combat_source: Dictionary = source.get("combat", {})
 	var resource_source: Dictionary = source.get("resources", {})
