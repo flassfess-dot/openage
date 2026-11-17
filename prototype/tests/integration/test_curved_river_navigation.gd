@@ -66,19 +66,24 @@ func _initialize() -> void:
 		for kind in ["fishing_boat","scout_ship","transport","catapult_trireme"]:
 			var probe:Dictionary=world.add_unit(1,kind,Vector2(1,1),false)
 			world.detach_unit_for_transport(probe["id"])
+			var radius := float(probe["footprint_radius"])
+			var restriction := int(probe["terrain_restriction"])
 			var endpoints:Array[Vector2]=[]
 			for channel in channels:
 				var points:PackedVector2Array=channel["points"]
 				var reach:Array[Vector2]=[]
 				for i in range(8,points.size()-8):
-					# Use legal raster anchors, matching the actual route solver.
-					var point:=Vector2(Vector2i(points[i].floor()))+Vector2.ONE*0.5
-					var fits:bool=world.navigation_grid.is_position_walkable_for(point,probe["footprint_radius"],"water",probe["terrain_restriction"])
-					if not reach.is_empty() and fits:fits=world.navigation_grid.is_segment_walkable_for(reach[-1],point,probe["footprint_radius"],"water",probe["terrain_restriction"])
+					var cell := Vector2i(points[i].floor())
+					var point := Vector2(cell) + Vector2.ONE * 0.5
+					var fits: bool = world.navigation_grid.is_position_walkable_for(point, radius, "water", restriction)
+					if fits and not reach.is_empty():
+						# The route solver also needs both orthogonal anchors for diagonal steps.
+						fits = world.pathfinder._can_step(Vector2i(reach[-1].floor()), cell, "water", restriction, radius)
+						fits = fits and world.navigation_grid.is_segment_walkable_for(reach[-1], point, radius, "water", restriction)
 					if not fits:reach.clear();continue
 					reach.append(point)
 					if reach[0].distance_to(reach[-1])>=7.0:
-						var path:Array=world.pathfinder.find_path(reach[0],reach[-1],"water",probe["terrain_restriction"],probe["footprint_radius"])
+						var path:Array=world.pathfinder.find_path(reach[0],reach[-1],"water",restriction,radius)
 						check(not path.is_empty() and Vector2(path[-1]).distance_to(reach[-1])<0.1,profile+": fitting raster reach has an actual complete route: "+kind)
 						endpoints.assign([reach[0],reach[-1]]);break
 				if not endpoints.is_empty():break
@@ -90,14 +95,49 @@ func _initialize() -> void:
 			check(_move(world,unit,endpoints[1]),profile+" ship completes a fitting curved reach: "+kind)
 			profile_routes+=1;tested_routes+=1
 			world.release_unit_destination(unit);world.detach_unit_for_transport(unit["id"])
+		if profile == "highlands":
+			var scout: Dictionary = world.add_unit(1, "scout_ship", Vector2(64.5, 63.5), false)
+			check(scout["pos"].distance_to(Vector2(64.5, 63.5)) < 0.1, "scout ship fits the diagonal highland reach")
+			check(_move(world, scout, Vector2(59.5, 68.5)), "scout ship can follow the diagonal highland reach")
 		for rapid in data["rivers"]["rapids"]:
 			for cell in rapid["barrier_cells"]:
 				check(not world.navigation_grid.is_position_walkable_for(Vector2(cell)+Vector2.ONE*0.5,0.3,"water",0),profile+": rapid rocks block live navigation")
 		print(profile+": fitted generated reaches tested = "+str(profile_routes))
 		world.shutdown_derived_state()
+	_verify_coastal_ford()
 	for failure in failures:push_error(failure)
-	print("Natural river navigation: %d actual generated routes, %d failures"%[tested_routes,failures.size()])
+	print("Natural river navigation: %d fitted generated reaches and fixed river routes, %d failures"%[tested_routes,failures.size()])
 	quit(0 if failures.is_empty() else 1)
+
+func _verify_coastal_ford() -> void:
+	var settings := Settings.default_settings()
+	settings["map_type_id"] = "coastal"
+	settings["map_size_id"] = "standard"
+	settings["seed"] = 41721
+	var built := Settings.build(settings)
+	check(built.get("valid", false), "coastal river fixture builds through skirmish settings")
+	if not built.get("valid", false): return
+	var data: Dictionary = built["map_data"]
+	var fords: Array = data["fords"]
+	check(fords.size() >= 8, "coastal watersheds have several distributed river crossings")
+	var world = _world(data, built["definition"])
+	for unit in world.get_units().duplicate(): world.detach_unit_for_transport(unit["id"])
+	var ford_index := fords.find_custom(func(ford):
+		return ford["cells"].any(func(cell): return cell.y == 8 and cell.x >= 51 and cell.x < 58)
+	)
+	check(ford_index >= 0, "lower coastal reach has a ford outside the mouth")
+	if ford_index >= 0:
+		var ford: Dictionary = fords[ford_index]
+		check(ford["cells"].all(func(cell): return world.navigation_grid.terrain_id(cell) == 4), "ford crosses the channel with shared shallows")
+		var infantry: Dictionary = world.add_unit(1, "clubman", ford["bank_a"], false)
+		check(_move(world, infantry, ford["bank_b"]), "infantry crosses the new coastal ford between banks")
+		world.release_unit_destination(infantry)
+		world.detach_unit_for_transport(infantry["id"])
+	var sea := Vector2(24.5, 8.5)
+	var scout: Dictionary = world.add_unit(1, "scout_ship", sea, false)
+	check(scout["pos"].distance_to(sea) < 0.1, "scout ship starts offshore")
+	check(_move(world, scout, Vector2(58.5, 8.5)), "scout ship sails upriver from the sea, past the coastal ford")
+	world.shutdown_derived_state()
 
 func _world(data:Dictionary,definition:Dictionary):
 	var world=World.new(data["size"])

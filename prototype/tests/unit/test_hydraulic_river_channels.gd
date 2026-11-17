@@ -8,7 +8,7 @@ const Support := preload("res://scripts/random_map_generation_support.gd")
 var failures: Array[String] = []
 
 func _initialize() -> void:
-	check(Channels.radius(2.0)<1.2,"main-reach threshold no longer forces a warship-sized channel")
+	check(Channels.radius(2.0)<1.2,"small reaches can still be too narrow for warships")
 	check(Channels.radius(1.0,0.9)<0.5,"headwaters may be narrower than the source fishing boat")
 	check(Channels.radius(1)<Channels.radius(4) and Channels.radius(4)<Channels.radius(16),"watershed discharge increases channel width")
 	var size := Vector2i(64,64)
@@ -61,7 +61,9 @@ func _initialize() -> void:
 	Rapids.append_rocks(river,scenery,cells,{},41721)
 	check(not scenery.is_empty() and scenery.all(func(item):return item.get("river_rapid",false) and item["occupied_cells"].size()==1),"every rapid obstacle has a visible original rock")
 	for rapid in rapids:
-		for cell in rapid["barrier_cells"]:check(cells.has(cell),"rapid barriers reach the actual navigation raster")
+		for cell in rapid["barrier_cells"]:
+			check(cells.has(cell),"rapid barriers reach the actual navigation raster")
+			check(absi(cell.x - 32) >= 2, "bank rocks leave the developed channel clear for ships")
 	for failure in failures:push_error(failure)
 	print("Hydraulic river geometry: %d failures"%failures.size())
 	quit(0 if failures.is_empty() else 1)

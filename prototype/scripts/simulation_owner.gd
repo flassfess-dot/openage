@@ -1,6 +1,7 @@
 extends RefCounted
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const RenderWorld := preload("res://scripts/render_world.gd")
+const MatchLifecycle := preload("res://scripts/match_lifecycle_service.gd")
 ## A bounded ownership handoff, not a worker snapshot of a mutable world.
 ## The caller must relinquish EVERY live controller/world reference until take().
 var thread := Thread.new()
@@ -42,6 +43,8 @@ func submit(controller, runtime, delta: float, player: int, enemy: int, frame: i
 			handoff_probe.observe_microseconds("owner.handoff.main", Time.get_ticks_usec() - taken_usec)
 	if not thread.is_started():
 		if thread.start(Callable(self, "_run")) != OK: return false
+	elif not thread.is_alive():
+		return false
 	request = [controller, runtime, delta, player, enemy, frame, autosave_service, presentation_request]
 	mutex.lock()
 	accepts_time = bool(presentation_request.get("stream", false))
@@ -155,6 +158,18 @@ func _run() -> void:
 func _advance(job: Array) -> Dictionary:
 	var controller = job[0]
 	var runtime = job[1]
+	if job[7].has("save_capture"):
+		# The caller has ceded the live world at a tick boundary. A paused menu
+		# or launcher keeps drawing while this owner detaches the requested state.
+		var capture: Dictionary = job[7]["save_capture"]
+		var state: Dictionary = job[7]["frame_state"]
+		if capture.has("map"):
+			state["manual_save_input"] = MatchLifecycle.new().capture_save(controller.simulation_world, controller, runtime.players, runtime.decisions,
+				capture["path"], capture["slot_name"], capture["match_path"], capture["definition"], capture["map"], capture["view"], capture["controller"])
+		else:
+			job[6].prepare_capture_on_owner(controller.simulation_world, controller, runtime)
+			job[6].advance_capture_on_owner(controller.simulation_world, controller)
+		return state
 	var previous_frame: int = runtime.render_frame_override
 	var previous_capture: int = runtime.capture_budget_override
 	var previous_preparation: int = runtime.decisions.preparation_budget_usec

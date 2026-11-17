@@ -42,6 +42,10 @@ func run() -> void:
 func _relay() -> void:
 	var native=ClassDB.instantiate("RoRSaveFileKernel")
 	var read_deadline := 0
+	var active_tick := -1
+	var request_id := 0
+	var previous_status := {}
+	var next_progress_write := 0
 	while not service._cancelled():
 		if FileAccess.file_exists(base+".job"):
 			var message := Channel.read_message_result(base+".job")
@@ -69,6 +73,10 @@ func _relay() -> void:
 					last_sequence=int(record["sequence_id"])
 			input["new_commands"]=records
 			sent_until=int(input.get("sent_until",0))
+			active_tick = int(input["tick"])
+			request_id = int(input.get("ipc_request_id", 0))
+			previous_status = {}
+			service._progress.update("materialize")
 			service._mutex.lock()
 			service._job=input
 			service._mutex.unlock()
@@ -80,9 +88,22 @@ func _relay() -> void:
 		service._mutex.unlock()
 		if not result.is_empty():
 			result["ipc_nonce"]=nonce
+			result["ipc_request_id"] = request_id
 			result["sent_until"]=sent_until
+			active_tick = -1
 			if Channel.write_message(base+".result",result,native)!=OK:
 				relay_error="autosave_process_result_write";_stop_service();break
+		elif active_tick >= 0 and Time.get_ticks_usec() >= next_progress_write:
+			next_progress_write = Time.get_ticks_usec() + 100000
+			var status: Dictionary = service._progress.read()
+			# The final rename is done by the parent process. The child is
+			# still writing the staged file until its result has been delivered.
+			if status.get("stage") == "committing": status["stage"] = "writing"
+			if status != previous_status:
+				var message := status.duplicate()
+				message.merge({"nonce":nonce,"tick":active_tick,"ipc_request_id":request_id})
+				if Channel.write_message(base+".progress", message, native) == OK:
+					previous_status = status
 		OS.delay_msec(25)
 
 func _stop_service() -> void:

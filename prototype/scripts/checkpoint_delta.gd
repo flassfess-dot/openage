@@ -11,6 +11,8 @@ var map_data_revision := -1
 var elevation_revision := -1
 var elevation_epoch := -1
 var grid_stamps: Dictionary = {}
+var memory_edits: Dictionary = {}
+var source_world: WeakRef
 var file_kernel: Variant
 
 func configure(world) -> bool:
@@ -20,6 +22,11 @@ func configure(world) -> bool:
 	world.entity_changes.flush()
 	epoch = world.entity_changes.epoch
 	world_epoch = world.cache_epoch
+	source_world = weakref(world)
+	for team in world.known_resources_by_player:
+		var edits := {}
+		world.known_resources_by_player[team]["checkpoint_edits"] = edits
+		memory_edits[team] = edits
 	resource_revision = world.entity_changes.revision
 	map_data_revision = world.map_data_revision
 	elevation_revision = world.terrain_elevation.revision
@@ -38,6 +45,13 @@ static func _stamp(grid, physical: bool = false) -> Array:
 	return [grid.get_instance_id(), grid.cache_epoch, grid.revision, dense, grid.begin_checkpoint_changes(), weakref(grid)]
 
 func release() -> void:
+	var world: Variant = source_world.get_ref() if source_world != null else null
+	if world != null:
+		for team in memory_edits:
+			var cache: Dictionary = world.known_resources_by_player.get(team, {})
+			if is_same(cache.get("checkpoint_edits"), memory_edits[team]): cache.erase("checkpoint_edits")
+	memory_edits.clear()
+	source_world = null
 	for seed in grid_stamps.values():
 		var grid: Variant = seed[5].get_ref()
 		if grid != null: grid.end_checkpoint_changes(seed[4])
@@ -51,6 +65,7 @@ static func base_state(checkpoint: Dictionary) -> Dictionary:
 		"grid":checkpoint["grid"], "knowledge":checkpoint["knowledge"],
 		"world":{"resource_nodes":checkpoint["world"]["resource_nodes"], "map_terrain_ids":checkpoint["world"]["map_terrain_ids"]},
 		"systems":{"terrain_elevation":checkpoint["systems"]["terrain_elevation"]},
+		"remembered_resources":checkpoint["observation_memory"]["resources"],
 	}
 
 # Called by the exclusive simulation owner at one completed tick. Only detached
@@ -87,9 +102,19 @@ func capture(world, controller) -> Dictionary:
 	var resources: Dictionary = file_kernel.capture_resource_changes(resource_rows, world.entity_changes.version_source(), resource_revision if same_epoch else -1)
 	var memories: Dictionary = view["observation_memory"]
 	memories["buildings"] = memories["buildings"].duplicate(true)
-	# Known resources are producer-owned frozen render rows. The owner replaces
-	# a row when sight or resources change, and edits the enclosing array.
+	var changed_memories := {}
 	for team in memories["resources"]:
+		var cache: Dictionary = world.known_resources_by_player[team]
+		if same_epoch and memory_edits.has(team) and is_same(cache.get("checkpoint_edits"), memory_edits[team]):
+			var changes := {}
+			var by_id: Dictionary = cache["ids"]
+			for id in memory_edits[team]:
+				var row: Variant = by_id.get(id)
+				changes[id] = row.duplicate(true) if row is Dictionary and not row.is_read_only() else row
+			changed_memories[team] = changes
+			memories["resources"][team] = null
+			continue
+		# A new observer or a rebuilt fog cache has no shared baseline.
 		var rows: Array = memories["resources"][team].duplicate(false)
 		for index in range(rows.size()):
 			if not rows[index].is_read_only(): rows[index] = rows[index].duplicate(true)
@@ -105,7 +130,7 @@ func capture(world, controller) -> Dictionary:
 	view["fog"] = copies.parts[fog_job]
 	var grids := {}
 	for team in grid_jobs: grids[team] = copies.parts[grid_jobs[team]]
-	return {"view":view, "resources":resources, "grids":grids}
+	return {"view":view, "resources":resources, "grids":grids, "changed_memories":changed_memories}
 
 class CaptureCopies extends RefCounted:
 	var units: Array
@@ -186,9 +211,37 @@ static func index_resources(seed: Dictionary) -> Dictionary:
 	for row in seed["world"]["resource_nodes"]: index[int(row["id"])] = row
 	return index
 
+# Observer memory is maintained in ascending resource-ID order, including
+# removal and rediscovery. Most explored rows remain in the loading seed.
+static func _restore_resource_memory(baseline: Array, changes: Dictionary) -> Array:
+	if changes.is_empty(): return baseline
+	var ids := changes.keys()
+	ids.sort()
+	var rows: Array = []
+	var cursor := 0
+	for row in baseline:
+		var id: int = row["id"]
+		while cursor < ids.size() and int(ids[cursor]) < id:
+			var added: Variant = changes[ids[cursor]]
+			if added != null: rows.append(added)
+			cursor += 1
+		if cursor < ids.size() and int(ids[cursor]) == id:
+			var replacement: Variant = changes[id]
+			if replacement != null: rows.append(replacement)
+			cursor += 1
+		else: rows.append(row)
+	while cursor < ids.size():
+		var added: Variant = changes[ids[cursor]]
+		if added != null: rows.append(added)
+		cursor += 1
+	return rows
+
 # File worker only. Preserve the existing checkpoint and archive schemas.
 static func materialize(seed: Dictionary, resource_index: Dictionary, patch: Dictionary) -> Dictionary:
 	var view: Dictionary = patch["view"]
+	for team in patch.get("changed_memories", {}):
+		if not seed.get("remembered_resources", {}).has(team): return {}
+		view["observation_memory"]["resources"][team] = _restore_resource_memory(seed["remembered_resources"][team], patch["changed_memories"][team])
 	var state: Dictionary = view["world"]
 	var resources: Dictionary = patch["resources"]
 	var changed: Dictionary = resources["changed"]
@@ -217,12 +270,14 @@ static func materialize(seed: Dictionary, resource_index: Dictionary, patch: Dic
 					continue
 				var update: Dictionary = grid["fields"][name]
 				var values: Dictionary = update["values"]
-				var current := baseline.duplicate(false)
 				if not update.has("order"):
+					var current := baseline.duplicate(false)
 					for cell in values: current[cell] = values[cell]
 					result[name] = current
 					continue
-				current.clear()
+				# Construct the typed/sparse map directly in the published order.
+				# A shallow duplicate followed by clear copied every baseline cell.
+				var current := Dictionary({}, baseline.get_typed_key_builtin(), baseline.get_typed_key_class_name(), baseline.get_typed_key_script(), baseline.get_typed_value_builtin(), baseline.get_typed_value_class_name(), baseline.get_typed_value_script())
 				for cell in update["order"]:
 					if values.has(cell): current[cell] = values[cell]
 					elif baseline.has(cell): current[cell] = baseline[cell]

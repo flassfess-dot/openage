@@ -3,6 +3,7 @@ extends RefCounted
 
 const Topology := preload("res://scripts/random_map_topology.gd")
 const Banks := preload("res://scripts/random_map_river_banks.gd")
+const Footprint := preload("res://scripts/footprint.gd")
 
 # A bedrock/boulder reach is distinct from a walkable gravel riffle and from
 # a vertical waterfall. Water remains visible between the original wet rocks;
@@ -37,16 +38,26 @@ static func plan(size: Vector2i, terrain: Array[int], rivers: Dictionary, lakes:
 		var point: Vector2 = candidate["position"]
 		var direction: Vector2 = candidate["direction"]
 		var normal := Vector2(-direction.y,direction.x)
-		var reach := ceili(candidate["radius"]+2.0)
+		var radius: float = candidate["radius"]
+		var reach := ceili(radius + 2.0)
+		# In a developed channel the rocks line the margins of the rapid.
+		# A confined headwater can still have a ledge across its whole width.
+		var clearance := minf(1.2, radius - 0.75) if radius >= 1.65 else 0.0
+		var upstream := point - direction * 2.0
+		var downstream := point + direction * 2.0
 		var cells: Array[Vector2i] = []
 		var valid := true
 		for y in range(maxi(0,floori(point.y)-reach),mini(size.y,floori(point.y)+reach+1)):
 			for x in range(maxi(0,floori(point.x)-reach),mini(size.x,floori(point.x)+reach+1)):
 				var delta := Vector2(x+0.5,y+0.5)-point
-				if absf(delta.dot(direction))>1.15 or absf(delta.dot(normal))>candidate["radius"]+0.8: continue
+				var across := absf(delta.dot(normal))
+				if absf(delta.dot(direction)) > 1.15 or across > radius + 0.8: continue
 				var index := y*size.x+x
 				if rivers["mouth_mask"][index]!=0 or excluded.has(index): valid=false
-				if rivers["mask"][index]!=0 and terrain[index] in [1,4,22]: cells.append(Vector2i(x,y))
+				if rivers["mask"][index] == 0 or terrain[index] not in [1, 4, 22]: continue
+				var cell := Vector2i(x, y)
+				if clearance > 0.0 and Footprint.segment_cell_distance_squared(upstream, downstream, cell) < clearance * clearance: continue
+				cells.append(cell)
 		if not valid or cells.size()<2: continue
 		candidate.erase("score")
 		candidate["barrier_cells"] = cells

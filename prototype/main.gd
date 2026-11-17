@@ -100,6 +100,13 @@ const BackgroundSaveTask := preload("res://scripts/background_save_task.gd")
 const BackgroundSaveQueue := preload("res://scripts/background_save_queue.gd")
 const TaskData := preload("res://scripts/isolated_task_data.gd")
 var background_saves := BackgroundSaveQueue.new()
+const SaveProgressIndicator := preload("res://scripts/save_progress_indicator.gd")
+var save_progress_indicator: SaveProgressIndicator
+var manual_save_requests: Array[Dictionary] = []
+var active_manual_save: Dictionary = {}
+var last_manual_save_result: Dictionary = {}
+var save_notice: Dictionary = {}
+var save_notice_until := 0
 const BackgroundAutosave := preload("res://scripts/background_autosave.gd")
 var autosave := BackgroundAutosave.new()
 const TaskCoordinator := preload("res://scripts/isolated_task_coordinator.gd")
@@ -478,6 +485,10 @@ func join_simulation_owner() -> void:
 	owner_state = simulation_owner.take()
 	owner_delta += float(owner_state.get("unused_seconds", 0.0))
 	owner_state.erase("unused_seconds")
+	if owner_state.has("manual_save_input"):
+		var input: Dictionary = owner_state["manual_save_input"]
+		owner_state.erase("manual_save_input")
+		_enqueue_full_save(input)
 	owner_presentation_packet = owner_state.get("presentation", {})
 	# Keep the compact frame-state API free of large presentation payloads.
 	owner_state.erase("presentation")
@@ -485,6 +496,8 @@ func join_simulation_owner() -> void:
 	if bool(owner_state.get("failed", false)):
 		simulation_owner_enabled = false
 		game_controller.set_paused(true)
+		if active_manual_save.get("stage") == "capture" and not active_manual_save.get("incremental", false):
+			_finish_manual_save({"error":ERR_CANT_CREATE, "detail":"capture_not_isolated"})
 	if not String(owner_state.get("error", "")).is_empty():
 		game_message = owner_state["error"]
 		message_time = 8.0
@@ -795,6 +808,9 @@ func _initialize_scene_from_catalog(for_saved_game: bool = false) -> void:
 	hud_modal_overlay = HUDModalOverlay.new()
 	add_child(hud_modal_overlay)
 	hud_modal_overlay.configure(resource_catalog.interface_skin, match_definition, interface_style_index, resource_catalog.localization)
+	save_progress_indicator = SaveProgressIndicator.new()
+	add_child(save_progress_indicator)
+	save_progress_indicator.attach_to_hud(hud_modal_overlay)
 	hud_modal_overlay.set_viewport_size(get_viewport_rect().size)
 	hud_modal_overlay.close_requested.connect(_close_hud_modal)
 	hud_modal_overlay.save_requested.connect(_save_quick_game)
@@ -947,6 +963,9 @@ func center_initial_view(recenter: bool = true) -> void:
 	queue_redraw()
 
 func reset_game() -> void:
+	_drain_manual_saves()
+	last_manual_save_result = {}
+	save_notice = {}
 	_clear_world_drawables()
 	initial_environment_generation += 1
 	initial_environment_preparing = false
@@ -1070,6 +1089,8 @@ func add_resource(kind: String, position: Vector2, amount: int) -> void:
 		return
 	simulation_world.add_resource(kind, position, amount)
 func _process(delta: float) -> void:
+	if save_progress_indicator != null:
+		save_progress_indicator.set_save_progress(save_progress_state())
 	if not simulation_owner.pending and game_controller != null and game_controller.paused:
 		owner_prediction_stopped = true
 	owner_delta += delta
@@ -1108,6 +1129,11 @@ func _process(delta: float) -> void:
 	var background_started := Time.get_ticks_usec() if probe != null else 0
 	_poll_autosave(autosave_delta)
 	autosave_delta = 0.0
+	if simulation_owner.pending:
+		# A manual save has just taken the world for capture. Rendering continues
+		# from the published scene until the next ownership boundary.
+		queue_redraw()
+		return
 	if probe != null: probe.observe_microseconds("presentation.background.autosave_poll", Time.get_ticks_usec() - background_started)
 	background_started = Time.get_ticks_usec() if probe != null else 0
 	if resource_catalog != null:
@@ -1932,9 +1958,7 @@ func _refresh_menu_details() -> void:
 
 
 func _save_quick_game() -> void:
-	if request_save_game_to_path(GameSaveArchive.SAVE_PATH):
-		hud_modal_overlay.set_menu_status("Сохранение…")
-	else:
+	if not request_save_game_to_path(GameSaveArchive.SAVE_PATH):
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
 
@@ -1949,10 +1973,7 @@ func _save_named_game(name: String) -> void:
 	if path.is_empty():
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message("slot_name_invalid"), true)
 		return
-	if request_save_game_to_path(path, GameSaveArchive.normalized_slot_name(name)):
-		hud_modal_overlay.set_named_saves(GameSaveArchive.list_saves())
-		hud_modal_overlay.set_menu_status("Сохранение…")
-	else:
+	if not request_save_game_to_path(path, GameSaveArchive.normalized_slot_name(name)):
 		hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
 
 
@@ -1966,18 +1987,17 @@ func _request_saved_game_load(path: String) -> void:
 		return
 	_return_to_launcher(path)
 
+func _save_request_error(path: String, slot_name: String) -> String:
+	if network_session != null or not network_role.is_empty(): return "network_save_unsupported"
+	if path.is_empty() or not GameSaveArchive.valid_slot_name(slot_name): return "slot_name_invalid"
+	if game_controller == null or simulation_world == null or game_controller.replay_recorder == null:
+		return "runtime_not_ready"
+	return ""
+
 func _capture_save_input(path: String, slot_name: String = "Быстрое сохранение", metadata_only: bool = false, defer_header: bool = false) -> Dictionary:
 	join_simulation_owner()
-	last_save_error = ""
-	if network_session != null:
-		last_save_error = "network_save_unsupported"
-		return {}
-	if not GameSaveArchive.valid_slot_name(slot_name):
-		last_save_error = "slot_name_invalid"
-		return {}
-	if game_controller == null or simulation_world == null or game_controller.replay_recorder == null:
-		last_save_error = "runtime_not_ready"
-		return {}
+	last_save_error = _save_request_error(path, slot_name)
+	if not last_save_error.is_empty(): return {}
 	var view_state := {
 		"view_offset": view_offset,
 		"view_zoom": view_zoom,
@@ -1998,11 +2018,7 @@ func _capture_save_input(path: String, slot_name: String = "Быстрое со�
 		return {"deferred_header": true, "path": path, "slot_name": slot_name, "match_path": match_path, "tick": game_controller.tick_index, "view": TaskData.copy(view_state), "controller": TaskData.copy(controller_state)}
 	if metadata_only:
 		return match_lifecycle.capture_save_header(game_controller, ai_players, ai_decision_queue, path, slot_name, match_path, match_definition, view_state, controller_state, false)
-	var input: Dictionary = match_lifecycle.capture_save(simulation_world, game_controller, ai_players, ai_decision_queue, path, slot_name, match_path, match_definition, map_definition, view_state, controller_state)
-	if not TaskData.is_detached(input):
-		last_save_error = "capture_not_isolated"
-		return {}
-	return input
+	return match_lifecycle.capture_save(simulation_world, game_controller, ai_players, ai_decision_queue, path, slot_name, match_path, match_definition, map_definition, view_state, controller_state)
 
 func _seed_autosave() -> void:
 	join_simulation_owner()
@@ -2010,19 +2026,17 @@ func _seed_autosave() -> void:
 	autosave.seed_from(simulation_world, game_controller, match_definition, map_definition, {"gamespec": gamespec_data, "terrain": resource_catalog.terrain_catalog_data, "objects": resource_catalog.object_catalog_data, "graphics": resource_catalog.graphics_catalog_data, "runtime": resource_catalog.runtime_catalog_data})
 
 func _poll_autosave(delta: float) -> bool:
+	if simulation_owner.pending and not simulation_owner.ready(): return false
 	join_simulation_owner()
-	if not _can_use_simulation_owner(): autosave.advance_capture_on_owner(simulation_world, game_controller)
+	if autosave.needs_owner_capture() and (launcher_suspended or not _can_use_simulation_owner()):
+		autosave.prepare_capture_on_owner(simulation_world, game_controller, ai_runtime)
+		autosave.advance_capture_on_owner(simulation_world, game_controller)
 	var result := autosave.poll()
-	if not result.is_empty() and int(result["error"]) == OK and hud_modal_overlay != null:
-		var menu_started := Time.get_ticks_usec()
-		hud_modal_overlay.set_named_saves(GameSaveArchive.with_autosave_result(hud_modal_overlay.named_saves, result))
-		var probe: Variant = _presentation_probe()
-		if probe != null: probe.observe_microseconds("presentation.autosave.menu_refresh", Time.get_ticks_usec() - menu_started)
+	var committed := _accept_shared_save_result(result)
+	if manual_save_pending():
+		_start_next_manual_save()
+		return committed
 	var playable := network_session == null and not launcher_suspended and game_controller != null and simulation_world != null and not game_controller.paused and not simulation_world.battle_over and not (scenario_overlay != null and scenario_overlay.is_blocking()) and not (hud_modal_overlay != null and hud_modal_overlay.is_blocking())
-	var committed := not result.is_empty() and int(result["error"]) == OK
-	if not result.is_empty() and not committed:
-		game_message = "Не удалось выполнить автосохранение. Повторим попытку."
-		message_time = 6.0
 	if not autosave.advance(delta, playable): return committed
 	if background_saves.active_request >= 0 or not background_saves.waiting.is_empty(): return committed
 	var started := Time.get_ticks_usec()
@@ -2036,19 +2050,114 @@ func _poll_autosave(delta: float) -> bool:
 	return committed
 
 func request_save_game_to_path(path: String, slot_name: String = "Быстрое сохранение") -> bool:
-	if background_saves.waiting.size() >= BackgroundSaveQueue.MAX_WAITING:
+	last_save_error = _save_request_error(path, slot_name)
+	if not last_save_error.is_empty(): return false
+	if manual_save_requests.size() >= BackgroundSaveQueue.MAX_WAITING:
 		last_save_error = "save_busy"
 		return false
-	var input := _capture_save_input(path, slot_name)
-	if input.is_empty():
-		return false
-	if not background_saves.enqueue(input):
-		last_save_error = "save_busy"
-		return false
+	manual_save_requests.append({"kind":"quick" if path == GameSaveArchive.SAVE_PATH else "manual", "stage":"queued", "path":path, "slot_name":slot_name})
+	save_notice = {}
+	if save_progress_indicator != null: save_progress_indicator.set_save_progress(save_progress_state())
 	return true
+
+func manual_save_pending() -> bool:
+	return not active_manual_save.is_empty() or not manual_save_requests.is_empty()
+
+func save_progress_state() -> Dictionary:
+	if not active_manual_save.is_empty():
+		var status: Dictionary = autosave.progress() if active_manual_save.get("incremental", false) else background_saves.progress()
+		return active_manual_save.merged(status, true)
+	if not manual_save_requests.is_empty(): return manual_save_requests.front()
+	if not save_notice.is_empty() and Time.get_ticks_msec() < save_notice_until: return save_notice
+	return autosave.progress() if autosave.busy else {}
+
+func _start_next_manual_save() -> void:
+	if not active_manual_save.is_empty() or manual_save_requests.is_empty(): return
+	# A paused match cannot move beyond the requested tick while a previous
+	# autosave is committing. It can reuse that writer as soon as it is free.
+	var shared := autosave.supports_manual_save()
+	if shared and autosave.busy and game_controller.paused: return
+	active_manual_save = manual_save_requests.pop_front()
+	active_manual_save["stage"] = "capture"
+	var path: String = active_manual_save["path"]
+	var slot_name: String = active_manual_save["slot_name"]
+	var capture := _capture_save_input(path, slot_name, true, true)
+	if capture.is_empty():
+		_finish_manual_save({"error":ERR_INVALID_DATA,"detail":last_save_error})
+		return
+	_configure_ai_runtime()
+	var incremental := shared and not autosave.busy
+	active_manual_save["incremental"] = incremental
+	if incremental:
+		capture["kind"] = active_manual_save["kind"]
+		if not autosave.submit(capture, simulation_world, game_controller, true):
+			_finish_manual_save({"error":ERR_BUSY,"detail":"save_busy"})
+			return
+	else:
+		capture["map"] = map_definition
+		capture["definition"] = match_definition
+	# The launcher disables the match's regular process loop and HUD menus
+	# pause simulation. This capture-only handoff works in both states.
+	simulation_owner.autosave_service = autosave
+	simulation_owner.presentation_request = {"save_capture":capture, "frame_state":simulation_frame_state()}
+	if simulation_owner.submit(game_controller, ai_runtime, 0.0, local_player_team, ENEMY_TEAM, Engine.get_process_frames()): return
+	simulation_owner.presentation_request = {}
+	if incremental:
+		autosave.prepare_capture_on_owner(simulation_world, game_controller, ai_runtime)
+	else:
+		_enqueue_full_save(_capture_save_input(path, slot_name))
+
+func _enqueue_full_save(input: Dictionary) -> void:
+	if input.is_empty():
+		_finish_manual_save({"error":ERR_INVALID_DATA,"detail":"capture_not_isolated"})
+		return
+	input["kind"] = active_manual_save["kind"]
+	if background_saves.enqueue_captured(input):
+		active_manual_save["stage"] = "queued"
+	else:
+		_finish_manual_save({"error":ERR_INVALID_DATA,"detail":"capture_not_isolated"})
+
+func _accept_shared_save_result(result: Dictionary) -> bool:
+	if result.is_empty(): return false
+	if result.get("kind", "auto") in ["quick", "manual"]:
+		_finish_manual_save(result)
+		return false
+	var committed := int(result["error"]) == OK
+	_set_save_notice("auto", result)
+	if committed and hud_modal_overlay != null:
+		hud_modal_overlay.set_named_saves(GameSaveArchive.with_autosave_result(hud_modal_overlay.named_saves, result))
+	return committed
+
+func _set_save_notice(kind: String, result: Dictionary) -> void:
+	var failed := int(result["error"]) != OK
+	save_notice = {"kind":kind, "stage":"error" if failed else "done", "tick":result.get("tick", -1), "slot_name":result.get("slot_name", "")}
+	if failed: save_notice["message"] = GameSaveArchive.error_message(String(result.get("detail", "write_failed:%d" % result["error"])))
+	save_notice_until = Time.get_ticks_msec() + (8000 if failed else 3000)
+
+func _finish_manual_save(result: Dictionary) -> void:
+	var descriptor := active_manual_save
+	active_manual_save = {}
+	last_manual_save_result = descriptor.merged(result, true)
+	last_save_error = ""
+	_set_save_notice(String(last_manual_save_result.get("kind", "manual")), last_manual_save_result)
+	if int(result["error"]) != OK:
+		last_save_error = String(result.get("detail", "write_failed:%d" % result["error"]))
+	elif hud_modal_overlay != null:
+		hud_modal_overlay.set_save_available(true)
+		hud_modal_overlay.set_named_saves(GameSaveArchive.with_save_result(hud_modal_overlay.named_saves, last_manual_save_result))
+
+func _drain_manual_saves() -> void:
+	join_simulation_owner()
+	while manual_save_pending():
+		if autosave.busy:
+			_accept_shared_save_result(autosave.drain(simulation_world, game_controller, ai_runtime))
+		for result in background_saves.drain(): _finish_manual_save(result)
+		_start_next_manual_save()
+		join_simulation_owner()
 
 # Retain the synchronous public API used by tools and explicit callers.
 func save_game_to_path(path: String, slot_name: String = "Быстрое сохранение") -> bool:
+	_drain_manual_saves()
 	background_saves.drain()
 	var input := _capture_save_input(path, slot_name)
 	if input.is_empty():
@@ -2061,16 +2170,7 @@ func save_game_to_path(path: String, slot_name: String = "Быстрое сох�
 
 func _poll_save_jobs() -> void:
 	for result in background_saves.poll():
-		if int(result["error"]) != OK:
-			last_save_error = "write_failed:%d" % int(result["error"])
-			if hud_modal_overlay != null:
-				hud_modal_overlay.set_menu_status(GameSaveArchive.error_message(last_save_error), true)
-			continue
-		last_save_error = ""
-		if hud_modal_overlay != null:
-			hud_modal_overlay.set_save_available(true)
-			hud_modal_overlay.set_named_saves(GameSaveArchive.list_saves())
-			hud_modal_overlay.set_menu_status("Игра сохранена" if String(result["path"]) == GameSaveArchive.SAVE_PATH else "Именованное сохранение создано")
+		_finish_manual_save(result)
 
 func initialize_prepared_load_async(restored: Dictionary, progress: Callable) -> bool:
 	resource_catalog = restored["catalog"]
@@ -2123,7 +2223,7 @@ func initialize_prepared_load_async(restored: Dictionary, progress: Callable) ->
 
 
 func load_game_from_path(path: String, inspected: Dictionary = {}) -> bool:
-	join_simulation_owner()
+	_drain_manual_saves()
 	background_saves.drain()
 	last_save_error = ""
 	if network_session != null:
@@ -2868,7 +2968,7 @@ func resume_from_launcher() -> void:
 	queue_redraw()
 
 func _exit_tree() -> void:
-	join_simulation_owner()
+	_drain_manual_saves()
 	autosave.shutdown()
 	PickingService.SelectionResolver.clear_hit_images()
 	navigation_loading.shutdown()

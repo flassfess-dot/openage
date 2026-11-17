@@ -17,6 +17,7 @@ public:
     bool background_process_running() const;
     void stop_background_process();
     int64_t replace_atomic(const String &source, const String &destination) const;
+    bool link_for_backup(const String &source, const String &destination) const;
     Dictionary capture_resource_changes(const Array &rows, const Variant &versions, int64_t base_revision) const;
 };
 }

@@ -132,19 +132,23 @@ static func _digest(bytes: PackedByteArray) -> String:
 	hashing.update(bytes)
 	return hashing.finish().hex_encode()
 
-static func pack(checkpoint: Dictionary) -> Dictionary:
+static func pack(checkpoint: Dictionary, progress: Callable = Callable()) -> Dictionary:
+	if progress.is_valid(): progress.call("encoding", 0, 0)
 	var bytes := var_to_bytes(checkpoint)
 	if bytes.is_empty() or bytes.size() > MAX_BYTES: return {}
 	var size := bytes.size()
+	if progress.is_valid(): progress.call("hashing", 0, 0)
 	var sha256 := _digest(bytes)
 	var profile_memory := "--profile-save-memory" in OS.get_cmdline_user_args()
 	if profile_memory: print("CHECKPOINT encoded bytes=", size, " heap=", OS.get_static_memory_usage(), " memory=", OS.get_memory_info())
+	if progress.is_valid(): progress.call("compressing", 0, 0)
 	var compressed := bytes.compress(FileAccess.COMPRESSION_ZSTD)
 	# The raw checkpoint can exceed 370 MiB. Release it before constructing
 	# the base64 string and archive, rather than retaining all three buffers.
 	bytes = PackedByteArray()
 	if compressed.is_empty(): return {}
 	if profile_memory: print("CHECKPOINT compressed bytes=", compressed.size(), " heap=", OS.get_static_memory_usage(), " memory=", OS.get_memory_info())
+	if progress.is_valid(): progress.call("encoding_checkpoint", 0, 0)
 	var encoded := Marshalls.raw_to_base64(compressed)
 	if encoded.is_empty(): return {}
 	if profile_memory: print("CHECKPOINT base64 chars=", encoded.length(), " heap=", OS.get_static_memory_usage())

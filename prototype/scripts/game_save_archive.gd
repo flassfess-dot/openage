@@ -16,7 +16,7 @@ const MAX_TICK := 20_000_000
 const REQUIRED_FEATURES := ["incremental_runtime_v2", "world_checkpoint", "population_points", "order_queues", "fog_memory", "sound_cue_history", "match_rules", "adaptive_ai_v1", "gates_v1", "competitive_ai_v2", "resource_ledger_v1", "team_intents_v1"]
 
 
-static func create(match_path: String, match_definition: Dictionary, tick: int, _state_hash: String, replay: Dictionary, ai_states: Array, view_state: Dictionary, controller_state: Dictionary, slot_name: String = "Быстрое сохранение", checkpoint: Dictionary = {}) -> Dictionary:
+static func create(match_path: String, match_definition: Dictionary, tick: int, _state_hash: String, replay: Dictionary, ai_states: Array, view_state: Dictionary, controller_state: Dictionary, slot_name: String = "Быстрое сохранение", checkpoint: Dictionary = {}, owns_replay: bool = false) -> Dictionary:
 	if checkpoint.is_empty():
 		push_error("Current save format requires a checkpoint")
 		return {}
@@ -43,7 +43,7 @@ static func create(match_path: String, match_definition: Dictionary, tick: int, 
 		"match_fingerprint": fingerprint(match_definition),
 		"tick": tick,
 		"state_sha256": String(checkpoint["sha256"]),
-		"replay": replay.duplicate(true),
+		"replay": replay if owns_replay else replay.duplicate(true),
 		# Pending plans compare against the exact captured AI state on restore.
 		"ai_states": ai_states.map(func(state): return codec.encode_exact_variant(state)),
 		"view_state": codec.encode_variant(saved_view),
@@ -88,10 +88,9 @@ static func validate(data: Dictionary) -> String:
 		return "state_sections_missing"
 	if not data["view_state"].has("sound_cue_history"):
 		return "state_sections_missing"
-	var replay := ReplaySystem.new()
-	if not replay.load_dictionary(data["replay"]):
+	if not ReplaySystem.valid_dictionary(data["replay"]):
 		return "replay_invalid"
-	if int(replay.simulation_seed) <= 0:
+	if int(data["replay"].get("simulation_seed", 1)) <= 0:
 		return "seed_invalid"
 	return ""
 
@@ -138,6 +137,67 @@ static func named_path(name: String, directory: String = NAMED_SAVE_DIRECTORY) -
 	return "%s/slot_%s.json" % [directory, fingerprint({"slot_name": normalized_slot_name(name)}).substr(0, 24)]
 
 
+const HEADER_BYTES := 4096
+const LEGACY_SCAN_BYTES := 128 * 1024
+
+
+# Previous writers indented and sorted the JSON. Its top-level members have
+# exactly one tab. A JSON string cannot contain this literal newline + tab.
+static func _legacy_fields(bytes: PackedByteArray, summary: Dictionary) -> void:
+	var text := bytes.get_string_from_ascii() # One character per byte, including non-ASCII bytes.
+	for field in ["format_version", "tick"]:
+		if summary.has(field): continue
+		var prefix := "\n\t\"%s\": " % field
+		var start := text.find(prefix)
+		if start < 0: continue
+		start += prefix.length()
+		var end := text.find(",", start)
+		if end < 0 or end - start > 20: continue
+		var number := text.substr(start, end - start)
+		if number.is_valid_int(): summary[field] = number.to_int()
+	if summary.has("metadata"): return
+	var marker := "\n\t\"metadata\": "
+	var start := text.find(marker)
+	if start < 0: return
+	start += marker.length()
+	var end := text.find("\n\t}", start)
+	if end < 0: return
+	var metadata: Variant = JSON.parse_string(bytes.slice(start, end + 3).get_string_from_utf8())
+	if metadata is Dictionary: summary["metadata"] = metadata
+
+
+static func _slot_summary(path: String) -> Dictionary:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null: return {}
+	var length := file.get_length()
+	var first := file.get_buffer(mini(length, HEADER_BYTES))
+	var end := first.find(10)
+	if end >= 0 and first.size() > 2 and first[1] == 34:
+		var header := first.slice(0, end).get_string_from_utf8()
+		if header.begins_with("{\"format_version\":") and header.ends_with(","):
+			var parsed: Variant = JSON.parse_string(header.left(-1) + "}")
+			if parsed is Dictionary and parsed.has("metadata") and parsed.has("tick"): return parsed
+	if first.size() > 3 and first[0] == 123 and first[1] == 10 and first[2] == 9:
+		var summary := {}
+		_legacy_fields(first, summary)
+		# All supported historical writers placed the tick near the end, and
+		# metadata after the large checkpoint/AI fields. Stop as soon as known.
+		var right := length
+		while not summary.has("format_version") or (int(summary["format_version"]) == FORMAT_VERSION and summary.size() < 3):
+			if right <= first.size(): break
+			var left := maxi(0, right - LEGACY_SCAN_BYTES)
+			file.seek(left)
+			_legacy_fields(file.get_buffer(right - left), summary)
+			if left == 0: break
+			right = left + HEADER_BYTES
+		if summary.has("format_version") and (int(summary["format_version"]) != FORMAT_VERSION or summary.size() == 3): return summary
+	# Other valid JSON layouts (e.g. an externally reformatted legacy save).
+	file.seek(0)
+	var data: Variant = JSON.parse_string(file.get_as_text())
+	if not data is Dictionary: return {}
+	return {"format_version":data.get("format_version", -1), "metadata":data.get("metadata", {}), "tick":data.get("tick", 0)}
+
+
 static func list_named_saves(directory_path: String = NAMED_SAVE_DIRECTORY) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	var directory := DirAccess.open(directory_path)
@@ -149,12 +209,7 @@ static func list_named_saves(directory_path: String = NAMED_SAVE_DIRECTORY) -> A
 			continue
 		var path := "%s/%s" % [directory_path, filename]
 		if stored_filename != filename and FileAccess.file_exists(path): continue
-		var file := FileAccess.open(directory_path.path_join(stored_filename), FileAccess.READ)
-		if file == null:
-			continue
-		var parsed: Variant = JSON.parse_string(file.get_as_text())
-		if not parsed is Dictionary:
-			continue
+		var parsed := _slot_summary(directory_path.path_join(stored_filename))
 		if int(parsed.get("format_version", -1)) != FORMAT_VERSION: continue
 		var metadata: Variant = parsed.get("metadata", {})
 		if not metadata is Dictionary or not valid_slot_name(String(metadata.get("slot_name", ""))):
@@ -181,10 +236,9 @@ static func list_saves(named_directory: String = NAMED_SAVE_DIRECTORY, quick_pat
 	for path in [autosave_path, quick_path]:
 		var stored_path: String = path if FileAccess.file_exists(path) else path + ".bak"
 		if not FileAccess.file_exists(stored_path): continue
-		var file := FileAccess.open(stored_path, FileAccess.READ)
-		var data: Variant = JSON.parse_string(file.get_as_text()) if file != null else null
-		if data is Dictionary and int(data.get("format_version", -1)) == FORMAT_VERSION:
-			var metadata: Dictionary = data.get("metadata", {})
+		var data := _slot_summary(stored_path)
+		if int(data.get("format_version", -1)) == FORMAT_VERSION and data.get("metadata") is Dictionary:
+			var metadata: Dictionary = data["metadata"]
 			entries.append({"path": path, "slot_name": AUTOSAVE_NAME if path == autosave_path else "Быстрое сохранение", "saved_at_unix": int(metadata.get("saved_at_unix", 0)), "tick": int(data.get("tick", 0)), "quicksave": path == quick_path, "autosave": path == autosave_path})
 	entries.sort_custom(func(left, right):
 		if int(left["saved_at_unix"]) != int(right["saved_at_unix"]):
@@ -193,20 +247,48 @@ static func list_saves(named_directory: String = NAMED_SAVE_DIRECTORY, quick_pat
 	)
 	return entries
 
-static func commit_autosave(staging_path: String, target_path: String = AUTOSAVE_PATH) -> Error:
+static func commit_autosave(staging_path: String, target_path: String = AUTOSAVE_PATH, preserve_previous: bool = false) -> Error:
 	# Rename in the same directory replaces the destination atomically. Never
 	# remove/move the previous slot before the complete new file is in place.
 	if not ClassDB.class_exists("RoRSaveFileKernel"): return ERR_UNAVAILABLE
 	var kernel = ClassDB.instantiate("RoRSaveFileKernel")
-	return kernel.replace_atomic(ProjectSettings.globalize_path(staging_path), ProjectSettings.globalize_path(target_path))
+	var source := ProjectSettings.globalize_path(staging_path)
+	var destination := ProjectSettings.globalize_path(target_path)
+	if preserve_previous and FileAccess.file_exists(destination):
+		if not FileAccess.file_exists(source) or source == destination or source.get_base_dir() != destination.get_base_dir(): return ERR_INVALID_PARAMETER
+		var backup_stage := destination + ".%d-%d.bak.tmp" % [OS.get_process_id(), kernel.get_instance_id()]
+		# Published slot files are only ever replaced, never edited in place.
+		# A link holds the previous version even after its main name is replaced.
+		if not kernel.has_method("link_for_backup") or not kernel.link_for_backup(destination, backup_stage):
+			var copy_error := DirAccess.copy_absolute(destination, backup_stage)
+			if copy_error != OK:
+				DirAccess.remove_absolute(backup_stage)
+				return copy_error
+		var backup_error: Error = kernel.replace_atomic(backup_stage, destination + ".bak")
+		# POSIX rename may keep the source if both names already link to the
+		# same previous version (e.g. after a retry).
+		if FileAccess.file_exists(backup_stage): DirAccess.remove_absolute(backup_stage)
+		if backup_error != OK: return backup_error
+	return kernel.replace_atomic(source, destination)
 
 static func with_autosave_result(entries: Array[Dictionary], result: Dictionary) -> Array[Dictionary]:
+	var automatic := result.duplicate()
+	automatic["kind"] = "autosave"
+	return with_save_result(entries, automatic)
+
+
+static func with_save_result(entries: Array[Dictionary], result: Dictionary) -> Array[Dictionary]:
 	# Completion updates a cached menu model; it must not reread every archive
 	# on the render thread just because an automatic write finished.
 	var updated: Array[Dictionary] = []
+	var path := String(result["path"])
+	var automatic: bool = result.get("kind") == "autosave" or path == AUTOSAVE_PATH
+	var quick: bool = result.get("kind") == "quick" or path == SAVE_PATH
 	for entry in entries:
-		if not bool(entry.get("autosave", false)) and String(entry.get("path", "")) != String(result["path"]): updated.append(entry)
-	updated.append({"path": String(result["path"]), "slot_name": AUTOSAVE_NAME, "saved_at_unix": int(result.get("saved_at_unix", 0)), "tick": int(result["tick"]), "autosave": true, "quicksave": false})
+		if String(entry.get("path", "")) != path and not (automatic and entry.get("autosave", false)): updated.append(entry)
+	updated.append({"path":path, "slot_name":AUTOSAVE_NAME if automatic else "Быстрое сохранение" if quick else String(result["slot_name"]),
+		"saved_at_unix":int(result.get("saved_at_unix", 0)), "tick":int(result["tick"]), "autosave":automatic, "quicksave":quick,
+		"map_type_id":String(result.get("map_type_id", "")), "victory_mode_id":String(result.get("victory_mode_id", "")), "format_version":FORMAT_VERSION})
 	updated.sort_custom(func(a, b):
 		if int(a.get("saved_at_unix", 0)) != int(b.get("saved_at_unix", 0)): return int(a.get("saved_at_unix", 0)) > int(b.get("saved_at_unix", 0))
 		return String(a.get("slot_name", "")) < String(b.get("slot_name", ""))
@@ -233,7 +315,7 @@ static func error_message(error: String) -> String:
 		_: return "Не удалось загрузить или сохранить игру (%s)" % error
 
 
-static func write(path: String, archive: Dictionary, _atomic_replace: bool = true) -> Error:
+static func write(path: String, archive: Dictionary, _atomic_replace: bool = true, progress: Callable = Callable(), preserve_previous: bool = false) -> Error:
 	var validation_error := validate(archive)
 	if not validation_error.is_empty():
 		return ERR_INVALID_DATA
@@ -241,15 +323,32 @@ static func write(path: String, archive: Dictionary, _atomic_replace: bool = tru
 	var directory_error := DirAccess.make_dir_recursive_absolute(absolute_path.get_base_dir())
 	if directory_error != OK:
 		return directory_error
-	var temporary_path := absolute_path + ".tmp"
+	var handle := RefCounted.new()
+	var temporary_path := absolute_path + ".%d-%d.tmp" % [OS.get_process_id(), handle.get_instance_id()]
 	var file := FileAccess.open(temporary_path, FileAccess.WRITE)
 	if file == null:
 		return FileAccess.get_open_error()
-	file.store_string(JSON.stringify(archive, "\t", true, true))
+	var header := {"format_version":archive["format_version"], "tick":archive["tick"], "metadata":archive["metadata"]}
+	var remaining: Array = archive.keys().filter(func(field): return not header.has(field))
+	var total := remaining.size() + 1
+	if progress.is_valid(): progress.call("writing", 0, total)
+	var stored := file.store_string(JSON.stringify(header, "", false, true).left(-1) + ",\n")
+	for i in range(remaining.size()):
+		if not stored: break
+		var field: String = remaining[i]
+		# Write a section at a time so the whole UTF-32 JSON and UTF-8 file
+		# buffer are never materialized together. Numeric precision stays exact.
+		stored = file.store_string(JSON.stringify(field) + ":") and file.store_string(JSON.stringify(archive[field], "", false, true))
+		stored = stored and file.store_string("}" if i + 1 == remaining.size() else ",\n")
+		if stored and progress.is_valid(): progress.call("writing", i + 2, total)
+	var write_error := file.get_error() if stored else ERR_FILE_CANT_WRITE
 	file.flush()
-	var write_error := file.get_error()
+	if write_error == OK: write_error = file.get_error()
 	file.close()
 	if write_error != OK:
 		DirAccess.remove_absolute(temporary_path)
 		return write_error
-	return commit_autosave(temporary_path, absolute_path)
+	if progress.is_valid(): progress.call("committing", 0, 0)
+	var result := commit_autosave(temporary_path, absolute_path, preserve_previous)
+	if result != OK: DirAccess.remove_absolute(temporary_path)
+	return result

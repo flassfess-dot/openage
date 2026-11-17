@@ -22,7 +22,9 @@ func _initialize() -> void:
 		var b := (points[i + 1] - points[i]).normalized()
 		maximum_turn = maxf(maximum_turn, absf(a.angle_to(b)))
 	check(maximum_turn < deg_to_rad(35.0), "an original right-angle bend becomes a continuous curve")
-	check(Array(channel["radii"]).max() <= 3.0, "main river varies in width without turning into a broad uniform canal")
+	var radii := Array(channel["radii"])
+	check(float(radii.max()) <= 3.20001 and float(radii.max()) - float(radii.min()) > 0.05,
+		"developed channel varies in width within the profile limit")
 	var bend_index := 0
 	for i in range(points.size()):
 		if absf(channel["bends"][i]) > absf(channel["bends"][bend_index]): bend_index = i

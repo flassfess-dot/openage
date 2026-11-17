@@ -144,10 +144,12 @@ static func sediment_at(channel: Dictionary, index: int, delta: Vector2) -> floa
 	return clampf(channel["sediment"][index] + minf(0.85, absf(bend) * 2.5) * smoothstep(0.0, 0.7, inside), 0.0, 1.0)
 
 static func radius(flow_ratio: float, width_scale: float = 1.0, maximum_radius: float = 3.2) -> float:
-	# Map-scale hydraulic geometry. The lower limit keeps a visible continuous
-	# stream in the terrain raster; it has no relationship to unit footprints.
-	var source_taper := lerpf(0.6,1.0,smoothstep(1.0,2.0,flow_ratio))
-	return clampf(0.86 * pow(maxf(1.0,flow_ratio),0.32) * width_scale * source_taper,0.42,maximum_radius)
+	var source_taper := lerpf(0.6, 1.0, smoothstep(1.0, 2.0, flow_ratio))
+	var hydraulic_radius := 0.86 * pow(maxf(1.0, flow_ratio), 0.32) * source_taper
+	# Additional room develops gradually downstream. Springs and small
+	# tributaries keep their taper, and geology still shapes the resulting valley.
+	var added_radius := 1.45 * smoothstep(1.85, 3.1, flow_ratio)
+	return clampf((hydraulic_radius + added_radius) * width_scale, 0.42, maximum_radius)
 
 static func _shape_widths(channel: Dictionary, size: Vector2i, fields: Dictionary, options: Dictionary) -> void:
 	var points: PackedVector2Array = channel["points"]

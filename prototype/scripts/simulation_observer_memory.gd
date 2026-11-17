@@ -557,6 +557,7 @@ func publish_resource_chunks(world, observer_team: int) -> Dictionary:
 
 
 func _mark_resource_view_changed(world, cached: Dictionary, id: int) -> void:
+	if cached.has("checkpoint_edits"): cached["checkpoint_edits"][id] = true
 	var view: Dictionary = cached.get("render_view", {})
 	if not view.is_empty(): view["dirty"][id] = true
 

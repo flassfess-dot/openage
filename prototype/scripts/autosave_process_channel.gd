@@ -10,8 +10,10 @@ var nonce := ""
 var arguments: Array = []
 var available := false
 var seed_count := 0
+var seed_hash_count := 0
 var launched := false
 var launch_count := 0
+var request_id := 0
 
 func supported() -> bool:
 	if not ClassDB.class_exists("RoRSaveFileKernel"): return false
@@ -20,6 +22,7 @@ func supported() -> bool:
 
 func prepare(seed: Dictionary, stage: String, recorded_count: int) -> bool:
 	seed_count=recorded_count
+	seed_hash_count = seed.get("replay", {}).get("state_hashes", []).size()
 	if not supported(): return false
 	base = ProjectSettings.globalize_path(stage)
 	nonce = stage.get_file()+":"+str(Time.get_ticks_usec())
@@ -46,9 +49,9 @@ func prepare(seed: Dictionary, stage: String, recorded_count: int) -> bool:
 func needs_reseed() -> bool:
 	return launched and not kernel.background_process_running()
 
-func run_job(input: Dictionary, cancel: Callable) -> Dictionary:
+func run_job(input: Dictionary, cancel: Callable, progress: Callable = Callable()) -> Dictionary:
 	if not kernel.background_process_running():
-		if int(input.get("sent_from",-1))!=seed_count: return _failed("autosave_process_restart_required")
+		if int(input.get("sent_from",-1)) != seed_count or int(input.get("hashes_from",seed_hash_count)) != seed_hash_count: return _failed("autosave_process_restart_required")
 		for suffix in [".job",".job.tmp",".result",".result.tmp"]: _remove(suffix)
 		if launched and "--profile-save-memory" in OS.get_cmdline_user_args() and FileAccess.file_exists(base+".worker.log"):
 			var previous_log := base+".worker-%d.log" % (1+(launch_count-1)%2)
@@ -63,10 +66,17 @@ func run_job(input: Dictionary, cancel: Callable) -> Dictionary:
 		launch_count += 1
 	var payload := input.duplicate(false)
 	payload["ipc_nonce"] = nonce
+	request_id += 1
+	payload["ipc_request_id"] = request_id
+	_remove(".progress")
+	_remove(".result")
+	if FileAccess.file_exists(base+".result"): return _failed("autosave_process_result_in_use")
 	var error := write_message(base+".job",payload,kernel)
 	if error != OK: return _failed("autosave_process_job:%d" % error)
 	var deadline := Time.get_ticks_usec()+JOB_TIMEOUT_USEC
 	var read_deadline := 0
+	var next_progress_read := 0
+	var previous_status := {}
 	while not bool(cancel.call()):
 		if FileAccess.file_exists(base+".result"):
 			var message := read_message_result(base+".result")
@@ -77,10 +87,19 @@ func run_job(input: Dictionary, cancel: Callable) -> Dictionary:
 				continue
 			var result: Dictionary = message["data"]
 			_remove(".result")
-			if String(result.get("ipc_nonce","")) != nonce or int(result.get("tick",-1)) != int(input["tick"]) or int(result.get("sent_until",-1)) != int(input["sent_until"]): return _failed("autosave_process_result")
+			if String(result.get("ipc_nonce","")) != nonce or int(result.get("ipc_request_id",-1)) != request_id or int(result.get("tick",-1)) != int(input["tick"]) or int(result.get("sent_until",-1)) != int(input["sent_until"]): return _failed("autosave_process_result")
 			result["transport_delivered"] = true
+			result["hashes_until"] = int(input.get("hashes_until", 0))
 			result["worker_process_isolated"] = true
+			result["path"] = input.get("_staging_path", base)
 			return result
+		if progress.is_valid() and Time.get_ticks_usec() >= next_progress_read:
+			next_progress_read = Time.get_ticks_usec() + 125000
+			if FileAccess.file_exists(base+".progress"):
+				var status := read_message(base+".progress")
+				if status != previous_status and status.get("nonce") == nonce and status.get("ipc_request_id") == request_id and status.get("tick") == input["tick"] and status.has("stage"):
+					progress.call(String(status["stage"]), int(status.get("completed", 0)), int(status.get("total", 0)))
+					previous_status = status
 		if not kernel.background_process_running(): return _failed("autosave_process_exited")
 		if Time.get_ticks_usec()>=deadline: return _failed("autosave_process_timeout")
 		OS.delay_msec(25)
@@ -99,7 +118,7 @@ func _remove(suffix: String) -> void:
 
 func clear() -> void:
 	stop()
-	for suffix in [".seed",".job",".job.tmp",".result",".result.tmp"]: _remove(suffix)
+	for suffix in [".seed",".job",".job.tmp",".result",".result.tmp",".progress",".progress.tmp"]: _remove(suffix)
 	available = false
 
 static func write_message(path: String, data: Dictionary, native: Variant) -> int:

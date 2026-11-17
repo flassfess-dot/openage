@@ -7,6 +7,7 @@ const GenerationJob := preload("res://scripts/skirmish_generation_job.gd")
 const LauncherTheme := preload("res://scripts/launcher_theme.gd")
 const AntiqueTheme := preload("res://scripts/antique_ui_theme.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
+const SaveProgressIndicator := preload("res://scripts/save_progress_indicator.gd")
 const MatchDefinition := preload("res://scripts/match_definition.gd")
 const GAME_SCENE := preload("res://main.tscn")
 const MatchLoadJob := preload("res://scripts/match_load_job.gd")
@@ -31,6 +32,7 @@ var active_game
 var initial_load_path := ""
 var _load_job: RefCounted
 var _finishing_saved_load := false
+var _load_after_save := ""
 var _load_started_at := 0
 var _load_progress := 0.0
 var _load_stage := ""
@@ -41,6 +43,8 @@ var save_details_label: Label
 var saved_games: Array[Dictionary] = []
 var _save_menu_parent := SCREEN_MAIN
 var _saving_current_game := false
+var _save_indicator: SaveProgressIndicator
+var _last_manual_result: Dictionary = {}
 var _save_overwrite_dialog: ConfirmationDialog
 var _pending_save_name := ""
 var current_screen := ""
@@ -157,6 +161,18 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	if not _load_after_save.is_empty():
+		_poll_launcher_save()
+		if is_instance_valid(active_game) and active_game.manual_save_pending(): return
+		var path := _load_after_save
+		_load_after_save = ""
+		generation_progress_bar.indeterminate = false
+		generation_progress_bar.show_percentage = true
+		if is_instance_valid(active_game) and int(active_game.last_manual_save_result.get("error", OK)) != OK:
+			_saved_load_failed(active_game.last_save_error)
+		else:
+			_start_saved_load(path)
+		return
 	if _load_job != null or _finishing_saved_load:
 		if _load_job != null and not _finishing_saved_load:
 			var loading: Dictionary = _load_job.snapshot()
@@ -275,6 +291,7 @@ func _begin_screen(screen_name: String, background_path: String, tint: Color) ->
 	save_list = null
 	save_name_input = null
 	save_details_label = null
+	_save_indicator = null
 	if _screen_root != null:
 		# Menu callbacks run from BaseButton.pressed. Freeing the screen
 		# immediately would destroy the signal emitter while Godot is still using
@@ -913,9 +930,15 @@ func _show_save_menu() -> void:
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	LauncherTheme.caption(status_label, 13)
 	column.add_child(status_label)
+	_save_indicator = SaveProgressIndicator.new()
+	column.add_child(_save_indicator)
+	var caption := status_label
+	var indicator := _save_indicator
+	indicator.visibility_changed.connect(func(): caption.visible = not indicator.visible)
 	column.add_child(_menu_button("НАЗАД", _leave_save_menu, true, "Вернуться в меню", "back", true))
 	_refresh_saved_games()
-	_set_save_status("Сохранение выполняется…" if _saving_current_game else "Матч приостановлен. Можно сохранить его или загрузить другую игру." if is_instance_valid(active_game) else "Чтобы создать сохранение, сначала начните игру. Загрузка доступна сразу.")
+	_set_save_status("Матч приостановлен. Можно сохранить его или загрузить другую игру." if is_instance_valid(active_game) else "Чтобы создать сохранение, сначала начните игру. Загрузка доступна сразу.")
+	if is_instance_valid(active_game): indicator.set_save_progress(active_game.save_progress_state())
 
 
 func _refresh_saved_games(completed_entries: Array[Dictionary] = []) -> void:
@@ -1004,25 +1027,28 @@ func _save_current_game(name: String) -> void:
 		_set_save_status(GameSaveArchive.error_message(active_game.last_save_error), true)
 		return
 	_saving_current_game = true
-	_set_save_status("Сохранение выполняется…")
+	if _save_indicator != null: _save_indicator.set_save_progress(active_game.save_progress_state())
 	_update_save_buttons()
 
 
 func _poll_launcher_save() -> void:
 	if not is_instance_valid(active_game):
 		return
-	var queue = active_game.background_saves
+	active_game._poll_save_jobs()
 	if active_game._poll_autosave(0.0) and current_screen == SCREEN_SAVES:
 		_refresh_saved_games(GameSaveArchive.with_autosave_result(saved_games, {"path": active_game.autosave.save_path, "tick": active_game.autosave.last_tick, "saved_at_unix": int(Time.get_unix_time_from_system())}))
-	var had_pending: bool = queue.active_request >= 0 or not queue.waiting.is_empty() or not queue.completed.is_empty()
-	active_game._poll_save_jobs()
-	if queue.active_request >= 0 or not queue.waiting.is_empty():
-		return
-	if _saving_current_game or had_pending:
+	var pending: bool = active_game.manual_save_pending()
+	var result: Dictionary = active_game.last_manual_save_result
+	var was_saving := _saving_current_game
+	if pending:
+		_saving_current_game = true
+	elif not result.is_empty() and (was_saving or not is_same(result, _last_manual_result)):
 		_saving_current_game = false
-		if current_screen == SCREEN_SAVES:
-			_refresh_saved_games()
-			_set_save_status("Игра сохранена" if active_game.last_save_error.is_empty() else GameSaveArchive.error_message(active_game.last_save_error), not active_game.last_save_error.is_empty())
+		_last_manual_result = result
+		if current_screen == SCREEN_SAVES and int(result.get("error", OK)) == OK and not String(result.get("path", "")).is_empty():
+			_refresh_saved_games(GameSaveArchive.with_save_result(saved_games, result))
+	if was_saving != _saving_current_game: _update_save_buttons()
+	if _save_indicator != null: _save_indicator.set_save_progress(active_game.save_progress_state())
 
 
 func _set_save_status(message: String, failed: bool = false) -> void:
@@ -1039,12 +1065,22 @@ func _load_selected_save() -> void:
 
 
 func load_saved_game(path: String) -> void:
-	if _load_job != null or _finishing_saved_load or _saving_current_game: return
+	if _load_job != null or _finishing_saved_load or not _load_after_save.is_empty(): return
 	_load_progress = 0.0
-	_load_stage = "Подготовка загрузки"
+	var saving: bool = is_instance_valid(active_game) and active_game.manual_save_pending()
+	_load_stage = "Ожидание завершения сохранения" if saving else "Подготовка загрузки"
 	_load_started_at = Time.get_ticks_msec()
 	if not get_window().close_requested.is_connected(_loading_window_close): get_window().close_requested.connect(_loading_window_close)
 	_show_loading_screen("ЗАГРУЗКА СОХРАНЕНИЯ", _load_stage)
+	if saving:
+		_load_after_save = path
+		generation_progress_bar.indeterminate = true
+		generation_progress_bar.show_percentage = false
+		return
+	_start_saved_load(path)
+
+
+func _start_saved_load(path: String) -> void:
 	_load_job = MatchLoadJob.new()
 	var autosave_enabled := true
 	var autosave_path := GameSaveArchive.AUTOSAVE_PATH
@@ -1151,3 +1187,4 @@ func _discard_active_game() -> void:
 		active_game.queue_free()
 	active_game = null
 	_saving_current_game = false
+	_last_manual_result = {}

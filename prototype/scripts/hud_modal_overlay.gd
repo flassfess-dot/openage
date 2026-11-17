@@ -55,6 +55,7 @@ var resign_button: Button
 var launcher_button: Button
 var diplomacy_close_button: Button
 var menu_status: Label
+var save_progress_host: VBoxContainer
 var instructions_label: Label
 var match_status_label: Label
 var diplomacy_relation_buttons: Dictionary = {}
@@ -516,6 +517,11 @@ func _build_menu_pages() -> void:
 	menu_status = _wrapping_label("")
 	menu_status.visible = false
 	column.add_child(menu_status)
+	save_progress_host = VBoxContainer.new()
+	save_progress_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	save_progress_host.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	save_progress_host.hide()
+	column.add_child(save_progress_host)
 	back_button = _action_button("Продолжить игру · Esc")
 	back_button.set_meta("primary", true)
 	resume_button = back_button
@@ -678,6 +684,7 @@ func _layout_panels() -> void:
 	for key in ["menu", "save", "load", "settings", "confirm", "help", "instructions"]:
 		pages[key].size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		pages[key].custom_minimum_size.x = minf(960 if key in ["help", "instructions"] else 760, maxf(0, available.x - 52))
+	save_progress_host.custom_minimum_size.x = minf(760, maxf(0, available.x - 52))
 	var footer: HBoxContainer = back_button.get_parent()
 	footer.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	footer.custom_minimum_size.x = minf(760, maxf(0, available.x - 36))

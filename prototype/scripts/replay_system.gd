@@ -92,15 +92,20 @@ func to_json() -> String:
 	return JSON.stringify(to_dictionary(), "\t", true, true)
 
 
+static func valid_dictionary(data: Dictionary) -> bool:
+	if int(data.get("format_version", -1)) != FORMAT_VERSION: return false
+	var commands: Variant = data.get("commands", [])
+	if not commands is Array or not data.get("state_hashes", []) is Array: return false
+	for record in commands:
+		if not record is Dictionary or int(record.get("sequence_id", 0)) <= 0 or not record.has("issuer_id") or not record.has("issued_tick"): return false
+	return true
+
+
 func load_dictionary(data: Dictionary) -> bool:
-	var source_version := int(data.get("format_version", -1))
-	if source_version != FORMAT_VERSION:
-		return false
+	if not valid_dictionary(data): return false
 	simulation_seed = int(data.get("simulation_seed", 1))
 	command_records = data.get("commands", []).duplicate(true)
 	state_hashes = data.get("state_hashes", []).duplicate(true)
-	for record in command_records:
-		if not record is Dictionary or int(record.get("sequence_id", 0)) <= 0 or not record.has("issuer_id") or not record.has("issued_tick"): return false
 	command_records.sort_custom(_record_less)
 	_rebuild_issuance_records()
 	playback_cursor = 0

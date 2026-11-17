@@ -39,6 +39,8 @@ var _result: Dictionary = {}
 var _stage := ""
 var _sent_commands := 0
 var _seed_command_count := 0
+var _sent_hashes := 0
+var _seed_hash_count := 0
 var _process_channel
 var _process_fallback := false
 var worker_process_isolated := false
@@ -52,6 +54,28 @@ var _capture_epoch := -1
 # The isolated helper only stages a file; its parent service owns publication.
 var defer_commit_to_parent := false
 var _header_definition: Dictionary = {}
+var _active_request: Dictionary = {}
+var _progress := SaveTask.Progress.new()
+
+func supports_manual_save() -> bool:
+	return _checkpoint_delta != null and _thread.is_started()
+
+func progress() -> Dictionary:
+	if _active_request.is_empty(): return {}
+	var status := _progress.read()
+	status.merge(_active_request)
+	return status
+
+# Caller owns the simulation. Finish the accepted save before replacing a match.
+func drain(world, controller, runtime = null) -> Dictionary:
+	if not busy: return {}
+	if needs_owner_capture(): prepare_capture_on_owner(world, controller, runtime)
+	while needs_owner_capture(): advance_capture_on_owner(world, controller)
+	while busy:
+		var result := poll()
+		if not result.is_empty(): return result
+		OS.delay_msec(5)
+	return {}
 
 func seed_from(world, controller, definition: Dictionary, map: Dictionary, catalogs: Dictionary) -> void:
 	shutdown()
@@ -85,7 +109,11 @@ func seed_from(world, controller, definition: Dictionary, map: Dictionary, catal
 	_header_definition = _seed["checkpoint"]["match_definition"]
 	_sent_commands = controller.replay_recorder.issuance_records.size()
 	_seed_command_count = _sent_commands
-	_clean_abandoned_staging()
+	_sent_hashes = controller.replay_recorder.state_hashes.size()
+	_seed_hash_count = _sent_hashes
+	_clean_abandoned_staging(save_path.get_base_dir())
+	if save_path.get_base_dir() != Archive.NAMED_SAVE_DIRECTORY:
+		_clean_abandoned_staging(Archive.NAMED_SAVE_DIRECTORY)
 	_stage = save_path.get_base_dir().path_join(".autosave-%d-%d.pending" % [OS.get_process_id(), get_instance_id()])
 	_stop = false
 	_process_fallback = false
@@ -114,13 +142,24 @@ func advance(delta: float, playable: bool) -> bool:
 
 func submit(input: Dictionary, world, controller, deferred: bool = false) -> bool:
 	if busy or not _thread.is_started(): return false
+	var kind := String(input.get("kind", "auto"))
+	if kind != "auto" and not supports_manual_save(): return false
+	var destination := save_path if kind == "auto" else String(input["path"])
+	_active_request = {"kind":kind, "path":destination, "slot_name":String(input["slot_name"])}
+	_progress.update("capture")
+	input["_staging_path"] = destination.get_base_dir().path_join(_stage.get_file()) if kind != "auto" else _stage
 	var started := Time.get_ticks_usec()
 	var recorder = controller.replay_recorder
-	if _process_channel != null and not _process_fallback and _process_channel.needs_reseed(): _sent_commands=_seed_command_count
+	if _process_channel != null and not _process_fallback and _process_channel.needs_reseed():
+		_sent_commands = _seed_command_count
+		_sent_hashes = _seed_hash_count
 	input["sent_from"]=_sent_commands
 	input["new_commands"] = recorder.issuance_records.slice(_sent_commands).duplicate(true)
 	input["sent_until"] = recorder.issuance_records.size()
-	next_save = elapsed + INTERVAL_SECONDS
+	input["hashes_from"] = _sent_hashes
+	input["new_hashes"] = recorder.state_hashes.slice(_sent_hashes).duplicate(true)
+	input["hashes_until"] = recorder.state_hashes.size()
+	if kind == "auto": next_save = elapsed + INTERVAL_SECONDS
 	if deferred and (_checkpoint_delta != null or ClassDB.class_exists("RoRResourceDigest")):
 		_capture_input = input
 		_capture_world = weakref(world)
@@ -139,7 +178,10 @@ func submit(input: Dictionary, world, controller, deferred: bool = false) -> boo
 
 
 func _publish_capture(input: Dictionary) -> void:
-	if _process_channel == null or _process_fallback: _sent_commands = int(input["sent_until"])
+	if _process_channel == null or _process_fallback:
+		_sent_commands = int(input["sent_until"])
+		_sent_hashes = int(input["hashes_until"])
+	_progress.update("transfer" if _process_channel != null and not _process_fallback else "materialize")
 	_mutex.lock()
 	_job = input
 	busy = true
@@ -179,7 +221,7 @@ func prepare_capture_on_owner(world, controller, runtime = null) -> void:
 			return
 		var request := _capture_input
 		_capture_input = Lifecycle.new().capture_save_header(controller, runtime.players, runtime.decisions, request["path"], request["slot_name"], request["match_path"], _header_definition, request["view"], request["controller"], false)
-		for field in ["sent_from", "sent_until", "new_commands"]: _capture_input[field] = request[field]
+		for field in ["sent_from", "sent_until", "new_commands", "new_hashes", "hashes_from", "hashes_until", "_staging_path"]: _capture_input[field] = request[field]
 	if _checkpoint_delta != null:
 		_capture_checkpoint(world, controller)
 		return
@@ -251,10 +293,17 @@ func poll() -> Dictionary:
 	_result = {}
 	_mutex.unlock()
 	if result.is_empty(): return {}
+	var kind := String(_active_request.get("kind", "auto"))
+	result.merge(_active_request, true)
+	_active_request = {}
 	if result.has("diagnostic"): last_diagnostic = result["diagnostic"]
 	busy = false
-	if bool(result.get("restart_from_seed",false)): _sent_commands = _seed_command_count
-	elif bool(result.get("transport_delivered",false)): _sent_commands = int(result["sent_until"])
+	if bool(result.get("restart_from_seed",false)):
+		_sent_commands = _seed_command_count
+		_sent_hashes = _seed_hash_count
+	elif bool(result.get("transport_delivered",false)):
+		_sent_commands = int(result["sent_until"])
+		_sent_hashes = int(result["hashes_until"])
 	worker_process_isolated = bool(result.get("worker_process_isolated",false))
 	last_initialization_us = int(result.get("initialization_us", 0))
 	last_worker_us = int(result.get("worker_us", 0))
@@ -262,14 +311,13 @@ func poll() -> Dictionary:
 	var error := int(result.get("error", ERR_INVALID_DATA))
 	if error == OK and not bool(result.get("committed", false)): error = ERR_INVALID_DATA
 	if error == OK:
-		last_tick = int(result["tick"])
+		if kind == "auto": last_tick = int(result["tick"])
 		last_error = ""
 	else:
 		last_error = String(result.get("detail", "write_failed:%d" % error))
-		next_save = elapsed + 10.0
-		push_warning("Автосохранение: " + last_error)
+		if kind == "auto": next_save = elapsed + 10.0
+		push_warning("Сохранение: " + last_error)
 	result["error"] = error
-	result["path"] = save_path
 	return result
 
 func _cancelled() -> bool:
@@ -281,14 +329,19 @@ func _cancelled() -> bool:
 
 func _commit_result(result: Dictionary) -> void:
 	if int(result.get("error", ERR_INVALID_DATA)) != OK: return
+	var stage := String(result["path"])
 	if _cancelled():
 		result["error"] = int(ERR_SKIP)
 		result["detail"] = "autosave_cancelled"
+		if FileAccess.file_exists(stage): DirAccess.remove_absolute(ProjectSettings.globalize_path(stage))
 		return
 	# Atomic rename can wait for filesystem/antivirus I/O. It belongs to this
 	# save thread, just like encoding and writing, never to the render frame.
-	result["error"] = int(Archive.commit_autosave(_stage, save_path))
+	_progress.update("committing")
+	result["error"] = int(Archive.commit_autosave(stage, _active_request["path"], _active_request["kind"] != "auto"))
 	result["committed"] = int(result["error"]) == OK
+	if not result["committed"] and FileAccess.file_exists(stage):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(stage))
 
 func _run_process() -> void:
 	while true:
@@ -300,7 +353,7 @@ func _run_process() -> void:
 		_mutex.unlock()
 		if input.is_empty(): continue
 		var started := Time.get_ticks_usec()
-		var result: Dictionary = _process_channel.run_job(input,_cancelled)
+		var result: Dictionary = _process_channel.run_job(input, _cancelled, _progress.update)
 		if _cancelled(): break
 		# A platform/job restriction preserves the existing thread fallback.
 		if bool(result.get("unavailable",false)):
@@ -310,11 +363,15 @@ func _run_process() -> void:
 				_mutex.lock()
 				_process_fallback=true
 				_sent_commands=int(input["sent_until"])
+				_sent_hashes=int(input["hashes_until"])
 				_job=input
 				_mutex.unlock()
 				_wake.post()
 				_run()
 				break
+		if int(result.get("error", ERR_INVALID_DATA)) != OK:
+			var pending_path := String(input["_staging_path"])
+			if FileAccess.file_exists(pending_path): DirAccess.remove_absolute(ProjectSettings.globalize_path(pending_path))
 		_commit_result(result)
 		result["worker_us"]=Time.get_ticks_usec()-started
 		result["worker_pool_shared"]=false
@@ -402,6 +459,7 @@ func _run() -> void:
 		var target := int(input["tick"])
 		var records: Array = input["new_commands"]
 		_append_history(history, records)
+		history["state_hashes"].append_array(input.get("new_hashes", []))
 		var cursor := 0
 		var slice_started := Time.get_ticks_usec()
 		while valid and controller.tick_index <= target and not _cancelled():
@@ -426,11 +484,12 @@ func _run() -> void:
 			if profile_memory:
 				print("AUTOSAVE entity journal state ", JSON.stringify({"active":world.entity_changes.native_active,"stats":world.entity_changes.native_journal.stats() if world.entity_changes.native_active else {}}))
 				print("AUTOSAVE route preparation state ", JSON.stringify({"enabled":world.movement_system.native_route_preparation_requested,"calls":world.movement_system.full_actor_pipeline_counters.get("route_preparation_calls",0),"fallbacks":world.movement_system.full_actor_pipeline_counters.get("route_preparation_fallbacks",0),"region_reads":world.movement_system.full_actor_pipeline_counters.get("route_region_reads",0)}))
-			input["path"] = _stage
+			input["path"] = input.get("_staging_path", _stage)
+			input["_stage_for_commit"] = true
 			input["atomic_replace"] = true
 			input["replay"] = history
 			input["checkpoint"] = Checkpoint.capture(world, controller, definition, map, false)
-			result = SaveTask.run(input)
+			result = SaveTask.run(input, _progress.update)
 		elif valid and input.get("debug_hash_sections") is Dictionary:
 			var mismatch: Array = []
 			var diagnostic: Dictionary = {}
@@ -479,11 +538,21 @@ func _run() -> void:
 
 static func _append_history(history: Dictionary, records: Array) -> void:
 	if records.is_empty(): return
-	history["commands"].append_array(records)
-	history["commands"].sort_custom(func(a, b):
-		if int(a["tick"]) != int(b["tick"]): return int(a["tick"]) < int(b["tick"])
-		return int(a["sequence_id"]) < int(b["sequence_id"])
-	)
+	# Commands are received in issuance order; the archive orders them by
+	# execution tick. Only future orders can overlap the existing sorted tail.
+	var commands: Array = history["commands"]
+	var pending := records.duplicate()
+	pending.sort_custom(_command_before)
+	if not commands.is_empty() and _command_before(pending.front(), commands.back()):
+		var first := commands.bsearch_custom(pending.front(), _command_before)
+		pending.append_array(commands.slice(first))
+		commands.resize(first)
+		pending.sort_custom(_command_before)
+	commands.append_array(pending)
+
+static func _command_before(a: Dictionary, b: Dictionary) -> bool:
+	if int(a["tick"]) != int(b["tick"]): return int(a["tick"]) < int(b["tick"])
+	return int(a["sequence_id"]) < int(b["sequence_id"])
 
 
 func _run_checkpoint_writer() -> void:
@@ -503,17 +572,20 @@ func _run_checkpoint_writer() -> void:
 		if input.is_empty(): continue
 		var start := Time.get_ticks_usec()
 		var tick := int(input["tick"])
+		_progress.update("materialize")
 		_append_history(history, input["new_commands"])
+		history["state_hashes"].append_array(input.get("new_hashes", []))
 		var result := {"tick":tick, "error":int(ERR_INVALID_DATA), "detail":"autosave_checkpoint_materialization"}
 		if input.get("checkpoint_patch") is Dictionary:
 			var checkpoint := CheckpointDelta.materialize(base, resources, input["checkpoint_patch"])
 			input.erase("checkpoint_patch")
 			if not checkpoint.is_empty() and int(checkpoint["controller"]["tick"]) == tick:
-				input["path"] = _stage
+				input["path"] = input.get("_staging_path", _stage)
+				input["_stage_for_commit"] = true
 				input["atomic_replace"] = true
 				input["replay"] = history
 				input["checkpoint"] = checkpoint
-				result = SaveTask.run(input)
+				result = SaveTask.run(input, _progress.update)
 				if not defer_commit_to_parent: _commit_result(result)
 		input = {}
 		result["worker_us"] = Time.get_ticks_usec() - start
@@ -546,11 +618,14 @@ static func _diagnose_fields(before: Variant, after: Variant, path: String, resu
 static func state_anchor(world, controller) -> Dictionary:
 	return {"version": 2, "state_sha256": preload("res://scripts/simulation_snapshot.gd").autosave_checksum(world, controller)}
 
-func _clean_abandoned_staging() -> void:
-	var directory := DirAccess.open(save_path.get_base_dir())
+func _clean_abandoned_staging(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(path)): return
+	var directory := DirAccess.open(path)
 	if directory == null: return
 	for filename in directory.get_files():
-		if not filename.begins_with(".autosave-") or not [".pending",".pending.tmp",".pending.bak",".pending.seed",".pending.job",".pending.job.tmp",".pending.result",".pending.result.tmp",".pending.worker.log"].any(func(suffix):return filename.ends_with(suffix)): continue
+		if not filename.begins_with(".autosave-"): continue
+		var worker_temporary := filename.contains(".pending.") and filename.ends_with(".tmp")
+		if not worker_temporary and not [".pending",".pending.bak",".pending.seed",".pending.job",".pending.result",".pending.progress",".pending.worker.log"].any(func(suffix):return filename.ends_with(suffix)): continue
 		var pid := int(filename.trim_prefix(".autosave-").get_slice("-", 0))
 		if pid > 0 and not OS.is_process_running(pid): directory.remove(filename)
 
@@ -573,6 +648,7 @@ func shutdown() -> void:
 	_seed = {}
 	_job = {}
 	_result = {}
+	_active_request = {}
 	busy = false
 	for suffix in ["", ".tmp", ".bak"]:
 		if not _stage.is_empty() and FileAccess.file_exists(_stage + suffix): DirAccess.remove_absolute(ProjectSettings.globalize_path(_stage + suffix))

@@ -12,9 +12,8 @@ static func build(size: Vector2i, original: Array[int], rivers: Dictionary, lake
 	var grid := size*RESOLUTION+Vector2i.ONE
 	var samples := PackedFloat32Array()
 	samples.resize(grid.x*grid.y*STRIDE)
-	# Preserve water flow through deposits, not a ship-sized navigation lane.
-	# This narrow thread scales with the local channel and may be too small
-	# even for a fishing boat. Exposed bars remain real navigation terrain.
+	# Bank deposits can emerge along the margins, while developed reaches
+	# keep a continuous strip of water under the shared terrain and render field.
 	var flow_floor := PackedFloat32Array()
 	flow_floor.resize(grid.x*grid.y)
 	flow_floor.fill(-0.5)
@@ -23,30 +22,38 @@ static func build(size: Vector2i, original: Array[int], rivers: Dictionary, lake
 		samples[i*STRIDE+2] = 2.0
 	for channel in rivers["channels"]:
 		var points: PackedVector2Array = channel["points"]
+		var rockiness: PackedFloat32Array = channel.get("rockiness", PackedFloat32Array())
 		for i in range(0,points.size(),2):
 			var point := points[i]
 			var radius: float = channel["radii"][i]
 			var tangent := (points[mini(points.size()-1,i+6)]-points[maxi(0,i-6)]).normalized()
 			var normal := Vector2(-tangent.y,tangent.x)
 			var bend := float(channel["bends"][i])
-			var rocky: float = channel.get("rockiness",PackedFloat32Array())[i] if channel.has("rockiness") else 0.0
+			var rocky := rockiness[i] if not rockiness.is_empty() else 0.0
+			var developed := smoothstep(1.0, 2.2, radius)
+			var flow_radius := lerpf(minf(0.35, radius * 0.22), radius * 0.76, developed)
+			var flow_depth := lerpf(0.10, 0.72, developed)
+			var thalweg := -signf(bend) * minf(0.38, absf(bend) * 0.7)
+			var margin := maxf(0.0, radius - flow_radius - 0.20)
+			var flow_center := point + normal * clampf(thalweg * radius, -margin, margin)
 			var reach := ceili((radius+1.8)*RESOLUTION)
 			var center := Vector2i(point*RESOLUTION)
 			for y in range(maxi(0,center.y-reach),mini(grid.y,center.y+reach+1)):
 				for x in range(maxi(0,center.x-reach),mini(grid.x,center.x+reach+1)):
-					var delta := Vector2(x,y)/RESOLUTION-point
+					var sample_point := Vector2(x,y)/RESOLUTION
+					var delta := sample_point - point
 					var distance := delta.length()
 					var at := y*grid.x+x
+					if distance < radius:
+						var flow_distance := sample_point.distance_to(flow_center)
+						if flow_distance < flow_radius + 0.5:
+							var bed := lerpf(flow_depth, -0.5, smoothstep(flow_radius, flow_radius + 0.5, flow_distance))
+							flow_floor[at] = maxf(flow_floor[at], bed)
 					# Confluences are a union of wet sections. A narrow tributary
 					# must not pinch the surface of a larger receiving channel.
 					if radius-distance <= samples[at*STRIDE]: continue
 					var crosswise := delta.dot(normal)/radius
 					# The deep thread shifts toward the eroding outer bank.
-					var thalweg := -signf(bend)*minf(0.38,absf(bend)*0.7)
-					var flow_distance := delta.distance_to(normal*thalweg*radius)
-					var flow_radius := minf(0.35,radius*0.22)
-					if flow_distance < flow_radius+0.5:
-						flow_floor[at] = maxf(flow_floor[at],lerpf(0.10,-0.5,smoothstep(flow_radius,flow_radius+0.5,flow_distance)))
 					var section := maxf(0.0,1.0-pow(absf(crosswise-thalweg)/(1.0+absf(thalweg)),1.7))
 					var depth := 0.12+section*lerpf(1.10,1.65,rocky)
 					var index := at*STRIDE

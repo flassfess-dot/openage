@@ -13,6 +13,7 @@
 #include <windows.h>
 #else
 #include <cstdio>
+#include <unistd.h>
 #endif
 
 namespace godot {
@@ -23,6 +24,7 @@ void RoRSaveFileKernel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("background_process_running"), &RoRSaveFileKernel::background_process_running);
     ClassDB::bind_method(D_METHOD("stop_background_process"), &RoRSaveFileKernel::stop_background_process);
     ClassDB::bind_method(D_METHOD("replace_atomic", "source", "destination"), &RoRSaveFileKernel::replace_atomic);
+    ClassDB::bind_method(D_METHOD("link_for_backup", "source", "destination"), &RoRSaveFileKernel::link_for_backup);
 }
 
 Dictionary RoRSaveFileKernel::capture_resource_changes(const Array &rows, const Variant &versions, int64_t base_revision) const {
@@ -54,6 +56,17 @@ Dictionary RoRSaveFileKernel::capture_resource_changes(const Array &rows, const 
     result["ids"] = order;
     result["changed"] = changed;
     return result;
+}
+
+bool RoRSaveFileKernel::link_for_backup(const String &source, const String &destination) const {
+    if (source.get_base_dir() != destination.get_base_dir()) return false;
+#ifdef _WIN32
+    const Char16String from = source.replace("/", "\\").utf16();
+    const Char16String to = destination.replace("/", "\\").utf16();
+    return CreateHardLinkW(reinterpret_cast<LPCWSTR>(to.get_data()), reinterpret_cast<LPCWSTR>(from.get_data()), nullptr) != 0;
+#else
+    return link(source.utf8().get_data(), destination.utf8().get_data()) == 0;
+#endif
 }
 
 int64_t RoRSaveFileKernel::replace_atomic(const String &source, const String &destination) const {
