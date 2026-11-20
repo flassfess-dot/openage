@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">
+  <!-- materials: wood/neutral | wood | stone/neutral | stone | stone | neutral | iron | bronze/neutral | bronze | neutral -->
+  <defs>
+    <linearGradient id="stone" x2="80%" y2="100%">
+      <stop stop-color="#c8bda3"/>
+      <stop offset=".42" stop-color="#a69a82"/>
+      <stop offset=".73" stop-color="#948976"/>
+      <stop offset="1" stop-color="#625949"/>
+    </linearGradient>
+    <linearGradient id="brass" x2="45%" y2="100%">
+      <stop stop-color="#e4c88e"/>
+      <stop offset=".49" stop-color="#c5a76b"/>
+      <stop offset="1" stop-color="#9c7043"/>
+    </linearGradient>
+  </defs>
+  <path d="M16.8 42V22q8-10 16 0l.5 20z" fill="#735038" stroke="#32291f" stroke-width="1"/>
+  <path d="m21 26.2-.4 14.3m4.6-24v24m4.2-17.5.5 17M18 37.6l14-.6" fill="none" stroke="#a58356" stroke-width="1"/>
+  <path fill="url(#stone)" stroke="#373027" stroke-width="1.2" stroke-linejoin="round" fill-rule="evenodd"
+        d="M3.7 43.4 4.4 29l-.3-11.8 4.2-8.4 6.2-.7 5.7-3.2 8.9.5 6 2.4 5.7.8 4.7 8.1-.5 10.3 1 16.3-8.2 1-5.6-.9-.3-20.2q-.9-8.7-7.1-8.7-6.8.7-7 9.1l-.6 19.9-7.1.7z"/>
+  <path d="m4.8 18.8 7.2.4 6.2 3.1m-13.2 6.4 12.1-.4M5 36.5l12.2.2m-5.5-7.8-.4 7.7m-.8.4 1.2 6.5M45 18l-7.9.9-5.2 3.9m12.6 5.7-12.1.6m12.6 7.1-12.5.5m5.5-7.7.6 7.2m.2 1.5 1.5 5.1M17.8 8.4l3.2 7.7m10.2-8.5-2.5 7.7m10-5.4-5.2 6.5"
+        fill="none" stroke="#6b6050" stroke-width="1.16"/>
+  <path d="m5.9 16.5 3.8-6.1 4.4-.6m1.8.1 4.9-3.3 4.8.1m2.5.2 3.3 1.1m4.5 1.2 3.8.7m2 2.5 2 3.8M6 21l-.1 5.1m.5 4.5-.2 4.1m-.3 4.3.1 3.3M33.7 30l4.5-.2m2.9-6.3 2.1-.3"
+        fill="none" stroke="#d7cbb0" stroke-width=".9"/>
+  <path d="M19 31v-4.8a6 6 0 1 1 12 .1V31" fill="none" stroke="#42352a" stroke-width="5.8"/>
+  <path d="M19 30v-3.8a6 6 0 1 1 12 .1V31" fill="none" stroke="#b6ad98" stroke-width="3"/>
+  <path d="m15 31 2-1.6 15.4-.4 2.6 1.7-.1 12.9-2.2 2.1-16.9.2-1.2-2.3z"
+        fill="url(#brass)" stroke="#4c3627" stroke-width="1.15"/>
+  <path d="m17.2 42.3.4-9.8 6.2-.7m2.7 0 5.1.1m.5 10.2-1.9.7" fill="none" stroke="#dec48e" stroke-width="1.05" stroke-linecap="round"/>
+  <path d="M22.8 36.7a2.2 2 0 1 1 4.4 0l-1.2 1.4 1.1 4-4.2.2 1.1-4.1z" fill="#503a2b"/>
+</svg>

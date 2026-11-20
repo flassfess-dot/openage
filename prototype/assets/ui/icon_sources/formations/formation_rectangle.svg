@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="50" height="50" viewBox="0 0 50 50">
+  <!-- materials: bronze/neutral | bronze | bronze | bronze | patina/neutral | patina -->
+  <defs>
+    <g id="rank" stroke-linejoin="round">
+      <path d="m-4.1-1.7 1.9-2.2 2.5-1.1 2.5 1.3 1.3 2v4l-3.9 2.5-4.2-2.1z" fill="#9c7951" stroke="#382d22" stroke-width="1"/>
+      <path d="m-3.6-1.7 1.9-1.9 1.9-1 2.2 1.1 1.2 1.7L.1.1z" fill="#ccb486"/>
+      <path d="m.1.1 3.5-1.9-.1 3.6L.1 4.1z" fill="#71523a"/>
+      <path d="m-3 .5 1.8 1m.6.4.5.2" stroke="#c2a47a" stroke-width=".85"/>
+    </g>
+  </defs>
+  <use xlink:href="#rank" x="11" y="11"/>
+  <use xlink:href="#rank" x="25" y="11"/>
+  <use xlink:href="#rank" x="39" y="11"/>
+  <use xlink:href="#rank" x="11" y="25"/>
+  <use xlink:href="#rank" x="39" y="25"/>
+  <use xlink:href="#rank" x="11" y="39"/>
+  <use xlink:href="#rank" x="25" y="39"/>
+  <use xlink:href="#rank" x="39" y="39"/>
+  <path d="m21 24 3.9-4.1 4.2 4.2-4.2 4.8z" fill="#778d7e" stroke="#373027" stroke-width="1.05" stroke-linejoin="round"/>
+  <path d="m22.8 24 2.2-2.4 2.1 2.3" fill="none" stroke="#b1bba1" stroke-width="1"/>
+</svg>

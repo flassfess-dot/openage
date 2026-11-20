@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">
+  <!-- materials: stone/neutral | stone/neutral | stone | stone | neutral/stone | neutral | red/neutral | red -->
+  <defs>
+    <linearGradient id="stone" x2="50%" y2="100%">
+      <stop stop-color="#cbbfa6"/>
+      <stop offset=".51" stop-color="#aaa08a"/>
+      <stop offset="1" stop-color="#736856"/>
+    </linearGradient>
+    <linearGradient id="arrow" x2="0%" y2="100%">
+      <stop stop-color="#db8d65"/>
+      <stop offset=".46" stop-color="#bd5438"/>
+      <stop offset="1" stop-color="#872f21"/>
+    </linearGradient>
+  </defs>
+  <path d="m5.6 40.8 8.3-4.5 24 1 4.6 3.5-3 3.7-16.4.8-13-.6z" fill="#817561" stroke="#3a3025" stroke-width="1.05"/>
+  <path d="m6.6 16 1-8.4 5.2-2.4.6 5.8 4.8-1.8.1-4.2 5.5-2.1.6 6.1 4.5-1.2.1-3.8 5.4-1.1 6.7 5.1-.1 11.4-3.5 2.6-.5 16.1-5 4.3-13.8.4-8.4-.6.2-21.2z"
+        fill="url(#stone)" stroke="#3c342a" stroke-width="1.05" stroke-linejoin="round"/>
+  <path d="m33.8 3.5 7.4 4.5-.1 11.4-3.5 2.6-.5 16.1-5 4.3.1-21.9 1.7-4.1z" fill="#756957"/>
+  <path d="m8.3 16.7 6.9-1.4 7.4-.4 9.5-2.1M10.5 22.5l11.3-1.7 10.7-.8M11 28.8l6.1-1 7.4-.2 6-1.5M11 34.8l11.1-2.5 8.2-.4M16.4 22l-.4 6.3m10-9v2.2m-7.5-6.6.4 6.5m4.7-10.2 1.1 3.5M11 17l-.8-7.5m26.5 14.9-4.7 2.9m4.8 4.7-4.6 2.8"
+        fill="none" stroke="#6c6253" stroke-width="1.05"/>
+  <path d="m14.7 42 .3-11.2q0-7.7 7.9-8.1 7.5.2 8.3 7.7L31 41.8z"
+        fill="#473a30" stroke="#b8a98a" stroke-width="1.45"/>
+  <path d="M17.7 39.9V31q0-5.7 5.1-5.9" fill="none" stroke="#302820" stroke-width="1.4"/>
+  <path d="m20.8 30.1 15.1-.2v-5.8l12.3 10.9-12 10.8-.2-5.9-15.2.2z" fill="url(#arrow)" stroke="#523125" stroke-width="1.15" stroke-linejoin="round"/>
+  <path d="m23.1 31.6 7.7-.1m2.5-.1 4.6.1.2-3.5 6.9 6.2" fill="none" stroke="#d78661" stroke-width="1" stroke-linecap="round"/>
+</svg>

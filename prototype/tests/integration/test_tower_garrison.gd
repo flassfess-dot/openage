@@ -119,6 +119,8 @@ func test_right_click_capacity_and_hud(catalog, native: bool) -> void:
 	controls.set_layout(preload("res://scripts/interface_layout.gd").for_viewport(Vector2(1280, 720)))
 	controls.set_view_model(before["model"])
 	controls.ungarrison_requested.connect(func(building_id, passenger_id): game.command_actions.issue_ungarrison(game, building_id, passenger_id))
+	var unload_button: Button = controls.train_button
+	check(unload_button.icon != null and unload_button.icon != catalog.interface_icons.texture("command", 1), "tower unload has its own icon, not the ship's")
 	check(controls.status_panel.garrison_buttons.all(func(button): return button.visible and not button.disabled and button.icon != null), "all five occupant portraits are visible and clickable")
 	for button in controls.status_panel.garrison_buttons:
 		check(controls.current_layout["production"].encloses(button.get_rect()), "garrison portrait stays inside its HUD area")

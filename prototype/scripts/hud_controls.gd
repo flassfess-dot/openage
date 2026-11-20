@@ -2,7 +2,6 @@ class_name RoRHUDControls
 extends Control
 
 const IconRegistry := preload("res://scripts/interface_icon_registry.gd")
-
 const InterfaceLayout := preload("res://scripts/interface_layout.gd")
 const StatusPanel := preload("res://scripts/hud_status_panel.gd")
 const Typography := preload("res://scripts/hud_typography.gd")
@@ -22,20 +21,28 @@ signal farm_reserve_requested(building_id: int, amount: int)
 signal idle_worker_requested
 
 const HUD_HEIGHT: float = InterfaceLayout.BOTTOM_HEIGHT
+const COMMAND_INSET := 2
+const MIN_HOTKEY_CELL := 36.0
+const COMMAND_ICON_FILTERS := {
+	"command": CanvasItem.TEXTURE_FILTER_NEAREST,
+	"command_custom": CanvasItem.TEXTURE_FILTER_LINEAR,
+	"gate_mode": CanvasItem.TEXTURE_FILTER_LINEAR,
+	"trade_resource": CanvasItem.TEXTURE_FILTER_LINEAR,
+}
 const FORMATIONS := [
 	["LINE", "F5 LINE", "Line formation"],
 	["RECTANGLE", "F6 BLOCK", "Compact block formation"],
 	["COLUMN", "F7 COLUMN", "Narrow column formation"],
 	["WEDGE", "F8 WEDGE", "Wedge formation"],
 	["STAGGERED", "F9 STAGGER", "Staggered formation"],
-	["FLANK", "F10 FLANK", "Split flank formation"],
+	["FLANK", "Shift+F9 FLANK", "Split flank formation"],
 ]
 const FORMATION_ICONS := {
 	"LINE": preload("res://assets/ui/formations/formation_line.png"),
 	"RECTANGLE": preload("res://assets/ui/formations/formation_rectangle.png"),
 	"COLUMN": preload("res://assets/ui/formations/formation_column.png"),
 	"WEDGE": preload("res://assets/ui/formations/formation_wedge.png"),
-	"FLANK": preload("res://assets/ui/formations/formation_flank.svg"),
+	"FLANK": preload("res://assets/ui/formations/formation_flank.png"),
 	"STAGGERED": preload("res://assets/ui/formations/formation_staggered.png"),
 }
 
@@ -51,6 +58,8 @@ var trade_resource_group := ButtonGroup.new()
 var icon_registry
 var interface_skin
 var interface_style_index := 0
+var command_styles: Dictionary = {}
+var hotkey_chip := StyleBoxFlat.new()
 var current_layout: Dictionary = {}
 var current_model: Dictionary = {}
 var selection_context := ""
@@ -81,14 +90,21 @@ func _notification(what: int) -> void:
 		layout_controls()
 
 func build_controls() -> void:
+	hotkey_chip.bg_color = Color("19150ee6")
+	hotkey_chip.corner_radius_top_left = 2
+	hotkey_chip.corner_radius_top_right = 2
+	hotkey_chip.corner_radius_bottom_left = 2
+	hotkey_chip.corner_radius_bottom_right = 2
+	hotkey_chip.set_content_margin(SIDE_LEFT, 3)
+	hotkey_chip.set_content_margin(SIDE_RIGHT, 3)
 	for index in range(FORMATIONS.size()):
 		var definition: Array = FORMATIONS[index]
 		var formation_name: String = definition[0]
-		var button := Button.new()
+		var button := CommandButton.new()
 		button.text = ""
 		button.icon = FORMATION_ICONS[formation_name]
 		button.expand_icon = true
-		button.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		button.tooltip_text = definition[2]
 		button.toggle_mode = true
 		button.button_group = formation_group
@@ -119,7 +135,7 @@ func build_controls() -> void:
 
 
 func _make_command_page_button(label: String, tooltip: String, step: int) -> Button:
-	var button := Button.new()
+	var button := CommandButton.new()
 	button.text = label
 	button.tooltip_text = tooltip
 	button.visible = false
@@ -166,17 +182,15 @@ func _append_action_button() -> void:
 	queue_badges.append(badge)
 	var hotkey := Label.new()
 	hotkey.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hotkey.position = Vector2(4, 34)
+	hotkey.add_theme_stylebox_override("normal", hotkey_chip)
 	hotkey.add_theme_font_override("font", Typography.body_font())
-	hotkey.add_theme_font_size_override("font_size", 11)
+	hotkey.add_theme_font_size_override("font_size", 10)
 	hotkey.add_theme_color_override("font_color", Color("fff1bd"))
-	hotkey.add_theme_color_override("font_outline_color", Color("1a1109"))
-	hotkey.add_theme_constant_override("outline_size", 2)
+	hotkey.visible = false
 	button.add_child(hotkey)
 	hotkey_badges.append(hotkey)
 	add_child(button)
-	if interface_skin != null:
-		apply_source_command_theme(button)
+	apply_source_command_theme(button)
 
 
 func _ensure_action_button_capacity(required: int) -> void:
@@ -193,8 +207,20 @@ func configure_interface_skin(skin, style_index: int = 0) -> void:
 	interface_skin = skin
 	interface_style_index = clampi(style_index, 0, 4)
 	status_panel.configure(icon_registry, skin, interface_style_index)
-	for button_value in formation_buttons.values() + train_buttons + [previous_commands_button, next_commands_button, idle_worker_button]:
+	var backplate: Texture2D = interface_skin.square_command_backplate(interface_style_index)
+	command_styles = source_command_styles(backplate)
+	for button_value in formation_buttons.values() + train_buttons + [previous_commands_button, next_commands_button]:
 		apply_source_command_theme(button_value)
+	if backplate != null:
+		var idle_modulations := {
+			"normal": Color.WHITE,
+			"hover": Color(1.08, 1.08, 1.08),
+			"pressed": Color(0.78, 0.78, 0.78),
+			"disabled": Color(0.48, 0.48, 0.48),
+		}
+		for state in idle_modulations:
+			idle_worker_button.add_theme_stylebox_override(state, texture_style(backplate, idle_modulations[state], 7))
+		idle_worker_button.add_theme_stylebox_override("focus", command_styles["focus"])
 
 
 func set_layout(layout: Dictionary) -> void:
@@ -245,10 +271,14 @@ func set_view_model(model: Dictionary) -> void:
 		active_train_commands.clear()
 		if build_menu_open:
 			active_train_commands.append_array(build_commands)
-			active_train_commands.append({"type": "close_build_menu", "id": "close_build_menu", "label": "Назад", "hotkey": "Esc", "enabled": true, "reason": ""})
+			var back := {"type": "close_build_menu", "id": "close_build_menu", "label": "Назад", "hotkey": "Esc", "enabled": true, "reason": ""}
+			back.merge(IconRegistry.command_icon("close_build_menu"))
+			active_train_commands.append(back)
 		else:
 			# The original first hammer opens Build; the second command is Repair.
-			active_train_commands.append({"type": "open_build_menu", "id": "open_build_menu", "label": "Строить", "hotkey": "B", "enabled": true, "reason": ""})
+			var build := {"type": "open_build_menu", "id": "open_build_menu", "label": "Строить", "hotkey": "B", "enabled": true, "reason": ""}
+			build.merge(IconRegistry.command_icon("open_build_menu"))
+			active_train_commands.append(build)
 			active_train_commands.append_array(unit_actions.filter(func(command): return command.get("id") == "repair"))
 			active_train_commands.append_array(unit_actions.filter(func(command): return command.get("id") != "repair"))
 	available_formation_buttons.clear()
@@ -287,15 +317,18 @@ func set_view_model(model: Dictionary) -> void:
 		var label := String(command.get("label", command.get("id", "")))
 		var icon := command_icon(command)
 		button.icon = icon
-		button.expand_icon = true
+		var icon_kind := String(command.get("icon_kind", ""))
+		button.texture_filter = COMMAND_ICON_FILTERS.get(icon_kind, CanvasItem.TEXTURE_FILTER_NEAREST)
 		var hotkey := String(command.get("hotkey", ""))
 		var short_label := String(command.get("short_label", label))
 		hotkey_badges[index].text = hotkey
+		hotkey_badges[index].reset_size()
 		button.text = "" if icon != null else short_label
 		var queue_count := int(command.get("queue_count", 0))
 		queue_badges[index].visible = queue_count > 0
 		queue_badges[index].text = "×%d" % queue_count if queue_count > 0 else ""
 		button.disabled = not bool(command.get("enabled", false))
+		(button as CommandButton).command_selected = icon_kind == "gate_mode" and bool(command.get("active", false))
 		var is_toggle := String(command.get("type", "")) == "trade_resource"
 		if button.toggle_mode != is_toggle: button.toggle_mode = is_toggle
 		var group: ButtonGroup = trade_resource_group if is_toggle else null
@@ -409,14 +442,19 @@ func layout_controls() -> void:
 		var column := slot % columns
 		var row := floori(float(slot) / float(columns))
 		set_bottom_rect(button, Rect2(local_rect.position + Vector2(column, row) * (cell_size + Vector2.ONE * InterfaceLayout.COMMAND_GAP), cell_size))
-		button.add_theme_constant_override("icon_max_width", maxi(8, int(cell_size.x) - 14))
-		if train_buttons.has(button):
-			var index := train_buttons.find(button)
-			hotkey_badges[index].position = Vector2(4, 2 if queue_badges[index].visible else maxf(0, cell_size.y - 16))
+		var index := train_buttons.find(button)
+		if index >= 0:
+			# Portraits retain their existing scale; task glyphs fill the cell.
+			var icon_kind := String(active_train_commands[index].get("icon_kind", "")) if index < active_train_commands.size() else ""
+			var padding := 2 * COMMAND_INSET if COMMAND_ICON_FILTERS.has(icon_kind) else 14
+			button.add_theme_constant_override("icon_max_width", maxi(8, int(cell_size.x) - padding))
+			var badge := hotkey_badges[index]
+			badge.visible = cell_size.x >= MIN_HOTKEY_CELL and not badge.text.is_empty()
+			badge.position = Vector2(3, 3 if queue_badges[index].visible else cell_size.y - badge.get_combined_minimum_size().y - 3)
 	for index in range(available_formation_buttons.size()):
 		var button := available_formation_buttons[index]
 		set_bottom_rect(button, Rect2(Vector2(local_rect.position.x + index * (formation_cell + InterfaceLayout.COMMAND_GAP), formation_y), Vector2.ONE * formation_cell))
-		button.add_theme_constant_override("icon_max_width", maxi(8, int(formation_cell) - 14))
+		button.add_theme_constant_override("icon_max_width", maxi(8, int(formation_cell) - 2 * COMMAND_INSET))
 
 
 static func command_grid(available_size: Vector2) -> Dictionary:
@@ -440,7 +478,7 @@ func set_bottom_rect(control: Control, rectangle: Rect2) -> void:
 func apply_button_theme(button: Button) -> void:
 	button.add_theme_font_override("font", Typography.body_font())
 	button.add_theme_font_size_override("font_size", 12)
-	button.add_theme_constant_override("icon_max_width", 36)
+	button.add_theme_constant_override("icon_max_width", int(InterfaceLayout.COMMAND_CELL_SIZE) - 2 * COMMAND_INSET)
 	button.add_theme_color_override("font_color", Color("fff1bd"))
 	button.add_theme_color_override("font_hover_color", Color("ffffff"))
 	button.add_theme_color_override("font_pressed_color", Color("fff5c9"))
@@ -449,39 +487,38 @@ func apply_button_theme(button: Button) -> void:
 	button.add_theme_stylebox_override("hover", make_style(Color("8a7044"), Color("f1d890")))
 	button.add_theme_stylebox_override("pressed", make_style(Color("9b7c42"), Color("fff1bd")))
 	button.add_theme_stylebox_override("disabled", make_style(Color("443b2d"), Color("746850")))
+	if button is CommandButton:
+		button.add_theme_color_override("icon_disabled_color", Color(0.8, 0.76, 0.7, 0.62))
 
 
 func apply_source_command_theme(button: Button) -> void:
-	if interface_skin == null:
-		return
-	var backplate: Texture2D = interface_skin.square_command_backplate(interface_style_index)
+	for state in command_styles:
+		button.add_theme_stylebox_override(state, command_styles[state])
+
+
+func source_command_styles(backplate: Texture2D) -> Dictionary:
 	if backplate == null:
-		return
-	button.add_theme_stylebox_override("normal", texture_style(backplate, Color.WHITE))
-	button.add_theme_stylebox_override("hover", texture_style(backplate, Color(1.08, 1.08, 1.08, 1.0)))
-	button.add_theme_stylebox_override("pressed", texture_style(backplate, Color(0.78, 0.78, 0.78, 1.0)))
-	button.add_theme_stylebox_override("disabled", texture_style(backplate, Color(0.48, 0.48, 0.48, 1.0)))
-	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+		return {}
+	return {
+		"normal": texture_style(backplate, Color.WHITE),
+		"hover": texture_style(backplate, Color(1.1, 1.1, 1.1)),
+		"pressed": texture_style(backplate, Color(0.84, 0.84, 0.84)),
+		"hover_pressed": texture_style(backplate, Color(0.94, 0.94, 0.94)),
+		"disabled": texture_style(backplate, Color(0.62, 0.62, 0.62)),
+		"focus": StyleBoxEmpty.new(),
+	}
 
 
-func texture_style(texture: Texture2D, modulation: Color) -> StyleBoxTexture:
+func texture_style(texture: Texture2D, modulation: Color, inset: int = COMMAND_INSET) -> StyleBoxTexture:
 	var style := StyleBoxTexture.new()
 	style.texture = texture
 	style.modulate_color = modulation
-	style.content_margin_left = 7
-	style.content_margin_right = 7
-	style.content_margin_top = 7
-	style.content_margin_bottom = 7
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		style.set_content_margin(side, inset)
 	return style
 
 
 func command_icon(command: Dictionary) -> Texture2D:
-	var command_type := String(command.get("type", ""))
-	if interface_skin != null and command_type == "trade_resource":
-		var resource_name := String({0: "food", 1: "wood", 2: "stone"}.get(int(command.get("resource_type_id", -1)), ""))
-		return interface_skin.resource_icon(resource_name, interface_style_index)
-	if icon_registry != null and command_type in ["open_build_menu", "cancel_production", "close_build_menu"]:
-		return icon_registry.texture("command", int(IconRegistry.COMMAND_GLYPHS[command_type]), int(current_model.get("icon_team", 1)))
 	return icon_registry.texture(String(command.get("icon_kind", "")), int(command.get("icon_id", -1)), int(command.get("icon_team", current_model.get("icon_team", 1)))) if icon_registry != null else null
 
 func make_style(fill: Color, border: Color) -> StyleBoxFlat:

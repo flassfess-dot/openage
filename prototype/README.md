@@ -112,6 +112,10 @@ selected, showing its unit production or research queue.
 Smaller windows page commands instead of shrinking them; construction keeps Back
 accessible on every page. Narrow windows reflow the HUD without stretching the
 original minimap frame.
+Unit order icons use most of their button face. Classic commands keep the
+original glyphs; project-specific orders and formations use distinct artwork.
+See [HUD command icons](../doc/ror-modern/HUD_COMMAND_ICONS.md) for the original
+comparison and graphical review command.
 
 The desktop renderer uses Vulkan Mobile with Mailbox presentation, applied after
 native window creation to avoid a startup presentation stall. Unsupported

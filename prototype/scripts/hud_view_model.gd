@@ -11,12 +11,12 @@ const FORMATIONS := [
 	{"id": "COLUMN", "label": "Колонна", "hotkey": "F7"},
 	{"id": "WEDGE", "label": "Клин", "hotkey": "F8"},
 	{"id": "STAGGERED", "label": "Рассредоточенный", "hotkey": "F9"},
-	{"id": "FLANK", "label": "Фланги", "hotkey": "F10"},
+	{"id": "FLANK", "label": "Фланги", "hotkey": "Shift+F9"},
 ]
 const STANCE_LABELS_RU := {
 	"aggressive": "Агрессивная",
 	"defensive": "Оборонительная",
-	"stand_ground": "Держать позицию",
+	"stand_ground": "Не покидать позицию",
 	"passive": "Не атаковать",
 }
 const HIDDEN_COMMAND_REASONS := {
@@ -148,7 +148,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 			{"id": "stop", "label": "Остановиться", "short_label": "СТОП", "hotkey": "X"},
 			{"id": "delete", "label": "Удалить выбранные объекты", "short_label": "УДАЛИТЬ", "hotkey": "Del"},
 			{"id": "hold", "label": "Держать позицию", "short_label": "ДЕРЖ", "hotkey": "H"},
-			{"id": "stance", "label": "Стойка: %s" % String(STANCE_LABELS_RU.get(next_stance, next_stance)), "short_label": "СТОЙКА", "hotkey": "V", "stance": next_stance},
+			{"id": "stance", "label": "Сменить стойку: %s" % String(STANCE_LABELS_RU.get(next_stance, next_stance)), "short_label": "СТОЙКА", "hotkey": "V", "stance": next_stance},
 		]:
 			var action: Dictionary = action_value
 			action["type"] = "unit_action"
@@ -172,18 +172,18 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				all_ground_attackers = false
 				break
 		if all_ground_attackers:
-			model["commands"].append({
+			var ground_attack := {
 				"type": "unit_action",
 				"id": "attack_ground",
 				"label": "Атаковать землю",
 				"short_label": "ПО ЗЕМЛЕ",
 				"hotkey": "G",
-				"icon_kind": "command_custom",
-				"icon_id": 0,
 				"enabled": disabled_reason.is_empty(),
 				"active": false,
 				"reason": disabled_reason,
-			})
+			}
+			ground_attack.merge(IconRegistry.command_icon("attack_ground"))
+			model["commands"].append(ground_attack)
 	if unit_count == selected.size() and unit_count > 1:
 		for definition_value in FORMATIONS:
 			var definition: Dictionary = definition_value
@@ -206,6 +206,8 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"type": "trade_resource",
 				"id": String.num_int64(resource_type_id),
 				"resource_type_id": resource_type_id,
+				"icon_kind": "trade_resource",
+				"icon_id": resource_type_id,
 				"label": _trade_resource_label(resource_type_id, locale),
 				"cost_text": "20 %s" % String(RESOURCE_NAMES[resource_type_id]).to_upper(),
 				"duration": 0.0,
@@ -221,19 +223,18 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 			break
 	if not selected_worker.is_empty():
 		var worker: Dictionary = selected_worker
-		if String(worker.get("movement_domain", "land")) == "land":
-			model["commands"].append({
-				"type": "unit_action",
-				"id": "repair",
-				"label": "Ремонтировать здание или судно",
-				"short_label": "РЕМОНТ",
-				"hotkey": "R",
-				"icon_kind": "command",
-				"icon_id": int(IconRegistry.COMMAND_GLYPHS["repair"]),
-				"enabled": disabled_reason.is_empty(),
-				"active": false,
-				"reason": disabled_reason,
-			})
+		var repair := {
+			"type": "unit_action",
+			"id": "repair",
+			"label": "Ремонтировать здание или судно",
+			"short_label": "РЕМОНТ",
+			"hotkey": "R",
+			"enabled": disabled_reason.is_empty(),
+			"active": false,
+			"reason": disabled_reason,
+		}
+		repair.merge(IconRegistry.command_icon("repair"))
+		model["commands"].append(repair)
 		for option_value in worker.get("command_options", {}).get("build", []):
 			var option: Dictionary = option_value
 			if not _command_option_is_visible(option):
@@ -256,8 +257,19 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"reason": reason,
 			})
 	if not selected.is_empty() and selected.all(func(entity): return String(entity.get("kind", "")) == "gate"):
-		for mode in ["auto", "open", "locked"]:
-			model["commands"].append({"type": "unit_action", "id": "gate_" + mode, "label": {"auto": "Автоматические ворота", "open": "Держать открытыми", "locked": "Запереть ворота"}[mode], "short_label": {"auto": "АВТО", "open": "ОТКРЫТЬ", "locked": "ЗАПЕРЕТЬ"}[mode], "icon_kind": "gate_mode", "icon_id": ["auto", "open", "locked"].find(mode), "enabled": disabled_reason.is_empty() and selected.all(func(gate): return String(gate.get("state", "")) == "complete"), "active": selected.all(func(gate): return String(gate.get("gate_mode", "auto")) == mode), "reason": disabled_reason})
+		var complete := selected.all(func(gate): return String(gate.get("state", "")) == "complete")
+		for mode in IconRegistry.GATE_MODES:
+			var action := {
+				"type": "unit_action",
+				"id": "gate_" + mode,
+				"label": {"auto": "Автоматические ворота", "open": "Держать открытыми", "locked": "Запереть ворота"}[mode],
+				"short_label": {"auto": "АВТО", "open": "ОТКРЫТЬ", "locked": "ЗАПЕРЕТЬ"}[mode],
+				"enabled": disabled_reason.is_empty() and complete,
+				"active": selected.all(func(gate): return String(gate.get("gate_mode", "auto")) == mode),
+				"reason": disabled_reason if not disabled_reason.is_empty() else "" if complete else "Строительство не завершено",
+			}
+			action.merge(IconRegistry.gate_mode_icon(mode))
+			model["commands"].append(action)
 	if selected.size() == 1 and _category(selected[0]) == "building":
 		var building: Dictionary = selected[0]
 		if String(building.get("kind", "")) == "granary" and String(building.get("state", "")) == "complete" and bool(player_state.get("farm_reserve_available", false)):
@@ -281,7 +293,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				occupants.append(entry)
 			model["garrison"] = {"building_id": int(building["id"]), "capacity": int(garrison.get("capacity", 5)), "units": occupants, "extra_arrows": int(garrison.get("extra_arrows", 0))}
 			var action := {"type": "unit_action", "id": "ungarrison", "label": "Высадить весь гарнизон", "short_label": "ВЫСАДИТЬ", "hotkey": "U", "enabled": not occupants.is_empty() and disabled_reason.is_empty(), "reason": disabled_reason, "active": false}
-			action.merge(IconRegistry.command_icon("unload"))
+			action.merge(IconRegistry.command_icon("ungarrison"))
 			model["commands"].append(action)
 		var production_queue: Array = building.get("production_queue", [])
 		for option_value in building.get("command_options", {}).get("train", []):
@@ -343,7 +355,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 		if not queue_model.is_empty():
 			var last_index: int = queue_model.size() - 1
 			var last_order: Dictionary = queue_model[last_index]
-			model["commands"].append({
+			var cancel_order := {
 				"type": "cancel_production",
 				"id": "cancel_0",
 				"building_id": int(building.get("id", -1)),
@@ -354,7 +366,9 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 				"enabled": disabled_reason.is_empty(),
 				"active": false,
 				"reason": disabled_reason,
-			})
+			}
+			cancel_order.merge(IconRegistry.command_icon("cancel_production"))
+			model["commands"].append(cancel_order)
 		if production_queue.size() > 1:
 			model["commands"].append({
 				"type": "unit_action",

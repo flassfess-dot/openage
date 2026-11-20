@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 50 50">
+  <!-- materials: neutral | stone/neutral | stone | stone | wood/neutral | wood | green/neutral | green -->
+  <defs>
+    <linearGradient id="stone" x2="80%" y2="100%">
+      <stop stop-color="#c8bda3"/>
+      <stop offset=".42" stop-color="#a69a82"/>
+      <stop offset=".73" stop-color="#948976"/>
+      <stop offset="1" stop-color="#625949"/>
+    </linearGradient>
+    <linearGradient id="doors" x2="65%" y2="100%">
+      <stop stop-color="#b18f5d"/>
+      <stop offset=".57" stop-color="#906741"/>
+      <stop offset="1" stop-color="#60442f"/>
+    </linearGradient>
+  </defs>
+  <path d="M17 25q0-11 8-11t7 11v16l-7 5-7.8-4.6z" fill="#352f27"/>
+  <path fill="url(#stone)" stroke="#373027" stroke-width="1.2" stroke-linejoin="round" fill-rule="evenodd"
+        d="M3.7 43.4 4.4 29l-.3-11.8 4.2-8.4 6.2-.7 5.7-3.2 8.9.5 6 2.4 5.7.8 4.7 8.1-.5 10.3 1 16.3-8.2 1-5.6-.9-.3-20.2q-.9-8.7-7.1-8.7-6.8.7-7 9.1l-.6 19.9-7.1.7z"/>
+  <path d="m4.8 18.8 7.2.4 6.2 3.1M45 18l-7.9.9-5.2 3.9M17.8 8.4l3.2 7.7m10.2-8.5-2.5 7.7m10-5.4-5.2 6.5"
+        fill="none" stroke="#6b6050" stroke-width="1.16"/>
+  <path d="m5.9 16.5 3.8-6.1 4.4-.6m1.8.1 4.9-3.3 4.8.1m2.5.2 3.3 1.1m4.5 1.2 3.8.7m2 2.5 2 3.8"
+        fill="none" stroke="#d7cbb0" stroke-width=".9"/>
+  <path d="m16.8 21.3-12.7 4.4-.5 16.2 13.2-6.4zM33 21l12.8 4.6.6 16.4-13.2-6.7z"
+        fill="url(#doors)" stroke="#453224" stroke-width="1.1" stroke-linejoin="round"/>
+  <path d="m5.5 27.5 10.4-4m-7.3 4.3-.5 10.1m4.8-12.7-.1 9.9m-8 2.4 10.6-5.3m19-8.5 10.6 4.2m-7.6-2.4.1 9.8m4.6-7.4.3 10.1m-7.8-6 10.9 5.6"
+        fill="none" stroke="#bd9b6c" stroke-width="1.05"/>
+  <path d="m22.1 35.1-.2-7.3h-4.8l7.9-8.5 8 8.5h-5l.1 7.1z" fill="#81976a" stroke="#394231" stroke-width="1.25" stroke-linejoin="round"/>
+  <path d="m20 26.8 5-5.5 4.5 5m-5.9 4 .1 2.6" fill="none" stroke="#c0c39c" stroke-width="1" stroke-linecap="round"/>
+</svg>

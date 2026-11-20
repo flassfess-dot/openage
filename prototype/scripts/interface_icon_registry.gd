@@ -15,20 +15,40 @@ const ASSET_NAMES := {
 	"building_4": "building_icon_4",
 }
 
-# One semantic map for both the model and renderer. Never reuse unrelated
-# original glyphs for newer commands such as stances and ground fire.
+# Source glyphs keep their frame numbers; modern orders have their own art.
 const COMMAND_GLYPHS := {
-	"repair": 0, "open_build_menu": 2, "stop": 3, "attack_move": 4,
+	"repair": 0, "open_build_menu": 2, "stop": 3,
 	"unload": 1, "delete": 10, "cancel_production": 10, "close_build_menu": 10, "hold": 12,
 }
-const CUSTOM_COMMANDS := ["attack_ground", "aggressive", "defensive", "stand_ground", "passive"]
+const CUSTOM_COMMANDS := {
+	"attack_ground": preload("res://assets/ui/commands/attack_ground.png"),
+	"aggressive": preload("res://assets/ui/commands/aggressive.png"),
+	"defensive": preload("res://assets/ui/commands/defensive.png"),
+	"stand_ground": preload("res://assets/ui/commands/stand_ground.png"),
+	"passive": preload("res://assets/ui/commands/passive.png"),
+	"attack_move": preload("res://assets/ui/commands/attack_move.png"),
+	"ungarrison": preload("res://assets/ui/commands/ungarrison.png"),
+}
+const GATE_MODES := {
+	"auto": preload("res://assets/ui/commands/gate-auto.png"),
+	"open": preload("res://assets/ui/commands/gate-open.png"),
+	"locked": preload("res://assets/ui/commands/gate-locked.png"),
+}
+const TRADE_RESOURCES := [
+	preload("res://assets/ui/commands/trade-food.png"),
+	preload("res://assets/ui/commands/trade-wood.png"),
+	preload("res://assets/ui/commands/trade-stone.png"),
+]
 
 static func command_icon(action: String, stance: String = "aggressive") -> Dictionary:
-	if action == "stance":
-		return {"icon_kind": "command_custom", "icon_id": CUSTOM_COMMANDS.find(stance)}
-	if action == "attack_ground":
-		return {"icon_kind": "command_custom", "icon_id": 0}
+	var custom := stance if action == "stance" else action
+	if CUSTOM_COMMANDS.has(custom):
+		return {"icon_kind": "command_custom", "icon_id": CUSTOM_COMMANDS.keys().find(custom)}
 	return {"icon_kind": "command", "icon_id": int(COMMAND_GLYPHS.get(action, -1))}
+
+static func gate_mode_icon(mode: String) -> Dictionary:
+	return {"icon_kind": "gate_mode", "icon_id": GATE_MODES.keys().find(mode)}
+
 
 var records_by_sheet: Dictionary = {}
 var texture_cache: Dictionary = {}
@@ -66,9 +86,11 @@ func has_icon(icon_kind: String, icon_id: int) -> bool:
 	if icon_kind == "gate":
 		return icon_id >= 0 and icon_id < GateCatalog.ICON_VARIANTS.size()
 	if icon_kind == "gate_mode":
-		return icon_id >= 0 and icon_id < 3
+		return icon_id >= 0 and icon_id < GATE_MODES.size()
 	if icon_kind == "command_custom":
 		return icon_id >= 0 and icon_id < CUSTOM_COMMANDS.size()
+	if icon_kind == "trade_resource":
+		return icon_id >= 0 and icon_id < TRADE_RESOURCES.size()
 	var sheet_name := String(ASSET_NAMES.get(icon_kind, ""))
 	return icon_id >= 0 and records_by_sheet.get(sheet_name, {}).has(icon_id)
 
@@ -76,20 +98,16 @@ func has_icon(icon_kind: String, icon_id: int) -> bool:
 func texture(icon_kind: String, icon_id: int, team: int = 1) -> Texture2D:
 	if not has_icon(icon_kind, icon_id):
 		return null
+	match icon_kind:
+		"gate_mode": return GATE_MODES.values()[icon_id]
+		"command_custom": return CUSTOM_COMMANDS.values()[icon_id]
+		"trade_resource": return TRADE_RESOURCES[icon_id]
 	var player: int = player_palette.color_index(team) if player_palette != null and team > 0 else 1
-	if icon_kind in ["gate", "gate_mode"]:
-		var gate_key := "%s:%d:%d" % [icon_kind, icon_id, player]
+	if icon_kind == "gate":
+		var gate_key := "gate:%d:%d" % [icon_id, player]
 		if not texture_cache.has(gate_key):
-			if icon_kind == "gate":
-				texture_cache[gate_key] = load("res://assets/ui/gates/%s-p%d.png" % [GateCatalog.ICON_VARIANTS[icon_id], player])
-			else:
-				texture_cache[gate_key] = load("res://assets/ui/commands/%s.png" % ["gate-auto", "gate-open", "gate-locked"][icon_id])
+			texture_cache[gate_key] = load("res://assets/ui/gates/%s-p%d.png" % [GateCatalog.ICON_VARIANTS[icon_id], player])
 		return texture_cache[gate_key]
-	if icon_kind == "command_custom":
-		var custom_key := "custom:%d" % icon_id
-		if not texture_cache.has(custom_key):
-			texture_cache[custom_key] = load("res://assets/ui/commands/%s.png" % CUSTOM_COMMANDS[icon_id])
-		return texture_cache[custom_key]
 	var sheet_name := String(ASSET_NAMES[icon_kind])
 	var cache_key := "%s:%d:%d" % [sheet_name, icon_id, player]
 	if texture_cache.has(cache_key):
@@ -105,7 +123,10 @@ func texture(icon_kind: String, icon_id: int, team: int = 1) -> Texture2D:
 
 
 func frame_count(icon_kind: String) -> int:
-	if icon_kind in ["gate", "gate_mode"]:
-		return GateCatalog.ICON_VARIANTS.size() if icon_kind == "gate" else 3
+	match icon_kind:
+		"gate": return GateCatalog.ICON_VARIANTS.size()
+		"gate_mode": return GATE_MODES.size()
+		"command_custom": return CUSTOM_COMMANDS.size()
+		"trade_resource": return TRADE_RESOURCES.size()
 	var sheet_name := String(ASSET_NAMES.get(icon_kind, ""))
 	return records_by_sheet.get(sheet_name, {}).size()

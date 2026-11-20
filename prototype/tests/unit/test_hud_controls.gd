@@ -23,12 +23,17 @@ func test_buttons_and_signals() -> void:
 	var hud = HUDControls.new()
 	root.add_child(hud)
 	assert_equal(hud.formation_buttons.size(), 6, "formation button count")
+	var formation_art := {}
 	for formation_name in ["LINE", "RECTANGLE", "COLUMN", "WEDGE", "STAGGERED", "FLANK"]:
 		var icon: Texture2D = hud.formation_buttons[formation_name].icon
 		assert_true(icon != null, "%s formation has a dedicated icon" % formation_name)
 		if icon != null:
 			assert_equal(Vector2i(icon.get_width(), icon.get_height()), Vector2i(50, 50), "%s formation icon uses the source command size" % formation_name)
+			var image := icon.get_image()
+			assert_true(image.get_used_rect().has_area(), "%s formation renders non-empty artwork" % formation_name)
+			formation_art[hash(image.get_data())] = true
 		assert_equal(hud.formation_buttons[formation_name].text, "", "%s formation uses icon-only presentation" % formation_name)
+	assert_equal(formation_art.size(), 6, "all six formation patterns render distinct artwork")
 	assert_equal(hud.train_button.tooltip_text.is_empty(), false, "train tooltip")
 	hud.set_state("WEDGE", false)
 	assert_true(not hud.train_button.text.contains("CLUBMAN"), "compatibility control no longer advertises debug Clubman training")
@@ -122,6 +127,12 @@ func test_buttons_and_signals() -> void:
 	]})
 	hud.train_button.emit_signal("pressed")
 	assert_equal(trade_resource_request[0], 2, "trade resource signal preserves selected resource ID")
+	hud.set_view_model({"commands": [
+		{"type": "unit_action", "id": "gate_auto", "icon_kind": "gate_mode", "enabled": true, "active": true},
+		{"type": "unit_action", "id": "gate_open", "icon_kind": "gate_mode", "enabled": true, "active": false},
+	]})
+	assert_true(hud.train_buttons[0].command_selected and not hud.train_buttons[1].command_selected, "only the active authoritative gate mode receives a selection rim")
+	assert_true(not hud.train_buttons[0].toggle_mode, "gate mode selection does not toggle locally")
 	var unit_action_request := [""]
 	hud.unit_action_requested.connect(func(action_name: String): unit_action_request[0] = action_name)
 	hud.set_view_model({"commands": [
@@ -129,6 +140,7 @@ func test_buttons_and_signals() -> void:
 	]})
 	hud.train_button.emit_signal("pressed")
 	assert_equal(unit_action_request[0], "hold", "unit-order button preserves its semantic action")
+	assert_true(not hud.train_button.command_selected, "reusing the button for a unit order clears the gate-mode highlight")
 	assert_true(hud.hotkey_badges[0].text == "H" and hud.train_button.text.contains("ДЕРЖ"), "an unconfigured icon registry keeps the readable text fallback")
 
 	var dense_commands: Array = []
@@ -174,12 +186,12 @@ func test_formation_row() -> void:
 	root.add_child(hud)
 	var commands: Array = []
 	for index in range(12):
-		commands.append({"type": "unit_action", "id": "action_%d" % index, "label": "Action", "enabled": true})
+		commands.append({"type": "unit_action", "id": "action_%d" % index, "label": "Action", "hotkey": "H", "enabled": true})
 	commands.append({"type": "unit_action", "id": "delete", "label": "Delete", "enabled": true})
 	for definition in HUDControls.FORMATIONS:
 		commands.append({"type": "formation", "id": definition[0], "enabled": true})
 	hud.set_view_model({"commands": commands})
-	for width in [536, 320, 212, 158]:
+	for width in [536, 320, 212, 158, 140]:
 		hud.size = Vector2(1280, 752)
 		hud.set_layout({"bottom": Rect2(0, 626, 1280, 126), "command": Rect2(136, 630, width, 118)})
 		await process_frame
@@ -200,6 +212,8 @@ func test_formation_row() -> void:
 				reached[index] = true
 				assert_true(button.offset_bottom < row_y, "ordinary actions never enter the formation row")
 				assert_true(button.offset_right <= 136 + width + 0.01, "action stays inside the command region")
+				if width == 140 and index < 12:
+					assert_true(not hud.hotkey_badges[index].visible and button.tooltip_text.ends_with(" · H"), "compact cell keeps its hotkey in the tooltip without crowding the icon")
 			for button in [hud.previous_commands_button, hud.next_commands_button]:
 				assert_true(not button.visible or button.offset_bottom < row_y, "page controls stay above formations")
 		assert_equal(reached.size(), 13, "every ordinary action remains reachable alongside formations")

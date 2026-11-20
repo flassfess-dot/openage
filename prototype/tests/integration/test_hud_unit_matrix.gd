@@ -47,6 +47,7 @@ func _initialize() -> void:
 		for button in hud.train_buttons:
 			if button.visible:
 				check(button.icon != null, kind + ": command has a native icon")
+				check(button.get_theme_constant("icon_max_width") == 46, kind + ": glyph uses all but the bevel of a 50px slot")
 				check(hud.current_layout["command"].encloses(button.get_rect()), kind + ": commands fit their panel")
 		if kind == "villager": check(hud.status_panel.owner_label.text.contains("Пища: 10"), "worker cargo shown")
 		if kind == "priest": check(hud.status_panel.owner_label.text.begins_with("Вера:"), "priest faith shown")
@@ -57,6 +58,7 @@ func _initialize() -> void:
 				var command: Dictionary = hud.active_train_commands[index]
 				if command.get("type") == "trade_resource":
 					check(hud.train_buttons[index].text.is_empty(), "trade command uses compact icon presentation")
+					check(hud.train_buttons[index].icon.get_size() == Vector2(50, 50), "trade button uses dedicated large artwork rather than a top-bar crop")
 					if hud.train_buttons[index].button_pressed:
 						pressed_resources += 1
 						check(int(command["resource_type_id"]) == 1, "source default wood choice is highlighted")

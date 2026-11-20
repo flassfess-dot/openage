@@ -1,6 +1,7 @@
 extends SceneTree
 
 const ResourceCatalog := preload("res://scripts/resource_catalog.gd")
+const Registry := preload("res://scripts/interface_icon_registry.gd")
 
 var failures: Array[String] = []
 
@@ -21,6 +22,29 @@ func _initialize() -> void:
 	assert_true(icons.texture("technology", 97) != null, "technology icon lazily loads as a texture")
 	assert_true(icons.texture("building_4", 15) != icons.texture("unit", 15), "building icons cannot silently fall back to the unit sheet")
 	assert_true(not icons.has_icon("technology", 101), "out-of-range icon remains explicit")
+
+	var fingerprints := {}
+	for kind in ["command_custom", "gate_mode", "trade_resource"]:
+		for id in range(icons.frame_count(kind)):
+			var texture: Texture2D = icons.texture(kind, id)
+			var context := "%s/%d" % [kind, id]
+			assert_true(texture != null, context + " loads")
+			if texture == null:
+				continue
+			var image := texture.get_image()
+			var bounds := image.get_used_rect()
+			assert_equal(image.get_size(), Vector2i(50, 50), context + " uses a square canvas")
+			assert_true(bounds.size.x >= 30 and bounds.size.y >= 30, context + " isn't blank or lost in transparent padding")
+			assert_true(image.get_pixel(0, 0).a == 0.0, context + " preserves the source backplate")
+			var fingerprint := hash(image.get_data())
+			assert_true(not fingerprints.has(fingerprint), context + " does not repeat another symbol")
+			fingerprints[fingerprint] = true
+			assert_true(icons.texture(kind, id, 2) == texture, context + " does not duplicate textures per player")
+		assert_true(not icons.has_icon(kind, icons.frame_count(kind)), "%s bounds are explicit" % kind)
+	assert_equal(fingerprints.size(), 13, "complete distinct modern action, gate and trade art")
+	assert_equal(Registry.command_icon("open_build_menu").get("icon_id"), 2, "first hammer still opens construction")
+	assert_equal(Registry.command_icon("repair").get("icon_id"), 0, "second hammer still repairs")
+	assert_equal(Registry.command_icon("close_build_menu"), Registry.command_icon("delete"), "Back and Delete retain the source cross")
 
 	if failures.is_empty():
 		print("I12-018 interface icon registry tests passed")
