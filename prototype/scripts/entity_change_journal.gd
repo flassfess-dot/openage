@@ -100,7 +100,8 @@ static func field_mask(field: String) -> int:
 		"kind", "solid_animal": return COMBAT | APPEARANCE | CONTROL
 		"team": return OWNERSHIP | ACTIVITY | COMBAT | ECONOMY | APPEARANCE | CONTROL
 	match field:
-		"service_xp", "service_role", "service_item", "service_name", "expedition_cache": return CONTROL
+		"service_role": return APPEARANCE | CONTROL
+		"service_xp", "service_item", "service_name", "expedition_cache": return CONTROL
 		"service_spent", "service_healed", "survey_cells": return CONTROL
 		"previous_pos", "anim", "anim_event_frame": return 0
 		"footprint_radius": return POSITION | ACTIVITY | COMBAT | CONTROL

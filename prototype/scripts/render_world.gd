@@ -378,7 +378,9 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				if death_phase == "alive" and highlighted:
 					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 1))
 				if death_phase == "alive" and highlighted:
-					drawables.append(RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2))
+					var bar := RenderItem.create("health_bar", RenderItem.Layer.HEALTH_BAR, render_position, unit_screen, stable_id, unit, frame_info, elevation, player_color, 1.0, 2)
+					bar["hotspot"] = Vector2(bar["hotspot"]) * float(frame_info.get("figure_scale", 1.0))
+					drawables.append(bar)
 		displayed_unit_items = drawables.slice(first_unit_item)
 	if sprite_scale > 0.0 and native_render_kernel != null:
 		if native_render_kernel.has_method("cache_actor_sprites_atlased"):
@@ -566,7 +568,8 @@ func _cache_resource_sprite(item: Dictionary) -> void:
 	var info: Dictionary = item["frame_info"]
 	var texture: Texture2D = info.get("texture")
 	if cached_sprite_scale <= 0.0 or texture == null or info.has("gate_polygon") or info.has("rotation") or bool(info.get("mirrored", false)): return
-	var anchor := Vector2(item["screen_position"]).round() + Vector2(info.get("screen_offset", Vector2.ZERO)) * cached_sprite_scale
+	var draw_scale := cached_sprite_scale * float(info.get("figure_scale", 1.0))
+	var anchor := Vector2(item["screen_position"]).round() + Vector2(info.get("screen_offset", Vector2.ZERO)) * draw_scale
 	item["sprite_source_size"] = texture.get_size()
 	item["sprite_screen_offset"] = Vector2(info.get("screen_offset", Vector2.ZERO))
 	var rendered_texture := sprite_atlas.texture_for(texture) if sprite_atlas_enabled else texture
@@ -575,7 +578,7 @@ func _cache_resource_sprite(item: Dictionary) -> void:
 	if rendered_texture is AtlasTexture:
 		texture_rid = rendered_texture.atlas.get_rid()
 		region = rendered_texture.region
-	item["sprite_command"] = [rendered_texture, Rect2(anchor - Vector2(item["hotspot"]) * cached_sprite_scale, texture.get_size() * cached_sprite_scale), Color(1, 1, 1, float(item["opacity"])), texture_rid, region]
+	item["sprite_command"] = [rendered_texture, Rect2(anchor - Vector2(item["hotspot"]) * draw_scale, texture.get_size() * draw_scale), Color(1, 1, 1, float(item["opacity"])), texture_rid, region]
 
 
 static func _append_resource_shadow(drawables: Array, resource: Dictionary, frame_info: Dictionary, position: Vector2, screen: Vector2) -> void:

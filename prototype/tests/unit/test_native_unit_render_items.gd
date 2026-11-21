@@ -1,5 +1,7 @@
 extends SceneTree
 const Renderer := preload("res://scripts/render_world.gd")
+const Markers := preload("res://scripts/expedition_markers.gd")
+const Picking := preload("res://scripts/picking_service.gd")
 var failures: Array[String] = []
 var texture: Texture2D
 func project(point: Vector2) -> Vector2:
@@ -35,6 +37,8 @@ func _initialize() -> void:
 			var predicted_position: Vector2 = Vector2(source["previous_pos"]).lerp(Vector2(source["pos"]), alpha)
 			if predicted.is_empty() or not Vector2(predicted[0].get("world_anchor", Vector2.INF)).is_equal_approx(predicted_position):
 				failures.append("Owner presentation does not extrapolate at interpolation %s" % alpha)
+	# This case starts at alpha 1, independently of the alpha 5 pose above.
+	fast.clear_caches()
 	var refreshed := fast.create_world_drawables(scene, project, 1.0, info, [3, 8], 1, [1, 2, 7, 8])
 	refreshed = fast.refresh_world_drawables(refreshed, project, 3.0)
 	var refreshed_unit: Array = refreshed.filter(func(item): return String(item.get("kind", "")) == "unit" and int(item.get("stable_id", -1)) == 1)
@@ -42,6 +46,38 @@ func _initialize() -> void:
 	var refreshed_position: Vector2 = Vector2(refreshed_source["previous_pos"]).lerp(Vector2(refreshed_source["pos"]), 3.0)
 	if refreshed_unit.is_empty() or not Vector2(refreshed_unit[0].get("world_anchor", Vector2.INF)).is_equal_approx(refreshed_position):
 		failures.append("Retained native drawables do not extrapolate while the owner is pending")
+	check_hero_geometry(fast)
 	for failure in failures: push_error(failure)
 	print("Native unit render items: %d failures" % failures.size())
 	quit(0 if failures.is_empty() else 1)
+
+func check_hero_geometry(renderer: Renderer) -> void:
+	var ordinary := info("unit", {})
+	ordinary.composite_parts[0]["mirrored"] = true
+	ordinary.composite_parts[0]["screen_offset"] = Vector2(-3, 1)
+	var frames := {1: ordinary, 2: Markers.hero_frame(ordinary)}
+	var provider := func(_kind, unit): return frames[unit.id]
+	var soldier := {"id": 1, "kind": "clubman", "team": 1, "hp": 50, "previous_pos": Vector2(3, 5), "pos": Vector2(4, 5)}
+	var hero := soldier.duplicate()
+	hero.id = 2
+	var picking := Picking.new()
+	for zoom: float in [1.0, 2.0, 3.0]:
+		renderer.clear_caches()
+		var projection := func(pos: Vector2): return project(pos) * zoom
+		var items: Array = renderer.create_world_drawables({"units": [soldier, hero]}, projection, 0.0, provider, [], 1, [], zoom)
+		for alpha: float in [0.0, 0.75]:
+			if alpha > 0.0:
+				renderer.refresh_world_drawables(items, projection, alpha, false, true)
+			for kind in ["unit", "unit_part"]:
+				var pair: Array = renderer.displayed_unit_items.filter(func(item): return item.kind == kind)
+				var normal: Rect2 = pair[0].sprite_command[1]
+				var enlarged: Rect2 = pair[1].sprite_command[1]
+				var feet := Vector2(pair[1].screen_position).round()
+				var expected := Rect2(feet + (normal.position - feet) * 1.10, normal.size * 1.10)
+				if not enlarged.is_equal_approx(expected):
+					failures.append("Hero %s moved off its foot anchor at zoom %s, pose %s" % [kind, zoom, alpha])
+				if kind == "unit" and Markers.banner_position(pair[1], zoom) != (feet + Vector2(11.0, -28.0 * 1.10) * zoom).round():
+					failures.append("Standard did not rise vertically with the shoulder at zoom %s" % zoom)
+				var top := Vector2(enlarged.get_center().x, enlarged.position.y + 0.1)
+				if not picking.texture_hit(top, pair[1], projection, zoom) or picking.texture_hit(top, pair[0], projection, zoom):
+					failures.append("Picking does not follow the enlarged %s at zoom %s" % [kind, zoom])

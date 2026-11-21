@@ -2,7 +2,7 @@ class_name RoREntityReadContract
 extends RefCounted
 
 const Data := preload("res://scripts/isolated_task_data.gd")
-const SCHEMA_VERSION := 4
+const SCHEMA_VERSION := 5
 const RENDER_SCHEMA_KEY := "_ror_render_schema"
 # One schema for one-shot and retained projections. No live entity borrowing.
 const RENDER_FIELDS := [
@@ -13,7 +13,7 @@ const RENDER_FIELDS := [
 	"state", "resource_state", "depletion_stage", "visible_when_depleted",
 	"harvestable", "resource_type_id", "building_type", "movement_domain",
 	"footprint_radius", "selection_radius", "selection_height",
-	"anim", "anim_state", "facing", "presentation_facing",
+	"anim", "anim_state", "facing", "presentation_facing", "service_role",
 	"connectivity_group", "connection_mask", "connection_revision",
 	"gate_axis", "gate_mode", "gate_open_fraction",
 	"death_phase", "death_elapsed", "decay_elapsed", "construction_stage",

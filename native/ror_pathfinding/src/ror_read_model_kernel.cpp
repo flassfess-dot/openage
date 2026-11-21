@@ -34,6 +34,14 @@ RoREntityChangeJournalKernel *native_entity_journal(Object *journal) {
     return script.get_type() == Variant::NIL || (script.get_type() == Variant::OBJECT && !static_cast<Object *>(script)) ? kernel : nullptr;
 }
 constexpr double MAX_INTERPOLATION_ALPHA = 5.0;
+Rect2 sprite_destination(const Vector2 &ground, const Vector2 &offset, const Vector2 &hotspot,
+        const Vector2 &size, double scale, bool mirrored) {
+    const Vector2 anchor = ground.round() + offset * scale;
+    Vector2 corner = anchor - hotspot * scale;
+    if (mirrored) corner.x = anchor.x + hotspot.x * scale - size.x * scale;
+    return Rect2(corner, size * scale);
+}
+
 uint32_t canonical_entity_value_hash(const Dictionary &entity) {
     static const StringName ignored[] = {"selected", "formation_shared_motion", "_formation_path_cache", "formation_steering_target", "formation_shared_isolated"};
     Dictionary record = entity;
@@ -141,9 +149,7 @@ void RoRReadModelKernel::cache_actor_sprites(const Array &items, double scale) c
         item[ROR_FIELD("sprite_mirrored")] = flip;
         Array sprite;
         sprite.append(source_texture);
-        Vector2 corner = Vector2(item[screen]).round() + offset * scale - Vector2(item[hotspot]) * scale;
-        if (flip) corner.x = Vector2(item[screen]).round().x + offset.x * scale + Vector2(item[hotspot]).x * scale - source_size.x * scale;
-        sprite.append(Rect2(corner, source_size * scale));
+        sprite.append(sprite_destination(item[screen], offset, item[hotspot], source_size, scale * double(info.get(ROR_FIELD("figure_scale"), 1.0)), flip));
         sprite.append(Color(1, 1, 1, float(item[ROR_FIELD("opacity")])));
         sprite.append(source_texture->call("get_rid"));
         sprite.append(Rect2(Vector2(), Vector2(flip ? -source_size.x : source_size.x, source_size.y)));
@@ -233,9 +239,8 @@ bool RoRReadModelKernel::refresh_interpolated_items(const Array &items, const Ca
         if (item.has(command)) {
             Array sprite = item[command];
             const Vector2 offset = item[ROR_FIELD("sprite_screen_offset")], hotspot = item[ROR_FIELD("hotspot")], size = item[ROR_FIELD("sprite_source_size")];
-            Vector2 corner = point.screen.round() + offset * sprite_scale - hotspot * sprite_scale;
-            if (sprite.size() >= 7 && bool(sprite[6])) corner.x = point.screen.round().x + offset.x * sprite_scale + hotspot.x * sprite_scale - size.x * sprite_scale;
-            sprite[1] = Rect2(corner, size * sprite_scale);
+            const Dictionary info = item[ROR_FIELD("frame_info")];
+            sprite[1] = sprite_destination(point.screen, offset, hotspot, size, sprite_scale * double(info.get(ROR_FIELD("figure_scale"), 1.0)), sprite.size() >= 7 && bool(sprite[6]));
         }
     }
     return moved;
@@ -516,8 +521,11 @@ Array RoRReadModelKernel::create_unit_render_items(const Array &units, const Cal
         const bool chosen = selected_ids.find(entity_id) != selected_ids.end() || bool(unit.get(ROR_FIELD("selected"), false)) || preview_ids.find(entity_id) != preview_ids.end();
         if (death == ROR_TEXT("alive") && (chosen || preview_ids.find(entity_id) != preview_ids.end()))
             result.append(item("selection", 2, position, screen, entity_id, unit, info, height, color, 1));
-        if (death == ROR_TEXT("alive") && chosen)
-            result.append(item("health_bar", 7, position, screen, entity_id, unit, info, height, color, 2));
+        if (death == ROR_TEXT("alive") && chosen) {
+            Dictionary bar = item("health_bar", 7, position, screen, entity_id, unit, info, height, color, 2);
+            bar[hotspot] = Vector2(bar[hotspot]) * double(info.get(ROR_FIELD("figure_scale"), 1.0));
+            result.append(bar);
+        }
     }
     return result;
 }
@@ -694,14 +702,12 @@ void RoRReadModelKernel::cache_sprite_items(const Array &items, double scale, co
         }
         const Vector2 size = prepared[ROR_FIELD("size")], screen_offset = info.get(offset, Vector2());
         item[ROR_FIELD("sprite_source_size")] = size; item[ROR_FIELD("sprite_screen_offset")] = screen_offset;
-        const Vector2 point = Vector2(item[screen]).round() + screen_offset * scale;
-        Vector2 corner = point - Vector2(item[hotspot]) * scale;
-        if (flipped) corner.x = point.x + Vector2(item[hotspot]).x * scale - size.x * scale;
+        const double draw_scale = actor ? scale * double(info.get(ROR_FIELD("figure_scale"), 1.0)) : scale;
         Rect2 region = prepared[ROR_FIELD("region")];
         if (flipped) region.size.x = -region.size.x;
         Array sprite;
         sprite.append(prepared[texture_key]);
-        sprite.append(Rect2(corner, size * scale));
+        sprite.append(sprite_destination(item[screen], screen_offset, item[hotspot], size, draw_scale, flipped));
         sprite.append(Color(1,1,1,float(item[ROR_FIELD("opacity")])));
         sprite.append(prepared[ROR_FIELD("rid")]); sprite.append(region);
         if (prepared.has(ROR_FIELD("uv"))) {

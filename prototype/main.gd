@@ -3625,7 +3625,8 @@ func draw_map_edge_guard() -> void:
 func render_item_frame_info(kind: String, data: Variant) -> Dictionary:
 	match kind:
 		"unit":
-			return unit_frame_info(data)
+			var frame := unit_frame_info(data)
+			return ExpeditionMarkers.hero_frame(frame) if data.has("service_role") else frame
 		"resource":
 			var animation_time := float(presentation_snapshot.get("tick", 0)) * GameController.FIXED_STEP_SECONDS
 			resource_catalog.performance_probe = _presentation_probe()
@@ -3682,14 +3683,15 @@ func draw_render_body(item: Dictionary, probe = null) -> void:
 	if item["kind"] == "projectile":
 		screen.y -= float(item["data"].get("visual_height", 0.0)) * TerrainElevation.ELEVATION_PIXEL_STEP * view_zoom
 	var screen_offset: Vector2 = frame_info.get("screen_offset", Vector2.ZERO)
-	screen += screen_offset * view_zoom
+	var draw_scale := view_zoom * float(frame_info.get("figure_scale", 1.0))
+	screen += screen_offset * draw_scale
 	if frame_info.has("rotation"):
-		draw_set_transform(screen, float(frame_info["rotation"]), Vector2.ONE * view_zoom)
+		draw_set_transform(screen, float(frame_info["rotation"]), Vector2.ONE * draw_scale)
 		var texture: Texture2D = frame_info["texture"]
 		draw_texture(texture, -Vector2(item["hotspot"]), Color(1, 1, 1, float(item["opacity"]) * float(frame_info.get("fall_opacity", 1.0))))
 		draw_set_transform(Vector2.ZERO)
 		return
-	draw_anchored_texture(frame_info["texture"], frame_info["asset_name"], item["frame"], screen, view_zoom, bool(frame_info.get("mirrored", false)), float(item["opacity"]), item["hotspot"])
+	draw_anchored_texture(frame_info["texture"], frame_info["asset_name"], item["frame"], screen, draw_scale, bool(frame_info.get("mirrored", false)), float(item["opacity"]), item["hotspot"])
 
 
 func draw_objective_fallback(item: Dictionary) -> void:

@@ -99,18 +99,19 @@ func texture_hit(screen_position: Vector2, drawable: Dictionary, world_to_screen
 	if texture == null:
 		return false
 	var anchor := PixelScaling.snap_screen(world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO))))
-	anchor += Vector2(frame_info.get("screen_offset", Vector2.ZERO)) * zoom
+	var draw_scale := zoom * float(frame_info.get("figure_scale", 1.0))
+	anchor += Vector2(frame_info.get("screen_offset", Vector2.ZERO)) * draw_scale
 	# Mobile targets remain clickable between animated limbs and along their
 	# silhouette. Use the same mirrored pivot and part offsets as drawing.
-	if String(drawable.get("kind", "")) in ["unit", "unit_part"] and zoom > 0.0:
-		var source := SpriteGeometry.screen_to_source(screen_position, anchor, zoom,
+	if String(drawable.get("kind", "")) in ["unit", "unit_part"] and draw_scale > 0.0:
+		var source := SpriteGeometry.screen_to_source(screen_position, anchor, draw_scale,
 			Vector2(drawable.get("hotspot", frame_info.get("hotspot", Vector2.ZERO))),
 			bool(frame_info.get("mirrored", false)))
 		return Rect2(Vector2.ZERO, texture.get_size()).has_point(source)
 	return SelectionResolver.texture_hit(
 		screen_position,
 		anchor,
-		zoom,
+		draw_scale,
 		texture,
 		Vector2(drawable.get("hotspot", frame_info.get("hotspot", Vector2.ZERO))),
 		bool(frame_info.get("mirrored", false))

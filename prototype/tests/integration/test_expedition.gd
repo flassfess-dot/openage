@@ -91,6 +91,9 @@ func run() -> void:
 	game.sync_world_state()
 	game.refresh_hud_model()
 	check(game.hud_controls.status_panel.name_label.text == "Луций" and game.hud_controls.status_panel.service_badge.visible, "named officer and insignia in HUD")
+	game.current_world_drawables()
+	var scout_body: Dictionary = game.expedition_actor_items.get(id, {})
+	check(is_equal_approx(float(scout_body.get("frame_info", {}).get("figure_scale", 1.0)), 1.10), "appointment immediately enlarges the scout on the field")
 	await capture("officer")
 	# Select the coffer through the same screen-position/context order as the mouse.
 	var pile: Dictionary = world.expedition_field.piles[1]

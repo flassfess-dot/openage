@@ -4,6 +4,23 @@ const EDGE := Color("32251c")
 const GOLD := Color("ecc779")
 const BRONZE := Color("ab8045")
 const LIGHT := Color("fff0c4")
+const HERO_FIGURE_SCALE := 1.10
+
+static func hero_frame(source: Dictionary) -> Dictionary:
+	# Pose descriptors and textures can be shared with an ordinary soldier.
+	var frame := source.duplicate()
+	frame["figure_scale"] = HERO_FIGURE_SCALE
+	if source.has("composite_parts"):
+		var parts := []
+		for part in source["composite_parts"]:
+			parts.append(hero_frame(part))
+		frame["composite_parts"] = parts
+	return frame
+
+static func banner_position(actor: Dictionary, zoom: float) -> Vector2:
+	var height := clampf(Vector2(actor.hotspot).y, 28.0, 62.0)
+	var shoulder := Vector2(11, -height * HERO_FIGURE_SCALE) * zoom
+	return (Vector2(actor.screen_position).round() + shoulder).round()
 
 static func pile_at(game, screen: Vector2) -> Dictionary:
 	var nearest := {}
@@ -38,10 +55,9 @@ static func draw_field(game, state: Dictionary) -> void:
 	for hero in state.get("service_heroes", []):
 		var actor: Dictionary = game.expedition_actor_items.get(hero.id, {})
 		if actor.is_empty() or hero.carrier >= 0: continue
-		var height := clampf(Vector2(actor.hotspot).y, 28.0, 62.0)
-		var shoulder := Vector2(actor.screen_position) + Vector2(11, -height) * zoom
+		var shoulder := banner_position(actor, zoom)
 		if not clip.has_point(shoulder): continue
-		game.draw_set_transform(shoulder.round(), 0, Vector2.ONE * scale)
+		game.draw_set_transform(shoulder, 0, Vector2.ONE * scale)
 		var cloth: Color = game.resource_catalog.player_palette.color_for_team(int(hero.team)).darkened(0.42)
 		game.draw_line(Vector2(-5,-5), Vector2(-5,15), EDGE, 2)
 		game.draw_line(Vector2(-5,-5), Vector2(-5,8), BRONZE)
