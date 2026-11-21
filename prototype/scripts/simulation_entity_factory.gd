@@ -161,6 +161,7 @@ func add_unit(team: int, kind: String, position: Vector2, selected: bool) -> Dic
 	if world.entity_has_behavior_tag(unit, "capturable"):
 		world.capturable_units.append(unit)
 	world.configure_unit_combat_awareness(unit)
+	preload("res://scripts/expedition.gd").enroll(world, unit)
 	EntityComponents.sync_dynamic(unit)
 	unit["solid_animal"] = MobileCollision.is_solid_animal(unit)
 	world.units.append(unit)

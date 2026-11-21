@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "expedition_outpost",
+  "field_service_enabled":true,
+  "title": "Боевой путь I · Застава",
+  "briefing":"Лекарь Менекрат сопровождает гарнизон пограничной заставы. Встретьте налётчиков у башни. Подведите лекаря к раненым и нажмите E для перевязки.\n\nПосле боя щёлкните правой кнопкой по трофейному сундуку, выбрав героя. Рассмотреть находки можно в рюкзаке (J). На севере, у старого храма, спрятан щит.\n\nЗа бой и лечение солдаты получают опыт. Назначьте ветерана с 36 очками дозорным или начальником строя. Разбейте лагерь противника и выберите до трёх выживших для следующего похода.",
+  "start_message": "Менекрат прибыл на заставу. E — перевязка бойцов, J — снаряжение. Разбейте налётчиков.",
+  "map": {"size":[32,32],"seed":8623,"generator":{"type":"coastal_land","water_border":{"left":2,"top":1,"shore_width":1},"resource_clusters":[
+    {"kind":"tree","center":[8,22],"count":7,"radius":2,"amount":100},
+    {"kind":"berries","center":[9,17],"count":4,"radius":1,"amount":150},
+    {"kind":"gold_mine","center":[15,24],"count":2,"radius":1,"amount":350}
+  ]}},
+  "players":[
+    {"team":1,"controller":"human","civilization_id":13,"start":[9,19],"starting_age_technology_id":101,"population_housing":18,"starting_resources":{"food":250,"wood":200,"stone":100,"gold":100}},
+    {"team":2,"controller":"ai","civilization_id":1,"start":[24,18],"population_housing":12,"starting_resources":{"food":150,"wood":80}}
+  ],
+  "entities":[
+    {"category":"building","team":1,"kind":"town_center","position":[6,20]},
+    {"category":"building","team":1,"kind":"barracks","position":[6,25]},
+    {"category":"building","team":1,"kind":"tower","position":[12,18]},
+    {"category":"building","team":0,"kind":"temple","position":[14,8],"expedition_cache":"shield"},
+    {"category":"unit","team":1,"kind":"villager","position":[9,20]},
+    {"category":"unit","team":1,"kind":"villager","position":[9,21]},
+    {"category":"unit","team":1,"kind":"archer","position":[10,18]},
+    {"category":"unit","team":1,"kind":"archer","position":[10,19]},
+    {"category":"unit","team":1,"kind":"swordsman","position":[13,20]},
+    {"category":"unit","team":1,"kind":"swordsman","position":[13,21]},
+    {"category":"unit","team":1,"kind":"priest","position":[9,23],"selected":true,"service_record":{"role":"medic","name":"Менекрат","xp":36000,"pack":[{"item":"balm","count":2}]}},
+    {"category":"building","team":2,"kind":"barracks","position":[26,17]},
+    {"category":"unit","team":2,"kind":"clubman","position":[18,18]},
+    {"category":"unit","team":2,"kind":"clubman","position":[19,20]},
+    {"category":"unit","team":2,"kind":"clubman","position":[20,19]},
+    {"category":"unit","team":2,"kind":"archer","position":[23,17]},
+    {"category":"unit","team":2,"kind":"archer","position":[24,19],"service_record":{"role":"scout","name":"Артан","xp":36000,"relic":"seal"}}
+  ],
+  "alliances":[],
+  "victory_rules":[{"type":"conquest","field_caches":true}]
+}

@@ -22,6 +22,7 @@ var name_label: Label
 var owner_label: Label
 var stats_label: Label
 var portrait: TextureRect
+var service_badge: Label
 var job_icon: TextureRect
 var job_label: Label
 var percent_label: Label
@@ -57,6 +58,10 @@ func _init() -> void:
 	stats_label = make_label(12, true)
 	stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	portrait = make_icon()
+	service_badge = make_label(13, true)
+	service_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	service_badge.add_theme_color_override("font_color", Color("f4c779"))
+	service_badge.visible = false
 	job_icon = make_icon()
 	job_label = make_label(16, true)
 	job_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -159,8 +164,29 @@ func set_view_model(value: Dictionary) -> void:
 		owner_label.text = "АТК %d · БРН %d" % [int(leader.get("attack", 0)), int(leader.get("armor", 0))]
 	stats_label.text = "%d/%d" % [int(leader.get("hp", 0)), int(leader.get("max_hp", 0))] if bool(leader.get("show_hp", true)) else "%d/%d" % [int(leader.get("resource_amount", 0)), int(leader.get("resource_maximum", 0))]
 	var count := int(model.get("selection", {}).get("count", 0))
+	portrait.mouse_filter = Control.MOUSE_FILTER_PASS if count == 1 and int(leader.get("service_xp", -1)) >= 0 else Control.MOUSE_FILTER_IGNORE
+	service_badge.visible = count == 1 and int(leader.get("service_xp", -1)) >= preload("res://scripts/expedition.gd").SEASONED
+	service_badge.text = "II" if int(leader.get("service_xp", -1)) >= preload("res://scripts/expedition.gd").VETERAN else "I"
+	if count == 1 and int(leader.get("service_xp", -1)) >= 0:
+		var xp := int(leader.service_xp)
+		var rank_label := preload("res://scripts/expedition.gd").rank(xp)
+		var target_xp := 36
+		if not String(leader.service_name).is_empty():
+			name_label.text = String(leader.service_name)
+			rank_label = preload("res://scripts/expedition.gd").ROLES.get(leader.service_role, rank_label)
+			var tier := preload("res://scripts/expedition.gd").level(xp)
+			service_badge.text = ["I","II","III"][tier - 1]
+			target_xp = int(preload("res://scripts/expedition.gd").HERO_XP[mini(tier, 2)]) / 1000
+		portrait.tooltip_text += "\n%s · опыт %.1f / %d" % [rank_label, xp / 1000.0, target_xp]
+		var armor: Dictionary = preload("res://scripts/expedition_inventory.gd").ITEMS.get(leader.service_item, {})
+		if not armor.is_empty(): portrait.tooltip_text += "\n%s · %s" % [armor.name, armor.effect]
+		name_label.tooltip_text = portrait.tooltip_text
+	else:
+		name_label.tooltip_text = name_label.text
 	if count > 1:
 		name_label.text = "%d × %s" % [count, name_label.text]
+		if not String(leader.get("group_officer", "")).is_empty():
+			owner_label.text = "Ком. %s" % leader.group_officer
 	for node in [name_label, owner_label, stats_label, portrait]:
 		node.visible = not leader.is_empty()
 	pending_groups = group_pending(model.get("queue", []))
@@ -214,6 +240,7 @@ func layout_contents() -> void:
 	var card: Rect2 = layout["selection"]
 	place(name_label, Rect2(card.position + Vector2(6, 3), Vector2(116, 30)))
 	place(portrait, Rect2(card.position + Vector2(43, 35), Vector2(42, 42)))
+	place(service_badge, Rect2(card.position + Vector2(88, 58), Vector2(25, 18)))
 	place(stats_label, Rect2(card.position + Vector2(6, 87), Vector2(116, 14)))
 	place(owner_label, Rect2(card.position + Vector2(6, 103), Vector2(116, 14)))
 	var production: Rect2 = layout["production"]
@@ -254,6 +281,9 @@ func layout_garrison() -> void:
 		button.icon = icon_for(occupants[index]) if occupied else null
 		button.text = "" if occupied else "·"
 		button.tooltip_text = "%s · %d/%d ОЗ\nВысадить бойца" % [String(occupants[index].get("name", "")), roundi(float(occupants[index].get("hp", 0))), roundi(float(occupants[index].get("max_hp", 0)))] if occupied else "Свободное место"
+		if occupied and occupants[index].has("service_xp"):
+			var record: Dictionary = occupants[index]
+			button.tooltip_text += "\n%s · %s" % [record.get("service_name", record.name), preload("res://scripts/expedition.gd").rank(record.service_xp)]
 
 
 func _ungarrison(index: int) -> void:

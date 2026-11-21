@@ -529,6 +529,13 @@ func _build_general_settings() -> Control:
 	_style_checkbox(full_tech)
 	grid.add_child(full_tech)
 	setting_controls["full_tech_tree"] = full_tech
+	grid.add_child(_field_label("Боевой опыт и командиры"))
+	var service := CheckBox.new()
+	_style_checkbox(service)
+	service.button_pressed = SkirmishSettings.DEFAULT_FIELD_SERVICE_ENABLED
+	service.tooltip_text = "Бойцы и жрецы набирают опыт. Назначайте ветеранов героями трёх должностей и собирайте трофеи после боёв."
+	grid.add_child(service)
+	setting_controls["field_service_enabled"] = service
 	return column
 
 
@@ -736,6 +743,7 @@ func _settings_from_controls() -> Dictionary:
 	result["seed"] = roundi(float(setting_controls["seed"].value))
 	result["allied_victory_enabled"] = bool(setting_controls["allied_victory_enabled"].button_pressed)
 	result["full_tech_tree"] = bool(setting_controls["full_tech_tree"].button_pressed)
+	result["field_service_enabled"] = setting_controls["field_service_enabled"].button_pressed
 	var active_count := roundi(float(setting_controls["player_count"].value))
 	var players: Array = []
 	for index in range(player_controls.size()):

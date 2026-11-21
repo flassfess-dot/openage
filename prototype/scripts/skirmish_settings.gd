@@ -2,6 +2,7 @@ class_name RoRSkirmishSettings
 extends RefCounted
 
 const CATALOG_PATH := "res://data/skirmish/settings_catalog.json"
+const DEFAULT_FIELD_SERVICE_ENABLED := true
 const MatchDefinition := preload("res://scripts/match_definition.gd")
 const GameSaveArchive := preload("res://scripts/game_save_archive.gd")
 const RandomMapContract := preload("res://scripts/random_map_contract.gd")
@@ -51,6 +52,7 @@ static func default_settings() -> Dictionary:
 		"victory_mode_id": "conquest",
 		"allied_victory_enabled": false,
 		"full_tech_tree": false,
+		"field_service_enabled": DEFAULT_FIELD_SERVICE_ENABLED,
 		"players": slots,
 	}
 
@@ -78,6 +80,8 @@ static func normalize(source: Dictionary) -> Dictionary:
 		errors.append("skirmish_allied_victory_invalid")
 	if not settings.get("full_tech_tree") is bool:
 		errors.append("skirmish_full_tech_tree_invalid")
+	if not settings["field_service_enabled"] is bool:
+		errors.append("skirmish_field_service_invalid")
 	if not _array_has_int(source_catalog.get("population_limits", []), int(settings.get("population_limit", 0))):
 		errors.append("skirmish_population_limit_invalid")
 	settings["population_limit"] = int(settings.get("population_limit", 0))
@@ -233,6 +237,7 @@ static func build_with_progress(source: Dictionary, progress_callback: Callable 
 		"victory_rules": _victory_rules(victory_entry),
 		"allied_victory_enabled": bool(settings["allied_victory_enabled"]),
 		"full_tech_tree": bool(settings["full_tech_tree"]),
+		"field_service_enabled": settings["field_service_enabled"],
 		"skirmish_settings": settings.duplicate(true),
 	}
 	if bool(settings.get("networked", false)):

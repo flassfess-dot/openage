@@ -21,7 +21,7 @@ static func _presentation_entity(entity: Dictionary, observer_team: int = 0, com
 	result.erase("formation_steering_target")
 	result.erase("formation_shared_isolated")
 	if observer_team > 0 and int(entity.get("team", 0)) != observer_team:
-		for private_key in ["production_queue", "production_progress", "command_options", "rally_point", "rally_point_set"]:
+		for private_key in ["production_queue", "production_progress", "command_options", "rally_point", "rally_point_set", "service_pack", "service_ready_tick", "service_relic", "service_healed", "service_spent"]:
 			result.erase(private_key)
 		result.get("components", {}).erase("production")
 		result.get("components", {}).erase("order")
@@ -174,7 +174,7 @@ static func _presentation_fog(fog, observer_team: int) -> Dictionary:
 static func _presentation_player_state(world, observer_team: int) -> Dictionary:
 	if observer_team <= 0:
 		return {}
-	return {
+	var state := {
 		"team": observer_team,
 		"allies": world.get_allied_teams(observer_team),
 		"mutual_allies": world.get_allied_teams(observer_team).filter(func(other_team): return world.are_teams_allied(int(other_team), observer_team)),
@@ -200,6 +200,12 @@ static func _presentation_player_state(world, observer_team: int) -> Dictionary:
 		"researched_technologies": world.get_researched_technologies(observer_team),
 		"kills": int(world.get_kills()),
 	}
+	if world.field_service_enabled:
+		state["field_service_enabled"] = true
+		state["service_heroes"] = world.expedition_field.roster(world, observer_team)
+		state["service_loot"] = world.expedition_field.visible_piles(world, observer_team)
+		state["field_caches_enabled"] = world.victory_system.rules.any(func(rule): return rule.get("field_caches", false))
+	return state
 
 
 static func _production_overview(world, observer_team: int) -> Array:

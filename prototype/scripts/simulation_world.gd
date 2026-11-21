@@ -350,6 +350,8 @@ var attack_animation_spec_cache: Dictionary = {}
 var capture_radius_by_kind: Dictionary = {}
 var civilization_by_team: Dictionary = {1: 13, 2: 13}
 var full_tech_tree_enabled := false
+var field_service_enabled := false
+var expedition_field := preload("res://scripts/expedition_field.gd").new()
 var population_by_team: Dictionary = {}
 var population_reserved_by_team: Dictionary = {}
 var population_cap_by_team: Dictionary = {}
@@ -611,6 +613,8 @@ func configure_players(definitions: Array) -> void:
 			trade_system.initialize_team(team, data_repository.runtime_metadata("trade_boat").get("trade", {}))
 
 func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = false) -> void:
+	field_service_enabled = false
+	expedition_field = preload("res://scripts/expedition_field.gd").new()
 	shutdown_derived_state()
 	entity_mutations.reset()
 	cache_epoch += 1
@@ -1295,7 +1299,7 @@ func _building_navigation_cells(building: Dictionary) -> Array:
 	if bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", []):
 		return []
 	if String(building.get("kind", "")) == "gate":
-		return gate_system.navigation_cells(building)
+		return GateSystem.navigation_cells(building)
 	return building.get("occupied_cells", [])
 
 
@@ -2593,6 +2597,17 @@ func transfer_entity_ownership(entity: Dictionary, new_team: int, converter_id: 
 			economy_system.add_population_points(new_team, int(entity["population_points_cost"]))
 	player_registry.ensure(new_team, int(civilization_by_team.get(new_team, 13)))
 	set_entity_field(entity, "team", new_team)
+	if entity.get("kind") == "gate": gate_system.policy_revision += 1
+	if entity.has("service_role"):
+		# A converted soldier keeps earned experience but loses their commission.
+		if entity.service_role == "scout": entity.components.vision.range -= 2.0
+		expedition_field.release_kit(entity, entity.pos)
+		set_entity_field(entity, "service_xp", preload("res://scripts/expedition.gd").VETERAN)
+		entity.erase("service_role")
+		entity.erase("service_name")
+		entity.erase("service_guard")
+		entity.erase("service_guard_until")
+		notify_entity_changed(entity)
 	track_conquest_entity(entity)
 	if transport_system.is_transport(entity):
 		transport_system.reconcile_ownership(entity)
@@ -3086,7 +3101,8 @@ func _mutate_apply_unit_upgrade_to_entity(entity: Dictionary, target_unit_id: in
 	var components: Dictionary = entity.get("components", {})
 	components.get("identity", {})["source_unit_id"] = target_unit_id
 	components.get("identity", {})["source_key"] = String(source.get("key", ""))
-	components.get("vision", {})["range"] = float(source.get("line_of_sight", components.get("vision", {}).get("range", 0.0)))
+	if source.has("line_of_sight"):
+		components.get("vision", {})["range"] = float(source["line_of_sight"]) + (2.0 if entity.get("service_role") == "scout" else 0.0)
 	components.get("combat", {})["attacks"] = attacks
 	components.get("combat", {})["armors"] = combat.get("armors", []).duplicate(true)
 	components.get("combat", {})["base_armor"] = float(combat.get("base_armor", 0.0))

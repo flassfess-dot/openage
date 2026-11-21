@@ -12,6 +12,7 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 	world.configure_players(definition.get("players", []))
 	world.begin_bulk_load()
 	world.reset_game(false, true)
+	world.field_service_enabled = bool(definition.get("field_service_enabled", false))
 	world.configure_map_data(map_data)
 	var obstructions: Array = definition.get("static_obstructions", []).duplicate(true)
 	obstructions.append_array(SceneryObstructions.collect(map_data.get("scenery", []) + definition.get("presentation_environment", [])))
@@ -66,11 +67,22 @@ static func apply(world, definition: Dictionary, map_data: Dictionary) -> Dictio
 			"unit":
 				var unit: Dictionary = world.add_unit(int(entity.get("team", 0)), String(entity.get("kind", "villager")), position, false)
 				_apply_source_identity(world, unit, entity)
+				if entity.has("service_record"):
+					preload("res://scripts/expedition.gd").inherit_service(world, unit, entity.service_record)
 				if bool(entity.get("selected", false)):
 					selected_ids.append(int(unit["id"]))
 			"building":
 				var building: Dictionary = world.create_building(int(entity.get("team", 0)), String(entity.get("kind", "town_center")), position, bool(entity.get("completed", true)))
 				_apply_source_identity(world, building, entity)
+				if entity.get("expedition_cache") in ["shield", "chart"] and preload("res://scripts/expedition.gd").enabled(world):
+					world.set_entity_field(building, "expedition_cache", entity.expedition_cache)
+					var surveyed: Array[Vector2i] = []
+					for xy in entity.get("survey_centres", []):
+						for dx in range(-2, 3):
+							for dy in range(-2, 3):
+								var cell := Vector2i(int(xy[0])+dx, int(xy[1])+dy)
+								if Rect2i(Vector2i.ZERO, world.map_size).has_point(cell): surveyed.append(cell)
+					world.set_entity_field(building, "survey_cells", surveyed)
 				if bool(entity.get("selected", false)):
 					selected_ids.append(int(building["id"]))
 			"resource":

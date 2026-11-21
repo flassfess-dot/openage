@@ -332,6 +332,8 @@ func _dispatch_command(command) -> Dictionary:
 			rejection_reason = simulation_world.gate_system.set_mode(command.unit_ids, command.issuer_id, String(command.params.get("mode", "")))
 		"stance":
 			rejection_reason = _apply_stance(command)
+		"field_service":
+			rejection_reason = _apply_service(command)
 		"stop", "hold":
 			rejection_reason = _apply_halt(command)
 		"diplomacy":
@@ -357,6 +359,7 @@ func _dispatch_command(command) -> Dictionary:
 				var unit = simulation_world.find_unit(int(unit_id))
 				if unit != null and (int(command.issuer_id) <= 0 or int(unit.get("team", 0)) == int(command.issuer_id)):
 					simulation_world.clear_entity_queued_orders(unit)
+					if simulation_world.field_service_enabled: simulation_world.expedition_field.pickup_orders.erase(unit.id)
 					queued_unit_ids.erase(int(unit_id))
 		return CommandResult.accepted(command, tick_index)
 	return CommandResult.rejected(command, tick_index, rejection_reason)
@@ -563,6 +566,35 @@ func _command_less(left, right) -> bool:
 	if int(left.issuer_id) != int(right.issuer_id):
 		return int(left.issuer_id) < int(right.issuer_id)
 	return String(left.command_type()) < String(right.command_type())
+
+func _apply_service(command) -> String:
+	const Service := preload("res://scripts/expedition.gd")
+	const Inventory := preload("res://scripts/expedition_inventory.gd")
+	var world = simulation_world
+	var selected := _units_for_ids(command.unit_ids, command.issuer_id)
+	if command.issuer_id <= 0 or command.unit_ids.size() != 1 or selected.size() != 1 or selected[0].hp <= 0 or world.battle_over or not world.field_service_enabled:
+		return "no_eligible_units"
+	var hero: Dictionary = selected[0]
+	var action := String(command.params.get("action", ""))
+	if Service.ROLES.has(action): return Service.appoint(world, hero, action, String(command.params.get("name", "")))
+	if not hero.has("service_role"): return "expedition_item_unavailable"
+	match action:
+		"search": return Service.search_shrine(world, hero)
+		"rally": return _rally_service_group(hero)
+		"ability": return Service.use_ability(world, hero, tick_index)
+		"pickup":
+			var reason: String = world.expedition_field.request_pickup(world, hero, int(command.params.get("pile", -1)))
+			if reason.is_empty() and world.expedition_field.pickup_orders.has(hero.id):
+				_detach_units_from_formations([hero])
+				queued_unit_ids.erase(int(hero.id))
+			return reason
+		"activate", "drop":
+			return Inventory.act(world, hero, int(command.params.get("slot", -1)), String(command.params.get("item", "")), action == "drop", tick_index)
+		"balm":
+			var slot := Inventory.balm_slot(hero)
+			if slot < 0: return "expedition_no_balm"
+			return Inventory.act(world, hero, slot, "balm", false, tick_index)
+	return "expedition_item_unavailable"
 
 func _apply_move(command) -> String:
 	var target = command.target
@@ -1317,7 +1349,9 @@ func _reconcile_formation_group(group_id: int, requested_member_ids: Variant = n
 
 func _update_group_lifecycle(group, members: Array) -> void:
 	var stranded: Array = []
+	var captain_present := false
 	for unit in members:
+		if unit.get("service_role") == "captain": captain_present = true
 		var task := String(unit.get("task", ""))
 		var slot_mode := "released" if task == "attack" else "soft"
 		if unit.get("formation_slot_mode") != slot_mode:
@@ -1328,6 +1362,12 @@ func _update_group_lifecycle(group, members: Array) -> void:
 		simulation_world.movement_system.resume_failed_formation_members(group, stranded)
 	var transition: Dictionary = FormationLifecycle.evaluate(group, members, Callable(simulation_world, "find_combat_target"))
 	if bool(transition["changed"]):
+		if captain_present and transition["current"] == FormationLifecycle.REGROUP:
+			for unit in members:
+				# Wake only stragglers without a player order to resume.
+				var home: Variant = unit.get("formation_home")
+				if unit.task == "idle" and unit.get("order_queue", []).is_empty() and home is Vector2 and Vector2(unit.pos).distance_squared_to(home) > 0.25:
+					simulation_world.assign_command_move([unit], home)
 		event_stream.emit(tick_index, "formation_state_changed", {
 			"group_id": int(group.group_id),
 			"previous_state": String(transition["previous"]),
@@ -1335,6 +1375,16 @@ func _update_group_lifecycle(group, members: Array) -> void:
 			"reason": String(transition["reason"]),
 			"revision": int(group.lifecycle_revision),
 		})
+
+
+func _rally_service_group(officer: Dictionary) -> String:
+	var group = formation_groups.get(int(officer.get("formation_group_id", -1)))
+	if group == null or officer.get("service_role") != "captain":
+		return "expedition_no_formation"
+	var members: Array = _units_for_ids(group.member_ids, int(officer.team)).filter(func(unit):
+		return unit.hp > 0 and unit.formation_group_id == group.group_id)
+	if members.size() < 2: return "expedition_no_formation"
+	return "" if _assign_formation(members, officer.pos, group.preferred_formation_type, group.forward) else "no_path"
 
 
 func _set_group_lifecycle_state(group, state: String, reason: String) -> void:
@@ -1619,6 +1669,7 @@ func _run_fixed_tick_internal(player_team: int, enemy_team: int) -> bool:
 		local_command_inbox.receive_on_owner(self, player_team)
 	_inject_replay_commands_for_current_tick()
 	tick_index += 1
+	if simulation_world.field_service_enabled: simulation_world.expedition_field.clock_tick = tick_index
 	if simulation_world.get("match_statistics") != null:
 		simulation_world.match_statistics.begin(simulation_world, tick_index - 1)
 	simulation_world.begin_event_capture()
@@ -1652,6 +1703,8 @@ func _run_fixed_tick_internal(player_team: int, enemy_team: int) -> bool:
 	if simulation_world.has_method("set_formation_groups_view"):
 		simulation_world.set_formation_groups_view(formation_groups)
 	simulation_world.advance(FIXED_STEP_SECONDS, player_team, enemy_team)
+	if simulation_world.field_service_enabled and not simulation_world.expedition_field.pickup_orders.is_empty():
+		simulation_world.expedition_field.advance_pickups(simulation_world)
 	_advance_deferred_orders()
 	var world_microseconds := Time.get_ticks_usec() - world_started if observer != null else 0
 	var formation_started := Time.get_ticks_usec() if observer != null else 0

@@ -6,16 +6,21 @@ const Commands := preload("res://scripts/commands.gd")
 const Replay := preload("res://scripts/replay_system.gd")
 const Hud := preload("res://scripts/hud_view_model.gd")
 const Checkpoint := preload("res://scripts/game_checkpoint.gd")
+const Fog := preload("res://scripts/fog_of_war.gd")
 var failures: Array[String] = []
 
 func _initialize() -> void:
 	var catalog = Catalog.new()
 	catalog.load()
 	test_build_and_upgrade(catalog)
+	test_completed_gate_route(catalog)
 	test_passage(catalog)
 	test_placement_orientation(catalog)
 	test_economy_and_large_units(catalog)
 	test_opening_checkpoint(catalog)
+	test_gate_knowledge(catalog)
+	test_checkpoint_gate_knowledge(catalog)
+	test_directional_admission(catalog)
 	test_presentations(catalog)
 	if failures.is_empty():
 		print("Gate construction, upgrade, passage, ownership, replay and presentation tests passed")
@@ -186,12 +191,54 @@ func test_placement_orientation(catalog) -> void:
 func barrier(world, axis: int = 0) -> Dictionary:
 	research(world,1,[101,11,102,13])
 	var gate: Dictionary = world.add_building(100,"gate",Vector2(12,12),1,true,{"gate_axis":axis})
+	build_barrier_walls(world, axis)
+	return gate
+
+func build_barrier_walls(world, axis: int = 0) -> void:
 	for cell in range(24):
 		if cell >= 10 and cell <= 13:
 			continue
 		world.add_building(200+cell,"wall",Vector2(cell,12) if axis == 0 else Vector2(12,cell))
 	world.add_unit(2,"clubman",Vector2(2,2),false)
-	return gate
+
+func test_completed_gate_route(catalog) -> void:
+	var world = make_world(catalog)
+	research(world, 1, [101, 11, 102, 13])
+	build_barrier_walls(world)
+	var builder: Dictionary = world.add_unit(1, "villager", Vector2(11, 9), false)
+	var unit: Dictionary = world.add_unit(1, "clubman", Vector2(12.5, 7), false)
+	var controller = Controller.new(world)
+	var build = Commands.BuildCommand.new(0, [int(builder["id"])], "gate", Vector2(12, 12))
+	controller.enqueue_command(build, true, 1)
+	controller.process_commands()
+	var gates: Array = world.get_buildings().filter(func(building): return building["kind"] == "gate")
+	check(gates.size() == 1, "build command places a foundation in the wall gap")
+	if gates.is_empty():
+		return
+	var gate: Dictionary = gates[0]
+	var planner = world.movement_system.knowledge.planner(world, 1)
+	for cell in gate["gate_passage_cells"]:
+		check(world.fog_of_war.state_at_cell(1, cell) == Fog.VISIBLE and not planner.grid.is_walkable(cell), "owner learns each visible foundation cell as blocked")
+	var physical_revision: int = world.navigation_grid.revision
+	gate["construction_required"] = 0.2
+	for step in range(200):
+		controller.advance_frame(0.05, 1, 2)
+		if gate["state"] == "complete":
+			break
+	check(gate["state"] == "complete" and gate["gate_mode"] == "auto", "villager completes the gate in Auto mode")
+	check(world.navigation_grid.revision == physical_revision and gate["gate_open_fraction"] == 0.0, "completion leaves the physical gate closed without a grid revision")
+	for cell in gate["gate_passage_cells"]:
+		check(planner.grid.is_walkable(cell) and not world.navigation_grid.is_walkable(cell), "owner can plan through each completed passage cell before the gate opens")
+	for cell in gate["gate_pier_cells"]:
+		check(not planner.grid.is_walkable(cell), "completion keeps both piers blocked for planning")
+	var destination := Vector2(12.5, 18.5)
+	controller.enqueue_command(Commands.MoveCommand.new(controller.tick_index, [int(unit["id"])], destination), true, 1)
+	controller.process_commands()
+	for step in range(350):
+		controller.advance_frame(0.05, 1, 2)
+		if Vector2(unit["pos"]).distance_to(destination) < 1.0:
+			break
+	check(Vector2(unit["pos"]).distance_to(destination) < 1.0, "owner's move command opens and crosses the newly completed gate: " + str(unit["pos"]))
 
 func test_economy_and_large_units(catalog) -> void:
 	for axis in [0,1]:
@@ -244,6 +291,116 @@ func test_opening_checkpoint(catalog) -> void:
 		restored_controller.advance_frame(0.05,1,2)
 	check(verifier.world_state_hash(world,controller.tick_index,controller) == verifier.world_state_hash(restored,restored_controller.tick_index,restored_controller),"opening and crossing continue identically after checkpoint")
 	check(Vector2(world.find_unit(int(unit["id"]))["pos"]).y > 12,"route issued together with manual opening crosses gate")
+
+func test_gate_knowledge(catalog) -> void:
+	var world = make_world(catalog)
+	var gate: Dictionary = world.add_building(100, "gate", Vector2(12,12))
+	var cell: Vector2i = gate.gate_passage_cells[0]
+	var index: int = cell.y * world.map_size.x + cell.x
+	var knowledge = world.movement_system.knowledge
+	var observer: Dictionary = world.add_unit(2, "clubman", Vector2(2,2), false)
+	world.update_fog_of_war()
+	var enemy = knowledge.planner(world, 2)
+	var unknown_revision: int = enemy.grid.revision
+	check(enemy.grid.learned[index] == 0, "hidden gate does not explore its footprint")
+	world.gate_system.set_mode([100], 1, "locked")
+	check(knowledge.planner(world, 2).grid.revision == unknown_revision, "hidden policy changes keep the observer's grid revision")
+	for gate_cell: Vector2i in gate["occupied_cells"]:
+		var gate_index: int = gate_cell.y * world.map_size.x + gate_cell.x
+		check(world.fog_of_war.state_at_cell(2, gate_cell) == Fog.UNKNOWN and enemy.grid.learned[gate_index] == 0 and enemy.grid.is_walkable(gate_cell), "black fog conceals each pier and passage cell from the planner")
+	world.fog_of_war.reveal_explored_cell(2, cell)
+	check(knowledge.planner(world, 2).grid.is_walkable(cell), "terrain-only exploration does not disclose a gate")
+	world.set_entity_field(observer, "pos", Vector2(12,10))
+	world.update_fog_of_war()
+	check(not knowledge.planner(world, 2).grid.is_walkable(cell), "visible closed gate is learned")
+	world.set_entity_field(observer, "pos", Vector2(2,2))
+	world.update_fog_of_war()
+	world.gate_system.set_mode([100], 1, "open")
+	world.gate_system.advance(1.0)
+	check(world.fog_of_war.state_at_cell(2, cell) == Fog.EXPLORED, "observer has left the gate out of sight")
+	check(not knowledge.planner(world, 2).grid.is_walkable(cell), "opening out of sight preserves last observation")
+	world.set_entity_field(observer, "pos", Vector2(12,10))
+	world.update_fog_of_war()
+	check(knowledge.planner(world, 2).grid.is_walkable(cell), "revisiting an open gate refreshes the enemy route")
+	world.set_entity_field(observer, "pos", Vector2(2,2))
+	world.update_fog_of_war()
+	world.gate_system.set_mode([100], 1, "locked")
+	world.gate_system.advance(1.0)
+	check(knowledge.planner(world, 2).grid.is_walkable(cell) and not world.navigation_grid.is_walkable(cell), "closing out of sight preserves the previously open passage")
+
+func test_checkpoint_gate_knowledge(catalog) -> void:
+	var world = make_world(catalog)
+	var gate: Dictionary = world.add_building(100, "gate", Vector2(12, 12))
+	world.add_unit(2, "clubman", Vector2(2, 2), false)
+	world.update_fog_of_war()
+	var cell: Vector2i = gate["gate_passage_cells"][0]
+	var index: int = cell.y * world.map_size.x + cell.x
+	var checkpoint := Checkpoint.capture(world, Controller.new(world), {}, {"size": world.map_size})
+	# Recreate the stale planner cell stored by older saves without revealing it.
+	var saved_grid: Dictionary = checkpoint["knowledge"][2]["grid"]
+	saved_grid["learned"][index] = 1
+	saved_grid["terrain_cells"][cell] = world.navigation_grid.terrain(cell)
+	saved_grid["terrain_ids"][cell] = world.navigation_grid.terrain_id(cell)
+	saved_grid["occupied_cells"][cell] = world.navigation_grid.occupants(cell)
+	var restored = make_world(catalog)
+	var loaded: bool = Checkpoint.restore(Checkpoint.unpack(Checkpoint.pack(checkpoint)), restored, Controller.new(restored))
+	check(loaded, "checkpoint with stale navigation knowledge loads")
+	if not loaded:
+		return
+	var planner = restored.movement_system.knowledge.planner(restored, 2)
+	check(restored.fog_of_war.state_at_cell(2, cell) == Fog.UNKNOWN and planner.grid.learned[index] == 0, "old gate cache cannot teach black fog on load")
+	check(planner.grid.is_walkable(cell) and not planner.grid.occupied_cells.has(cell), "old gate cache does not block an unexplored passage")
+
+func test_directional_admission(catalog) -> void:
+	var world = make_world(catalog)
+	var gate: Dictionary = barrier(world)
+	var cell: Vector2i = gate.gate_passage_cells[0]
+	world.add_unit(1, "clubman", Vector2(21, 4), false)
+	var origin := Vector2(12.5, 9.5)
+	var destination := Vector2(12.5, 18.5)
+	var unit: Dictionary = world.add_unit(2, "clubman", origin, false)
+	world.set_entity_field(unit, "stance", "passive")
+	world.update_fog_of_war()
+	var controller = Controller.new(world)
+	world.set_diplomacy_relation(2, 1, "ally")
+	var planner = world.movement_system.knowledge.planner(world, 2)
+	check(not planner.grid.is_walkable(cell), "unilateral visitor alliance grants no route")
+	controller.enqueue_command(Commands.MoveCommand.new(0, [int(unit["id"])], destination), true, 2)
+	controller.process_commands()
+	for step in range(60):
+		controller.advance_frame(0.05, 1, 2)
+	check(gate.gate_open_fraction == 0.0 and Vector2(unit["pos"]).y < 12.0, "uninvited visitor's move order leaves the gate closed")
+	world.set_diplomacy_relation(2, 1, "enemy")
+	world.set_diplomacy_relation(1, 2, "ally")
+	check(planner.grid.is_walkable(cell), "unilateral owner permission grants route")
+	controller.enqueue_command(Commands.MoveCommand.new(controller.tick_index, [int(unit["id"])], destination), true, 2)
+	controller.process_commands()
+	for step in range(350):
+		controller.advance_frame(0.05, 1, 2)
+		if Vector2(unit["pos"]).distance_to(destination) < 1.0:
+			break
+	check(Vector2(unit["pos"]).distance_to(destination) < 1.0, "visitor with owner permission opens and crosses the gate: " + str(unit["pos"]))
+	world.set_diplomacy_relation(1, 2, "enemy")
+	world.gate_system.set_mode([100], 1, "open")
+	world.gate_system.advance(1.0)
+	controller.enqueue_command(Commands.MoveCommand.new(controller.tick_index, [int(unit["id"])], origin), true, 2)
+	controller.process_commands()
+	for step in range(350):
+		controller.advance_frame(0.05, 1, 2)
+		if Vector2(unit["pos"]).y < 12.75:
+			break
+	check(absf(Vector2(unit["pos"]).y - 12.5) < 0.25, "enemy can enter a manually opened passage: " + str(unit["pos"]))
+	world.gate_system.set_mode([100], 1, "locked")
+	var revision: int = world.gate_system.policy_revision
+	world.gate_system.set_mode([100], 1, "locked")
+	check(world.gate_system.policy_revision == revision, "repeating a mode does not invalidate routes")
+	world.gate_system.advance(1.0)
+	check(world.navigation_grid.is_walkable(cell), "locked gate holds open for an enemy in the passage")
+	for step in range(350):
+		controller.advance_frame(0.05, 1, 2)
+		if Vector2(unit["pos"]).distance_to(origin) < 1.0 and gate.gate_open_fraction == 0.0:
+			break
+	check(Vector2(unit["pos"]).distance_to(origin) < 1.0 and gate.gate_open_fraction == 0.0, "enemy exits the passage and the locked gate closes: pos=%s target=%s open=%s task=%s reason=%s" % [unit["pos"], unit["target"], gate.gate_open_fraction, unit["task"], unit.get("diagnostic_reason", "")])
 
 func test_presentations(catalog) -> void:
 	for civilization in [1,2,3,10,13]:

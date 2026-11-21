@@ -4,9 +4,9 @@ const Gates := preload("res://scripts/gate_system.gd")
 class Owner extends RefCounted:
 	var player_registry := Registry.new()
 	var queries := 0
-	func get_allied_teams(team: int) -> Array[int]:
+	func are_teams_allied(owner: int, traveller: int) -> bool:
 		queries += 1
-		return player_registry.allied_teams(team)
+		return player_registry.are_allied(owner, traveller)
 var failures: Array[String] = []
 func check(value: bool, message: String) -> void:
 	if not value: failures.append(message)
@@ -15,13 +15,17 @@ func _initialize() -> void:
 	var gates := Gates.new(owner)
 	gates.gate_ids[10] = true
 	var original: int = gates.planning_revision(1)
+	var cold_queries := owner.queries
 	for index in range(1000): check(gates.planning_revision(1) == original, "warm policy stays equal")
-	check(owner.queries == 1, "warm movement does not rebuild the alliance array")
+	check(cold_queries > 0 and owner.queries == cold_queries, "warm movement does not rebuild admission lists")
 	owner.player_registry.set_relation(1, 2, Registry.ALLY)
+	check(gates.planning_revision(1) == original, "traveller cannot grant itself passage")
+	owner.player_registry.set_relation(2, 1, Registry.ALLY)
 	var allied: int = gates.planning_revision(1)
-	check(allied != original, "new alliance invalidates policy")
-	owner.player_registry.set_relation(1, 2, Registry.ALLY)
-	check(gates.planning_revision(1) == allied and owner.queries == 2, "unchanged relation stays cached")
+	check(allied != original, "permission from a gate owner invalidates policy")
+	var allied_queries := owner.queries
+	owner.player_registry.set_relation(2, 1, Registry.ALLY)
+	check(gates.planning_revision(1) == allied and owner.queries == allied_queries, "unchanged relation stays cached")
 	owner.player_registry.relations = {1: {1: Registry.ALLY}, 2: {2: Registry.ALLY}}
 	check(gates.planning_revision(1) == original, "checkpoint dictionary replacement invalidates policy")
 	owner.player_registry.ensure(3)

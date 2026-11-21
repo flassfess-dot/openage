@@ -118,7 +118,8 @@ func rate_for(healer: Dictionary) -> float:
 	var bonus_resource_id := int(healing.get("bonus_resource_id", -1))
 	if bonus_resource_id >= 0:
 		rate += maxf(0.0, float(world.get_resource_amount(int(healer.get("team", 0)), bonus_resource_id)))
-	return rate * maxf(0.0, float(healing.get("rate_multiplier", 1.0)))
+	var equipment := preload("res://scripts/expedition.gd").bonus_damage(healer) if healer.has("service_weapon") else 0.0
+	return rate * maxf(0.0, float(healing.get("rate_multiplier", 1.0))) + equipment
 
 
 func advance_unit_order(healer: Dictionary, delta: float, result: Dictionary) -> void:
@@ -200,6 +201,13 @@ func advance_healing(healer: Dictionary, target: Dictionary, delta: float) -> St
 	var maximum := float(target.get("max_hp", previous))
 	world.set_entity_field(target, "hp", minf(maximum, previous + rate_for(healer) * maxf(0.0, delta)))
 	var restored := maxf(0.0, float(target["hp"]) - previous)
+	if healer.has("service_xp"):
+		# Only wounds inflicted by eligible enemies can earn medical service.
+		var used := int(target.get("service_healed", 0))
+		var credit := mini(roundi(restored * 1000), int(target.get("service_spent", 0)) - used)
+		if credit > 0:
+			world.set_entity_field(target, "service_healed", used + credit)
+			preload("res://scripts/expedition.gd").award(world, healer, credit)
 	healing["restored_amount"] = float(healing.get("restored_amount", 0.0)) + restored
 	return "complete" if float(target["hp"]) + 0.0001 >= maximum else "pending"
 

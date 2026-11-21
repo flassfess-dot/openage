@@ -126,7 +126,7 @@ static func presentation(world, tick: int, observer_team: int = 0, options: Dict
 static func _world_state(world, detached: bool = true) -> Dictionary:
 	var fog = world.get_fog_of_war()
 	var economy: Dictionary = world.get_economy_snapshot()
-	return {
+	var state := {
 		"map_size": world.map_size,
 		"map_terrain_ids": world.map_terrain_ids.duplicate() if detached else world.map_terrain_ids,
 		"map_reserved_foundation_cells": world.map_reserved_foundation_cells.duplicate() if detached else world.map_reserved_foundation_cells,
@@ -177,6 +177,11 @@ static func _world_state(world, detached: bool = true) -> Dictionary:
 			"research": String(world.last_research_failure),
 		},
 	}
+	if world.field_service_enabled:
+		state["field_service_enabled"] = true
+		var field: Dictionary = world.expedition_field.capture()
+		if not field.is_empty(): state["expedition_field"] = field
+	return state
 
 
 static func _controller_state(controller) -> Dictionary:

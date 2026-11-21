@@ -22,6 +22,7 @@ const RENDER_FIELDS := [
 	"source_depleted_graphic_id", "source_depleted_asset_name", "combat_enabled", "task", "target_id",
 	"target_building_id", "resource_id", "formation_forward", "preferred_formation", "formation_group_id", "carried_amount", "construction_progress"]
 const AI_FIELDS := [
+	"service_xp", "service_role",
 	"id", "team", "kind", "entity_type", "source_unit_id", "scenario_object_id",
 	"pos", "elevation", "hp", "max_hp", "state", "task", "target_id", "target_building_id", "diagnostic_reason", "movement_domain", "combat_enabled", "retaliation_target_id", "amount",
 	"resource_type_id", "harvestable", "footprint_radius", "rally_point", "attack_range",
@@ -37,6 +38,7 @@ const VISIBLE_AI_FIELDS := [
 	"projectile_id", "blast_range", "acquisition_range", "category", "completed", "active",
 ]
 const CONTROL_FIELDS := [
+	"service_xp", "service_role", "service_name", "service_item", "service_weapon",
 	"stance", "attack_damage", "attack_range", "attack_range_min", "attack_period",
 	"carry_capacity", "carried_resource_type_id", "resource_id", "gather_stage",
 	"worker_role_source_unit_id", "dropoff_id", "diagnostic_reason",
@@ -59,7 +61,7 @@ const UI_COMPONENT_FIELDS := {
 	"cargo": ["enabled", "capacity", "passenger_ids", "allowed_domains", "garrison", "allow_artifacts", "count"],
 	"trade": ["enabled", "target_building_source_id", "stage", "selected_input_resource_type_id", "cargo_gold"],
 }
-const UI_CONTROL_FIELDS := ["stance", "attack_damage", "attack_range", "attack_range_min", "attack_period", "carry_capacity", "carried_resource_type_id", "worker_role_source_unit_id"]
+const UI_CONTROL_FIELDS := ["stance", "attack_damage", "attack_range", "attack_range_min", "attack_period", "carry_capacity", "carried_resource_type_id", "worker_role_source_unit_id", "service_xp", "service_role", "service_name", "service_item", "service_weapon"]
 
 static func redact_foreign_control(row: Dictionary, observer: int) -> void:
 	if observer > 0 and int(row.get("team", 0)) != observer:

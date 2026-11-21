@@ -113,6 +113,10 @@ static func capture(world, controller, definition: Dictionary, map: Dictionary, 
 		grid["learned"] = entry["grid"].learned.duplicate() if detached else entry["grid"].learned
 		knowledge[team] = {"grid": grid, "source_revision": entry["source_revision"], "fog_revision": entry.get("fog_revision", -1), "gate_revision": entry.get("gate_revision", -1)}
 	var world_state := _capture_fields(world, WORLD_FIELDS, detached)
+	if world.field_service_enabled:
+		world_state["field_service_enabled"] = true
+		var field: Dictionary = world.expedition_field.capture()
+		if not field.is_empty(): world_state["expedition_field"] = field
 	if not detached: world_state["units"] = world.units.duplicate(false)
 	for index in range(world_state["units"].size()):
 		var unit: Dictionary = world_state["units"][index]
@@ -189,10 +193,12 @@ static func validate(data: Dictionary) -> bool:
 		if not data["world"].has(field): return false
 	var size: Variant = data["world"]["map_size"]
 	if not size is Vector2i or size.x <= 0 or size.y <= 0 or size.x > 1024 or size.y > 1024: return false
+	if data.world.has("expedition_field") and not preload("res://scripts/expedition_field.gd").valid_state(data.world.expedition_field, size): return false
 	for group in ["units", "resource_nodes", "buildings", "static_obstructions"]:
 		if not data["world"][group] is Array: return false
 		for entity in data["world"][group]:
 			if not entity is Dictionary: return false
+			if group == "units" and entity.has("service_pack") and not preload("res://scripts/expedition_inventory.gd").valid_pack(entity.service_pack): return false
 			if group == "static_obstructions":
 				if not entity.get("pos") is Vector2 and not entity.get("occupied_cells") is Array: return false
 			elif not entity.get("pos") is Vector2: return false
@@ -206,6 +212,11 @@ static func validate(data: Dictionary) -> bool:
 		for field in SYSTEM_FIELDS[system]:
 			if system == "terrain_elevation" and field == "river_shape": continue # Optional in checkpoints predating curved river banks.
 			if not data["systems"][system].has(field): return false
+	if data.world.get("field_service_enabled", false):
+		var passengers: Variant = data.systems.transport_system.embarked_units
+		if not passengers is Dictionary: return false
+		for unit in passengers.values():
+			if not unit is Dictionary or (unit.has("service_pack") and not preload("res://scripts/expedition_inventory.gd").valid_pack(unit.service_pack)): return false
 	var farm_reserves: Variant = data["systems"]["economy_system"].get("farm_reseed_queues_by_team", {})
 	var intents: Variant=data["systems"]["ai_distress_system"].get("team_intents")
 	if not intents is Dictionary or intents.size()>16: return false
@@ -263,6 +274,7 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	if not validate(data) or world.map_size != data["world"]["map_size"]: return false
 	world.resource_component_pool.clear()
 	_restore_fields(world, data["world"], WORLD_FIELDS)
+	world.field_service_enabled = bool(data["world"].get("field_service_enabled", false))
 	# Derived cache cursors never survive a state replacement, including a
 	# restore into the same objects with coincident saved revisions.
 	world.cache_epoch += 1
@@ -355,15 +367,17 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	fog.navigation_newly_explored_by_player.clear()
 	fog.presentation_dirty_tracked_players.clear()
 	for team in data["knowledge"]:
+		fog.track_path_knowledge(int(team))
 		var saved: Dictionary = data["knowledge"][team]
 		var grid := KnowledgeGrid.new(world.map_size)
 		_restore_fields(grid, saved["grid"], GRID_FIELDS)
 		grid.learned = saved["grid"]["learned"]
 		grid.terrain_restrictions = world.navigation_grid.terrain_restrictions
+		grid.discard_unexplored_cells(fog.states_by_player[int(team)])
 		var planner := Pathfinder.new(grid)
 		planner.set_native_enabled(world.pathfinder.native_enabled)
-		world.movement_system.knowledge.entries[team] = {"source": world.navigation_grid, "grid": grid, "planner": planner, "source_revision": saved["source_revision"], "fog_revision": saved["fog_revision"], "gate_revision": saved.get("gate_revision", -1)}
-		fog.track_path_knowledge(int(team))
+		# Recheck visible passages under the current gate policy after loading.
+		world.movement_system.knowledge.entries[team] = {"source": world.navigation_grid, "grid": grid, "planner": planner, "source_revision": saved["source_revision"], "fog_revision": saved["fog_revision"], "gate_revision": -1}
 	world.simulation_rng.state = int(data["rng_state"])
 	world.entity_id_sequence.reset(int(data["next_entity_id"]))
 	world.navigation_service.reset()
@@ -371,6 +385,9 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	controller.reset_timing()
 	var saved: Dictionary = data["controller"]
 	controller.tick_index = int(saved["tick"])
+	if world.field_service_enabled:
+		world.expedition_field.restore(world, data["world"].get("expedition_field", {}))
+		world.expedition_field.clock_tick = controller.tick_index
 	controller.next_command_sequence = int(saved["next_command_sequence"])
 	controller.next_formation_group_id = int(saved["next_formation_group_id"])
 	controller.formation_groups.clear()

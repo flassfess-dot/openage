@@ -3,6 +3,7 @@ class_name RoRNavigationGrid
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const ChangeJournal := preload("res://scripts/cell_change_journal.gd")
 const Footprint := preload("res://scripts/footprint.gd")
+const GateSystem := preload("res://scripts/gate_system.gd")
 static var native_masks_enabled := true
 static var mask_kernel: Variant = ClassDB.instantiate("RoRReadModelKernel") if ClassDB.class_exists("RoRReadModelKernel") else null
 
@@ -227,8 +228,8 @@ func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []
 		if bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", []):
 			continue
 		var building_cells: Array = building.get("occupied_cells", [])
-		if String(building.get("kind", "")) == "gate" and String(building.get("state", "")) == "complete" and float(building.get("gate_open_fraction", 0.0)) >= 0.95:
-			building_cells = building.get("gate_pier_cells", [])
+		if building.get("kind") == "gate":
+			building_cells = GateSystem.navigation_cells(building)
 		_append_occupants(desired, building_cells, "building", int(building.get("id", -1)))
 	for obstruction_value in static_obstructions:
 		var obstruction: Dictionary = obstruction_value

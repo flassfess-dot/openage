@@ -3,6 +3,7 @@ extends RefCounted
 
 const IconRegistry := preload("res://scripts/interface_icon_registry.gd")
 const GateCatalog := preload("res://scripts/gate_catalog.gd")
+const Expedition := preload("res://scripts/expedition.gd")
 const RoRCommands := preload("res://scripts/commands.gd")
 const RESOURCE_NAMES := {0: "food", 1: "wood", 2: "stone", 3: "gold"}
 const FORMATIONS := [
@@ -141,6 +142,15 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 		return model
 	var unit_count := selected.filter(func(entity): return _category(entity) == "unit").size()
 	if unit_count == selected.size() and unit_count > 0:
+		if unit_count == 1 and selected[0].has("service_xp"):
+			var soldier: Dictionary = selected[0]
+			if int(soldier.service_xp) >= Expedition.VETERAN and not soldier.has("service_role"):
+				model.commands.append({"type":"unit_action", "id":"appoint_officer", "label":"Назначить командира", "short_label":"Чин", "icon_kind":"command", "icon_id":6, "enabled":disabled_reason.is_empty(), "reason":disabled_reason})
+			elif soldier.has("service_role"):
+				if player_state.get("field_caches_enabled", false):
+					model.commands.append({"type":"unit_action", "id":"search_shrine", "label":"Искать находку у святилища", "short_label":"Поиск", "icon_kind":"technology", "icon_id":46, "enabled":disabled_reason.is_empty(), "reason":disabled_reason})
+			if soldier.get("service_role") == "captain":
+				model.commands.append({"type":"unit_action", "id":"service_rally", "label":"Собрать свой строй у командира", "short_label":"Сбор", "icon_kind":"command", "icon_id":7, "enabled":disabled_reason.is_empty(), "reason":disabled_reason})
 		var leader_stance := String(selected[0].get("stance", "aggressive"))
 		var next_stance := RoRCommands.next_stance(leader_stance)
 		for action_value in [
@@ -448,8 +458,10 @@ func _selection_input_signature(selected: Array, observer_team: int) -> int:
 	var complete_gates := true
 	var gate_modes: Dictionary = {}
 	var first_worker: Dictionary = {}
+	var group_officer := ""
 	for entity_value in selected:
 		var entity: Dictionary = entity_value
+		if group_officer.is_empty() and entity.has("service_role"): group_officer = String(entity.get("service_name",""))
 		var kind := String(entity.get("kind", ""))
 		var category := _category(entity)
 		var components: Dictionary = entity.get("components", {})
@@ -474,7 +486,7 @@ func _selection_input_signature(selected: Array, observer_team: int) -> int:
 		if first_worker.is_empty() and category == "unit" and _is_worker(entity) and String(entity.get("movement_domain", "land")) == "land": first_worker = entity
 	var leader_signature := _entity_input_signature(leader)
 	var worker_signature := 0 if first_worker.is_empty() or is_same(first_worker, leader) else _entity_input_signature(first_worker)
-	return hash([members, leader_signature, worker_signature, homogeneous, same_category, unit_count, foreign, all_transports, any_combat, loaded_transport, ground_attackers, traders, all_gates, complete_gates, gate_modes])
+	return hash([members, leader_signature, worker_signature, homogeneous, same_category, unit_count, foreign, all_transports, any_combat, loaded_transport, ground_attackers, traders, all_gates, complete_gates, gate_modes, group_officer])
 
 
 func _entity_input_signature(entity: Dictionary) -> int:
@@ -498,6 +510,7 @@ func _entity_input_signature(entity: Dictionary) -> int:
 		String(entity.get("task", "")),
 		String(entity.get("state", "")),
 		String(entity.get("stance", "")),
+		entity.get("service_xp"), entity.get("service_role"), entity.get("service_item"), entity.get("service_name"), entity.get("service_weapon"),
 		String(entity.get("gate_mode", "")),
 		float(entity.get("carried_amount", 0.0)),
 		float(entity.get("carry_capacity", 0.0)),
@@ -610,6 +623,12 @@ func _selection_model(selected: Array, player_state: Dictionary, locale: String)
 	var ownership: Dictionary = leader.get("components", {}).get("ownership", {})
 	var civilization_id := int(ownership.get("civilization_id", runtime_catalog.get("default_civilization_id", 13)))
 	var combat: Dictionary = leader.get("components", {}).get("combat", {})
+	var officer_label := ""
+	if selected.size() > 1 and player_state.get("field_service_enabled", false):
+		for member in selected:
+			if member.has("service_role"):
+				officer_label = String(member.get("service_name", ""))
+				break
 	var kind := String(leader.get("kind", ""))
 	var show_hp := not (category == "resource" and kind in ["berries", "shore_fish", "deep_fish"])
 	var show_combat_stats := category != "building" or kind in ["tower", "mirror_tower"]
@@ -620,13 +639,18 @@ func _selection_model(selected: Array, player_state: Dictionary, locale: String)
 			"id": int(leader.get("id", -1)),
 			"kind": String(leader.get("kind", "")),
 			"name": _name_for_kind(String(leader.get("kind", "")), leader, locale),
+			"service_xp": int(leader.get("service_xp", -1)),
+			"service_name": String(leader.get("service_name", "")),
+			"service_role": String(leader.get("service_role", "")),
+			"service_item": String(leader.get("service_item", "")),
+			"group_officer": officer_label,
 			"civilization_id": civilization_id,
 			"civilization_name": _civilization_name(civilization_id, locale),
 			"hp": roundi(float(leader.get("hp", 0.0))),
 			"max_hp": roundi(float(leader.get("max_hp", 0.0))),
 			"show_hp": show_hp,
 			"show_combat_stats": show_combat_stats,
-			"attack": roundi(float(leader.get("attack_damage", _largest_amount(combat.get("attacks", []))))),
+			"attack": roundi(float(leader.get("attack_damage", _largest_amount(combat.get("attacks", [])))) + (Expedition.bonus_damage(leader) if leader.get("combat_enabled", false) else 0.0)),
 			"armor": maxi(0, roundi(maxf(float(combat.get("base_armor", 0.0)), _largest_amount(combat.get("armors", []))))),
 			"task": String(leader.get("task", leader.get("state", ""))),
 			"stance": String(leader.get("stance", "")),

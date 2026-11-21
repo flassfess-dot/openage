@@ -21,6 +21,7 @@ func _initialize() -> void:
 			assert_true(bool(built.get("valid", false)), "networked two-player lobby builds a deterministic match: %s" % [built.get("errors", [])])
 			if bool(built.get("valid", false)):
 				assert_true(bool(built["definition"].get("networked", false)), "match definition distinguishes remote participants from autonomous AI")
+				assert_equal(built["definition"].get("field_service_enabled"), true, "a new random-map lobby enables field service")
 				assert_equal(String(built["definition"]["players"][1].get("controller", "")), "remote", "remote player is not assigned an AI planner")
 				assert_equal(int(built["definition"]["players"][1].get("population_limit", 0)), 75, "lobby population setting reaches the match")
 				assert_equal(String(built["definition"].get("victory_rules", [])[0].get("type", "")), "conquest", "lobby victory setting reaches the match")
@@ -29,6 +30,14 @@ func _initialize() -> void:
 			var normalized: Dictionary = SkirmishSettings.normalize(invited.settings)["settings"]
 			assert_equal(typeof(normalized["landscape_version"]), TYPE_INT, "JSON invitations normalize the recipe version to an integer")
 			assert_equal(GameSaveArchive.fingerprint(invited.build_match().get("definition", {})), GameSaveArchive.fingerprint(built.get("definition", {})), "invitation produces the same deterministic match fingerprint")
+			assert_equal(lobby.configure(count, {"field_service_enabled": false}), "", "host can turn off field service")
+			assert_equal(invited.load_invite(lobby.invite_code()), "", "a classic match invitation loads")
+			assert_equal(invited.settings.get("field_service_enabled"), false, "joiner inherits the host's opt-out")
+			var old_settings: Dictionary = lobby.settings.duplicate(true)
+			old_settings.erase("field_service_enabled")
+			var old_invite := "ROR1-" + Marshalls.raw_to_base64(JSON.stringify(old_settings).to_utf8_buffer())
+			assert_equal(invited.load_invite(old_invite), "", "older invitations remain valid")
+			assert_equal(invited.settings.get("field_service_enabled"), false, "older invitations without the rule keep classic play")
 		assert_equal(lobby.set_slot(count, 13, count, "ai"), "lobby_slot_invalid", "AI cannot silently occupy a remote frame without host authority")
 		assert_equal(lobby.participant_teams().size(), count, "rejected AI slot leaves all network participants intact")
 	var invalid := MultiplayerLobby.new()

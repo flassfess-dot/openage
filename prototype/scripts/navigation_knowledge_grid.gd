@@ -1,6 +1,8 @@
 class_name RoRNavigationKnowledgeGrid
 extends "res://scripts/navigation_grid.gd"
 
+const Fog := preload("res://scripts/fog_of_war.gd")
+
 var learned := PackedByteArray()
 
 
@@ -12,6 +14,33 @@ func _init(world_size: Vector2i) -> void:
 	elevation_cells.clear()
 	slope_cells.clear()
 	learned.resize(world_size.x * world_size.y)
+
+
+func discard_unexplored_cells(states: PackedByteArray) -> void:
+	var forgotten: Array[Vector2i] = []
+	for cell: Vector2i in terrain_cells:
+		if states[cell.y * size.x + cell.x] == Fog.UNKNOWN:
+			forgotten.append(cell)
+	if forgotten.is_empty():
+		return
+	# Older checkpoints could store gate cells that were still under black fog.
+	# Copy the restored tables before removing this knowledge.
+	terrain_cells = terrain_cells.duplicate()
+	terrain_ids = terrain_ids.duplicate()
+	elevation_cells = elevation_cells.duplicate()
+	slope_cells = slope_cells.duplicate()
+	occupied_cells = occupied_cells.duplicate()
+	_change_log = _change_log.duplicate(true)
+	for cell in forgotten:
+		learned[cell.y * size.x + cell.x] = 0
+		terrain_cells.erase(cell)
+		terrain_ids.erase(cell)
+		elevation_cells.erase(cell)
+		slope_cells.erase(cell)
+		occupied_cells.erase(cell)
+		_record_change(cell)
+	revision += 1
+	surface_revision += 1
 
 
 func is_walkable_for(cell: Vector2i, domain: String = "land", restriction_id: int = -1) -> bool:

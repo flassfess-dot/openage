@@ -63,6 +63,7 @@ func board(passengers: Array, transport: Dictionary) -> String:
 	for passenger_value in ordered:
 		var passenger: Dictionary = passenger_value
 		world.halt_unit(passenger, "board_transport")
+		if world.field_service_enabled: world.expedition_field.pickup_orders.erase(passenger.id)
 		world.set_entity_field(passenger, "selected", false)
 		world.set_entity_field(passenger, "transported_by_id", int(transport.get("id", -1)))
 		world.set_entity_field(passenger, "cargo_state", "embarked")
@@ -478,6 +479,10 @@ func destroy_cargo(transport: Dictionary) -> void:
 		var passenger: Variant = embarked_units.get(passenger_id)
 		if passenger == null:
 			continue
+		if world.field_service_enabled and passenger.has("service_role"):
+			var shore: Vector2i = world.pathfinder.nearest_walkable(Vector2i(Vector2(transport.pos).floor()), "land", int(passenger.get("terrain_restriction", -1)))
+			var drop_pos := Vector2(shore) + Vector2(0.5, 0.5) if world.navigation_grid.contains(shore) else Vector2(passenger.pos)
+			world.expedition_field.release_kit(passenger, drop_pos)
 		world.set_entity_field(passenger, "hp", 0.0)
 		world.track_conquest_entity(passenger)
 		world.set_entity_field(passenger, "death_phase", "removed")

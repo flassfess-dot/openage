@@ -113,6 +113,44 @@ func needs_decision(next_tick: int) -> bool:
 	return enabled and (last_economic_tick < 0 or next_tick - last_economic_tick >= economic_interval or (military_enabled and (last_military_tick < 0 or next_tick - last_military_tick >= military_interval)))
 
 
+func _service_commands(snapshot: Dictionary, tick: int) -> Array:
+	const Service := preload("res://scripts/expedition.gd")
+	var state: Dictionary = snapshot.player_state
+	var orders := []
+	var occupied := {}
+	for hero in state.get("service_heroes", []):
+		if hero.team != team: continue
+		occupied[hero.role] = true
+		if hero.carrier >= 0: continue
+		var ids: Array[int] = [int(hero.id)]
+		if hero.hp < hero.max_hp * 0.6 and hero.kit.any(func(stack): return stack.get("item") == "balm"):
+			orders.append(Commands.ServiceCommand.new(tick, ids, "balm"))
+		elif tick >= int(hero.ready):
+			var use_skill: bool = hero.role == "scout" and tick % 300 < military_interval
+			for unit in snapshot.get("units", []):
+				if unit.hp <= 0 or Vector2(unit.pos).distance_squared_to(hero.pos) > 16: continue
+				if hero.role == "medic" and unit.team == team and unit.has("service_xp") and unit.hp < unit.max_hp: use_skill = true
+				if hero.role == "captain" and unit.team > 0 and unit.team != team and unit.team not in state.get("allies", []): use_skill = true
+			if use_skill: orders.append(Commands.ServiceCommand.new(tick, ids, "ability"))
+		for pile in state.get("service_loot", []):
+			if Vector2(hero.pos).distance_squared_to(pile.pos) <= 2.7:
+				orders.append(Commands.ServiceCommand.new(tick, ids, "pickup", "", {"pile":pile.id}))
+				break
+		for i in range(3, hero.kit.size()):
+			var item := String(hero.kit[i].get("item", ""))
+			if (item == "iron" and hero.kit[0].get("item") != item) or (item == "scales" and hero.kit[1].get("item") != item):
+				orders.append(Commands.ServiceCommand.new(tick, ids, "activate", "", {"slot":i, "item":item}))
+				break
+	for unit in snapshot.get("units", []):
+		if unit.team != team or unit.hp <= 0 or unit.has("service_role") or int(unit.get("service_xp", -1)) < Service.VETERAN: continue
+		var preference := ["medic", "scout", "captain"] if unit.kind == "priest" else ["scout", "captain", "medic"] if "ranged" in unit.get("behavior_tags", []) else ["captain", "scout", "medic"]
+		for role in preference:
+			if occupied.has(role): continue
+			occupied[role] = true
+			orders.append(Commands.ServiceCommand.new(tick, [int(unit.id)], role, {"captain":"Начальник стражи", "scout":"Следопыт", "medic":"Лекарь стражи"}[role]))
+			break
+	return orders
+
 func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 	if not enabled:
 		return []
@@ -124,6 +162,8 @@ func collect_commands(snapshot: Dictionary, next_tick: int) -> Array:
 		return []
 	var navigation_reserved := navigation_policy.reserved_units(snapshot, next_tick)
 	var result: Array = navigation_policy.recovery_commands(snapshot, next_tick, navigation_reserved)
+	if snapshot.get("player_state", {}).get("field_service_enabled", false) and (last_military_tick < 0 or next_tick - last_military_tick >= military_interval):
+		result.append_array(_service_commands(snapshot, next_tick))
 	if profile == "source_campaign_v1":
 		var recovery_count := result.size()
 		var economic_reserved: Dictionary = navigation_reserved.duplicate()

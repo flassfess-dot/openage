@@ -18,6 +18,7 @@ func configure_from_skirmish(requested_settings: Dictionary) -> String:
 	if count < 2 or count > 8:
 		return "lobby_player_count_invalid"
 	settings = requested_settings.duplicate(true)
+	settings["field_service_enabled"] = requested_settings.get("field_service_enabled", SkirmishSettings.DEFAULT_FIELD_SERVICE_ENABLED)
 	settings["networked"] = true
 	player_count = count
 	for slot_value in settings["players"]:
@@ -42,6 +43,9 @@ func load_invite(code: String) -> String:
 	var decoded: Variant = JSON.parse_string(bytes.get_string_from_utf8())
 	if not decoded is Dictionary or not bool(decoded.get("networked", false)):
 		return "lobby_invite_invalid"
+	# Before the rule became the default, invitations omitted it for classic matches.
+	if not decoded.has("field_service_enabled"):
+		decoded["field_service_enabled"] = false
 	return configure_from_skirmish(decoded)
 
 
@@ -51,7 +55,7 @@ func configure(requested_player_count: int, options: Dictionary = {}) -> String:
 	player_count = requested_player_count
 	settings = SkirmishSettings.default_settings()
 	settings["networked"] = true
-	for key in ["map_size_id", "map_type_id", "seed", "resource_preset_id", "starting_age_id", "population_limit", "victory_mode_id", "allied_victory_enabled", "full_tech_tree", "ai_difficulty_id"]:
+	for key in ["map_size_id", "map_type_id", "seed", "resource_preset_id", "starting_age_id", "population_limit", "victory_mode_id", "allied_victory_enabled", "full_tech_tree", "field_service_enabled", "ai_difficulty_id"]:
 		if options.has(key):
 			settings[key] = options[key]
 	var slots: Array = settings["players"]

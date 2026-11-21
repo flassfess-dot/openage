@@ -38,6 +38,8 @@ static func normalize(source: Dictionary) -> Dictionary:
 		if vertex_levels.size() != (map["size"].x + 1) * (map["size"].y + 1):
 			errors.append("fixed_map_vertex_size_mismatch")
 	result["map"] = map
+	if result.has("field_service_enabled") and not result.field_service_enabled is bool:
+		errors.append("field_service_setting_invalid")
 	if result.has("full_tech_tree") and not result["full_tech_tree"] is bool:
 		errors.append("match_full_tech_tree_invalid")
 

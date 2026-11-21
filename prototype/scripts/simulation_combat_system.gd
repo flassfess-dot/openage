@@ -443,7 +443,8 @@ func apply_attack_frame_event(unit: Dictionary, enemy: Dictionary, player_team: 
 			if not friendly_fire and world.are_teams_allied(int(unit.get("team", 0)), int(candidate.get("team", 0))):
 				continue
 			var impact_damage := CombatRules.entity_damage(unit, candidate)
-			_apply_impact_damage(candidate, impact_damage, source_context, -1, player_team)
+			if unit.has("service_weapon"): impact_damage += preload("res://scripts/expedition.gd").bonus_damage(unit)
+			impact_damage = _apply_impact_damage(candidate, impact_damage, source_context, -1, player_team)
 			if int(candidate.get("id", -1)) == int(enemy.get("id", -2)):
 				damage = impact_damage
 	world.set_entity_field(unit, "cooldown", maxf(0.1, unit["attack_period"]))
@@ -520,6 +521,10 @@ func spawn_projectile(attacker: Dictionary, target: Dictionary, lateral_offset: 
 		"hit_target_ids": [],
 		"damage": 0.0,
 	}
+	if world.field_service_enabled and attacker.get("kind") == "tower":
+		projectile["service_crew"] = preload("res://scripts/expedition.gd").garrison_shooters(world, attacker)
+	if attacker.has("service_weapon"):
+		projectile["service_damage"] = preload("res://scripts/expedition.gd").bonus_damage(attacker)
 	projectiles.append(projectile)
 	world.emit_domain_event("entity_created", {
 		"entity_id": projectile_entity_id,
@@ -549,12 +554,12 @@ func update_projectiles(delta: float, player_team: int) -> void:
 			projectile["hit"] = true
 			projectile["direct_hit"] = bool(projectile.get("direct_hit", false)) or int(candidate.get("id", -1)) == int(projectile.get("target_id", -2))
 			projectile["hit_target_ids"].append(int(candidate.get("id", -1)))
-			projectile["damage"] = float(projectile.get("damage", 0.0)) + impact_damage
-			_apply_impact_damage(candidate, impact_damage, {
+			impact_damage = _apply_impact_damage(candidate, impact_damage, {
 				"entity_id": int(projectile.get("source_id", -1)),
 				"team": int(projectile.get("team", 0)),
 				"is_worker": bool(projectile.get("source_is_worker", false)),
-			}, int(projectile["id"]), player_team)
+			}, int(projectile["id"]), player_team, projectile.get("service_crew", []))
+			projectile["damage"] = float(projectile.get("damage", 0.0)) + impact_damage
 		_destroy_trees_at_impact(projectile)
 		projectile["impact_position"] = Vector2(projectile["pos"])
 		if world.capture_domain_events:
@@ -606,9 +611,13 @@ func _impact_candidates(projectile: Dictionary, target: Variant) -> Array:
 	return [target] if Vector2(projectile["pos"]).distance_to(Vector2(target["pos"])) <= collision_radius else []
 
 
-func _apply_impact_damage(target: Dictionary, damage: float, source_context: Dictionary, projectile_id: int, player_team: int) -> void:
+func _apply_impact_damage(target: Dictionary, damage: float, source_context: Dictionary, projectile_id: int, player_team: int, crew: Array = []) -> float:
 	var source_id := int(source_context.get("entity_id", -1))
 	var source_team := int(source_context.get("team", 0))
+	if world.field_service_enabled:
+		if target.has("service_xp"):
+			damage = preload("res://scripts/expedition.gd").incoming_damage(target, damage, world.expedition_field.clock_tick)
+		preload("res://scripts/expedition.gd").credit_hit(world, target, damage, source_id, source_team, crew)
 	world.set_entity_field(target, "hp", target["hp"] - (damage))
 	world.set_entity_field(target, "retaliation_target_id", source_id)
 	world.refresh_unit_activity(target)
@@ -633,6 +642,7 @@ func _apply_impact_damage(target: Dictionary, damage: float, source_context: Dic
 		if source_team == player_team and not world.are_teams_allied(source_team, int(target.get("team", 0))):
 			world.kills += 1
 	EntityComponents.sync_dynamic(target)
+	return damage
 
 
 func _can_damage(projectile: Dictionary, candidate: Dictionary) -> bool:
@@ -646,4 +656,4 @@ func _can_damage(projectile: Dictionary, candidate: Dictionary) -> bool:
 func _damage_at_impact(projectile: Dictionary, target: Dictionary) -> float:
 	var multiplier := 1.5 if float(target.get("elevation", 0.0)) < float(projectile.get("origin_elevation", 0.0)) else 1.0
 	var attacks: Array = projectile.get("attacks", [])
-	return CombatRules.damage_from_attacks(attacks, target, multiplier, float(projectile.get("base_damage", 1.0)))
+	return CombatRules.damage_from_attacks(attacks, target, multiplier, float(projectile.get("base_damage", 1.0))) + float(projectile.get("service_damage", 0.0))

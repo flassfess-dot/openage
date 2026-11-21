@@ -79,6 +79,13 @@ const MATCHES := [
 		"path": "",
 		"kind": "custom_skirmish",
 	},
+	{
+		"id": "expedition_outpost",
+		"title": "Боевой путь · Застава и побережье",
+		"subtitle": "Две главы о пограничном отряде. Развивайте героев, собирайте трофеи и снарядите троих выживших для следующего похода.",
+		"path": "res://data/matches/expedition_outpost.json",
+		"kind": "expedition",
+	},
 ]
 
 

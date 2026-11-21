@@ -7,6 +7,7 @@ param(
     [string]$OutputRoot = "",
     [switch]$Rendered,
     [switch]$Competitive,
+    [switch]$ClassicSkirmish,
     [switch]$CombatFixture,
     [switch]$NavalFixture,
     [switch]$RenderedLoadFixture
@@ -51,6 +52,7 @@ else { $taskArguments += "--headless" }
 $taskArguments += @("--", "--verify-packaged-startup", "--require-release", "--output=$taskReport", "--map-size=$MapSize", "--map-type=$MapType")
 if ($Rendered) { $taskArguments += "--capture-rendered-startup" }
 if ($Competitive) { $taskArguments += "--competitive-ai" }
+if ($ClassicSkirmish) { $taskArguments += "--classic-skirmish" }
 if ($CombatFixture) { $taskArguments += "--combat-fixture" }
 if ($NavalFixture) { $taskArguments += "--naval-fixture" }
 if ($RenderedLoadFixture) { $taskArguments += "--rendered-load-fixture" }
@@ -103,6 +105,7 @@ $taskVerifiedArtifacts = [ordered]@{
     passed = $true
     rendered = [bool]$Rendered
     competitive = [bool]$Competitive
+    classic_skirmish = [bool]$ClassicSkirmish
     map_type = $MapType
     rendered_load_fixture = [bool]$RenderedLoadFixture
     completed_utc = [DateTime]::UtcNow.ToString("o")

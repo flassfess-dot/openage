@@ -179,6 +179,9 @@ func complete_foundation(building: Dictionary) -> void:
 	activate_harvestable_building(building)
 	EntityComponents.sync_dynamic(building)
 	activate_building_completion(building)
+	if building.get("kind") == "gate":
+		# The planner can use the completed passage before the leaves open.
+		world.gate_system.policy_revision += 1
 	world.sync_building_victory_objective(building)
 	world.refresh_building_connectivity()
 	var building_id := int(building["id"])

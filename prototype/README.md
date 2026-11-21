@@ -48,6 +48,12 @@ Controls:
 - `Del`: delete selected own objects
 - `Esc`: cancel targeting or return from construction, then open the match menu; inside it, go back or resume
 
+**Боевой путь** is an optional two-chapter expedition under Single Player →
+Campaigns. From a prepared checkout, `Боевой путь.cmd` launches chapter I
+directly. New random skirmishes enable combat experience and commanders by
+default. Clear **Боевой опыт и командиры** in the match settings to play with
+classic rules. See [rules and controls](docs/expedition.md).
+
 The match menu has separate save/load dialogs, audio/camera/window/game-speed
 settings, achievements, population/age TimeLine, scenario instructions and help.
 Loading, overwriting, restarting, resigning and leaving require confirmation.

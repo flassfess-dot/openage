@@ -15,6 +15,7 @@ func _initialize() -> void:
 	var catalog = ResourceCatalog.new()
 	catalog.load_generated_data()
 	test_round_trip_and_identical_state(catalog)
+	test_field_service_replay(catalog)
 	test_oblique_formation_vector_round_trip()
 	test_same_tick_command_order(catalog)
 	test_issue_tick_preserves_autonomous_sequence(catalog)
@@ -64,6 +65,32 @@ func test_round_trip_and_identical_state(catalog) -> void:
 	var second_hash: String = loaded.world_state_hash(second_world, second_controller.tick_index)
 	assert_equal(second_hash, first_hash, "same seed and commands produce identical state hash")
 	assert_equal(second_controller.last_replay_mismatch, "", "recorded per-tick hashes match playback")
+
+
+func test_field_service_replay(catalog) -> void:
+	var matches := [setup_match(catalog, 993), setup_match(catalog, 993)]
+	for fixture in matches:
+		fixture.world.field_service_enabled = true
+		var soldier: Dictionary = fixture.world.find_unit(fixture.player_ids[0])
+		fixture.world.set_entity_field(soldier, "service_xp", 36000)
+		fixture.world.expedition_field.place(soldier.pos, ["point", "iron", "balm"])
+		fixture.world.update_fog_of_war()
+	var first = matches[0].controller
+	var recorder = first.start_recording(993)
+	first.enqueue_command(Commands.ServiceCommand.new(1, [int(matches[0].player_ids[0])], "scout", "Луций"), true, 1)
+	var ids: Array[int] = [int(matches[0].player_ids[0])]
+	first.enqueue_command(Commands.ServiceCommand.new(1, ids, "pickup", "", {"pile":1}), true, 1)
+	first.enqueue_command(Commands.ServiceCommand.new(1, ids, "activate", "", {"slot":3,"item":"iron"}), true, 1)
+	first.enqueue_command(Commands.ServiceCommand.new(1, ids, "drop", "", {"slot":4,"item":"balm"}), true, 1)
+	first.enqueue_command(Commands.ServiceCommand.new(1, ids, "ability"), true, 1)
+	first.advance_frame(0.05, 1, 2)
+	var second = matches[1].controller
+	assert_true(second.load_replay(recorder.to_json()), "expedition recording loads")
+	assert_true(second.replay_until_tick(first.tick_index, 1, 2), "officer commission replays to exact fixed tick")
+	assert_equal(matches[1].world.find_unit(matches[1].player_ids[0]).get("service_name"), "Луций", "replayed officer was actually promoted")
+	assert_equal(matches[1].world.find_unit(ids[0]).get("service_weapon"), "iron", "pickup and gear swap replay through authoritative commands")
+	assert_equal(matches[1].world.expedition_field.piles.get(2, {}).get("items"), ["balm"], "dropping one stack member survives replay")
+	assert_equal(recorder.world_state_hash(matches[0].world, first.tick_index), recorder.world_state_hash(matches[1].world, second.tick_index), "identical expedition worlds after playback")
 
 
 func test_oblique_formation_vector_round_trip() -> void:

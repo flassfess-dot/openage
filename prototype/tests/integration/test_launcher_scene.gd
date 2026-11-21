@@ -38,7 +38,7 @@ func _initialize() -> void:
 	assert_equal(launcher.current_screen, "single_player", "leaving saved games returns to the menu that opened it")
 
 	launcher._show_campaign_menu()
-	assert_equal(launcher.campaign_selector.item_count, 10, "campaign screen lists the tutorial and nine campaign missions")
+	assert_equal(launcher.campaign_selector.item_count, 11, "campaign screen includes the new expedition")
 	launcher.campaign_selector.select(1)
 	launcher._refresh_campaign_selection(1)
 	assert_true(launcher.description_label.text.contains("Первая миссия"), "campaign selection exposes its launch description")
@@ -66,6 +66,11 @@ func _initialize() -> void:
 	launcher._select_metadata(population_selector, 500)
 	var normalized := SkirmishSettings.normalize(launcher._settings_from_controls())
 	assert_true(bool(normalized.get("valid", false)), "launcher settings satisfy the skirmish contract")
+	var service: CheckBox = launcher.setting_controls["field_service_enabled"]
+	assert_true(service.button_pressed, "field service is checked on opening random map setup")
+	assert_equal(normalized["settings"].get("field_service_enabled"), true, "starting without touching the checkbox enables field service")
+	service.button_pressed = false
+	assert_equal(SkirmishSettings.normalize(launcher._settings_from_controls())["settings"].get("field_service_enabled"), false, "unchecking the option starts a classic skirmish")
 	assert_equal(normalized["settings"]["map_size_id"], "supergiant", "supergiant choice reaches generation settings")
 	assert_equal(normalized["settings"]["population_limit"], 500, "population 500 reaches generation settings")
 	assert_equal(normalized["settings"]["landscape_version"], SkirmishSettings.WatershedWorld.VERSION, "ordinary menu enables the shared watershed generator")

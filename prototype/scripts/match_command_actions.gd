@@ -348,6 +348,15 @@ func issue_unit_action(game, action_name: String) -> void:
 	var command: Variant = null
 	var message = ""
 	match action_name:
+		"appoint_officer":
+			if ids.size() == 1: game.open_officer_dialog(int(ids[0]))
+			return
+		"search_shrine":
+			command = RoRCommands.ServiceCommand.new(game.next_local_command_tick(), ids, "search")
+			message = "Поиск трофея"
+		"service_rally":
+			command = RoRCommands.ServiceCommand.new(game.next_local_command_tick(), ids, "rally")
+			message = "Сбор у командира"
 		"stop":
 			command = RoRCommands.StopCommand.new(game.next_local_command_tick(), ids)
 			message = "Остановиться"

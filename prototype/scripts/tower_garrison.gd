@@ -51,6 +51,8 @@ static func presentation(world, tower: Dictionary) -> Dictionary:
 		var record := {}
 		for field in ["id", "kind", "team", "source_unit_id", "hp", "max_hp"]:
 			record[field] = unit.get(field)
+		for field in ["service_name", "service_xp", "service_role"]:
+			if unit.has(field): record[field] = unit[field]
 		record["components"] = {"ownership": unit.get("components", {}).get("ownership", {}).duplicate(true)}
 		units.append(record)
 	return {"capacity": CAPACITY, "units": units, "extra_arrows": extra_arrows(world, tower)}

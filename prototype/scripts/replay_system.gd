@@ -225,6 +225,8 @@ func command_from_record(record: Dictionary):
 			command = Commands.GateModeCommand.new(tick, ids, String(params.get("mode", "auto")))
 		"stance":
 			command = Commands.StanceCommand.new(tick, ids, String(params.get("stance", "passive")))
+		"field_service":
+			command = Commands.ServiceCommand.new(tick, ids, String(params.get("action", "")), String(params.get("name", "")), params)
 		"hold":
 			command = Commands.HoldCommand.new(tick, ids)
 		"stop":

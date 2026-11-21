@@ -12,12 +12,12 @@ func _initialize() -> void:
 
 	var defaults := SkirmishSettings.default_settings()
 	var first := SkirmishSettings.build(defaults)
-	var second := SkirmishSettings.build(defaults)
+	var second := SkirmishSettings.build({})
 	assert_true(bool(first.get("valid", false)), "default skirmish builds: %s" % [first.get("errors", [])])
 	if not bool(first.get("valid", false)):
 		_finish("E5-002 skirmish settings tests passed")
 		return
-	assert_equal(first.get("identity"), second.get("identity"), "the same settings produce stable save identity")
+	assert_equal(first.get("identity"), second.get("identity"), "omitted options and explicit defaults produce the same match")
 	var definition: Dictionary = first.get("definition", {})
 	assert_true(bool(definition.get("valid", false)), "generated match passes the ordinary match validator")
 	assert_equal(definition.get("players", []).size(), 2, "default match has two active players")
@@ -47,9 +47,12 @@ func _initialize() -> void:
 	assert_true(String(first.get("identity", "")).begins_with("generated://skirmish/"), "generated matches have a stable non-file identity")
 	assert_true(bool(first.get("map_quality", {}).get("valid", false)), "default map passes generation guarantees before launch")
 
+	assert_equal(definition.get("field_service_enabled"), true, "new skirmishes enable field service by default")
 	var team_settings := defaults.duplicate(true)
+	team_settings["field_service_enabled"] = false
 	team_settings["players"][1]["alliance_id"] = 1
 	var allied := SkirmishSettings.build(team_settings)
+	assert_equal(allied.get("definition", {}).get("field_service_enabled"), false, "disabling field service survives skirmish generation")
 	assert_equal(allied.get("definition", {}).get("alliances", []), [[1, 2]], "shared alliance IDs become mutual runtime alliances")
 
 	var large_settings := defaults.duplicate(true)

@@ -191,6 +191,16 @@ class StanceCommand extends Command:
 		return "stance"
 
 
+class ServiceCommand extends Command:
+	func _init(command_tick: int, ids: Array[int], action: String, officer_name := "", details: Dictionary = {}) -> void:
+		super(command_tick, ids, {"action":action, "name":officer_name})
+		for key in ["pile", "slot", "item"]:
+			if details.has(key): params[key] = details[key]
+
+	func command_type() -> String:
+		return "field_service"
+
+
 class GatherCommand extends Command:
 	var resource_id: int
 

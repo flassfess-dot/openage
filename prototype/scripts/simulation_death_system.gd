@@ -42,6 +42,7 @@ func corpse_animation_duration(source: Dictionary, team: int) -> float:
 func begin_death(unit: Dictionary, source_context: Dictionary = {}) -> void:
 	if String(unit.get("death_phase", "alive")) != "alive":
 		return
+	if world.field_service_enabled: world.expedition_field.fallen(world, unit, int(source_context.get("team", 0)))
 	world.dying_units.append(unit)
 	world.transport_system.destroy_cargo(unit)
 	world.conversion_system.cancel(unit, "unit_died")

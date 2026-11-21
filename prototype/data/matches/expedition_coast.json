@@ -1,0 +1,38 @@
+{
+  "schema_version":1,
+  "id":"expedition_coast",
+  "field_service_enabled":true,
+  "title":"Боевой путь II · Береговой лагерь",
+  "briefing":"Отряд достиг побережья. Лагерь противника прикрывает башня; к вам присоединился камнемёт. Решите, кому вести наступление, а кому остаться у лагеря.\n\nК востоку от высадки стоит святилище. Командир может прочесть там карту подступов к тылу противника. Она покажет местность, но не расположение войск.\n\nРазгромите вражеский лагерь и завершите поход.",
+  "start_message":"Разгромите береговой лагерь. В восточном святилище хранится карта обходной тропы.",
+  "map":{"size":[36,36],"seed":8624,"generator":{"type":"coastal_land","water_border":{"left":4,"top":2,"shore_width":1},"resource_clusters":[
+    {"kind":"berries","center":[9,20],"count":5,"radius":1.5,"amount":150},
+    {"kind":"tree","center":[15,9],"count":8,"radius":2,"amount":100},
+    {"kind":"gold_mine","center":[12,24],"count":3,"radius":1,"amount":350}
+  ]}},
+  "players":[
+    {"team":1,"controller":"human","civilization_id":13,"start":[10,15],"starting_age_technology_id":102,"population_housing":20,"starting_resources":{"food":350,"wood":300,"stone":150,"gold":150}},
+    {"team":2,"controller":"ai","civilization_id":1,"start":[26,23],"starting_age_technology_id":101,"population_housing":18,"starting_resources":{"food":200,"wood":100}}
+  ],
+  "entities":[
+    {"category":"building","team":1,"kind":"town_center","position":[7,17]},
+    {"category":"building","team":1,"kind":"barracks","position":[11,10]},
+    {"category":"unit","team":1,"kind":"villager","position":[10,17]},
+    {"category":"unit","team":1,"kind":"villager","position":[10,18]},
+    {"category":"unit","team":1,"kind":"priest","position":[10,15]},
+    {"category":"unit","team":1,"kind":"swordsman","position":[12,16],"selected":true},
+    {"category":"unit","team":1,"kind":"archer","position":[12,17],"selected":true},
+    {"category":"unit","team":1,"kind":"stone_thrower","position":[12,19]},
+    {"category":"building","team":0,"kind":"temple","position":[19,12],"expedition_cache":"chart","survey_centres":[[22,15],[26,15],[30,17],[32,21],[32,25]]},
+    {"category":"building","team":2,"kind":"tower","position":[23,24]},
+    {"category":"building","team":2,"kind":"barracks","position":[29,23]},
+    {"category":"unit","team":2,"kind":"archer","position":[25,22]},
+    {"category":"unit","team":2,"kind":"archer","position":[24,23]},
+    {"category":"unit","team":2,"kind":"clubman","position":[23,21]},
+    {"category":"unit","team":2,"kind":"clubman","position":[22,20]},
+    {"category":"unit","team":2,"kind":"clubman","position":[24,20]},
+    {"category":"unit","team":2,"kind":"scout","position":[19,18],"service_record":{"role":"captain","name":"Вождь береговой стражи","xp":72000,"item":"scales","weapon":"point","pack":[{"item":"incense","count":1}]}}
+  ],
+  "alliances":[],
+  "victory_rules":[{"type":"conquest","field_caches":true}]
+}

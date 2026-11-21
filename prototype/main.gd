@@ -304,6 +304,12 @@ var simulation_world: SimulationWorld
 var game_controller: GameController
 var render_world: RenderWorld
 var hud_controls: HUDControls
+const Expedition := preload("res://scripts/expedition.gd")
+const ExpeditionPanel := preload("res://scripts/expedition_panel.gd")
+const ExpeditionMarkers := preload("res://scripts/expedition_markers.gd")
+var expedition_panel: ExpeditionPanel
+var expedition_pulses: Array = []
+var expedition_actor_items: Dictionary = {}
 var top_bar_controls: TopBarControls
 var hud_modal_overlay: HUDModalOverlay
 var modal_restore_paused := false
@@ -829,6 +835,7 @@ func _initialize_scene_from_catalog(for_saved_game: bool = false) -> void:
 	add_child(scenario_overlay)
 	scenario_overlay.configure(match_definition, resource_catalog.localization, resource_catalog.object_catalog_data)
 	scenario_overlay.restart_requested.connect(_restart_from_scenario_overlay)
+	scenario_overlay.expedition_requested.connect(_choose_expedition_survivors)
 	scenario_overlay.menu_requested.connect(_request_return_to_launcher)
 	scenario_overlay.statistics_requested.connect(func():
 		_open_hud_modal(HUDModalOverlay.MODE_MENU)
@@ -1635,11 +1642,33 @@ func _present_events(new_events: Array, tick: int) -> void:
 				resource_feedback_time = 0.7
 		message_time = 0.0 if quiet_order else 1.8
 	presentation_effect_timeline.consume(new_events, Callable(self, "presentation_effect_visible"))
+	if expedition_panel != null: _present_expedition_events(new_events)
 	_sync_effect_snapshot()
 	process_world_audio_events(new_events)
 	for cue in sound_cue_history.consume_attacks(new_events, local_player_team, tick):
 		minimap_renderer.flash_under_attack(int(cue["target_id"]), Vector2(cue["position"]))
 		play_audio_request(presentation_audio_router.request_sound_id(10, "attack_alarm", -1, int(cue["sequence"])))
+
+func _present_expedition_events(new_events: Array) -> void:
+	for entry in new_events:
+		var payload: Dictionary = entry.get("payload", {})
+		if int(payload.get("team", 0)) != local_player_team: continue
+		match entry.get("type", ""):
+			"service_pickup":
+				var names := PackedStringArray()
+				for item in payload.items: names.append(Expedition.Inventory.ITEMS[item].name)
+				game_message = "%s · %s" % [payload.name, ", ".join(names)]
+				if int(payload.remaining) > 0: game_message += " · остаток на земле"
+			"service_pickup_failed": game_message = CommandFeedbackRouter.rejected_message(payload.reason)
+			"service_ability":
+				var pulse := payload.duplicate()
+				pulse["tick"] = entry.tick
+				expedition_pulses.append(pulse)
+				continue
+			"service_level": game_message = "%s достигает уровня %d" % [payload.name, payload.level]
+			"service_veteran": game_message = "Боец стал ветераном. Его можно назначить командиром."
+			_: continue
+		message_time = 3.0
 
 
 func process_world_audio_events(events: Array) -> void:
@@ -1751,6 +1780,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	if scenario_overlay != null and scenario_overlay.is_blocking():
 		return
 	if event is InputEventKey and event.pressed and not event.echo and not event.ctrl_pressed and not event.alt_pressed and not event.shift_pressed:
+		if expedition_panel != null and expedition_panel.visible:
+			if event.keycode == KEY_F2:
+				expedition_panel.cycle_hero()
+				get_viewport().set_input_as_handled()
+				return
+			if not expedition_panel.hero.is_empty():
+				var shortcuts := {KEY_J:"inventory", KEY_E:"ability", KEY_F:"pickup", KEY_C:"balm"}
+				if shortcuts.has(event.keycode):
+					expedition_panel.trigger(shortcuts[event.keycode])
+					get_viewport().set_input_as_handled()
+					return
+				if event.keycode == KEY_ESCAPE and expedition_panel.inventory.visible:
+					expedition_panel.close_inventory()
+					get_viewport().set_input_as_handled()
+					return
 		if event.keycode == KEY_ESCAPE:
 			if cancel_pending_targeting() or (hud_controls != null and hud_controls.build_menu_open and hud_controls.set_build_menu_open(false)):
 				get_viewport().set_input_as_handled()
@@ -2006,6 +2050,7 @@ func _capture_save_input(path: String, slot_name: String = "Быстрое со�
 		"control_groups": control_groups.groups.duplicate(true),
 		"last_recalled_group": control_groups.last_recalled_group,
 		"compact_status_visible": compact_status_visible,
+		"briefing_dismissed": scenario_overlay != null and scenario_overlay.briefing_dismissed,
 		"sound_cue_history": sound_cue_history.canonical_state(),
 	}
 	var controller_state := {
@@ -2203,7 +2248,7 @@ func initialize_prepared_load_async(restored: Dictionary, progress: Callable) ->
 		terrain_canvas.poll_scene_preparation()
 		progress.call(0.97 + terrain_canvas.scene_preparation_fraction()*0.02, "Подготовка ландшафта всей карты")
 		await tree.process_frame
-	if accepted:
+	if accepted and DisplayServer.get_name() != "headless":
 		progress.call(0.99, "Подготовка первого кадра")
 		await tree.process_frame
 		# Draw the restored, stopped scene once behind the launcher. This also
@@ -2350,7 +2395,8 @@ func _apply_restored_game(restored: Dictionary, prepared: bool = false) -> bool:
 	else:
 		_seed_autosave()
 	if scenario_overlay != null:
-		scenario_overlay.reset_presentation()
+		# In older saves, a running scenario had already passed its opening briefing.
+		scenario_overlay.reset_presentation(bool(saved_view.get("briefing_dismissed", int(archive["tick"]) > 0)))
 		scenario_overlay.set_snapshot(presentation_snapshot)
 	if hud_modal_overlay != null:
 		hud_modal_overlay.close()
@@ -2482,6 +2528,13 @@ func current_world_drawables() -> Array:
 		retained_snapshot["effects"] = []
 		render_world.performance_probe = _presentation_probe()
 		cached_world_drawables = render_world.create_world_drawables(retained_snapshot, Callable(self, "world_to_screen"), interpolation_alpha, Callable(self, "render_item_frame_info"), highlighted_ids, local_player_team, selected_ids, view_zoom, viewport)
+		expedition_actor_items.clear()
+		var heroes: Array = retained_snapshot.get("player_state", {}).get("service_heroes", [])
+		if not heroes.is_empty():
+			var hero_ids := {}
+			for hero in heroes: hero_ids[hero.id] = true
+			for item in render_world.displayed_unit_items:
+				if item.kind == "unit" and hero_ids.has(item.stable_id): expedition_actor_items[item.stable_id] = item
 		# The new queue already contains interpolated positions and current depth.
 		# Refresh it only on later frames that reuse this publication.
 		cached_rally_drawables = render_world.rally_drawables
@@ -2527,6 +2580,8 @@ func update_interaction_cursor(screen_position: Vector2) -> void:
 	var cursor := InteractionCursor.resolve(selected_units(), hovered, screen_to_world(screen_position), local_player_team)
 	interaction_highlight_id = int(cursor.get("entity_id", -1))
 	var semantic := String(cursor.get("semantic", "default"))
+	if expedition_panel != null and expedition_panel.visible and not expedition_panel.hero.is_empty() and not ExpeditionMarkers.pile_at(self, screen_position).is_empty():
+		semantic = "gather"
 	if not pending_build_kind.is_empty():
 		semantic = "build"
 	elif not pending_target_command.is_empty():
@@ -2586,6 +2641,11 @@ func unit_frame_info(unit: Dictionary) -> Dictionary:
 	return resource_catalog.unit_frame_info(unit, animation_state, -1.0, ambient_time)
 
 func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: bool = false) -> void:
+	if direction_end == null and expedition_panel != null and expedition_panel.visible and not expedition_panel.hero.is_empty():
+		var pile := ExpeditionMarkers.pile_at(self, mouse)
+		if not pile.is_empty():
+			_order_expedition_hero(expedition_panel.hero.id, "pickup", {"pile":pile.id})
+			return
 	command_actions.issue_order(self, mouse, direction_end, queue_order)
 
 
@@ -2766,6 +2826,18 @@ func refresh_hud_model() -> void:
 	formation = FormationSelection.selected_type(selected_units(), groups)
 	if hud_view_model == null or presentation_snapshot.is_empty():
 		return
+	var field_state: Dictionary = presentation_snapshot.get("player_state", {})
+	if expedition_panel == null and hud_controls != null and field_state.get("field_service_enabled", false):
+		expedition_panel = ExpeditionPanel.new()
+		expedition_panel.configure(hud_controls, resource_catalog.interface_icons)
+		add_child(expedition_panel)
+		move_child(expedition_panel, hud_controls.get_index() + 1)
+		expedition_panel.hero_requested.connect(_select_expedition_hero)
+		expedition_panel.action_requested.connect(_order_expedition_hero)
+	if expedition_panel != null:
+		expedition_panel.position = Vector2(8, hud_top_height() + 5)
+		var blocked := local_spectator or battle_over or (hud_modal_overlay != null and hud_modal_overlay.is_blocking()) or (scenario_overlay != null and scenario_overlay.is_blocking())
+		expedition_panel.refresh(field_state, player_control_state.selected_ids(), int(presentation_snapshot.get("tick", 0)), blocked)
 	var update: Dictionary = hud_view_model.build_update(presentation_snapshot, player_control_state.selected_ids(), formation, cached_hud_signature, "ru")
 	cached_hud_signature = update.get("signature")
 	if not bool(update.get("changed", false)):
@@ -2911,6 +2983,126 @@ func _restart_from_scenario_overlay() -> void:
 		game_message = "Для новой сетевой игры вернитесь в лобби"
 
 
+func _select_expedition_hero(id: int, carrier: int, pos: Vector2) -> void:
+	if battle_over or local_spectator: return
+	var ids: Array[int] = [carrier if carrier >= 0 else id]
+	player_control_state.replace_or_add(ids, false)
+	center_view_on_world(pos)
+	sync_world_state()
+	refresh_hud_model()
+	queue_redraw()
+
+func _order_expedition_hero(id: int, action: String, details: Dictionary) -> void:
+	if battle_over or local_spectator or not player_control_state.is_selected(id): return
+	join_simulation_owner()
+	var command := RoRCommands.ServiceCommand.new(next_local_command_tick(), [id], action, "", details)
+	var labels := {"pickup":"Подобрать трофей", "balm":"Бальзам применён", "drop":"Предмет выложен", "activate":"Снаряжение обновлено"}
+	var role := String(expedition_panel.hero.get("role", ""))
+	var message := String(Expedition.ABILITIES.get(role, "")) if action == "ability" else String(labels.get(action, ""))
+	enqueue_with_feedback(command, message, "", null)
+
+func open_officer_dialog(unit_id: int) -> void:
+	join_simulation_owner()
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "Назначение ветерана"
+	dialog.ok_button_text = "Назначить"
+	dialog.cancel_button_text = "Назад"
+	dialog.exclusive = true
+	var column := VBoxContainer.new()
+	dialog.add_child(column)
+	var info := Label.new()
+	info.text = "Имя и должность командира:"
+	column.add_child(info)
+	var edit := LineEdit.new()
+	edit.max_length = 24
+	edit.text = "Марк"
+	column.add_child(edit)
+	var roles := OptionButton.new()
+	roles.add_item("Начальник строя · сбор отряда и возврат отставших")
+	roles.add_item("Дозорный · +2 клетки обзора")
+	roles.add_item("Полевой лекарь · перевязка раненых в отряде")
+	var occupied := {}
+	for officer in presentation_snapshot.get("player_state", {}).get("service_heroes", []):
+		if officer.team == local_player_team: occupied[officer.role] = true
+	var first := -1
+	for i in roles.item_count:
+		var taken := occupied.has(Expedition.ROLES.keys()[i])
+		roles.set_item_disabled(i, taken)
+		if taken: roles.set_item_text(i, roles.get_item_text(i) + " · занято")
+		elif first < 0: first = i
+	if first >= 0: roles.select(first)
+	dialog.get_ok_button().disabled = first < 0
+	column.add_child(roles)
+	dialog.confirmed.connect(func():
+		join_simulation_owner()
+		var ids: Array[int] = [unit_id]
+		var role := String(Expedition.ROLES.keys()[roles.selected])
+		var cmd := RoRCommands.ServiceCommand.new(next_local_command_tick(), ids, role, edit.text)
+		enqueue_with_feedback(cmd, "Назначение командира", "", null))
+	add_child(dialog)
+	dialog.visibility_changed.connect(func(): if not dialog.visible: dialog.queue_free())
+	dialog.popup_centered(Vector2i(460, 150))
+	edit.grab_focus()
+	edit.select_all()
+
+
+func _choose_expedition_survivors() -> void:
+	join_simulation_owner()
+	if network_session != null or match_definition.get("id") != "expedition_outpost" or not battle_over or scenario_overlay.presentation_model.get("outcome") != "victory":
+		return
+	var records := preload("res://scripts/expedition.gd").survivors(simulation_world, local_player_team)
+	var dialog := ConfirmationDialog.new()
+	dialog.title = "Поход · выберите до трёх выживших"
+	dialog.ok_button_text = "На побережье"
+	dialog.cancel_button_text = "Назад"
+	dialog.exclusive = true
+	var column := VBoxContainer.new()
+	dialog.add_child(column)
+	var hint := Label.new()
+	hint.text = "Отметьте бойцов с боевым опытом." if not records.is_empty() else "Опытных бойцов не осталось. Вас ждёт новый отряд."
+	column.add_child(hint)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(410, 160)
+	column.add_child(scroll)
+	var choices := VBoxContainer.new()
+	scroll.add_child(choices)
+	var selected := {}
+	for row in records:
+		var choice := CheckBox.new()
+		var label := hud_view_model._name_for_kind(row.kind, {"team":local_player_team}, "ru")
+		var title := String(Expedition.ROLES[row.role]) + " " + str(Expedition.level(row.xp)) if Expedition.ROLES.has(row.role) else Expedition.rank(row.xp)
+		choice.text = "%s · %s · %.1f опыта" % [row.name if row.name != "" else label, title, row.xp / 1000.0]
+		var kit := PackedStringArray()
+		for item in [row.weapon, row.item, row.relic]:
+			if Expedition.Inventory.ITEMS.has(item): kit.append(Expedition.Inventory.ITEMS[item].name)
+		for stack in row.pack:
+			if not stack.is_empty(): kit.append("%s ×%d" % [Expedition.Inventory.ITEMS[stack.item].name, stack.count])
+		choice.tooltip_text = ", ".join(kit)
+		choices.add_child(choice)
+		if selected.size() < preload("res://scripts/expedition.gd").LIMIT:
+			selected[row.id] = true
+			choice.button_pressed = true
+		choice.toggled.connect(func(on: bool):
+			if not on: selected.erase(row.id)
+			elif selected.size() < preload("res://scripts/expedition.gd").LIMIT: selected[row.id] = true
+			else: choice.set_pressed_no_signal(false))
+	dialog.confirmed.connect(func():
+		var next := MatchDefinition.load_json(preload("res://scripts/expedition.gd").SECOND)
+		if not bool(next.get("valid", false)): return
+		var slot := 0
+		for row in records:
+			if selected.has(row.id):
+				next.entities.append({"category":"unit","team":local_player_team,"kind":row.kind,"position":Vector2(9.5 + slot, 13.5),"service_record":row,"selected":true})
+				slot += 1
+		var game = load("res://main.tscn").instantiate()
+		game.match_path = preload("res://scripts/expedition.gd").SECOND
+		game.match_definition_override = next
+		get_tree().change_scene_to_node.call_deferred(game))
+	add_child(dialog)
+	dialog.visibility_changed.connect(func(): if not dialog.visible: dialog.queue_free())
+	dialog.popup_centered(Vector2i(470, 280))
+
+
 func _return_to_launcher(load_path: String = "") -> void:
 	join_simulation_owner()
 	if launcher_suspended:
@@ -3020,11 +3212,17 @@ func _draw() -> void:
 	if probe != null:
 		probe.observe_microseconds("presentation.draw.map_edge", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
+	if not expedition_pulses.is_empty(): ExpeditionMarkers.draw_pulses(self, expedition_pulses, int(presentation_snapshot.get("tick", 0)))
 	draw_world_objects()
+	var field_state: Dictionary = presentation_snapshot.get("player_state", {})
+	if field_state.get("field_service_enabled", false): ExpeditionMarkers.draw_field(self, field_state)
 	if probe != null:
 		probe.observe_microseconds("presentation.draw.world", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
 	draw_fog_overlay()
+	if field_state.get("field_service_enabled", false) and is_world_interaction_area(get_local_mouse_position()):
+		var hovered := ExpeditionMarkers.pile_at(self, get_local_mouse_position())
+		if not hovered.is_empty(): ExpeditionMarkers.draw_loot_label(self, world_to_screen(hovered.pos), hovered)
 	if probe != null:
 		probe.observe_microseconds("presentation.draw.fog", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()

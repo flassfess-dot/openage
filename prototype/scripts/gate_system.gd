@@ -5,6 +5,7 @@ const Footprint := preload("res://scripts/footprint.gd")
 const MODES := ["auto", "open", "locked"]
 const OPEN_SECONDS := 0.65
 const HOLD_SECONDS := 1.2
+const PASSABLE_FRACTION := 0.95
 var world_ref: WeakRef
 var gate_ids: Dictionary = {}
 var policy_revision := 0
@@ -98,29 +99,41 @@ func set_mode(ids: Array, issuer: int, mode: String) -> String:
 		var gate: Variant = world.find_building(id)
 		if gate == null or String(gate.get("kind", "")) != "gate" or int(gate.get("team", 0)) != issuer or float(gate.get("hp", 0.0)) <= 0.0 or String(gate.get("state", "")) != "complete":
 			return "gate_unavailable"
-		selected.append(gate)
+		if gate.get("gate_mode") != mode:
+			selected.append(gate)
 	for gate in selected:
 		world.set_entity_field(gate, "gate_mode", mode)
-	policy_revision += 1
+	if not selected.is_empty():
+		policy_revision += 1
 	return ""
 
-func navigation_cells(gate: Dictionary) -> Array:
-	if float(gate.get("hp", 0.0)) <= 0.0:
+static func navigation_cells(gate: Dictionary) -> Array:
+	if float(gate.get("hp", 1.0)) <= 0.0:
 		return []
-	if String(gate.get("state", "")) != "complete" or float(gate.get("gate_open_fraction", 0.0)) < 0.95:
+	if String(gate.get("state", "")) != "complete" or float(gate.get("gate_open_fraction", 0.0)) < PASSABLE_FRACTION:
 		return gate.get("occupied_cells", [])
 	return gate.get("gate_pier_cells", [])
 
-func planning_occupants(team: int, cell: Vector2i, occupants: Array) -> Array:
-	if gate_ids.is_empty():
+func planning_occupants(team: int, cell: Vector2i, occupants: Array, visible: bool) -> Array:
+	if gate_ids.is_empty() or occupants.is_empty():
 		return occupants
 	var result: Array = []
 	for occupant in occupants:
-		var gate: Variant = world.find_building(int(occupant.get("id", -1))) if String(occupant.get("category", "")) == "building" else null
-		if gate != null and String(gate.get("kind", "")) == "gate" and String(gate.get("state", "")) == "complete" and String(gate.get("gate_mode", "auto")) in ["auto", "open"] and world.are_teams_allied(team, int(gate.get("team", 0))) and cell in gate.get("gate_passage_cells", []):
-			continue
+		var id := int(occupant.get("id", -1))
+		if occupant.get("category") == "building" and gate_ids.has(id):
+			# Shared exploration can reveal terrain without exposing the gate.
+			if not visible:
+				continue
+			var gate: Variant = world.find_building(id)
+			if (gate != null and cell in gate.get("gate_passage_cells", [])
+					and gate.get("state") == "complete" and gate.get("gate_mode", "auto") in ["auto", "open"]
+					and _admits(int(gate["team"]), team)):
+				continue
 		result.append(occupant)
 	return result
+
+func _admits(owner: int, traveller: int) -> bool:
+	return world.are_teams_allied(owner, traveller)
 
 func planning_revision(team: int) -> int:
 	if gate_ids.is_empty():
@@ -130,29 +143,40 @@ func planning_revision(team: int) -> int:
 	var previous: Array = planning_revisions.get(team, [])
 	if previous.size() == 3 and int(previous[0]) == policy_revision and int(previous[1]) == diplomacy_revision:
 		return int(previous[2])
-	var revision := hash([policy_revision, simulation_world.get_allied_teams(team)])
+	var owners: Array[int] = []
+	for owner in simulation_world.player_registry.all_teams():
+		if _admits(owner, team): owners.append(owner)
+	var revision := hash([policy_revision, owners])
 	if planning_revisions.size() >= 64: planning_revisions.clear()
 	planning_revisions[team] = [policy_revision, diplomacy_revision, revision]
 	return revision
 
-func all_cells() -> Array:
+func passage_cells() -> Array:
 	var result: Array = []
 	for id in gate_ids:
 		var gate: Variant = world.find_building(id)
 		if gate != null:
-			result.append_array(gate.get("occupied_cells", []))
+			result.append_array(gate.get("gate_passage_cells", []))
 	return result
 
 func _route_uses_passage(unit: Dictionary, gate: Dictionary) -> bool:
 	var route: Array = unit.get("path", [])
 	var origin := Vector2(unit.get("pos", Vector2.ZERO))
 	var radius := float(unit.get("footprint_radius", 0.3)) + 0.1
+	var radius_squared := radius * radius
 	for index in range(maxi(0, int(unit.get("path_index", 0))), route.size()):
 		var point := Vector2(route[index])
 		for cell in gate.get("gate_passage_cells", []):
-			if Footprint.segment_cell_distance_squared(origin, point, Vector2i(cell)) <= radius * radius:
+			if Footprint.segment_cell_distance_squared(origin, point, Vector2i(cell)) <= radius_squared:
 				return true
 		origin = point
+	return false
+
+func _passage_occupied(unit: Dictionary, gate: Dictionary) -> bool:
+	var radius := float(unit.get("footprint_radius", 0.3)) + 0.15
+	for cell in gate["gate_passage_cells"]:
+		if Footprint.circle_cell_distance_squared(unit["pos"], cell) < radius * radius:
+			return true
 	return false
 
 func advance(delta: float) -> void:
@@ -164,30 +188,29 @@ func advance(delta: float) -> void:
 			continue
 		if String(gate.get("state", "")) != "complete":
 			continue
-		_layout(gate)
-		var nearby: Array = world.spatial_index.query_circle(Vector2(gate["pos"]), 4.0, "unit")
-		var occupied := false
-		var request := false
-		for unit in nearby:
-			if float(unit.get("hp", 0.0)) <= 0.0 or String(unit.get("movement_domain", "land")) != "land" or bool(unit.get("embarked", false)):
-				continue
-			for cell in gate["gate_passage_cells"]:
-				if Footprint.circle_cell_distance_squared(Vector2(unit["pos"]), Vector2i(cell)) < pow(float(unit.get("footprint_radius", 0.3)) + 0.15, 2):
-					occupied = true
-			if world.are_teams_allied(int(gate["team"]), int(unit.get("team", 0))) and _route_uses_passage(unit, gate):
-				request = true
 		var mode := String(gate.get("gate_mode", "auto"))
+		var automatic := mode == "auto"
 		var hold: float = maxf(0.0, float(gate.get("gate_hold_seconds", 0.0)) - delta)
-		if mode == "auto" and request:
-			hold = HOLD_SECONDS
-		var wants_open: bool = mode == "open" or (mode == "auto" and hold > 0.0)
 		var previous := float(gate.get("gate_open_fraction", 0.0))
-		# Nobody is pushed, trapped or crushed by a closing door.
-		if occupied and previous >= 0.95:
-			wants_open = true
+		var passage_open := previous >= PASSABLE_FRACTION
+		var wants_open := mode == "open" or (automatic and hold > 0.0)
+		if automatic or (passage_open and not wants_open):
+			var owner := int(gate["team"])
+			for unit in world.spatial_index.query_circle(Vector2(gate["pos"]), 4.0, "unit"):
+				if float(unit.get("hp", 0.0)) <= 0.0 or String(unit.get("movement_domain", "land")) != "land" or bool(unit.get("embarked", false)):
+					continue
+				if automatic and _admits(owner, int(unit["team"])) and _route_uses_passage(unit, gate):
+					hold = HOLD_SECONDS
+					wants_open = true
+					break
+				# Wait for every unit in the passage before closing.
+				if passage_open and not wants_open and _passage_occupied(unit, gate):
+					wants_open = true
+					if not automatic:
+						break
 		var next := move_toward(previous, 1.0 if wants_open else 0.0, delta / OPEN_SECONDS)
 		world.set_entity_field(gate, "gate_hold_seconds", hold)
-		if not is_equal_approx(previous, next):
+		if previous != next:
 			world.set_entity_field(gate, "gate_open_fraction", next)
-			if (previous >= 0.95) != (next >= 0.95):
+			if passage_open != (next >= PASSABLE_FRACTION):
 				world.sync_building_navigation_occupancy(gate)

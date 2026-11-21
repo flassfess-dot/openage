@@ -4,6 +4,7 @@ extends Control
 signal restart_requested
 signal menu_requested
 signal statistics_requested
+signal expedition_requested
 
 const MenuTheme := preload("res://scripts/match_menu_theme.gd")
 const LauncherTheme := preload("res://scripts/launcher_theme.gd")
@@ -28,6 +29,7 @@ var result_layer: ColorRect
 var result_panel: PanelContainer
 var result_title: Label
 var result_text: Label
+var expedition_button: Button
 
 
 func _init() -> void:
@@ -44,8 +46,8 @@ func configure(definition: Dictionary, localization_catalog, object_data: Dictio
 	model_builder.configure(localization_catalog, object_data)
 
 
-func reset_presentation() -> void:
-	briefing_dismissed = false
+func reset_presentation(briefing_already_read: bool = false) -> void:
+	briefing_dismissed = briefing_already_read
 	result_dismissed = false
 	presentation_model.clear()
 	visible = false
@@ -57,6 +59,9 @@ func set_snapshot(snapshot: Dictionary) -> void:
 	if not bool(scenario_state.get("result", {}).get("over", false)) and bool(snapshot.get("match_result", {}).get("over", false)):
 		scenario_state["result"] = snapshot.get("match_result", {}).duplicate(true)
 	presentation_model = model_builder.build(match_definition, scenario_state, observer_team, "ru")
+	var expedition: bool = match_definition.get("id", "") in ["expedition_outpost", "expedition_coast"]
+	if expedition and not scenario_state.get("result", {}).get("over", false):
+		presentation_model = {"visible":true, "title":match_definition.title, "briefing":match_definition.briefing, "objectives":[], "over":false}
 	if not bool(presentation_model.get("visible", false)) and bool(scenario_state.get("result", {}).get("over", false)):
 		var match_result: Dictionary = scenario_state["result"]
 		var winning_side: Array = match_result.get("winner_teams", [int(match_result.get("winner_team", -1))])
@@ -75,18 +80,22 @@ func set_snapshot(snapshot: Dictionary) -> void:
 	briefing_title.text = String(presentation_model.get("title", "Сценарий"))
 	briefing_text.text = String(presentation_model.get("briefing", ""))
 	briefing_objectives.text = objective_lines
+	briefing_objectives.visible = not expedition
 	objectives_text.text = objective_lines
 	var over := bool(presentation_model.get("over", false))
 	briefing_layer.visible = not briefing_dismissed and not over
 	result_layer.visible = over and not result_dismissed
-	objectives_panel.visible = briefing_dismissed and not result_layer.visible
+	objectives_panel.visible = not expedition and briefing_dismissed and not result_layer.visible
 	if over:
 		var victory := String(presentation_model.get("outcome", "")) == "victory"
+		expedition_button.visible = victory and match_definition.get("id") == "expedition_outpost"
 		result_layer.get_node("Backdrop").show_section("victory" if victory else "defeat")
 		result_title.text = "ПОБЕДА" if victory else "ПОРАЖЕНИЕ"
 		var reason := String(scenario_state.get("result", {}).get("reason", ""))
 		var reason_label := String({"conquest": "завоевание", "score": "счёт или время", "wonder": "чудо света", "ruins": "руины", "artifacts": "артефакты", "scenario": "условия сценария"}.get(reason, reason))
 		result_text.text = "Условие победы: %s." % reason_label if not reason_label.is_empty() else "Матч завершён."
+		if expedition and victory:
+			result_text.text += "\nЗастава удержана. Выберите товарищей для следующей главы." if expedition_button.visible else "\nБереговой лагерь взят. Поход завершён."
 
 
 func is_blocking() -> bool:
@@ -144,6 +153,11 @@ func _build_interface() -> void:
 	result_text = _body_label(76)
 	result_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	result_body.add_child(result_text)
+	expedition_button = Button.new()
+	expedition_button.text = "ВЫБРАТЬ СПУТНИКОВ → СЛЕДУЮЩАЯ ГЛАВА"
+	expedition_button.visible = false
+	expedition_button.pressed.connect(func(): expedition_requested.emit())
+	result_column.add_child(expedition_button)
 	var observe_button := Button.new()
 	observe_button.text = "НАБЛЮДАТЬ"
 	observe_button.custom_minimum_size.y = 42
@@ -170,7 +184,7 @@ func _build_interface() -> void:
 func _dismiss_briefing() -> void:
 	briefing_dismissed = true
 	briefing_layer.visible = false
-	objectives_panel.visible = true
+	objectives_panel.visible = not presentation_model.get("objectives", []).is_empty()
 
 
 func _dismiss_result() -> void:

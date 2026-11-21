@@ -48,12 +48,22 @@ func run() -> void:
 	await tree.process_frame
 	launcher.screen_buttons["single_player"].pressed.emit()
 	launcher.screen_buttons["random_map"].pressed.emit()
+	var classic_skirmish := "--classic-skirmish" in OS.get_cmdline_user_args()
+	var field_service: CheckBox = launcher.setting_controls["field_service_enabled"]
+	if not field_service.button_pressed:
+		fail("New random maps must enable combat experience and commanders by default")
+		return
+	if classic_skirmish:
+		field_service.button_pressed = false
 	launcher._select_metadata(launcher.setting_controls["map_size_id"], map_size_id)
 	launcher._select_metadata(launcher.setting_controls["map_type_id"], map_type_id)
 	launcher.setting_controls["seed"].value = 41721
 	launcher.start_button.pressed.emit()
 	var game = await wait_for_match("random_map")
 	if game == null: return
+	if game.simulation_world.field_service_enabled != (not classic_skirmish):
+		fail("The random map did not use the commander's checkbox setting")
+		return
 	if not await check_running(game, "random_map"): return
 	if "--rendered-load-fixture" in OS.get_cmdline_user_args():
 		if not await measure_rendered_load(game): return
@@ -101,6 +111,8 @@ func run() -> void:
 		if launcher==null: return
 		await tree.process_frame
 		launcher.screen_buttons["single_player"].pressed.emit(); launcher.screen_buttons["random_map"].pressed.emit()
+		if classic_skirmish:
+			launcher.setting_controls["field_service_enabled"].button_pressed = false
 		launcher._select_metadata(launcher.setting_controls["map_size_id"],map_size_id)
 		launcher.start_button.pressed.emit()
 		game=await wait_for_match("restart_match")
@@ -144,6 +156,7 @@ func wait_for_match(stage: String):
 
 
 func check_running(game, stage: String) -> bool:
+	var field_service_active: bool = game.simulation_world.field_service_enabled
 	if "--competitive-ai" in OS.get_cmdline_user_args():
 		game.join_simulation_owner()
 		var enabled: Array=game.ai_players.filter(func(ai): return ai.enabled)
@@ -163,6 +176,7 @@ func check_running(game, stage: String) -> bool:
 		if current_tick >= initial_tick + 10:
 			game.current_world_drawables()
 			var stage_report := {"stage":stage,"initial_tick":initial_tick,"final_tick":current_tick,"map_size":[game.map_size.x,game.map_size.y],"simulation_owner_started":game.simulation_owner.thread.is_started()}
+			stage_report["field_service_enabled"] = field_service_active
 			if "--capture-rendered-startup" in OS.get_cmdline_user_args() and DisplayServer.get_name() != "headless":
 				if not await capture_rendered_stage(game,stage,stage_report): return false
 				stage_report["final_tick"]=int(game.simulation_frame_state()["tick"])
