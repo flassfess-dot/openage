@@ -14,7 +14,7 @@ func capture() -> void:
 		var data: Dictionary = built["map_data"]
 		data["scenery"] = data["scenery"].filter(func(item): return not bool(item.get("ford_detail", false)))
 		preload("res://scripts/random_map_hydrology.gd").decorate_fords(data, int(data["seed"]))
-		data["content_hash"] = ("watershed_world_v6:" + preload("res://scripts/random_map_landscape.gd").fingerprint(data)).sha256_text()
+		data["content_hash"] = (String(data["theme"]) + ":" + preload("res://scripts/random_map_landscape.gd").fingerprint(data)).sha256_text()
 		FileAccess.open(DIRECTORY.path_join("map.bin"), FileAccess.WRITE).store_var(built)
 		preview.preview_fixture = DIRECTORY.path_join("map.bin")
 	root.add_child(preview)
@@ -31,6 +31,7 @@ func capture() -> void:
 		return
 	var ford: Dictionary = data["fords"][0]
 	_focus(preview, Vector2(ford["center"]) + Vector2.ONE * 0.5, 1.5)
+	while preview.terrain.is_scene_preparing(): await process_frame
 	await _draw()
 	root.get_texture().get_image().save_png(DIRECTORY.path_join("ford-detail.png"))
 	var mouths: Array = data["rivers"]["nodes"].filter(func(node): return bool(node["is_mouth"]) and not bool(node.get("boundary_outlet", false)))

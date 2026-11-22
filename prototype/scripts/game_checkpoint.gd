@@ -252,6 +252,11 @@ static func validate(data: Dictionary) -> bool:
 		for field in section[1]:
 			if not data[section[0]].has(field): return false
 	if data["grid"]["size"] != size or data["fog"]["map_size"] != size or data["map_definition"].get("size", size) != size: return false
+	var map: Dictionary = data["map_definition"]
+	if map.has("climate_surfaces"):
+		if not map["climate_surfaces"] is PackedInt32Array or map["climate_surfaces"].size() != size.x * size.y: return false
+		if not map.get("terrain_ids") is Array or map["terrain_ids"].size() != size.x * size.y: return false
+		if int(map.get("bank_silt", 1004)) not in [1004, 1100] or int(map.get("ford_gravel", 1005)) not in [1005, 1103]: return false
 	if not data["fog"].get("sources") is Dictionary: return false
 	for team in data["fog"]["states_by_player"]:
 		var states: Variant = data["fog"]["states_by_player"][team]
@@ -282,6 +287,8 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	world.navigation_grid.cache_epoch += 1
 	world.terrain_elevation.cache_epoch += 1
 	for name in SYSTEM_FIELDS: _restore_fields(world.get(name), data["systems"][name], SYSTEM_FIELDS[name])
+	# Generated surfaces already live in the immutable map stored by the checkpoint.
+	world.terrain_elevation.configure_climate(data["map_definition"])
 	# Reconnect shared records: serialized values never retain object aliases.
 	world.destination_reservations.restore_state(world.destination_reservations.reservations)
 	world.population_by_team = world.economy_system.population_by_team

@@ -42,6 +42,40 @@ static func reserve(definition: Dictionary, data: Dictionary, fields: Dictionary
 		clearings.append({"team":int(player["team"]), "origin":best, "width":width})
 	data["building_clearings"] = clearings
 
+static func reserve_settlement_exits(definition: Dictionary, data: Dictionary, fields: Dictionary, reserved: Dictionary) -> void:
+	var size: Vector2i = data["size"]
+	var coastal: bool = data["geography"]["shape_kind"] != "interior"
+	var walkable := Navigation.mask(data, definition)
+	for player in definition["players"]:
+		var start := Vector2i(Vector2(player["start"]))
+		var field := Navigation.flood(size, walkable, start, 23)
+		_reserve_exits(reserved, fields, size, walkable, field, start, coastal)
+
+# Reserve two approaches beyond the clearing, preferring a beach for the
+# first one on maritime maps. Paths account for the opening economy.
+static func _reserve_exits(reserved: Dictionary, fields: Dictionary, size: Vector2i, walkable: PackedByteArray, field: Dictionary, start: Vector2i, coastal: bool) -> void:
+	var first_direction := Vector2.ZERO
+	for exit_index in range(2):
+		var best := -1
+		var best_score := INF
+		for y in range(maxi(0, start.y - 14), mini(size.y, start.y + 15)):
+			for x in range(maxi(0, start.x - 14), mini(size.x, start.x + 15)):
+				var i := y * size.x + x
+				var distance: int = field["distances"][i]
+				if distance < 0 or distance > 23: continue
+				var delta := Vector2(Vector2i(x, y) - start)
+				if delta.length_squared() < 64.0 or delta.length_squared() > 196.0: continue
+				if first_direction.dot(delta.normalized()) > 0.15: continue
+				var score := absf(delta.length() - 11.5) + distance * 0.18 + float(fields["forest_strength"][i]) * 4.0
+				if coastal and exit_index == 0:
+					score += absf(float(fields["coast_distance"][i]) - 1.0) * 1.8
+				if score < best_score:
+					best_score = score
+					best = i
+		if best < 0: break
+		Navigation.reserve_path(reserved, Navigation.trace(field, best), size, walkable, 1)
+		first_direction = Vector2(Vector2i(best % size.x, best / size.x) - start).normalized()
+
 static func _find(data: Dictionary, fields: Dictionary, blocked: Dictionary, distances: PackedInt32Array, start: Vector2i, width: int, reach: int) -> Vector2i:
 	var size: Vector2i = data["size"]
 	var best := Vector2i(-1, -1)

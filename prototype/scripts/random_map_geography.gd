@@ -10,6 +10,8 @@ const Topology := preload("res://scripts/random_map_topology.gd")
 const Navigation := preload("res://scripts/random_map_navigation.gd")
 const CliffChain := preload("res://scripts/cliff_chain.gd")
 const Water := preload("res://scripts/random_map_water.gd")
+const Watershed := preload("res://scripts/random_map_watershed_world.gd")
+const MEADOW_RADIUS := 6
 
 static func geography(size: Vector2i, profile: String, seed: int, capacity: int) -> Dictionary:
 	var span := float(mini(size.x, size.y))
@@ -179,12 +181,18 @@ static func settlement_sites(geography_data: Dictionary, count: int, seed: int) 
 	var wild := bool(geography_data.get("wild", false))
 	var largest := int(areas.max()) if not areas.is_empty() else 0
 	var site_clearance := (5 if mini(size.x, size.y) <= 128 else 7) if wild else 6 if mini(size.x, size.y) <= 48 else 7
+	var planned := int(geography_data.get("version", 0)) == Watershed.VERSION
+	var shared := planned and Watershed.requires_land_link(geography_data["profile"])
+	var mainland := areas.find(largest) if shared else -1
+	var meadow_scores := _meadow_scores(size, open, geography_data["fields"]) if planned else PackedFloat32Array()
+	var spacing_goal := mini(size.x, size.y) * 0.80 / sqrt(float(maxi(1, count)))
 	for slot in range(count):
 		var best := -INF
 		var chosen := -1
 		for i in range(open.size()):
 			if open[i] == 0 or clearance[i] < site_clearance: continue
 			var component := components[i]
+			if shared and component != mainland: continue
 			if int(areas[component]) < (96 if wild and mini(size.x, size.y) <= 128 else 180): continue
 			if not wild and insular and occupied_components.has(component): continue
 			if not wild and not insular and int(areas[component]) != largest: continue
@@ -204,7 +212,12 @@ static func settlement_sites(geography_data: Dictionary, count: int, seed: int) 
 			if separation < ((8.0 if mini(size.x, size.y) <= 128 else maxf(12.0, mini(size.x, size.y) * 0.025)) if wild else maxf(12.0, mini(size.x, size.y) * 0.16)): continue
 			var forest := float(geography_data["fields"]["forest_strength"][i])
 			var score := separation + minf(12.0, clearance[i]) * 0.9 - forest * 8.0 + Topology.roll(Vector2i(i, slot), seed ^ 0xA123) * 2.0
-			if wild: score = Topology.roll(Vector2i(i, slot), seed ^ 0xA123)
+			if planned:
+				var roll := Topology.roll(Vector2i(i, slot), seed ^ 0xA123)
+				score = meadow_scores[i] * 15.0 + minf(12.0, clearance[i]) * 0.65 + roll * 5.0
+				score += minf(1.0, separation / spacing_goal) * 35.0
+				if not shared and not occupied_components.has(component): score += 9.0
+			elif wild: score = Topology.roll(Vector2i(i, slot), seed ^ 0xA123)
 			if score > best:
 				best = score
 				chosen = i
@@ -212,6 +225,44 @@ static func settlement_sites(geography_data: Dictionary, count: int, seed: int) 
 		result.append(Vector2(chosen % size.x + 0.5, chosen / size.x + 0.5))
 		occupied_components[components[chosen]] = true
 	return result
+
+# Count usable meadow over a whole settlement neighbourhood in constant time
+# per site. A single clearing cell in the middle of a forest scores poorly.
+static func _meadow_scores(size: Vector2i, walkable: PackedByteArray, fields: Dictionary) -> PackedFloat32Array:
+	var stride := size.x + 1
+	var totals := PackedInt32Array()
+	totals.resize(stride * (size.y + 1))
+	var potential: PackedByteArray = fields["forest_potential"]
+	for y in range(size.y):
+		var row := 0
+		for x in range(size.x):
+			var i := y * size.x + x
+			row += int(walkable[i] != 0 and potential[i] == 0)
+			totals[(y + 1) * stride + x + 1] = totals[y * stride + x + 1] + row
+	var scores := PackedFloat32Array()
+	scores.resize(walkable.size())
+	var radius := MEADOW_RADIUS + 1
+	var area := float((2 * radius + 1) * (2 * radius + 1))
+	for y in range(size.y):
+		var top := maxi(0, y - radius) * stride
+		var bottom := mini(size.y, y + radius + 1) * stride
+		for x in range(size.x):
+			var left := maxi(0, x - radius)
+			var right := mini(size.x, x + radius + 1)
+			scores[y * size.x + x] = (totals[bottom + right] - totals[bottom + left] - totals[top + right] + totals[top + left]) / area
+	return scores
+
+static func reserve_meadows(reserved: Dictionary, fields: Dictionary, starts: Array[Vector2], size: Vector2i) -> void:
+	for start in starts:
+		var center := Vector2i(start.floor())
+		for y in range(maxi(0, center.y - MEADOW_RADIUS), mini(size.y, center.y + MEADOW_RADIUS + 1)):
+			for x in range(maxi(0, center.x - MEADOW_RADIUS), mini(size.x, center.x + MEADOW_RADIUS + 1)):
+				var cell := Vector2i(x, y)
+				# Trees can be displaced within their cell when their art is bound.
+				var offset := (Vector2(cell - center).abs() - Vector2.ONE * 0.5).max(Vector2.ZERO)
+				if offset.length_squared() > MEADOW_RADIUS * MEADOW_RADIUS: continue
+				reserved[cell] = true
+				fields["forest_potential"][y * size.x + x] = 0
 
 static func starting_villager_positions(start: Vector2, size: Vector2i) -> Array[Vector2]:
 	var inward := (Vector2(size) * 0.5 - start).normalized()

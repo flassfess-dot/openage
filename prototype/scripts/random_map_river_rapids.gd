@@ -8,18 +8,20 @@ const Footprint := preload("res://scripts/footprint.gd")
 # A bedrock/boulder reach is distinct from a walkable gravel riffle and from
 # a vertical waterfall. Water remains visible between the original wet rocks;
 # the same rocks publish the actual cells which stop ships and infantry.
-static func plan(size: Vector2i, terrain: Array[int], rivers: Dictionary, lakes: Array, seed: int) -> Array:
+static func plan(size: Vector2i, terrain: Array[int], rivers: Dictionary, lakes: Array, seed: int, fairway: PackedByteArray = PackedByteArray()) -> Array:
 	var excluded: Dictionary = {}
 	for lake in lakes:
 		for i in lake["cells"]: excluded[int(i)] = true
 	var candidates: Array = []
 	for channel in rivers["channels"]:
+		if channel.get("river_role", "") == "main": continue
 		var points: PackedVector2Array = channel["points"]
 		for i in range(15,points.size()-15,8):
 			var point := points[i]
 			var cell := Vector2i(point.floor())
 			if cell.x<3 or cell.y<3 or cell.x>=size.x-3 or cell.y>=size.y-3: continue
 			var index := cell.y*size.x+cell.x
+			if not fairway.is_empty() and fairway[index] != 0: continue
 			if rivers["mouth_mask"][index]!=0 or excluded.has(index) or Banks.near_fall(rivers,point,13.0): continue
 			var drop := int(channel["levels"][i-12])-int(channel["levels"][i+12])
 			var rocky := float(channel["rockiness"][i])

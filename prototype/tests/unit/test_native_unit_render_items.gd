@@ -64,7 +64,11 @@ func check_hero_geometry(renderer: Renderer) -> void:
 	for zoom: float in [1.0, 2.0, 3.0]:
 		renderer.clear_caches()
 		var projection := func(pos: Vector2): return project(pos) * zoom
-		var items: Array = renderer.create_world_drawables({"units": [soldier, hero]}, projection, 0.0, provider, [], 1, [], zoom)
+		var items: Array = renderer.create_world_drawables({"units": [soldier, hero]}, projection, 0.0, provider, [], 1, [hero.id], zoom)
+		var health_bars := items.filter(func(item): return item.kind == "health_bar" and item.stable_id == hero.id)
+		if health_bars.size() != 1:
+			failures.append("Selected hero has no health bar at zoom %s" % zoom)
+			continue
 		for alpha: float in [0.0, 0.75]:
 			if alpha > 0.0:
 				renderer.refresh_world_drawables(items, projection, alpha, false, true)
@@ -76,8 +80,15 @@ func check_hero_geometry(renderer: Renderer) -> void:
 				var expected := Rect2(feet + (normal.position - feet) * 1.10, normal.size * 1.10)
 				if not enlarged.is_equal_approx(expected):
 					failures.append("Hero %s moved off its foot anchor at zoom %s, pose %s" % [kind, zoom, alpha])
-				if kind == "unit" and Markers.banner_position(pair[1], zoom) != (feet + Vector2(11.0, -28.0 * 1.10) * zoom).round():
-					failures.append("Standard did not rise vertically with the shoulder at zoom %s" % zoom)
+				if kind == "unit":
+					var shield := Markers.shield_rect(pair[1], zoom)
+					var expected_tip := Vector2(feet.x, enlarged.position.y - 6.0 * zoom).round()
+					if shield.size != Vector2(7, 7) * zoom or shield.end.y != expected_tip.y or shield.position.x + 3.0 * zoom != expected_tip.x:
+						failures.append("Hero shield lost its head anchor at zoom %s, pose %s" % [zoom, alpha])
+					var bar: Dictionary = health_bars[0]
+					var bar_top := roundf(roundf(Vector2(bar.screen_position).y) - Vector2(bar.hotspot).y * zoom - 5.0)
+					if shield.end.y >= bar_top:
+						failures.append("Hero shield covers the selection health bar at zoom %s" % zoom)
 				var top := Vector2(enlarged.get_center().x, enlarged.position.y + 0.1)
 				if not picking.texture_hit(top, pair[1], projection, zoom) or picking.texture_hit(top, pair[0], projection, zoom):
 					failures.append("Picking does not follow the enlarged %s at zoom %s" % [kind, zoom])

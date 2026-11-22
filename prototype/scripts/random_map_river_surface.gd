@@ -22,6 +22,8 @@ static func build(size: Vector2i, original: Array[int], rivers: Dictionary, lake
 		samples[i*STRIDE+2] = 2.0
 	for channel in rivers["channels"]:
 		var points: PackedVector2Array = channel["points"]
+		var stream: bool = channel.get("river_role", "") == "tributary"
+		var trunk: bool = channel.get("river_role", "") == "main"
 		var rockiness: PackedFloat32Array = channel.get("rockiness", PackedFloat32Array())
 		for i in range(0,points.size(),2):
 			var point := points[i]
@@ -33,6 +35,7 @@ static func build(size: Vector2i, original: Array[int], rivers: Dictionary, lake
 			var developed := smoothstep(1.0, 2.2, radius)
 			var flow_radius := lerpf(minf(0.35, radius * 0.22), radius * 0.76, developed)
 			var flow_depth := lerpf(0.10, 0.72, developed)
+			if stream: flow_depth = 0.22
 			var thalweg := -signf(bend) * minf(0.38, absf(bend) * 0.7)
 			var margin := maxf(0.0, radius - flow_radius - 0.20)
 			var flow_center := point + normal * clampf(thalweg * radius, -margin, margin)
@@ -56,6 +59,10 @@ static func build(size: Vector2i, original: Array[int], rivers: Dictionary, lake
 					# The deep thread shifts toward the eroding outer bank.
 					var section := maxf(0.0,1.0-pow(absf(crosswise-thalweg)/(1.0+absf(thalweg)),1.7))
 					var depth := 0.12+section*lerpf(1.10,1.65,rocky)
+					if stream:
+						depth = 0.10 + section * 0.22
+					elif trunk:
+						depth = lerpf(0.25, depth, developed)
 					var index := at*STRIDE
 					samples[index] = radius-distance
 					samples[index+1] = 1.0-smoothstep(0.9,1.8,distance-radius)
@@ -156,7 +163,7 @@ static func sample(shape: Dictionary, point: Vector2) -> Vector4:
 		result[component] = lerpf(lerpf(data[(origin.y*grid.x+origin.x)*STRIDE+component],data[(origin.y*grid.x+next.x)*STRIDE+component],fraction.x),lerpf(data[(next.y*grid.x+origin.x)*STRIDE+component],data[(next.y*grid.x+next.x)*STRIDE+component],fraction.x),fraction.y)
 	return result
 
-static func blend(weights: Dictionary, field: Vector4) -> Dictionary:
+static func blend(weights: Dictionary, field: Vector4, silt_id: int = SILT, gravel_id: int = GRAVEL) -> Dictionary:
 	var influence := field.y
 	if influence <= 0.0: return weights
 	var land := 0.0
@@ -172,8 +179,8 @@ static func blend(weights: Dictionary, field: Vector4) -> Dictionary:
 	for id in weights:
 		weights[id] *= (target_land-bed_land)/land if id not in [1,4,15,22] and land > 0.0 else 0.0
 	if land <= 0.0: weights[0] = target_land-bed_land
-	weights[SILT] = float(weights.get(SILT,0.0))+bed_land*(1.0-gravel)
-	weights[GRAVEL] = float(weights.get(GRAVEL,0.0))+bed_land*gravel
+	weights[silt_id] = float(weights.get(silt_id,0.0))+bed_land*(1.0-gravel)
+	weights[gravel_id] = float(weights.get(gravel_id,0.0))+bed_land*gravel
 	var shallow := target_water*influence*(1.0-smoothstep(0.10,0.95,field.z))*0.85
 	var deep := target_water*influence*smoothstep(0.95,1.65,field.z)*0.55
 	weights[1] = target_water-shallow-deep

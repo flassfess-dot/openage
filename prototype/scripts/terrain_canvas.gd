@@ -3,6 +3,7 @@ extends Node2D
 
 const CacheDependency := preload("res://scripts/cache_dependency.gd")
 const NativeTerrainMesh := preload("res://scripts/native_terrain_mesh.gd")
+const MATERIAL_HALO := NativeTerrainMesh.MATERIAL_HALO
 const PreparedScene := preload("res://scripts/prepared_terrain_scene.gd")
 var prepared_scene: Variant = null
 var prepared_geometry_stamp: Dictionary = {}
@@ -20,6 +21,7 @@ var map_seed := 1
 var resource_catalog
 var simulation_world
 var terrain_id_provider: Callable
+var base_terrain_id_provider: Callable
 var bounds_provider: Callable
 var view_zoom := 1.0
 var view_offset := Vector2.ZERO
@@ -108,7 +110,8 @@ func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable,
 	surface_stamp = {}
 	terrain_revision = -1
 	cached_geometry_key = _terrain_geometry_key()
-	terrain_id_provider = id_provider
+	base_terrain_id_provider = id_provider
+	_bind_surface_provider()
 	bounds_provider = visible_bounds_provider
 	_build_terrain_atlas()
 	if native_enabled and _uses_world_mesh() and native_kernel == null and ClassDB.class_exists("RoRTerrainKernel"):
@@ -121,6 +124,16 @@ func configure(size: Vector2i, seed: int, catalog, world, id_provider: Callable,
 	else:
 		_rebuild_terrain_mesh()
 	queue_redraw()
+
+
+func _bind_surface_provider() -> void:
+	terrain_id_provider = base_terrain_id_provider
+	if simulation_world != null and resource_catalog != null and resource_catalog.environment_pack.enabled and not simulation_world.terrain_elevation.climate_surfaces.is_empty():
+		terrain_id_provider = _climate_surface_at
+
+
+func _climate_surface_at(cell: Vector2i) -> int:
+	return simulation_world.terrain_elevation.surface_material(cell, int(base_terrain_id_provider.call(cell)))
 
 
 func is_scene_preparing() -> bool:
@@ -140,6 +153,9 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 	var zoom_changed := not is_equal_approx(view_zoom, zoom)
 	var geometry_key := _terrain_geometry_key()
 	var geometry_changed := cached_geometry_key != geometry_key
+	# A new match attaches its generated geography after the canvas is created.
+	# The threaded match can then switch this canvas to its render-side terrain.
+	if geometry_changed: _bind_surface_provider()
 	var surface_changed := terrain_revision != next_terrain_revision
 	var surface_rebuild := false
 	var changed_scene_cells: Variant = null
@@ -157,7 +173,7 @@ func set_view_state(zoom: float, offset: Vector2, next_viewport_size: Vector2, n
 		if changed is Array and not geometry_changed:
 			_invalidate_terrain_cells(changed)
 			_advance_unchanged_refinement(changed, next_terrain_revision)
-			surface_rebuild = changed.any(func(cell): return terrain_mesh_bounds.grow(1).has_point(cell))
+			surface_rebuild = changed.any(func(cell): return terrain_mesh_bounds.grow(MATERIAL_HALO).has_point(cell))
 		else:
 			terrain_drawable_cache.clear()
 			native_sample_cache.clear()
@@ -218,37 +234,39 @@ func _terrain_geometry_key() -> int:
 
 
 func _advance_unchanged_refinement(cells: Array, next_revision: int) -> void:
-	if coverage_task_id >= 0 and coverage_job_revision == terrain_revision and not cells.any(func(cell): return coverage_job_bounds.grow(1).has_point(cell)):
+	if coverage_task_id >= 0 and coverage_job_revision == terrain_revision and not cells.any(func(cell): return coverage_job_bounds.grow(MATERIAL_HALO).has_point(cell)):
 		coverage_job_revision = next_revision
 	for entry in queued_coverage:
-		if int(entry["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(entry["bounds"]).grow(1).has_point(cell)):
+		if int(entry["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(entry["bounds"]).grow(MATERIAL_HALO).has_point(cell)):
 			entry["revision"] = next_revision
-	if coverage_upload != null and int(coverage_upload["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(coverage_upload["bounds"]).grow(1).has_point(cell)):
+	if coverage_upload != null and int(coverage_upload["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(coverage_upload["bounds"]).grow(MATERIAL_HALO).has_point(cell)):
 		coverage_upload["revision"] = next_revision
 	var coverage_unchanged := true
 	for part in coverage_parts:
-		if int(part.get("revision", coverage_revision)) == terrain_revision and not cells.any(func(cell): return Rect2i(part["bounds"]).grow(1).has_point(cell)):
+		if int(part.get("revision", coverage_revision)) == terrain_revision and not cells.any(func(cell): return Rect2i(part["bounds"]).grow(MATERIAL_HALO).has_point(cell)):
 			part["revision"] = next_revision
 		else:
 			coverage_unchanged = false
 	if coverage_unchanged: coverage_revision = next_revision
-	if refinement_task_id >= 0 and refinement_revision == terrain_revision and not cells.any(func(cell): return refinement_bounds.grow(1).has_point(cell)):
+	if refinement_task_id >= 0 and refinement_revision == terrain_revision and not cells.any(func(cell): return refinement_bounds.grow(MATERIAL_HALO).has_point(cell)):
 		refinement_revision = next_revision
-	if queued_refinement != null and int(queued_refinement["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(queued_refinement["bounds"]).grow(1).has_point(cell)):
+	if queued_refinement != null and int(queued_refinement["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(queued_refinement["bounds"]).grow(MATERIAL_HALO).has_point(cell)):
 		queued_refinement["revision"] = next_revision
-	if refinement_upload != null and int(refinement_upload["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(refinement_upload["bounds"]).grow(1).has_point(cell)):
+	if refinement_upload != null and int(refinement_upload["revision"]) == terrain_revision and not cells.any(func(cell): return Rect2i(refinement_upload["bounds"]).grow(MATERIAL_HALO).has_point(cell)):
 		refinement_upload["revision"] = next_revision
 
 
 func _invalidate_terrain_cells(cells: Array) -> void:
 	var samples: Variant = native_sample_cache.get("cells", {})
 	var bounds: Rect2i = native_sample_cache.get("bounds", Rect2i())
+	var cell_bounds := bounds.grow(MATERIAL_HALO)
 	var packed_detached := false
 	for cell_value in cells:
 		var cell := Vector2i(cell_value)
 		if samples is Dictionary: samples.erase(cell)
-		elif samples is PackedInt32Array and bounds.grow(1).has_point(cell):
-			var index := (cell.y-bounds.position.y+1)*(bounds.size.x+2)+cell.x-bounds.position.x+1
+		elif samples is PackedInt32Array and cell_bounds.has_point(cell):
+			var local := cell - cell_bounds.position
+			var index := local.y * cell_bounds.size.x + local.x
 			if index >= 0 and index < samples.size():
 				# Packed arrays assigned through Variants share their storage with
 				# issued requests. Detach once before changing the retained cache.
@@ -257,8 +275,8 @@ func _invalidate_terrain_cells(cells: Array) -> void:
 					packed_detached = true
 				samples[index] = -2
 		# Borders and blends also depend on adjacent cells.
-		for y in range(-1, 2):
-			for x in range(-1, 2):
+		for y in range(-MATERIAL_HALO, MATERIAL_HALO + 1):
+			for x in range(-MATERIAL_HALO, MATERIAL_HALO + 1):
 				terrain_drawable_cache.erase(cell + Vector2i(x, y))
 	native_sample_cache["cells"] = samples
 

@@ -16,7 +16,7 @@ func capture() -> void:
 		if not bool(scene.generated.get("valid", false)):
 			quit(1)
 			return
-		await process_frame
+		while scene.terrain.is_scene_preparing(): await process_frame
 		await process_frame
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png(directory.path_join(profile + "-overview.png"))

@@ -54,6 +54,8 @@ func _initialize() -> void:
 	var tested_routes:=0
 	for profile in ["grasslands","highlands"]:
 		var settings:=Settings.default_settings();settings["map_type_id"]=profile;settings["map_size_id"]="large"
+		# The diagonal route below is a coordinate fixture from the v6 map.
+		settings["landscape_version"] = Settings.WatershedWorld.LEGACY_VERSION
 		var built:=Settings.build(settings)
 		check(built.get("valid",false),profile+" builds")
 		if not built.get("valid",false):continue
@@ -105,12 +107,15 @@ func _initialize() -> void:
 		print(profile+": fitted generated reaches tested = "+str(profile_routes))
 		world.shutdown_derived_state()
 	_verify_coastal_ford()
+	for seed_value in [41721, 7919]:
+		_verify_main_river_routes(seed_value)
 	for failure in failures:push_error(failure)
 	print("Natural river navigation: %d fitted generated reaches and fixed river routes, %d failures"%[tested_routes,failures.size()])
 	quit(0 if failures.is_empty() else 1)
 
 func _verify_coastal_ford() -> void:
 	var settings := Settings.default_settings()
+	settings["landscape_version"] = Settings.WatershedWorld.LEGACY_VERSION
 	settings["map_type_id"] = "coastal"
 	settings["map_size_id"] = "standard"
 	settings["seed"] = 41721
@@ -139,6 +144,41 @@ func _verify_coastal_ford() -> void:
 	check(_move(world, scout, Vector2(58.5, 8.5)), "scout ship sails upriver from the sea, past the coastal ford")
 	world.shutdown_derived_state()
 
+func _verify_main_river_routes(seed_value: int) -> void:
+	for profile in ["coastal", "grasslands", "highlands"]:
+		var settings := Settings.default_settings()
+		settings["map_type_id"] = profile
+		settings["map_size_id"] = "large"
+		settings["seed"] = seed_value
+		var built := Settings.build(settings)
+		check(built.get("valid", false), profile + " current river recipe builds")
+		if not built.get("valid", false): continue
+		var data: Dictionary = built["map_data"]
+		var world = _world(data, built["definition"])
+		for actor in world.get_units().duplicate(): world.detach_unit_for_transport(actor["id"])
+		var systems: Array = data["rivers"]["network_plan"]["systems"]
+		check(not systems.is_empty(), profile + " control has a major river")
+		for system in systems:
+			var stem: PackedVector2Array = system["main_path"]
+			# Outside the map and the tapered spring cannot contain a hull.
+			# Select stations by their position on the full drainage stem.
+			var mouth := stem[0] if profile == "coastal" else stem[mini(4, stem.size() / 3)]
+			var upper := stem[maxi(stem.size() / 2, stem.size() - 6)]
+			for kind in ["fishing_boat", "scout_ship", "transport", "catapult_trireme"]:
+				var unit: Dictionary = world.add_unit(1, kind, mouth, false)
+				var radius: float = unit["footprint_radius"]
+				var restriction: int = unit["terrain_restriction"]
+				var target := Vector2(world.pathfinder.nearest_walkable(Vector2i(upper), "water", restriction, radius)) + Vector2.ONE * 0.5
+				var path: Array = world.pathfinder.find_path(unit["pos"], target, "water", restriction, radius)
+				check(unit["pos"].distance_to(mouth) <= 2.5 and target.distance_to(upper) <= 2.5, profile + " hull fits both main-stem stations: " + kind)
+				check(not path.is_empty() and Vector2(path[-1]).distance_to(target) < 0.2, profile + " hull routes from the lower to the upper main stem: " + kind)
+				if kind == "scout_ship":
+					check(_move(world, unit, target, ceili(float(system["main_length"]) * 60) + 300), profile + " scout ship completes the main river")
+				world.release_unit_destination(unit)
+				world.detach_unit_for_transport(unit["id"])
+			print("%s seed %d main river: four hulls, %.1f tiles along the stem" % [profile, seed_value, system["main_length"]])
+		world.shutdown_derived_state()
+
 func _world(data:Dictionary,definition:Dictionary):
 	var world=World.new(data["size"])
 	world.set_gamespec(catalog.gamespec_data);world.set_terrain_catalog(catalog.terrain_catalog_data)
@@ -152,9 +192,9 @@ func _world(data:Dictionary,definition:Dictionary):
 	controller=Controller.new(world)
 	return world
 
-func _move(world,unit:Dictionary,target:Vector2) -> bool:
+func _move(world,unit:Dictionary,target:Vector2,max_ticks:int=1200) -> bool:
 	controller.enqueue_command(Commands.MoveCommand.new(controller.tick_index+1,[int(unit["id"])],target),true,1)
-	for tick in range(1200):
+	for tick in range(max_ticks):
 		controller.advance_frame(0.05,1,2)
 		if unit["pos"].distance_to(target)<0.45:return true
 	print("Failed arrival: ",unit["kind"]," ",unit["pos"]," -> ",target," task=",unit["task"]," path=",unit.get("path",[])," results=",controller.command_results)

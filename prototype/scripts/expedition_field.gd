@@ -2,10 +2,12 @@ extends RefCounted
 
 const Service := preload("res://scripts/expedition.gd")
 const Inventory := preload("res://scripts/expedition_inventory.gd")
+const Coordinates := preload("res://scripts/coordinates.gd")
 const REACH := 1.65
 const MAX_FIELD_CACHES := 48
 const COMMON := ["point", "shield", "balm", "seal", "balm", "incense"]
 const RARE := ["iron", "scales", "fibula"]
+const TOWN_GEAR := ["point", "shield", "seal"]
 
 var casualties: Dictionary = {}
 var piles: Dictionary = {}
@@ -29,6 +31,7 @@ static func valid_state(state: Variant, size: Vector2i) -> bool:
 		var pile: Variant = state.piles[id]
 		if not id is int or id < 1 or id >= state.next or not pile is Dictionary or pile.get("id") != id: return false
 		if not pile.get("pos") is Vector2 or not bounds.has_point(pile.pos) or not pile.get("items") is Array or pile.items.is_empty(): return false
+		if pile.has("coffer") and not pile.coffer is bool: return false
 		for item in pile.items:
 			if not Inventory.ITEMS.has(item): return false
 	for id in state.orders:
@@ -45,13 +48,15 @@ func restore(world, state: Dictionary) -> void:
 	for unit in world.get_units() + world.get_embarked_units():
 		if unit.has("service_role") and unit.hp > 0: hero_ids[unit.id] = true
 
-func place(position: Vector2, items: Array) -> void:
+func place(position: Vector2, items: Array, coffer: bool = false) -> void:
 	if items.is_empty(): return
 	for pile in piles.values():
 		if Vector2(pile.pos).distance_squared_to(position) <= 0.8 * 0.8:
 			pile.items.append_array(items)
+			if coffer: pile["coffer"] = true
 			return
 	piles[next_pile] = {"id":next_pile, "pos":position, "items":items.duplicate()}
+	if coffer: piles[next_pile]["coffer"] = true
 	next_pile += 1
 
 func release_kit(hero: Dictionary, position: Vector2) -> void:
@@ -79,6 +84,22 @@ func fallen(world, unit: Dictionary, killer_team: int) -> void:
 	elif count % 3 == 0 or int(unit.service_xp) >= Service.SEASONED:
 		items.append(COMMON[roll % COMMON.size()])
 	place(unit.pos, items)
+
+func building_destroyed(world, building: Dictionary, attacker_team: int) -> void:
+	var kind := String(building.get("kind", ""))
+	if kind not in ["town_center", "wonder"] or building.get("state", "complete") != "complete": return
+	if attacker_team <= 0 or world.are_teams_allied(attacker_team, int(building.team)): return
+	var roll := int(world.simulation_seed) + int(building.id) * 37
+	var items: Array
+	if kind == "wonder":
+		var first := posmod(roll, RARE.size())
+		items = [RARE[first], RARE[(first + 1) % RARE.size()], "incense"]
+	else:
+		items = [TOWN_GEAR[posmod(roll, TOWN_GEAR.size())], "balm"]
+	# Leave the coffer on the near side, inside the newly cleared footprint.
+	var half_size := Vector2(building.get("footprint", {}).get("half_size", Vector2.ONE))
+	var position := Coordinates.clamp_world(Vector2(building.pos) + half_size * 0.65, world.map_size)
+	place(position, items, true)
 
 func visible_piles(world, team: int) -> Array:
 	var result := []

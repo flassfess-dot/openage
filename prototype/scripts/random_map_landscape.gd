@@ -431,6 +431,11 @@ static func fingerprint(map_data: Dictionary) -> String:
 	var stable: Array = [VERSION, map_data.get("size"), map_data.get("seed"), map_data.get("terrain_ids"), map_data.get("vertex_levels"),
 		map_data.get("cliff_cells", []), map_data.get("cliff_obstructions", []), map_data.get("resources", []), map_data.get("scenery", []), map_data.get("naval_start_zones", [])]
 	var river_surface: Dictionary = map_data.get("rivers", {}).get("surface", {})
+	if map_data.has("climate_surfaces"):
+		var climate_hash := HashingContext.new()
+		climate_hash.start(HashingContext.HASH_SHA256)
+		climate_hash.update(map_data["climate_surfaces"].to_byte_array())
+		stable.append([map_data["climate_id"], climate_hash.finish().hex_encode()])
 	if not river_surface.is_empty():
 		var digest := HashingContext.new()
 		digest.start(HashingContext.HASH_SHA256)

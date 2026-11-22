@@ -1,7 +1,8 @@
 class_name RoRRandomMapWatershedWorld
 extends RefCounted
 
-const VERSION := 6
+const LEGACY_VERSION := 6
+const VERSION := 7
 const PROFILES := ["small_islands", "islands", "coastal", "grasslands", "highlands", "continental", "mediterranean", "hill_country", "narrows"]
 const Natural := preload("res://scripts/random_map_natural_landscape.gd")
 const Base := preload("res://scripts/random_map_landscape.gd")
@@ -12,12 +13,18 @@ const Navigation := preload("res://scripts/random_map_navigation.gd")
 const CliffChain := preload("res://scripts/cliff_chain.gd")
 const Shapes := preload("res://scripts/random_map_world_shapes.gd")
 
-static func geography(size: Vector2i, profile: String, seed: int) -> Dictionary:
+static func supports(version: int) -> bool:
+	return version in [LEGACY_VERSION, VERSION]
+
+static func theme(version: int) -> String:
+	return "watershed_world_v%d" % version
+
+static func geography(size: Vector2i, profile: String, seed: int, version: int = VERSION) -> Dictionary:
 	if profile != "continental":
-		var shape := Shapes.build(size, profile, seed)
+		var shape := Shapes.build(size, profile, seed, version == VERSION)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = seed ^ 0xC0171
-		return finish(size, shape["terrain"], shape["forms"], profile, seed, rng, shape)
+		return finish(size, shape["terrain"], shape["forms"], profile, seed, rng, shape, version)
 	var span := float(mini(size.x, size.y))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed ^ 0xC0171
@@ -50,16 +57,27 @@ static func geography(size: Vector2i, profile: String, seed: int) -> Dictionary:
 			terrain[i] = 0 if silhouette + (coast[i] - 0.5) * 0.43 + (detail[i] - 0.5) * 0.11 > 0.0 else 1
 			if x < 3 or y < 3 or x >= size.x - 3 or y >= size.y - 3: terrain[i] = 1
 	Water.smooth_coast(terrain, size)
-	return finish(size, terrain, forms, profile, seed, rng)
+	return finish(size, terrain, forms, profile, seed, rng, {}, version)
 
-static func finish(size: Vector2i, terrain: Array[int], forms: Array, profile: String, seed: int, rng: RandomNumberGenerator, options: Dictionary = {}) -> Dictionary:
+static func finish(size: Vector2i, terrain: Array[int], forms: Array, profile: String, seed: int, rng: RandomNumberGenerator, options: Dictionary = {}, version: int = VERSION) -> Dictionary:
 	var span := float(mini(size.x, size.y))
 	var no_starts: Array[Vector2] = []
 	var fields := Natural.fields(size, terrain, no_starts, profile, seed ^ 0x8194)
 	fields["vertex_levels"] = broad_relief(size, terrain, fields, seed ^ 0x8194, profile)
 	var original_levels: Array[int] = fields["vertex_levels"].duplicate()
 	var hydro_options: Dictionary = options.get("hydrology", {}).duplicate(true)
-	if profile=="continental":
+	if version == VERSION:
+		var insular := profile in ["small_islands", "islands"]
+		hydro_options.merge({
+			"network_layout": "hierarchical", "playable_channels": true,
+			"minimum_landmass_area": 700 if insular else 0,
+			"minimum_tributary_length": clampf(span * 0.09, 8.0, 24.0),
+			"tributaries_per_river": 1 if insular or profile in ["grasslands", "hill_country"] else 2,
+			"maximum_radius": clampf(span * 0.043, 3.0, 4.8),
+			"width_scale": 1.08, "width_transition_cells": 3.0,
+		}, true)
+		if profile == "continental": hydro_options["runoff_scale"] = 0.32
+	elif profile=="continental":
 		# Expose narrow headwater candidates, then select whole drainage systems.
 		# Width keeps its independent hydraulic reference rather than this cutoff.
 		hydro_options.merge({"network_layout":"hierarchical","runoff_scale":0.32,"maximum_radius":3.5,"width_transition_cells":4.0},true)
@@ -74,15 +92,21 @@ static func finish(size: Vector2i, terrain: Array[int], forms: Array, profile: S
 	fields["vertex_levels"] = original_levels
 	Hydrology.apply_surface_relief(size, terrain, original_levels, hydro["rivers"], hydro["lakes"])
 	fields["recipe"] = fields["recipe"].duplicate(true)
-	fields["recipe"]["forest_threshold"] = 0.53
+	if version == LEGACY_VERSION: fields["recipe"]["forest_threshold"] = 0.53
+	var forest_threshold := float(fields["recipe"]["forest_threshold"])
+	var moisture_bias := float(fields["recipe"]["moisture_bias"])
 	var climate := Natural.noise_field(size, span * 0.34, seed ^ 0x6819)
 	var woodland := Natural.noise_field(size, maxf(10.0, span * 0.10), seed ^ 0x8351)
 	var local_wood := Natural.noise_field(size, 11.0, seed ^ 0x6512)
 	for i in range(terrain.size()):
 		var strength := climate[i] * 0.52 + woodland[i] * 0.36 + local_wood[i] * 0.12
 		fields["moisture"][i] = clampf(climate[i] * 0.85 + woodland[i] * 0.15 + 0.08, 0.0, 1.0)
+		if version == VERSION:
+			var bank := 1.0 - smoothstep(1.0, 8.0, float(fields["coast_distance"][i]))
+			fields["moisture"][i] = clampf(climate[i] * 0.75 + woodland[i] * 0.25 + moisture_bias + bank * 0.10, 0.0, 1.0)
+			strength += moisture_bias * 0.40 + bank * 0.045
 		fields["forest_strength"][i] = strength
-		fields["forest_potential"][i] = int(terrain[i] == 0 and fields["coast_distance"][i] > 1 and strength > 0.53 and hydro["rivers"]["mask"][i] == 0)
+		fields["forest_potential"][i] = int(terrain[i] == 0 and fields["coast_distance"][i] > 1 and strength > forest_threshold and hydro["rivers"]["mask"][i] == 0)
 	var scenery: Array = []
 	var cells: Dictionary = {}
 	var used: Dictionary = {}
@@ -105,22 +129,33 @@ static func finish(size: Vector2i, terrain: Array[int], forms: Array, profile: S
 	Hydrology.RiverFalls.restore_pools(size,terrain,fields["vertex_levels"],hydro["rivers"])
 	var walkable := PackedByteArray()
 	walkable.resize(terrain.size())
-	for i in range(terrain.size()): walkable[i] = int(terrain[i] in [0, 4])
+	for i in range(terrain.size()):
+		walkable[i] = int(Hydrology.Rules.is_land_walkable(Hydrology.Rules.logical_for_terrain_id(terrain[i]))) if version == VERSION else int(terrain[i] in [0, 4])
 	for cell in cells: walkable[cell.y * size.x + cell.x] = 0
-	return {"size": size, "seed": seed, "terrain": terrain, "fields": fields, "ridge_cells": cells.keys(), "ridge_scenery": scenery,
+	return {"size": size, "seed": seed, "version": version, "terrain": terrain, "fields": fields, "ridge_cells": cells.keys(), "ridge_scenery": scenery,
 		"rivers": hydro["rivers"], "lakes": hydro["lakes"], "fords": hydro["fords"], "landforms": forms,
 		"walkable": walkable, "woodland_regions": maxi(4, roundi(span / 43.0)), "landmass_seeds": forms.size(), "profile": profile, "wild": true, "shape_kind": options.get("shape_kind", "outer_ocean" if profile == "continental" else "interior")}
 
 static func contract(generator: Dictionary, geography_data: Dictionary, starts: Array[Vector2], seed: int) -> Dictionary:
-	var result := Wild.contract(generator, geography_data, starts, seed)
-	result["version"] = VERSION
-	result["theme"] = "watershed_world_v6"
-	result["requires_shared_land"] = false
+	var version := int(geography_data["version"])
+	var result := Wild.contract(generator, geography_data, starts, seed, version == VERSION)
+	result["version"] = version
+	result["theme"] = theme(version)
+	result["requires_shared_land"] = version == VERSION and requires_land_link(geography_data["profile"])
 	result["river_network"] = true
 	result["water_ratio"] = [0.0, 0.95]
 	result["cliff_profile"] = ""
 	result["quality_contract"]["minimum_gate_width_cells"] = 0
+	if version == VERSION:
+		result["quality_contract"]["resource_counts"] = {"tree": 3, "berries": 2}
+		result["quality_contract"]["maximum_gather_path_cells"] = 23
+		for group in result["resource_clusters"]:
+			if group.has("owner_start"):
+				group["count"] = clampi(group["count"], 4, 8) if group["kind"] == "tree" else clampi(group["count"], 3, 5)
 	return result
+
+static func requires_land_link(profile: String) -> bool:
+	return profile not in ["islands", "small_islands"]
 
 # Settlement-sized terraces come from broad landforms. Short-period ecological
 # noise must not turn every integer elevation boundary into tiny build blockers.

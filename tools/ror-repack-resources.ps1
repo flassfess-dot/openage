@@ -3,7 +3,8 @@ param(
     [string]$GamePath = "D:\Games\Age of Empires 1 - Rise of Rome",
     [string]$GameVersion = "1.1",
     [int]$Civilization = 13,
-    [string]$AoE2GamePath = "D:\Games\Age of Empires II"
+    [string]$AoE2GamePath = "D:\Games\Age of Empires II",
+    [string]$AoEDEGamePath = "D:\Games\Steam\steamapps\common\AoEDE"
 )
 
 $ErrorActionPreference = "Stop"
@@ -166,7 +167,8 @@ try {
         -Arguments @(
             (Join-Path $repositoryRoot "tools\ror_import\import_environment.js"),
             "--game", $AoE2GamePath,
-            "--ror-game", $GamePath
+            "--ror-game", $GamePath,
+            "--de-game", $AoEDEGamePath
         )
 
     Invoke-LoggedCommand `

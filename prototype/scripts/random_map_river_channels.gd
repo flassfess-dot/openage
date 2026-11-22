@@ -23,6 +23,11 @@ static func build(size: Vector2i, original: Array[int], nodes: Array, threshold:
 			if int(incoming.get(next["cell"], 0)) != 1: break
 			at = next
 		var channel := _curve(chain, width_reference)
+		if options.get("playable_channels", false):
+			# The chain starts on the incoming branch and ends at its receiving
+			# junction. Classify it by the upstream node, including short forks.
+			channel["river_role"] = node["river_role"]
+			channel["headwater"] = not incoming.has(node["cell"])
 		_shape_widths(channel, size, fields, options)
 		channels.append(channel)
 	var mask := PackedByteArray()
@@ -57,6 +62,7 @@ static func build(size: Vector2i, original: Array[int], nodes: Array, threshold:
 					var ratio: float = channel["runoff"][i] / width_reference
 					var kind := 4 if ratio < 2.0 else 1
 					if ratio > 18.0 and depth > 1.25: kind = 22
+					if channel.get("river_role", "") == "tributary": kind = 4
 					if original[index] != 0: kind = 22 if original[index] == 22 else 1
 					types[index] = kind
 	# Flat shallows are separated at changes in physical water level. Otherwise
@@ -160,6 +166,8 @@ static func _shape_widths(channel: Dictionary, size: Vector2i, fields: Dictionar
 	var maximum := float(options.get("maximum_radius",3.2))
 	var raw := radii.duplicate()
 	var rocks: PackedFloat32Array = channel["rockiness"]
+	var trunk: bool = channel.get("river_role", "") == "main"
+	var headwater := bool(channel.get("headwater", false))
 	for i in range(points.size()):
 		var cell := Vector2i(points[i].floor()).clamp(Vector2i.ZERO,size-Vector2i.ONE)
 		var stone := geology[cell.y*size.x+cell.x] if not geology.is_empty() else 0.5
@@ -178,6 +186,11 @@ static func _shape_widths(channel: Dictionary, size: Vector2i, fields: Dictionar
 		local_factor *= 1.0+sin(points[i].x*0.11+sin(points[i].y*0.09))*0.05
 		var end_weight := smoothstep(0.0,3.0,minf(points[i].distance_to(points[0]),points[i].distance_to(points[-1])))
 		raw[i] = clampf(base*lerpf(1.0,local_factor,end_weight),0.42,maximum)
+		if trunk:
+			# Allow the source to taper over its first few tiles. At bends a
+			# diagonal hull also needs clearance at both orthogonal anchors.
+			var taper := smoothstep(0.0, 5.0, points[i].distance_to(points[0])) if headwater else 1.0
+			raw[i] = maxf(raw[i], lerpf(0.65, 2.85, taper))
 		rocks[i] = clampf(rocks[i]+resistance*0.45+confinement*0.20,0.0,1.0)
 	# Width changes belong to reaches, never to independent individual tiles.
 	var transition:=float(options.get("width_transition_cells",2.4))

@@ -117,7 +117,7 @@ static func geography(size: Vector2i, seed: int, river_network: bool = false) ->
 	return {"size": size, "terrain": terrain, "fields": fields, "ridge_cells": cells.keys(), "ridge_scenery": scenery, "rivers": rivers,
 		"landforms": forms, "walkable": walkable, "woodland_regions": families, "landmass_seeds": forms.size(), "profile": "islands", "wild": true}
 
-static func contract(generator: Dictionary, geography_data: Dictionary, starts: Array[Vector2], seed: int) -> Dictionary:
+static func contract(generator: Dictionary, geography_data: Dictionary, starts: Array[Vector2], seed: int, zoned_minerals: bool = false) -> Dictionary:
 	var result := generator.duplicate(true)
 	result["version"] = VERSION
 	result["theme"] = "wild_islands_v5"
@@ -139,17 +139,18 @@ static func contract(generator: Dictionary, geography_data: Dictionary, starts: 
 			clusters.append({"kind": kind, "count": rng.randi_range(3, 11) if kind == "tree" else rng.randi_range(2, 7),
 				"radius": rng.randf_range(1.0, 3.5), "amount": 75 if kind == "tree" else 150, "owner_start": [start.x, start.y],
 				"minimum_distance": rng.randf_range(4.0, 7.0), "maximum_distance": rng.randf_range(10.0, 18.0), "guarantee_radius": 20.0})
-	var size: Vector2i = geography_data["size"]
-	var deposits := 0
-	for attempt in range(1600):
-		if deposits >= maxi(12, size.x * size.y / 850): break
-		var cell := Vector2i(rng.randi_range(2, size.x - 3), rng.randi_range(2, size.y - 3))
-		var i := cell.y * size.x + cell.x
-		if geography_data["terrain"][i] != 0 or geography_data["fields"]["coast_distance"][i] < 3: continue
-		if float(geography_data["fields"]["geology"][i]) < 0.52: continue
-		clusters.append({"kind": "gold_mine" if rng.randf() < 0.5 else "stone_mine", "count": rng.randi_range(3, 15),
-			"center": [cell.x + 0.5, cell.y + 0.5], "radius": rng.randf_range(1.2, 3.4), "amount": 400, "placement_radius": 5.0})
-		deposits += 1
+	if not zoned_minerals:
+		var size: Vector2i = geography_data["size"]
+		var deposits := 0
+		for attempt in range(1600):
+			if deposits >= maxi(12, size.x * size.y / 850): break
+			var cell := Vector2i(rng.randi_range(2, size.x - 3), rng.randi_range(2, size.y - 3))
+			var i := cell.y * size.x + cell.x
+			if geography_data["terrain"][i] != 0 or geography_data["fields"]["coast_distance"][i] < 3: continue
+			if float(geography_data["fields"]["geology"][i]) < 0.52: continue
+			clusters.append({"kind": "gold_mine" if rng.randf() < 0.5 else "stone_mine", "count": rng.randi_range(3, 15),
+				"center": [cell.x + 0.5, cell.y + 0.5], "radius": rng.randf_range(1.2, 3.4), "amount": 400, "placement_radius": 5.0})
+			deposits += 1
 	result["resource_clusters"] = clusters
 	result["source_profile"]["unit_groups"] = result["source_profile"].get("unit_groups", []).filter(func(group): return int(group.get("unit_id", -1)) not in [66, 102])
 	return result

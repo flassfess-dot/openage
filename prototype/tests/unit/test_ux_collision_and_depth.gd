@@ -71,13 +71,16 @@ func test_building_depth_in_every_direction() -> void:
 				var worker := {"id": 1, "kind": "villager", "team": 1, "hp": 25.0, "pos": center + offset, "previous_pos": center + offset * 1.05, "task": task}
 				var render = Render.new()
 				var project := func(point): return Vector2((point.x - point.y) * 32.0, (point.x + point.y) * 16.0)
-				var items: Array = render.create_world_drawables({"buildings": [building], "units": [worker]}, project, 0.5)
+				var pile := {"id": 1, "pos": center + offset, "items": ["balm"]}
+				var items: Array = render.create_world_drawables({"buildings": [building], "units": [worker], "player_state": {"service_loot": [pile]}}, project, 0.5)
 				render.refresh_world_drawables(items, project, 0.75)
 				var body: Dictionary = items.filter(func(item): return item["kind"] == "unit")[0]
 				var structure: Dictionary = items.filter(func(item): return item["kind"] == "building")[0]
 				var worker_in_front := items.find(body) > items.find(structure)
 				var expected_front: bool = kind == "farm" or offset.x > 0 or offset.y > 0
 				check(worker_in_front == expected_front, "%s depth at direction %s while %s remains correct after interpolation" % [kind, offset, task])
+				var roll: Dictionary = items.filter(func(item): return item.kind == "field_loot")[0]
+				check((items.find(roll) > items.find(structure)) == expected_front, "field loot follows the building footprint at %s / %s" % [kind, offset])
 
 
 func check(value: bool, message: String) -> void:

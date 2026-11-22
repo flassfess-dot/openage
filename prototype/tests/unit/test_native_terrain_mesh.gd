@@ -24,6 +24,11 @@ func _run() -> void:
 	var elevation := Elevation.new(Vector2i(400, 400))
 	for material in [0, 1, 4, 6, 15, 22, 1000, 1001]:
 		compare_patch("uniform %d" % material, Rect2i(190, 190, 2, 2), func(_cell): return material, elevation, canvas, kernel, 41721)
+	# Terrain preparation produces one mesh per row. Only the second row
+	# outside these requests contributes the red soil at their outer edges.
+	var soil_band := func(cell): return 1121 if cell.y == 193 else 1120
+	for y in [191, 192, 193, 194, 195]:
+		compare_patch("soil band from row %d" % y, Rect2i(190, y, 3, 1), soil_band, elevation, canvas, kernel, 41721)
 	var coast := func(cell):
 		if cell.x < 0 or cell.y < 0 or cell.x > 399 or cell.y > 399: return -1
 		return [1, 4, 15, 22, 0, 6, 1000, 1001][posmod(cell.x * 7 + cell.y * 3, 8)]
@@ -58,6 +63,10 @@ func _run() -> void:
 	for i in range(samples.size()/4): samples[i*4+2] = -0.10 if i%801 < 386 else 1.2
 	elevation.river_shape["samples"] = samples
 	compare_patch("continuous native shoal material",Rect2i(190,190,4,4),coast,elevation,canvas,kernel,41721)
+	elevation.bank_silt = 1100
+	elevation.ford_gravel = 1103
+	var climate_coast := func(cell): return [1, 4, 1100, 1103, 1111, 1121][posmod(cell.x + cell.y * 5, 6)]
+	compare_patch("regional river materials", coast_bounds, climate_coast, elevation, canvas, kernel, 41721)
 	var shoal_request := NativeMesh.capture(coast_bounds,41721,coast,elevation,catalog.environment_pack,canvas.terrain_atlas_regions,canvas.terrain_atlas_size)
 	check(NativeMesh.build_request(kernel,shoal_request,4) == NativeMesh.build_request(kernel,shoal_request,16),"native bank ribbons do not move during refinement")
 	check(kernel.build_mesh(Rect2i(0, 0, 2, 2), PackedInt32Array(), PackedFloat32Array(), PackedInt32Array(), PackedFloat32Array(), 1).is_empty(), "malformed mesh input is rejected")
@@ -66,7 +75,10 @@ func _run() -> void:
 	finish()
 
 func compare_patch(label: String, bounds: Rect2i, provider: Callable, elevation, canvas, kernel, seed: int) -> void:
-	var actual := NativeMesh.build_arrays(kernel, bounds, seed, provider, elevation, canvas.resource_catalog.environment_pack, canvas.terrain_atlas_regions, canvas.terrain_atlas_size)
+	var request := NativeMesh.capture(bounds, seed, provider, elevation, canvas.resource_catalog.environment_pack, canvas.terrain_atlas_regions, canvas.terrain_atlas_size)
+	# Compare the same tessellation here. Production may merge coplanar triangles.
+	request["compact_planar_base"] = false
+	var actual := NativeMesh.build_request(kernel, request)
 	check(not actual.is_empty(), label + " builds native arrays")
 	if actual.is_empty(): return
 	var points := PackedVector3Array()
@@ -78,16 +90,27 @@ func compare_patch(label: String, bounds: Rect2i, provider: Callable, elevation,
 			var cell := Vector2i(x, y)
 			var drawable := Terrain.tile_drawable(cell, int(provider.call(cell)), provider, canvas.resource_catalog, elevation, 1.0, Vector2.ZERO, seed)
 			for layer in drawable["mesh_layers"]: canvas._append_material_layer(points, uvs, indices, colors, layer)
-	check(actual[Mesh.ARRAY_INDEX] == indices, label + " preserves tessellation and triangle order")
-	check(actual[Mesh.ARRAY_VERTEX].size() == points.size(), label + " preserves vertex count")
-	if actual[Mesh.ARRAY_VERTEX].size() != points.size(): return
+	# The native kernel discards fully transparent triangles and numbers the
+	# remaining vertices on first use. Compare the actual visible triangle stream.
+	var visible := PackedInt32Array()
+	for tri in range(0, indices.size(), 3):
+		var a := indices[tri]
+		var b := indices[tri + 1]
+		var c := indices[tri + 2]
+		if colors[a].a == 0.0 and colors[b].a == 0.0 and colors[c].a == 0.0: continue
+		visible.append_array(PackedInt32Array([a, b, c]))
+	var native_indices: PackedInt32Array = actual[Mesh.ARRAY_INDEX]
+	check(native_indices.size() == visible.size(), label + " preserves the visible triangle count")
+	if native_indices.size() != visible.size(): return
 	var position_error := 0.0
 	var uv_error := 0.0
 	var color_error := 0.0
-	for i in range(points.size()):
-		position_error = maxf(position_error, points[i].distance_to(actual[Mesh.ARRAY_VERTEX][i]))
-		uv_error = maxf(uv_error, uvs[i].distance_to(actual[Mesh.ARRAY_TEX_UV][i]))
-		var diff: Color = colors[i] - actual[Mesh.ARRAY_COLOR][i]
+	for i in range(visible.size()):
+		var ref_index := visible[i]
+		var actual_index := native_indices[i]
+		position_error = maxf(position_error, points[ref_index].distance_to(actual[Mesh.ARRAY_VERTEX][actual_index]))
+		uv_error = maxf(uv_error, uvs[ref_index].distance_to(actual[Mesh.ARRAY_TEX_UV][actual_index]))
+		var diff: Color = colors[ref_index] - actual[Mesh.ARRAY_COLOR][actual_index]
 		color_error = maxf(color_error, maxf(absf(diff.r), maxf(absf(diff.g), maxf(absf(diff.b), absf(diff.a)))))
 	check(position_error < 0.001, "%s elevation geometry error %.8f" % [label, position_error])
 	check(uv_error < 0.000002, "%s texture coordinates error %.8f" % [label, uv_error])
@@ -115,11 +138,12 @@ func test_cached_capture(elevation, canvas, kernel, original_provider: Callable)
 	for index in range(bounds_list.size()):
 		var bounds: Rect2i = bounds_list[index]
 		if index == 4:
-			var cell := Vector2i(1,1)
-			changed[cell] = 22
-			reference_cache["cells"].erase(cell)
+			var dirty := [Vector2i(1,1), Vector2i(4,1)]
+			for cell in dirty:
+				changed[cell] = 22
+				reference_cache["cells"].erase(cell)
 			canvas.native_sample_cache=native_cache
-			canvas._invalidate_terrain_cells([cell])
+			canvas._invalidate_terrain_cells(dirty)
 		if index == 5:
 			elevation.set_vertex(Vector2i(1,1),3)
 			reference_cache.clear();native_cache.clear()
@@ -131,7 +155,7 @@ func test_cached_capture(elevation, canvas, kernel, original_provider: Callable)
 		retained_inputs.append({"input":actual,"saved":actual.duplicate(true)})
 		check(var_to_bytes(actual)==var_to_bytes(expected), "native cached terrain request preserves every numeric sample in cold/warm/shifted/dirty/boundary case %d" % index)
 		check(native_cache.get("bounds")==bounds, "packed sample cache is scoped to the current request")
-		check(native_cache["cells"].size()==(bounds.size.x+2)*(bounds.size.y+2) and native_cache["heights"].size()==(bounds.size.x+1)*(bounds.size.y+1) and native_cache["frames"].size()==bounds.size.x*bounds.size.y,"sample cache remains bounded by current request")
+		check(native_cache["cells"].size()==bounds.grow(Terrain.MATERIAL_HALO).get_area() and native_cache["heights"].size()==(bounds.size.x+1)*(bounds.size.y+1) and native_cache["frames"].size()==bounds.get_area(),"sample cache remains bounded by current request")
 		if index == 0: first=actual;first_saved=actual.duplicate(true)
 	check(first==first_saved,"later camera requests cannot mutate a detached earlier terrain input")
 	NativeMesh.native_cached_samples_enabled = true

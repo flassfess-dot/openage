@@ -2,13 +2,21 @@
 const assert = require('assert/strict');
 const fs = require('fs');
 const path = require('path');
-const {decodeTreeShadow, resizeSprite, sourceCutout, shoreIslets, shallowsGround, flattenTerrain, importPack, groundBounds, grade} = require('./import_environment.js');
+const {decodeTreeShadow, resizeSprite, blendTrail, sourceCutout, shoreIslets, shallowsGround, flattenTerrain, importPack, groundBounds, grade} = require('./import_environment.js');
 const identity={saturation:1,gain:[1,1,1]};
 // Transparent black must not darken an opaque red edge after downsampling.
 const resized=resizeSprite({width:2,height:2,hotspotX:1,hotspotY:2,rgba:Buffer.from([240,30,20,255,0,0,0,0,240,30,20,255,0,0,0,0])},0.5,identity);
 assert.equal(resized.width,1);assert.equal(resized.height,1);
 assert.deepEqual([...resized.rgba],[240,30,20,128]);
 assert.deepEqual(resized.hotspot,[1,1]);
+const trail = {width: 19, height: 13, hotspot: [9, 6], rgba: Buffer.alloc(19 * 13 * 4, 255)};
+trail.rgba[3] = 0;
+const blended = blendTrail(trail, 0.7);
+const alphaAt = (x, y) => blended.rgba[(y * trail.width + x) * 4 + 3];
+assert.equal(alphaAt(0, 0), 0);
+assert.ok(alphaAt(0, 6) < alphaAt(2, 6) && alphaAt(2, 6) < alphaAt(9, 6));
+assert.equal(alphaAt(9, 6), Math.round(255 * 0.7));
+assert.deepEqual(groundBounds(blended), groundBounds(trail));
 // Distinguishable constant-colour puzzle pieces verify AoC column/upward order.
 const frames=Array.from({length:100},(_,f)=>{
   const rgba=Buffer.alloc(97*49*4);for(let i=0;i<rgba.length;i+=4){rgba[i]=f;rgba[i+1]=80;rgba[i+2]=100;rgba[i+3]=255;}

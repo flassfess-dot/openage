@@ -134,6 +134,8 @@ static func instruction_summary(definition: Dictionary) -> String:
 	var map_type_id := String(settings.get("map_type_id", map.get("type_id", "")))
 	var map_fallback := String({"coastal_land": "Побережье", "fixed_source": "Заданная карта"}.get(String(map.get("generator", {}).get("type", "")), "Тип не указан"))
 	var map_type := _catalog_name(catalog.get("map_types", []), map_type_id, map_fallback)
+	if settings.has("climate_id"):
+		map_type += " · " + _catalog_name(catalog.get("climates", []), settings["climate_id"], "")
 	var age_id := String(settings.get("starting_age_id", ""))
 	if age_id.is_empty():
 		for player_value in definition.get("players", []):

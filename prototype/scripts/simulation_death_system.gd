@@ -102,6 +102,8 @@ func begin_entity_death(entity: Dictionary, source_context: Dictionary = {}) -> 
 func begin_building_destruction(building: Dictionary, source_context: Dictionary = {}) -> void:
 	if building == null or String(building.get("death_phase", "alive")) != "alive":
 		return
+	if world.field_service_enabled:
+		world.expedition_field.building_destroyed(world, building, int(source_context.get("team", 0)))
 	world.dying_buildings.append(building)
 	world.emit_domain_event("death", {
 		"entity_id": int(building.get("id", -1)),

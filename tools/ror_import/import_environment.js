@@ -6,7 +6,8 @@ const path = require('path');
 const crypto = require('crypto');
 const {parseDrs, layerDrs, parsePalettes, decodeSlp, writePng} = require('./import_assets.js');
 const RiverArt = require('./river_art.js');
-const VERSION = 'ror-native-shoreline-1';
+const DeArt = require('./de_environment.js');
+const VERSION = 'regional-ground-2';
 // AoC DAT graphics 2302/2310 attach ground-layer deltas 2300/2308.
 // Each shadow uses the same direction as its tree, with its own hotspot.
 const TREE_SHADOW_SLPS = {oak: 2296, pine: 2304};
@@ -40,6 +41,34 @@ function resizeSprite(d, scale, spec) {
   }
   return {width,height,rgba,hotspot:[Math.round(d.hotspotX*scale),Math.round(d.hotspotY*scale)]};
 }
+// The classic trail stamps include opaque soil. Feather them in the 2:1
+// isometric projection so the local terrain can show through their shoulders.
+function blendTrail(image, opacity) {
+  const {width, height, rgba} = image;
+  const result = Buffer.from(rgba);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const alpha = (y * width + x) * 4 + 3;
+      if (rgba[alpha] === 0) continue;
+      let nearest = 1;
+      for (let dy = -3; dy <= 3; dy++) {
+        for (let dx = -6; dx <= 6; dx++) {
+          const distanceSquared = dx * dx / 36 + dy * dy / 9;
+          if (distanceSquared >= nearest) continue;
+          const sx = x + dx, sy = y + dy;
+          if (sx < 0 || sy < 0 || sx >= width || sy >= height || rgba[(sy * width + sx) * 4 + 3] === 0) {
+            nearest = distanceSquared;
+          }
+        }
+      }
+      const t = Math.sqrt(nearest);
+      const feather = t * t * (3 - 2 * t);
+      result[alpha] = Math.round(rgba[alpha] * opacity * (0.20 + 0.80 * feather));
+    }
+  }
+  return {...image, rgba: result};
+}
+
 // Extract authored plants from the original Shallows sheet. Surviving pixels
 // are copied verbatim; no new colours or painted plant shapes are introduced.
 function sourceCutout(d, cutout) {
@@ -96,15 +125,17 @@ function sampleOpaque(d,x,y) {
   return sums.map(v=>v/sum);
 }
 function flattenTerrain(frames,spec) {
-  // AoC frame order: columns left-to-right, each column bottom-to-top.
-  // Keep all 100 puzzle pieces together (see terrain_merge.pyx), 32 texels/cell.
+  // Preserve the full source pattern in the renderer's ten-cell repeat.
+  // Both Genie ground sets run bottom-to-top within each column.
   const width=320,height=320,rgba=Buffer.alloc(width*height*4);
-  for(let f=0;f<100;f++){
-    const d=frames[f],col=Math.floor(f/10),row=9-f%10;
-    for(let y=0;y<32;y++)for(let x=0;x<32;x++){
-      const u=(x+0.5)/32,v=(y+0.5)/32;
-      const rgb=grade(sampleOpaque(d,48+48*(u-v),24*(u+v)),spec);
-      const i=((row*32+y)*320+col*32+x)*4;
+  const side=Math.sqrt(frames.length),cell=width/side;
+  for(let f=0;f<frames.length;f++){
+    const d=frames[f],col=Math.floor(f/side),row=side-1-f%side;
+    const halfWidth=(d.width-1)/2,halfHeight=(d.height-1)/2;
+    for(let y=0;y<cell;y++)for(let x=0;x<cell;x++){
+      const u=(x+0.5)/cell,v=(y+0.5)/cell;
+      const rgb=grade(sampleOpaque(d,halfWidth+halfWidth*(u-v),halfHeight*(u+v)),spec);
+      const i=((row*cell+y)*width+col*cell+x)*4;
       for(let k=0;k<3;k++)rgba[i+k]=rgb[k];rgba[i+3]=255;
     }
   }
@@ -140,7 +171,7 @@ function decodeTreeShadow(spec,archive,palettes,frame,scale) {
   if(decoded.semanticPixels.shadow===0)throw Error('Tree shadow has no shadow pixels: '+spec.key+'/'+frame);
   return {...resizeSprite(decoded,scale,{saturation:1,gain:[1,1,1]}),source_slp:slpId,source_shadow_pixels:decoded.semanticPixels.shadow};
 }
-function importPack(game,output,definitionPath,rorGame='D:/Games/Age of Empires 1 - Rise of Rome') {
+function importPack(game,output,definitionPath,rorGame='D:/Games/Age of Empires 1 - Rise of Rome',deGame='D:/Games/Steam/steamapps/common/AoEDE') {
   const definition=json(definitionPath), dataDir=path.join(game,'Data');
   const paths={terrain:path.join(dataDir,'terrain.drs'),graphics:path.join(dataDir,'graphics.drs'),palette:path.join(dataDir,'interfac.drs')};
   for(const file of Object.values(paths))if(!fs.existsSync(file))throw Error('Missing classic AoE2 archive: '+file);
@@ -169,6 +200,13 @@ function importPack(game,output,definitionPath,rorGame='D:/Games/Age of Empires 
     }
   }
   for(const spec of definition.materials){
+    const deFile=spec.de_sheet && path.join(deGame,'Assets','SLP',spec.de_sheet);
+    if(deFile && fs.existsSync(deFile)){
+      const source=fs.readFileSync(deFile);
+      const frames=DeArt.terrainFrames(source),atlas=flattenTerrain(frames,spec);
+      manifest.materials[spec.key]={...save(spec.key+'.png',atlas),source_game:'aoede',source_sheet:spec.de_sheet,source_sha256:hash(source),source_frames:frames.length,pattern_cells:[10,10],texels_per_cell:32,frame_order:'column_bottom_to_top'};
+      continue;
+    }
     if(spec.river_recipe){
       manifest.materials[spec.key]={...save(spec.key+'.png',riverArt[spec.river_recipe]),source_game:'ror',source_slp:15000,source_frames:9,pattern_cells:[10,10],texels_per_cell:32,recipe:spec.river_recipe};
       continue;
@@ -180,6 +218,18 @@ function importPack(game,output,definitionPath,rorGame='D:/Games/Age of Empires 
     manifest.materials[spec.key]={...save(spec.key+'.png',atlas),source_slp:spec.slp,source_frames:100,pattern_cells:[10,10],texels_per_cell:32,frame_order:'column_bottom_to_top'};
   }
   for(const spec of definition.objects){
+    const deFile=spec.de_sheet && path.join(deGame,'Assets','SLP',spec.de_sheet);
+    if(deFile && fs.existsSync(deFile)){
+      const source=fs.readFileSync(deFile),palette=fs.readFileSync(path.join(deGame,'Assets','Palettes','02_nature.pal'));
+      const tree=DeArt.standingTree(source,palette);
+      const scale=64/80,canopy=resizeSprite(tree.canopy,scale,spec),shadow=resizeSprite(tree.shadow,scale,spec);
+      manifest.objects[spec.key]={source_game:'aoede',source_sheet:spec.de_sheet,source_sha256:hash(source),palette_sha256:hash(palette),frames:[{
+        ...save(spec.key+'_00.png',canopy),hotspot:canopy.hotspot,source_frame:0,source_size:[tree.canopy.width,tree.canopy.height],
+        source_hotspot:[tree.canopy.hotspotX,tree.canopy.hotspotY],scale,ground_bounds:groundBounds(canopy),
+        shadow:{...save(spec.key+'_shadow_00.png',shadow),hotspot:shadow.hotspot}
+      }]};
+      continue;
+    }
     const archive=spec.source_game==='ror'?rorGraphics:graphics;
     const sourcePalettes=spec.source_game==='ror'?rorPalettes:palettes;
     const scale=spec.scale??(spec.source_game==='ror'?1:definition.object_scale);
@@ -197,20 +247,21 @@ function importPack(game,output,definitionPath,rorGame='D:/Games/Age of Empires 
       if(spec.placement && JSON.stringify(spec.ground_bounds?.[index])!==JSON.stringify(bounds))throw Error('Placement geometry differs from source: '+spec.key+'/'+index);
       const shadowImage=decodeTreeShadow(spec,archive,sourcePalettes,frame,scale);
       const shadow=shadowImage?{...save(spec.key+'_shadow_'+String(index).padStart(2,'0')+'.png',shadowImage),hotspot:shadowImage.hotspot,source_slp:shadowImage.source_slp,source_frame:frame,source_shadow_pixels:shadowImage.source_shadow_pixels}:null;
-      frames.push({...save(spec.key+'_'+String(frames.length).padStart(2,'0')+'.png',resized),hotspot:resized.hotspot,source_frame:frame,source_slp:slpId,source_hotspot:[source.hotspotX,source.hotspotY],source_size:[source.width,source.height],source_shadow_pixels:d.semanticPixels.shadow,scale,ground_bounds:bounds,...(cutout?{source_cutout:cutout,original_source_hotspot:[d.hotspotX,d.hotspotY],original_source_size:[d.width,d.height]}:{}),...(shadow?{shadow}:{})});
+      const artwork = spec.trail_opacity === undefined ? resized : blendTrail(resized, spec.trail_opacity);
+      frames.push({...save(spec.key+'_'+String(frames.length).padStart(2,'0')+'.png',artwork),hotspot:resized.hotspot,source_frame:frame,source_slp:slpId,source_hotspot:[source.hotspotX,source.hotspotY],source_size:[source.width,source.height],source_shadow_pixels:d.semanticPixels.shadow,scale,ground_bounds:bounds,...(cutout?{source_cutout:cutout,original_source_hotspot:[d.hotspotX,d.hotspotY],original_source_size:[d.width,d.height]}:{}),...(shadow?{shadow}:{})});
     }
     manifest.objects[spec.key]={source_game:spec.source_game??'aoe2',source_slp:spec.slp??null,frames};
   }
   fs.writeFileSync(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   return manifest;
 }
-module.exports={TREE_SHADOW_SLPS,decodeTreeShadow,resizeSprite,sourceCutout,shoreIslets,shallowsGround,flattenTerrain,importPack,grade,groundBounds,groundMask};
+module.exports={TREE_SHADOW_SLPS,decodeTreeShadow,resizeSprite,blendTrail,sourceCutout,shoreIslets,shallowsGround,flattenTerrain,importPack,grade,groundBounds,groundMask};
 if(require.main===module){
   try{
     const definition=option('--definition',path.join(ROOT,'prototype/data/environment/aoe2_temperate.json'));
     const game=option('--game','D:/Games/Age of Empires II');
     const output=option('--output',path.join(ROOT,'prototype/assets/generated/environment/aoe2_temperate'));
-    const m=importPack(game,output,definition,option('--ror-game','D:/Games/Age of Empires 1 - Rise of Rome'));
+    const m=importPack(game,output,definition,option('--ror-game','D:/Games/Age of Empires 1 - Rise of Rome'),option('--de-game','D:/Games/Steam/steamapps/common/AoEDE'));
     console.log(`Imported ${Object.keys(m.materials).length} materials and ${Object.values(m.objects).reduce((n,v)=>n+v.frames.length,0)} object variants into ${output}`);
   }catch(error){console.error(error.message);process.exitCode=1;}
 }

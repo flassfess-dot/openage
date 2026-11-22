@@ -21,12 +21,22 @@ func _initialize() -> void:
 	var selected_profiles := PackedStringArray()
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--profiles="): selected_profiles = argument.trim_prefix("--profiles=").split(",",false)
+	if mode == "smoke" and selected_profiles.is_empty():
+		var legacy := Settings.default_settings()
+		legacy["landscape_version"] = WorldGeography.LEGACY_VERSION
+		legacy["map_type_id"] = "grasslands"
+		legacy["map_size_id"] = "standard"
+		legacy["seed"] = 41721
+		var saved := Settings.build(legacy)
+		check(saved.get("map_data", {}).get("content_hash") == "a9b8968faad892a75ed63b4a67c3ef97f8133bf8f401f8a42278b429df996eb3", "Published v6 seed regenerates its original save fingerprint")
 	for profile in WorldGeography.PROFILES:
 		if not selected_profiles.is_empty() and profile not in selected_profiles: continue
 		if mode == "boundaries":
 			for item in [["compact", 7919, 4], ["large", 41721, 8], ["standard", 104729, 6]]: fixtures.append([profile] + item)
 		else: fixtures.append([profile, "supergiant" if mode == "supergiant" else "standard", 41721, 4])
 	if mode == "smoke" and (selected_profiles.is_empty() or "highlands" in selected_profiles): fixtures.append(["highlands", "standard", 41689, 4])
+	if mode == "boundaries" and (selected_profiles.is_empty() or "continental" in selected_profiles): fixtures.append(["continental", "compact", 3, 4])
+	if mode == "boundaries" and (selected_profiles.is_empty() or "small_islands" in selected_profiles): fixtures.append(["small_islands", "compact", 2, 4])
 	check(not fixtures.is_empty(),"profile filter selects at least one fixture")
 	var report_name := mode if selected_profiles.is_empty() else mode+"-"+"_".join(selected_profiles)
 	var output := FileAccess.open(DIRECTORY.path_join(report_name + ".jsonl"), FileAccess.WRITE)
@@ -45,6 +55,9 @@ func _initialize() -> void:
 			row["clearings"] = data.get("building_clearings",[]).size()
 			check(data["generator_version"] == WorldGeography.VERSION, "%s uses shared hydrology in ordinary settings" % [fixture])
 			check(data.get("building_clearings", []).size() == built["definition"]["players"].size(), "%s preserves an accessible expansion clearing for every settlement" % [fixture])
+			for team in built["map_quality"]["metrics"]["final_navigation"]["by_team"].values():
+				var opening: Dictionary = team["accessible_nearby"]
+				check(opening.get("tree", 0) >= 3 and opening.get("berries", 0) >= 2, "%s provides the opening wood and food quota within walking distance" % [fixture])
 			check(built["definition"]["map"]["generator"]["wild_geography"], "%s retains unequal geography and economy" % [fixture])
 			check(Rivers.inspect(data["rivers"])["valid"], "%s has a connected, non-uphill drainage graph" % [fixture])
 			check(not data.has("_fields") and not data.has("_reserved") and not data["rivers"].has("drainage"), "%s leaves no generation scratch in saved map data" % [fixture])
@@ -80,12 +93,22 @@ func _initialize() -> void:
 						check(data["vertex_levels"][corner] == lake["surface_level"], "%s keeps a level lake surface at its recorded altitude" % [fixture])
 			if fixture[0] == "highlands" and fixture[1] == "supergiant":
 				check(data["lakes"].any(func(lake): return int(lake["surface_level"]) > 0), "Highland 400 fixture retains elevated lakes instead of sea-level trenches")
+			var minerals := {"gold_mine": 0, "stone_mine": 0}
 			for resource in data["resources"]:
+				if minerals.has(resource["kind"]): minerals[resource["kind"]] += 1
+				if resource["kind"] == "tree":
+					for player in built["definition"]["players"]:
+						check(player["start"].distance_squared_to(resource["position"]) > 36.0, "%s leaves six tiles of open ground around each town" % [fixture])
 				var cell := Vector2i(resource["position"])
 				if resource.get("placement_domain", "land") == "land":
 					check(data["rivers"]["mask"][cell.y * size.x + cell.x] == 0, "%s leaves rivers, lakes and crossing approaches clear of land resources" % [fixture])
+			check(minerals["gold_mine"] > 0 and minerals["stone_mine"] > 0, "%s has both gold and stone for expansion" % [fixture])
 			row.merge({"water_ratio": built["map_quality"]["metrics"]["water_ratio"], "lakes": data["lakes"].size(), "fords": data["fords"].size(),
 				"rivers": Rivers.inspect(data["rivers"]), "composition": data["ecology"]["composition"], "shape_kind": data["geography"]["shape_kind"], "hash": data["content_hash"]})
+			var lengths := _channel_lengths(data["rivers"]["channels"])
+			row["channel_lengths"] = lengths
+			if fixture[0] in ["coastal", "grasslands", "highlands"] and fixture[1] == "standard" and fixture[2] == 41721:
+				check(lengths["total"] > 0 and lengths["under_three_tiles"] < 0.20 * lengths["total"], "%s keeps narrow headwaters a small part of the visible network" % [fixture])
 			if mode == "smoke":
 				var codec := Replay.new()
 				var definition: Dictionary = codec.decode_variant(JSON.parse_string(JSON.stringify(codec.encode_variant(built["definition"]))))
@@ -100,6 +123,17 @@ func _initialize() -> void:
 	FileAccess.open(DIRECTORY.path_join(report_name + ".json"), FileAccess.WRITE).store_string(JSON.stringify({"valid": failures.is_empty(), "rows": rows, "failures": failures}, "\t"))
 	for failure in failures: push_error(failure)
 	quit(0 if failures.is_empty() else 1)
+
+func _channel_lengths(channels: Array) -> Dictionary:
+	var total := 0.0
+	var narrow := 0.0
+	for channel in channels:
+		var points: PackedVector2Array = channel["points"]
+		for i in range(1, points.size()):
+			var length := points[i].distance_to(points[i - 1])
+			total += length
+			if channel["radii"][i] < 1.5: narrow += length
+	return {"total": total, "under_three_tiles": narrow}
 
 func check(value: bool, context: String) -> void:
 	if not value and context not in failures: failures.append(context)

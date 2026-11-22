@@ -487,6 +487,7 @@ func _build_general_settings() -> Control:
 	column.add_child(grid)
 	setting_controls["map_size_id"] = _add_catalog_option(grid, "Размер карты", skirmish_catalog.get("map_sizes", []), DEFAULT_MAP_SIZE_ID)
 	setting_controls["map_type_id"] = _add_catalog_option(grid, "Тип карты", skirmish_catalog.get("map_types", []), "grasslands")
+	setting_controls["climate_id"] = _add_catalog_option(grid, "Климат", skirmish_catalog.get("climates", []), "temperate")
 	setting_controls["resource_preset_id"] = _add_catalog_option(grid, "Ресурсы", skirmish_catalog.get("resource_presets", []), "standard")
 	setting_controls["starting_age_id"] = _add_catalog_option(grid, "Начальная эпоха", skirmish_catalog.get("starting_ages", []), "stone")
 	setting_controls["ai_difficulty_id"] = _add_catalog_option(grid, "Сложность", skirmish_catalog.get("ai_difficulties", []), "standard")
@@ -737,7 +738,7 @@ func _show_loading_screen(title_text: String, initial_status: String) -> void:
 
 func _settings_from_controls() -> Dictionary:
 	var result := SkirmishSettings.default_settings()
-	for key in ["map_size_id", "map_type_id", "resource_preset_id", "starting_age_id", "ai_difficulty_id", "victory_mode_id", "population_limit"]:
+	for key in ["map_size_id", "map_type_id", "climate_id", "resource_preset_id", "starting_age_id", "ai_difficulty_id", "victory_mode_id", "population_limit"]:
 		var option: OptionButton = setting_controls[key]
 		result[key] = option.get_item_metadata(option.selected)
 	result["seed"] = roundi(float(setting_controls["seed"].value))

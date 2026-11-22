@@ -90,7 +90,7 @@ func entity_type_for(drawable_kind: String, entity: Dictionary) -> String:
 	return drawable_kind
 
 
-func texture_hit(screen_position: Vector2, drawable: Dictionary, world_to_screen: Callable, zoom: float) -> bool:
+func texture_hit(screen_position: Vector2, drawable: Dictionary, world_to_screen: Callable, zoom: float, opaque_only: bool = false) -> bool:
 	var frame_info: Dictionary = drawable.get("frame_info", {})
 	if frame_info.has("gate_polygon"):
 		var gate_anchor := PixelScaling.snap_screen(world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO))))
@@ -103,7 +103,7 @@ func texture_hit(screen_position: Vector2, drawable: Dictionary, world_to_screen
 	anchor += Vector2(frame_info.get("screen_offset", Vector2.ZERO)) * draw_scale
 	# Mobile targets remain clickable between animated limbs and along their
 	# silhouette. Use the same mirrored pivot and part offsets as drawing.
-	if String(drawable.get("kind", "")) in ["unit", "unit_part"] and draw_scale > 0.0:
+	if not opaque_only and String(drawable.get("kind", "")) in ["unit", "unit_part"] and draw_scale > 0.0:
 		var source := SpriteGeometry.screen_to_source(screen_position, anchor, draw_scale,
 			Vector2(drawable.get("hotspot", frame_info.get("hotspot", Vector2.ZERO))),
 			bool(frame_info.get("mirrored", false)))

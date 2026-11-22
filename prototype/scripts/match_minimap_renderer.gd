@@ -63,7 +63,10 @@ func draw_minimap(game, rectangle: Rect2) -> void:
 	# the small minimap raster only when navigable surface topology changes.
 	var terrain_revision = int(game.render_terrain_view.surface_revision) if game.render_terrain_view != null else int(game.simulation_world.navigation_grid.surface_revision) if game.simulation_world != null else -1
 	if cached_minimap_terrain_texture == null or cached_minimap_terrain_revision != terrain_revision or cached_minimap_terrain_rectangle != rectangle:
-		var terrain_image = MinimapTerrainRaster.build(game.map_size, rectangle, center, scale, Callable(game, "terrain_id_at_cell"))
+		var surface := Callable(game, "terrain_id_at_cell")
+		if game.terrain_canvas != null and game.terrain_canvas.terrain_id_provider.is_valid():
+			surface = game.terrain_canvas.terrain_id_provider
+		var terrain_image = MinimapTerrainRaster.build(game.map_size, rectangle, center, scale, surface)
 		cached_minimap_terrain_texture = ImageTexture.create_from_image(terrain_image)
 		cached_minimap_terrain_revision = terrain_revision
 		cached_minimap_terrain_rectangle = rectangle

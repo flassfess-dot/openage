@@ -1,6 +1,6 @@
 extends RefCounted
 
-# Version 6 owns its candidate selection and publication sequence.
+# Both watershed recipes share the same publication sequence.
 const Pipeline := preload("res://scripts/random_map_candidate_pipeline.gd")
 const Support := preload("res://scripts/random_map_generation_support.gd")
 const Landscape := preload("res://scripts/random_map_landscape.gd")
@@ -9,6 +9,7 @@ const Geography := preload("res://scripts/random_map_geography.gd")
 const WatershedWorld := preload("res://scripts/random_map_watershed_world.gd")
 const WaterDetails := preload("res://scripts/random_map_water_details.gd")
 const Shoreline := preload("res://scripts/shoreline_features.gd")
+const Climate := preload("res://scripts/random_map_climate.gd")
 
 static func generate(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary, prepared_geography: Dictionary = {}) -> Dictionary:
 	if String(generator.get("map_type_id", "")) not in WatershedWorld.PROFILES:
@@ -26,17 +27,19 @@ static func generate(definition: Dictionary, size: Vector2i, seed: int, generato
 	var shoreline_timings: Dictionary = {}
 	Shoreline.decorate(data,shoreline_timings)
 	diagnostics["shoreline_ms"] = shoreline_timings["build_ms"]
+	if int(generator["version"]) == WatershedWorld.VERSION:
+		Climate.apply(data, fields, String(generator.get("climate_id", "temperate")))
 	WaterDetails.decorate(data, fields, seed, float(generator.get("decoration_density", 1.0)), Support._starting_entity_exclusion_cells(definition, size))
 	diagnostics["water_detail_ms"] = float(Time.get_ticks_usec() - water_detail_started) / 1000.0
 	data["ecology"]["composition"] = NaturalLandscape.composition(data)
-	data["content_hash"] = ("watershed_world_v6:" + Landscape.fingerprint(data)).sha256_text()
+	data["content_hash"] = (String(data["theme"]) + ":" + Landscape.fingerprint(data)).sha256_text()
 	diagnostics["candidate_count"] = 1
 	diagnostics["total_ms"] = float(Time.get_ticks_usec() - geography_started) / 1000.0
 	return data
 
 
 static func candidate(definition: Dictionary, size: Vector2i, seed: int, generator: Dictionary, progress: Callable, diagnostics: Dictionary, candidate_index: int = 0, prepared_geography: Dictionary = {}) -> Dictionary:
-	var pipeline := Pipeline.new(definition, size, seed, generator, progress, diagnostics, candidate_index, prepared_geography, 6, {"natural": true, "macro": true, "wild": true, "watershed": true})
+	var pipeline := Pipeline.new(definition, size, seed, generator, progress, diagnostics, candidate_index, prepared_geography, int(generator["version"]), {"natural": true, "macro": true, "wild": true, "watershed": true})
 	pipeline.prepare_geography()
 	pipeline.shape_coasts()
 	pipeline.shape_relief()

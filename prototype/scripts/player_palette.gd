@@ -65,7 +65,7 @@ func texture_for(record: Dictionary, texture: Texture2D, player: int) -> Texture
 	var remapped := remap_images(blue.get_image(), red.get_image(), player)
 	if remapped == null: return texture
 	var result := ImageTexture.create_from_image(remapped)
-	result.set_meta("ror_immutable_player_texture", true)
+	result.set_meta("ror_immutable_sprite", true)
 	if cached_textures.size() >= MAX_CACHED_TEXTURES: cached_textures.erase(cached_textures.keys()[0])
 	cached_textures[key] = weakref(result)
 	return result

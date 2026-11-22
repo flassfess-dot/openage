@@ -40,7 +40,7 @@ static func neighbors(index: int, size: Vector2i) -> PackedInt32Array:
 	return result
 
 
-static func flood(size: Vector2i, walkable: PackedByteArray, origin: Vector2i) -> Dictionary:
+static func flood(size: Vector2i, walkable: PackedByteArray, origin: Vector2i, limit: int = 2147483647) -> Dictionary:
 	var distances := PackedInt32Array()
 	var parents := PackedInt32Array()
 	distances.resize(walkable.size())
@@ -55,6 +55,7 @@ static func flood(size: Vector2i, walkable: PackedByteArray, origin: Vector2i) -
 	while cursor < queue.size():
 		var current := queue[cursor]
 		cursor += 1
+		if distances[current] >= limit: continue
 		for next in neighbors(current, size):
 			if walkable[next] == 0 or distances[next] >= 0: continue
 			distances[next] = distances[current] + 1
@@ -72,9 +73,10 @@ static func nearest_open(size: Vector2i, walkable: PackedByteArray, origin: Vect
 	return -1
 
 
-static func routes(definition: Dictionary, map_data: Dictionary, landscape_fields: Dictionary = {}) -> Dictionary:
+static func routes(definition: Dictionary, map_data: Dictionary, landscape_fields: Dictionary = {}, settled: bool = false) -> Dictionary:
 	var size: Vector2i = map_data["size"]
-	var walkable := mask(map_data, {}, false)
+	var walkable := mask(map_data, definition if settled else {}, settled)
+	var radius := 1 if settled else 2
 	var players: Array = definition.get("players", [])
 	var reserved: Dictionary = {}
 	var edges: Array = []
@@ -111,10 +113,10 @@ static func routes(definition: Dictionary, map_data: Dictionary, landscape_field
 			else:
 				if int(field["distances"][target]) < 0: continue
 				path = trace(field, target)
-			reserve_path(reserved, path, size, walkable, 2)
+			reserve_path(reserved, path, size, walkable, radius)
 			edges.append({"from_team": int(players[i]["team"]), "to_team": int(players[(i + 1) % players.size()]["team"]) if j == 0 else 0,
 				"role": ("ally_link" if int(players[i].get("alliance_id", players[i]["team"])) == int(players[(i + 1) % players.size()].get("alliance_id", players[(i + 1) % players.size()]["team"])) else "front") if j == 0 else "expansion",
-				"width_cells": 5, "path": path})
+				"width_cells": 2 * radius + 1, "path": path})
 	return {"reserved": reserved, "edges": edges}
 
 
@@ -143,7 +145,7 @@ static func reserve_naval_access(definition: Dictionary, map_data: Dictionary, r
 				reserve_path(reserved, trace(field, target), size, walkable, 1)
 
 
-static func protect_economy(definition: Dictionary, map_data: Dictionary, reserved: Dictionary, landscape_fields: Dictionary = {}) -> void:
+static func protect_economy(definition: Dictionary, map_data: Dictionary, reserved: Dictionary, landscape_fields: Dictionary = {}, reserve_nearest_mines: bool = false) -> void:
 	var size: Vector2i = map_data["size"]
 	var walkable := mask(map_data, definition)
 	var costs := PackedInt32Array()
@@ -210,6 +212,8 @@ static func protect_economy(definition: Dictionary, map_data: Dictionary, reserv
 			var access := adjacent_reachable(size, field["distances"], Vector2i(resource["position"]))
 			if access >= 0: reserve_path(reserved, trace(field, access), size, walkable, 0)
 		# Keep routes to the closest expansion mines open when the forest is planted.
+		if reserve_nearest_mines:
+			_reserve_mine_paths(size, field, walkable, map_data["resources"], reserved)
 		var wild := bool(definition.get("map", {}).get("generator", {}).get("wild_geography", false))
 		var expansions: Array = [] if wild else map_data.get("resources", []).filter(func(resource): return resource.get("owner_start", []).is_empty() and String(resource.get("kind", "")) in ["gold_mine", "stone_mine"])
 		expansions.sort_custom(func(left, right): return start.distance_squared_to(Vector2(left["position"])) < start.distance_squared_to(Vector2(right["position"])))
@@ -229,6 +233,18 @@ static func protect_economy(definition: Dictionary, map_data: Dictionary, reserv
 				reserve_path(reserved, trace(field, index), size, walkable, 1)
 
 	map_data["generation_repairs"] = repairs
+
+static func _reserve_mine_paths(size: Vector2i, field: Dictionary, walkable: PackedByteArray, resources: Array, reserved: Dictionary) -> void:
+	var nearest: Dictionary = {}
+	var distances: PackedInt32Array = field["distances"]
+	for resource in resources:
+		var kind: String = resource["kind"]
+		if kind not in ["stone_mine", "gold_mine"]: continue
+		var access := adjacent_reachable(size, distances, Vector2i(resource["position"]))
+		if access >= 0 and (not nearest.has(kind) or distances[access] < distances[nearest[kind]]):
+			nearest[kind] = access
+	for access in nearest.values():
+		reserve_path(reserved, trace(field, access), size, walkable, 0)
 
 
 static func _economic_flood(size: Vector2i, walkable: PackedByteArray, origin: Vector2i, costs: PackedInt32Array) -> Dictionary:
@@ -327,7 +343,9 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 	var errors: Array[String] = []
 	var by_team: Dictionary = {}
 	var reachable_starts: Array[int] = []
-	var required: Dictionary = definition.get("map", {}).get("generator", {}).get("quality_contract", {}).get("resource_counts", {})
+	var quality: Dictionary = definition.get("map", {}).get("generator", {}).get("quality_contract", {})
+	var required: Dictionary = quality.get("resource_counts", {})
+	var gather_limit := int(quality.get("maximum_gather_path_cells", 2147483647))
 	for player in definition.get("players", []):
 		var start := Vector2(player["start"])
 		var team := int(player["team"])
@@ -341,7 +359,7 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 			if start.distance_to(Vector2(resource["position"])) > 20.0: continue
 			var kind := String(resource.get("kind", ""))
 			var access := adjacent_reachable(size, distances, Vector2i(resource["position"]))
-			if access < 0: continue
+			if access < 0 or distances[access] > gather_limit: continue
 			counts[kind] = int(counts.get(kind, 0)) + 1
 			route_costs[kind] = mini(int(route_costs.get(kind, 1000000)), distances[access])
 		for kind in required:

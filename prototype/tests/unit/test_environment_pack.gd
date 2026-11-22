@@ -39,6 +39,7 @@ func _initialize() -> void:
 	_test_resources_and_cache()
 	_test_tree_ground()
 	_test_surfaces()
+	_test_material_footprint()
 	_test_transition_mesh()
 	_finish()
 
@@ -50,7 +51,7 @@ func check(condition: bool, message: String) -> void:
 
 func _test_assets() -> void:
 	var pack = catalog.environment_pack
-	check(pack.materials_by_id.size() == 6, "six ground materials including river silt and gravel")
+	check(pack.materials_by_id.size() == 19, "six original ground materials and thirteen regional surfaces")
 	var count := 0
 	for key in pack.objects_by_key:
 		for variant in range(pack.object_variant_count(key)):
@@ -61,7 +62,7 @@ func _test_assets() -> void:
 			var record: Dictionary = pack.manifest["objects"][key]["frames"][variant]
 			check(info["texture"].get_size() == Vector2(record["width"], record["height"]), "object dimensions")
 			check(Vector2(record["source_hotspot"][0], record["source_hotspot"][1]).distance_to(info["hotspot"] / float(record.get("scale", 2.0 / 3.0))) <= 1.1, "hotspot remains within one source pixel")
-	check(count == 146, "8 tree variants and 138 decoration variants, including seven native river islets")
+	check(count == 148, "ten tree variants and 138 decoration variants")
 	for id in pack.materials_by_id:
 		var image: Image = pack.material_texture(id).get_image()
 		check(image.get_size() == Vector2i(320, 320), "full 10x10 pattern at target density")
@@ -104,8 +105,9 @@ func _test_surfaces() -> void:
 	for id in pack.materials_by_id:
 		check(Rules.logical_for_terrain_id(id) == "grass", "new surface remains walkable grass")
 		check(Minimap.color_for_terrain_id(id) == Color(pack.materials_by_id[id]["minimap"]), "minimap agrees with material definition")
-		check(Rules.is_terrain_accessible([{"accessible_damage_multiplier": [1.0]}], 0, id), "native movement restriction maps to grass")
-		check(not Rules.is_terrain_accessible([{"accessible_damage_multiplier": [0.0]}], 0, id), "native inaccessible restriction is retained")
+		if Rules.is_environment_terrain_id(id):
+			check(Rules.is_terrain_accessible([{"accessible_damage_multiplier": [1.0]}], 0, id), "native movement restriction maps to grass")
+			check(not Rules.is_terrain_accessible([{"accessible_damage_multiplier": [0.0]}], 0, id), "native inaccessible restriction is retained")
 		for mask in masks:
 			elevation.clear()
 			for i in range(4):
@@ -122,6 +124,39 @@ func _test_surfaces() -> void:
 	check(Terrain.affects(Vector2i.ZERO, water, pack), "native water participates in the continuous coastal mesh")
 
 
+func _test_material_footprint() -> void:
+	var pack = catalog.environment_pack
+	var split := func(cell: Vector2i): return 1121 if cell.x < 10 else 1120
+	var widths: Array[float] = []
+	for y in [3.25, 9.5, 17.0, 28.75]:
+		var previous := 0.0
+		var mixed := 0
+		for i in range(129):
+			var x := 8.0 + float(i) / 32.0
+			var weights := Terrain.weights(Vector2(x, y), split, pack, 1121)
+			var stone := float(weights.get(1120, 0.0))
+			check(stone + 0.00001 >= previous, "stone gradually replaces red earth across a straight border")
+			previous = stone
+			if stone >= 0.1 and stone <= 0.9: mixed += 1
+			if i == 0 or i == 128:
+				check(is_equal_approx(stone, float(i == 128)), "unbroken terrain keeps its full texture")
+		var width := mixed / 32.0
+		widths.append(width)
+		check(width >= 1.5 and width <= 2.5, "the 10–90 percent soil transition spans about two tiles")
+	print("Measured 10–90 percent soil widths (tiles): ", widths)
+	var junction := func(cell: Vector2i): return [1101, 1100, 1120, 1121][int(cell.x >= 10) + 2 * int(cell.y >= 10)]
+	var weights := Terrain.weights(Vector2(10, 10), junction, pack, 1101)
+	for id in [1101, 1100, 1120, 1121]:
+		check(weights.get(id, 0.0) > 0.1, "all four soils contribute at a junction")
+	var shore := func(cell: Vector2i): return (22 if cell.y < 8 else 1) if cell.x < 10 else int(split.call(Vector2i(cell.y, cell.x)))
+	for i in range(129):
+		var point := Vector2(8.0 + i / 32.0, 8.25)
+		weights = Terrain.weights(point, shore, pack, 1)
+		var land := float(weights.get(1120, 0.0)) + float(weights.get(1121, 0.0))
+		check(is_equal_approx(land, Terrain.surface_land_coverage(point, shore)), "soil and water mixtures respect the actual shoreline")
+		check(is_equal_approx(land + float(weights.get(1, 0.0)) + float(weights.get(22, 0.0)), 1.0), "the shore stays opaque")
+
+
 func _test_transition_mesh() -> void:
 	var pack = catalog.environment_pack
 	var elevation = Elevation.new(Vector2i(4, 4))
@@ -136,6 +171,7 @@ func _test_transition_mesh() -> void:
 			check(absf(float(left[id]) - float(right.get(id, 0.0))) < 0.0002, "shared edge has continuous material weights")
 		check(absf(total - 1.0) < 0.00001, "blend weights form an opaque partition")
 	var canvas := TerrainCanvas.new()
+	canvas.prepared_scene_enabled = false
 	root.add_child(canvas)
 	canvas.configure(Vector2i(4, 4), 41721, catalog, {"terrain_elevation": elevation}, provider, func(): return Rect2i(0, 0, 4, 4))
 	check(canvas.terrain_mesh != null, "actual terrain canvas builds mesh with pack")
@@ -149,6 +185,17 @@ func _test_transition_mesh() -> void:
 	var generation: int=canvas.mesh_generation
 	canvas.set_view_state(1.5, Vector2(30, 20), Vector2(640, 480), 2)
 	check(canvas.mesh_generation>generation and canvas.terrain_revision==2, "changed terrain revision rebuilds geometry, permitting ArrayMesh buffer reuse")
+	var match_elevation := Elevation.new(Vector2i(4, 4))
+	var base: Array[int] = []
+	var regional := PackedInt32Array()
+	for y in range(4):
+		for x in range(4):
+			base.append(int(provider.call(Vector2i(x, y))))
+			regional.append(1104)
+	match_elevation.configure_climate({"terrain_ids":base, "climate_surfaces":regional})
+	canvas.simulation_world = {"terrain_elevation":match_elevation}
+	canvas.set_view_state(1.5, Vector2(30, 20), Vector2(640, 480), 3)
+	check(canvas.terrain_id_provider.call(Vector2i.ONE) == 1104, "late match bootstrap binds regional surfaces")
 	canvas.free()
 
 
@@ -163,6 +210,7 @@ func _finish() -> void:
 
 func _test_tree_ground() -> void:
 	for material_id in catalog.environment_pack.materials_by_id:
+		if not Rules.is_environment_terrain_id(material_id): continue # Regional artwork is separate from simulation terrain.
 		var world := World.new(Vector2i(8, 8))
 		var cell := Vector2i(4, 4)
 		world.map_terrain_ids[cell] = material_id

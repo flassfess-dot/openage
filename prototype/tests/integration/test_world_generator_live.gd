@@ -8,6 +8,7 @@ const Navigation := preload("res://scripts/random_map_navigation.gd")
 const Commands := preload("res://scripts/commands.gd")
 const Controller := preload("res://scripts/game_controller.gd")
 const Settings := preload("res://scripts/skirmish_settings.gd")
+const Footprint := preload("res://scripts/footprint.gd")
 const DIRECTORY := "res://qa/world-generator-20261018"
 var failures: Array[String] = []
 
@@ -57,6 +58,7 @@ func _initialize() -> void:
 		for i in range(expected.size()):
 			check((expected[i] != 0) == grid.is_walkable(Vector2i(i % grid.size.x, i / grid.size.x)), "%s generator and real land occupancy agree" % profile)
 		var paths := 0
+		var dock_paths := 0
 		for player in built["definition"]["players"]:
 			var team := int(player["team"])
 			var workers: Array = world.get_units().filter(func(unit): return unit.get("team", 0) == team and unit.get("kind", "") == "villager")
@@ -65,6 +67,10 @@ func _initialize() -> void:
 			for starting_worker in workers:
 				check(grid.is_position_walkable_for(starting_worker["pos"], starting_worker["footprint_radius"], "land", starting_worker["terrain_restriction"]), "%s player %d starts each worker on a valid footprint" % [profile, team])
 			var worker: Dictionary = workers[0]
+			if profile in ["small_islands", "islands"]:
+				var has_dock := _reachable_dock(world, data, expected, worker)
+				check(has_dock, "%s player %d can build a dock from their starting island" % [profile, team])
+				dock_paths += int(has_dock)
 			for kind in ["tree", "berries"]:
 				var reachable := false
 				var resources: Array = world.get_resources().filter(func(resource): return resource.get("kind", "") == kind and Vector2(resource["pos"]).distance_to(player["start"]) <= 20.0)
@@ -103,6 +109,7 @@ func _initialize() -> void:
 				if kind=="fishing_boat":
 					var route:Array=world.pathfinder.find_path(start,goal,"water",unit["terrain_restriction"],unit["footprint_radius"])
 					if unit["pos"].distance_to(start)>0.1 or route.is_empty() or Vector2(route[-1]).distance_to(goal)>0.2:
+						check(data["generator_version"] != Geography.VERSION, "%s marked ford must fit the fishing boat along its fairway" % profile)
 						crossings.append({"kind":kind,"reason":"natural_river_too_narrow"})
 						world.detach_unit_for_transport(int(unit["id"]))
 						continue
@@ -124,11 +131,38 @@ func _initialize() -> void:
 				world.release_unit_destination(unit)
 				world.detach_unit_for_transport(int(unit["id"]))
 		world.task_coordinator.shutdown()
-		rows.append({"profile": profile, "players": built["definition"]["players"].size(), "resource_paths": paths, "fords": data["fords"].size(), "crossings": crossings})
+		rows.append({"profile": profile, "players": built["definition"]["players"].size(), "resource_paths": paths, "dock_paths": dock_paths, "fords": data["fords"].size(), "crossings": crossings})
 		print(JSON.stringify(rows[-1]))
 	FileAccess.open(DIRECTORY.path_join("live.json" if profiles.size() == Geography.PROFILES.size() else "live-subset.json"), FileAccess.WRITE).store_string(JSON.stringify({"valid": failures.is_empty(), "rows": rows, "failures": failures}, "\t"))
 	for failure in failures: push_error(failure)
 	quit(0 if failures.is_empty() else 1)
+
+func _reachable_dock(world, data: Dictionary, walkable: PackedByteArray, worker: Dictionary) -> bool:
+	var size: Vector2i = data["size"]
+	var start: Vector2 = worker["pos"]
+	var field := Navigation.flood(size, walkable, Vector2i(start))
+	var shores: Array[Vector2] = []
+	for i in range(walkable.size()):
+		if data["terrain_ids"][i] not in [1, 2, 4, 22]: continue
+		var cell := Vector2i(i % size.x, i / size.x)
+		for direction in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
+			var bank: Vector2i = cell + direction * 2
+			if Navigation.inside(bank, size) and field["distances"][bank.y * size.x + bank.x] >= 0:
+				shores.append(Vector2(cell) + Vector2.ONE * 0.5)
+				break
+	shores.sort_custom(func(a, b): return start.distance_squared_to(a) < start.distance_squared_to(b))
+	for site in shores:
+		if not world.map_supports_foundation("dock", site): continue
+		var footprint := Footprint.building(world.building_placement_stats("dock"), site)
+		var dock := {"pos": site, "footprint": footprint, "occupied_cells": footprint["occupied_cells"]}
+		for bank in world.building_perimeter_candidates(worker, dock):
+			if not world.navigation_grid.is_position_walkable_for(bank, worker["footprint_radius"], "land", worker["terrain_restriction"]): continue
+			var path: Array = world.pathfinder.find_path(start, bank, "land", worker["terrain_restriction"], worker["footprint_radius"])
+			if path.is_empty() or Vector2(path[-1]).distance_to(bank) >= 0.2: continue
+			# The worker can scout this particular shore before placing the dock.
+			world.fog_of_war.reveal_explored_cell(worker["team"], Vector2i(site))
+			if world.can_place_foundation(worker["team"], "dock", site): return true
+	return false
 
 func check(value: bool, context: String) -> void:
 	if not value and context not in failures: failures.append(context)

@@ -15,6 +15,7 @@ const WatershedWorld := preload("res://scripts/random_map_watershed_world.gd")
 const RandomMapZones := preload("res://scripts/random_map_zones.gd")
 const RandomMapWater := preload("res://scripts/random_map_water.gd")
 const BuildingSpace := preload("res://scripts/random_map_building_space.gd")
+const OpeningEconomy := preload("res://scripts/random_map_opening_economy.gd")
 
 var definition: Dictionary
 var size: Vector2i
@@ -86,7 +87,7 @@ func prepare_geography() -> void:
 	starts = []
 	for player in definition.get("players", []): starts.append(Vector2(player["start"]))
 	geography = {}
-	if watershed and prepared_geography.get("size") == size and int(prepared_geography.get("seed", -1)) == seed and prepared_geography.get("profile") == generator.get("map_type_id"):
+	if watershed and int(prepared_geography.get("version", -1)) == version and prepared_geography.get("size") == size and int(prepared_geography.get("seed", -1)) == seed and prepared_geography.get("profile") == generator.get("map_type_id"):
 		geography = prepared_geography.duplicate(true)
 	else:
 		geography = Recipe.geography(version, size, generator, seed, starts.size())
@@ -157,8 +158,8 @@ func shape_relief() -> void:
 		"naval_start_zones": naval_zones, "reserved_foundation_cells": reserved_foundations, "resources": [], "scenery": [],
 		"generation_candidates": fields.get("generation_candidates", {})}
 	if macro:
-		result["generator_version"] = WatershedWorld.VERSION if watershed else WildIslands.VERSION if wild else Geography.VERSION
-		result["theme"] = "watershed_world_v6" if watershed else "wild_islands_v5" if wild else "geography_first_v4"
+		result["generator_version"] = version
+		result["theme"] = WatershedWorld.theme(version) if watershed else "wild_islands_v5" if wild else "geography_first_v4"
 		result["geography"] = {"order": ["land_and_sea", "relief_and_woodland", "settlements", "routes", "resources"], "woodland_regions": geography["woodland_regions"], "landmass_seeds": geography["landmass_seeds"]}
 	if river_network:
 		result["rivers"] = geography["rivers"]
@@ -190,6 +191,8 @@ func reserve_routes() -> void:
 	# particular, a small island may fit its expansion inside the start's
 	# resource-free square. Keep real routes, docks and geological reserves.
 	var building_exclusions := reserved.duplicate() if watershed else {}
+	if version == WatershedWorld.VERSION:
+		Geography.reserve_meadows(reserved, fields, starts, size)
 	reserved.merge(Support._starting_entity_exclusion_cells(definition, size), true)
 	# Rivers exclude trees and land resources. Fish retain the actual dock,
 	# route and obstruction reservations instead of inheriting that blanket ban.
@@ -209,6 +212,12 @@ func reserve_routes() -> void:
 				if watershed: building_exclusions[cell] = true
 	if watershed:
 		BuildingSpace.reserve(definition, result, fields, reserved, building_exclusions)
+	if version == WatershedWorld.VERSION:
+		OpeningEconomy.place(definition, result, fields, reserved, seed ^ 0x605EA)
+		BuildingSpace.reserve_settlement_exits(definition, result, fields, reserved)
+		if generator.get("requires_shared_land", false):
+			graph = LandscapeNavigation.routes(definition, result, fields, true)
+			reserved.merge(graph["reserved"])
 	result["region_graph"] = {"schema_version": 1, "edges": graph["edges"]}
 	checkpoint = Support._landscape_checkpoint(diagnostics, "routes", checkpoint)
 	Support._report_progress(progress, 0.57, "Размещение стартовых и нейтральных ресурсов")
@@ -216,7 +225,17 @@ func reserve_routes() -> void:
 
 func place_economy() -> void:
 	clusters = generator.get("resource_clusters", []).duplicate(true)
-	clusters.append_array(Support._neutral_source_resource_clusters(size, terrain, starts, generator.get("source_profile", {}), zones, seed ^ 0x673CA))
+	if version == WatershedWorld.VERSION:
+		clusters = clusters.filter(func(cluster): return not cluster.has("owner_start"))
+	var mineral_geology: PackedFloat32Array = fields["geology"] if version == WatershedWorld.VERSION else PackedFloat32Array()
+	clusters.append_array(Support._neutral_source_resource_clusters(size, terrain, starts, generator.get("source_profile", {}), zones, seed ^ 0x673CA, mineral_geology))
+	if version == WatershedWorld.VERSION:
+		# Crowded coasts can exhaust a deposit. Keep its remaining members in
+		# their geological/habitat patch instead of searching the entire map.
+		for cluster in clusters:
+			if cluster.has("center") and not cluster.has("guarantee_origin"):
+				cluster["guarantee_origin"] = cluster["center"]
+				cluster["placement_radius"] = cluster.get("placement_radius", float(cluster["radius"]) + 3.0)
 	clusters.append_array(Support._naval_resource_clusters(naval_zones, generator.get("naval_resource_clusters", [])))
 	components = Support._land_component_lookup(size, terrain, cliffs)
 	economic_reserved = reserved.duplicate() if macro else reserved
@@ -226,8 +245,10 @@ func place_economy() -> void:
 		for i in range(terrain.size()):
 			if int(fields["forest_potential"][i]) != 0 and float(fields["forest_strength"][i]) > 0.72:
 				economic_reserved[Vector2i(i % size.x, i / size.x)] = true
-	result["resources"] = Support._generate_resource_clusters(clusters, size, seed ^ 0x53AB19, terrain, economic_reserved, components)
-	if not wild: Support._complete_mineral_expansions(result, starts, economic_reserved, components, seed ^ 0x346C9)
+	result["resources"].append_array(Support._generate_resource_clusters(clusters, size, seed ^ 0x53AB19, terrain, economic_reserved, components))
+	if not wild or version == WatershedWorld.VERSION:
+		var minimum_nodes := 1 if version == WatershedWorld.VERSION else 4
+		Support._complete_mineral_expansions(result, starts, economic_reserved, components, seed ^ 0x346C9, minimum_nodes)
 	# Marine ecology depends on available water, not on the starting-dock flag.
 	# Use a separate random stream so changes at sea do not reroll land resources.
 	marine_clusters = Support._neutral_fish_clusters(size, terrain, seed ^ 0x26731, aquatic_reserved, result["resources"], geography["rivers"]["mask"] if river_network else PackedByteArray(),geography["rivers"].get("surface",{}) if watershed else {})
@@ -240,7 +261,7 @@ func place_economy() -> void:
 		if resource["kind"] != "shore_fish": continue
 		var approach: Variant = Support._shore_fish_approach(Vector2i(resource["position"]), size, terrain, occupied)
 		if approach is Vector2i: reserved[approach] = true
-	LandscapeNavigation.protect_economy(definition, result, reserved, fields if macro else {})
+	LandscapeNavigation.protect_economy(definition, result, reserved, fields if macro else {}, version == WatershedWorld.VERSION)
 	grove_cells = {}
 	for resource in result["resources"]:
 		if String(resource.get("kind", "")) == "tree": grove_cells[Vector2i(resource["position"])] = true
@@ -289,7 +310,7 @@ func finish() -> Dictionary:
 		if resource.get("kind", "") != "tree": continue
 		var source = "aoe2" if resource.has("environment_asset") else "ror"
 		tree_sources[source] += 1
-	result["ecology"] = {"forest_cells": result["forest_mask"].count(1), "tree_sources": tree_sources, "reserved_route_cells": reserved.size(), "material_policy": "watershed_world_v6" if watershed else "wild_islands_v5" if wild else "geography_first_v4" if macro else "temperate_natural_v3" if natural else "temperate_connected_v2"}
+	result["ecology"] = {"forest_cells": result["forest_mask"].count(1), "tree_sources": tree_sources, "reserved_route_cells": reserved.size(), "material_policy": WatershedWorld.theme(version) if watershed else "wild_islands_v5" if wild else "geography_first_v4" if macro else "temperate_natural_v3" if natural else "temperate_connected_v2"}
 	marine_counts = {"shore_fish": 0, "deep_fish": 0, "whale": 0}
 	for resource in result["resources"]:
 		var kind = String(resource.get("kind", ""))

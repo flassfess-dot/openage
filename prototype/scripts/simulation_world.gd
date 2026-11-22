@@ -730,6 +730,7 @@ func configure_map_data(map_data: Dictionary) -> void:
 				map_terrain_ids[Vector2i(x, y)] = int(terrain_ids[index])
 	terrain_elevation.clear()
 	terrain_elevation.river_shape = map_data.get("rivers", {}).get("surface", {})
+	terrain_elevation.configure_climate(map_data)
 	var vertex_levels: Array = map_data.get("vertex_levels", [])
 	var vertex_width := map_size.x + 1
 	for y in range(map_size.y + 1):

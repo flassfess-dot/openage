@@ -1,5 +1,7 @@
 extends SceneTree
 
+const LootView := preload("res://scripts/expedition_loot_view.gd")
+
 const World := preload("res://scripts/simulation_world.gd")
 const Controller := preload("res://scripts/game_controller.gd")
 const Commands := preload("res://scripts/commands.gd")
@@ -32,6 +34,18 @@ func make_field(catalog) -> void:
 	controller = Controller.new(world)
 
 func _initialize() -> void:
+	var supplies: Texture2D = LootView.frame_for(["balm", "incense"]).texture
+	check(supplies.get_image().get_used_rect().size.x == 21, "provision roll occupies 21 native pixels")
+	var gear_art := {}
+	for item in Kit.ITEMS:
+		var shown: Texture2D = LootView.frame_for(["incense", item, "balm"]).texture
+		if Kit.ITEMS[item].slot < 0:
+			check(shown == supplies, "supplies share a bound roll")
+		else:
+			check(shown != supplies and not gear_art.has(shown), "distinct equipment in the satchel: " + item)
+			check(shown.get_image().get_used_rect().size.x == 21, "satchel keeps its small battlefield silhouette: " + item)
+			check(shown == LootView.frame_for([item, "balm"]).texture, "mixing in supplies preserves " + item)
+			gear_art[shown] = true
 	var catalog := Catalog.new()
 	catalog.load_generated_data()
 	make_field(catalog)
@@ -63,6 +77,7 @@ func _initialize() -> void:
 	check(not issue(captain, "pickup", {"pile":2}, 2).accepted, "another team cannot manage a hero's kit")
 	check(issue(captain, "pickup", {"pile":2}).accepted, "hero takes everything that fits")
 	check(Kit.pack(captain)[2].count == 3 and field.piles[2].items == ["seal"], "consumables stack to three and overflow stays in the original pile")
+	check(LootView.frame_for(field.piles[2].items).texture == LootView.EQUIPMENT.seal, "partly collected satchel shows the remaining seal")
 	check(not issue(captain,"pickup",{"pile":2}).accepted, "a second pickup with a full pack leaves its contents intact")
 	check(not issue(captain,"activate",{"slot":1,"item":"shield"}).accepted, "unequipping into a full pack preserves the shield")
 	check(issue(captain,"activate",{"slot":3,"item":"iron"}).accepted and captain.service_weapon == "iron" and Kit.at(captain,3).item == "point", "gear swaps atomically even with a full pack")
@@ -101,6 +116,7 @@ func _initialize() -> void:
 	world.begin_entity_death(captain, {"team":2, "entity_id":enemy.id})
 	check(before == field.capture(), "repeated death resolution cannot duplicate gear")
 	test_open_battle(catalog)
+	test_building_trophies(catalog)
 	print("Expedition equipment, abilities, progression, fog and pickup orders: %d failures" % failures)
 	quit(1 if failures else 0)
 
@@ -131,3 +147,55 @@ func test_open_battle(catalog) -> void:
 		if not world.expedition_field.piles.has(1): break
 		controller._run_fixed_tick(1, 2)
 	check(archer.get("service_weapon") == "point" and Kit.balm_slot(archer) >= 0, "natural battle finishes with equipped loot and a packed consumable")
+
+func test_building_trophies(catalog) -> void:
+	make_field(catalog)
+	var field = world.expedition_field
+	var hero: Dictionary = world.add_unit(1, "swordsman", Vector2(11, 14), false)
+	Service.inherit_service(world, hero, {"role":"captain", "name":"Марк", "xp":Service.VETERAN})
+	var attacker: Dictionary = world.combat_source_context(hero)
+	var town: Dictionary = world.add_building(301, "town_center", Vector2(12, 10), 2)
+	var wonder: Dictionary = world.add_building(302, "wonder", Vector2(23, 20), 2)
+	world.update_fog_of_war()
+	world.combat_system._apply_impact_damage(town, town.max_hp + 1.0, attacker, -1, 1)
+	if not field.piles.has(1):
+		check(false, "enemy town center leaves loot on the lethal hit")
+		return
+	var city_cache: Dictionary = field.piles[1]
+	check(city_cache.get("coffer", false) and city_cache.items.size() == 2 and city_cache.items[0] in field.TOWN_GEAR and city_cache.items[1] == "balm", "town center leaves equipment and balm")
+	world.begin_entity_death(town, attacker)
+	check(city_cache.items.size() == 2 and field.piles.size() == 1, "a second destruction notification cannot duplicate the city reward")
+	check(issue(hero, "pickup", {"pile":1}).accepted, "commander accepts the pickup order on cleared city ruins")
+	for i in 200:
+		if not field.piles.has(1): break
+		controller._run_fixed_tick(1, 2)
+	check(not field.piles.has(1) and city_cache.items[0] in Kit.carried(hero) and Kit.balm_slot(hero) >= 0, "the city coffer can be reached and emptied")
+
+	world.combat_system._apply_impact_damage(wonder, wonder.max_hp + 1.0, attacker, -1, 1)
+	if not field.piles.has(2):
+		check(false, "enemy wonder leaves a coffer")
+		return
+	var treasury: Dictionary = field.piles[2]
+	var goods: Array = treasury.items.duplicate()
+	check(treasury.get("coffer", false) and goods.size() == 3 and goods[0] in field.RARE and goods[1] in field.RARE and goods[0] != goods[1] and goods[2] == "incense", "wonder holds two different rare items and incense")
+	check(not world.victory_objectives.any(func(o): return o.get("category") == "artifact"), "a trophy coffer creates no victory artifact")
+	var collector: Dictionary = world.add_unit(1, "archer", treasury.pos, false)
+	Service.inherit_service(world, collector, {"role":"scout", "name":"Луций", "xp":Service.VETERAN})
+	var full_pack := [{"item":"balm", "count":3}, {"item":"balm", "count":3}, {"item":"balm", "count":3}, {"item":"balm", "count":3}]
+	world.set_entity_field(collector, "service_pack", full_pack)
+	world.update_fog_of_war()
+	check(issue(collector, "pickup", {"pile":2}).accepted and treasury.items == ["incense"] and treasury.coffer, "a partly emptied wonder coffer retains its form and remaining supplies")
+	var chest := LootView.frame_for(treasury.items, treasury.coffer)
+	check(chest.texture != LootView.SUPPLIES and chest.texture.get_image().get_used_rect().size.x == 24, "the stripped reliquary has its own 24-pixel silhouette")
+	field.place(treasury.pos, ["balm"])
+	check(field.piles.size() == 1 and treasury.items == ["incense", "balm"] and treasury.coffer, "nearby field loot merges into the existing coffer")
+
+	world.begin_entity_death(world.add_building(303, "house", Vector2(8, 20), 2), attacker)
+	world.begin_entity_death(world.add_building(304, "wonder", Vector2(8, 27), 2, false), attacker)
+	world.begin_entity_death(world.add_building(305, "town_center", Vector2(14, 27), 1), {"reason":"delete_entity"})
+	var allied: Dictionary = world.add_building(306, "wonder", Vector2(21, 29), 3)
+	world.player_registry.set_mutual_relation(1, 3, "ally")
+	world.begin_entity_death(allied, attacker)
+	world.field_service_enabled = false
+	world.begin_entity_death(world.add_building(307, "town_center", Vector2(31, 29), 2), attacker)
+	check(field.piles.size() == 1 and field.next_pile == 3, "ordinary buildings, foundations, demolition, allies and classic matches produce no coffer")

@@ -43,6 +43,10 @@ func synchronize(world) -> void:
 		var original = world.terrain_elevation
 		terrain_elevation.vertex_levels = original.vertex_levels.duplicate()
 		terrain_elevation.river_shape = original.river_shape.duplicate()
+		terrain_elevation.climate_surfaces = original.climate_surfaces
+		terrain_elevation.climate_base = original.climate_base
+		terrain_elevation.bank_silt = original.bank_silt
+		terrain_elevation.ford_gravel = original.ford_gravel
 		terrain_elevation.nonzero_vertex_count = original.nonzero_vertex_count
 		terrain_elevation.maximum_vertex_level = original.maximum_vertex_level
 		terrain_elevation.maximum_vertex_level_dirty = original.maximum_vertex_level_dirty

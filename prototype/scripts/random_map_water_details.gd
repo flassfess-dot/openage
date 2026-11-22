@@ -206,7 +206,8 @@ func _margins() -> void:
 		var marine := _marine(i)
 		var field := Surface.sample(shape, point)
 		var quiet: bool = marine or lakes.has(i) or terrain[i] == 4 or Surface.sediment(field) > 0.25
-		if quiet and _chance(cell, 0xA1311, 0.22):
+		var reed_chance := 0.52 if not marine and data.get("climate_id", "") == "nile" else 0.22
+		if quiet and _chance(cell, 0xA1311, reed_chance):
 			_stamp("ror_reeds", point + _jitter(cell, 0xA1312), [0, 1], "coastal_margin" if marine else "lake_margin" if lakes.has(i) else "quiet_river_margin", 1.15)
 		if shape.is_empty() and terrain[i] == 4 and _chance(cell, 0xA1313, 0.50):
 			_stamp("ror_shallows", point, [0, 5, 1, 3, 6], "coastal_shoal" if marine else "lake_margin" if lakes.has(i) else "river_shoal", 1.15)

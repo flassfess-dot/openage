@@ -160,16 +160,33 @@ static func inspect(definition: Dictionary, map_data: Dictionary) -> Dictionary:
 		if not expected_hash.is_empty() and expected_hash != String(map_data.get("content_hash", "")):
 			errors.append("random_map_content_hash_mismatch")
 	metrics.merge(RandomMapMetrics.measure(definition, map_data), true)
-	if int(map_data.get("generator_version", 0)) == WatershedWorld.VERSION:
+	var watershed := WatershedWorld.supports(int(map_data.get("generator_version", 0)))
+	if watershed:
 		metrics["construction_space"] = preload("res://scripts/random_map_building_space.gd").measure(map_data)
+	if int(map_data.get("generator_version", 0)) == WatershedWorld.VERSION:
+		if map_data.get("building_clearings", []).size() != players.size():
+			errors.append("random_map_opening_building_space_missing")
+		var minerals := {"gold_mine": 0, "stone_mine": 0}
+		var obstructed_meadow := false
+		for resource in map_data.get("resources", []):
+			var kind := String(resource.get("kind", ""))
+			if minerals.has(kind): minerals[kind] += 1
+			if kind != "tree" or obstructed_meadow: continue
+			for start in starts:
+				if start.distance_squared_to(resource["position"]) <= Geography.MEADOW_RADIUS * Geography.MEADOW_RADIUS:
+					obstructed_meadow = true
+					break
+		if obstructed_meadow: errors.append("random_map_tree_in_starting_meadow")
+		for kind in minerals:
+			if minerals[kind] == 0: errors.append("random_map_expansion_resource_missing:" + kind)
 	if map_data.has("rivers"):
 		var rivers := WildIslands.Rivers.inspect(map_data["rivers"])
 		metrics["river_network"] = rivers
 		errors.append_array(rivers["errors"])
-	if int(map_data.get("generator_version", 0)) in [NaturalLandscape.VERSION, Geography.VERSION, WildIslands.VERSION, WatershedWorld.VERSION]:
+	if watershed or int(map_data.get("generator_version", 0)) in [NaturalLandscape.VERSION, Geography.VERSION, WildIslands.VERSION]:
 		var composition := NaturalLandscape.composition(map_data)
 		metrics["landscape_composition"] = composition
-		if int(map_data.get("generator_version", 0)) not in [WildIslands.VERSION, WatershedWorld.VERSION]:
+		if not watershed and int(map_data.get("generator_version", 0)) != WildIslands.VERSION:
 			errors.append_array(Geography.composition_errors(composition) if int(map_data.get("generator_version", 0)) == Geography.VERSION else NaturalLandscape.composition_errors(composition))
 	return {
 		"valid": errors.is_empty(),

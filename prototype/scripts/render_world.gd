@@ -1,5 +1,6 @@
 class_name RoRRenderWorld
 
+const ExpeditionLoot := preload("res://scripts/expedition_loot_view.gd")
 const FishShoalSelection := preload("res://scripts/fish_shoal_selection.gd")
 const PickingService := preload("res://scripts/picking_service.gd")
 const ResourcePresentationRegistry := preload("res://scripts/resource_presentation_registry.gd")
@@ -301,6 +302,17 @@ func create_world_drawables(world_source, world_to_screen: Callable, interpolati
 				_append_resource_shadow(drawables, resource, resource_info, resource_position, resource_screen)
 				if preview_id_lookup.has(int(resource["id"])) and PickingService.resource_is_selectable(resource):
 					drawables.append(RenderItem.create("selection", RenderItem.Layer.SELECTION, resource_position, resource_screen, int(resource["id"]), resource, resource_info, float(resource.get("elevation", 0.0)), Color("d6bc63"), 1.0, 1))
+	var loot: Array = world_source.get("player_state", {}).get("service_loot", []) if from_snapshot else []
+	if not from_snapshot and world_source.get("field_service_enabled"):
+		loot = world_source.expedition_field.visible_piles(world_source, observer_team) if observer_team > 0 else world_source.expedition_field.piles.values()
+	for pile in loot:
+		var position := Vector2(pile.pos)
+		var screen: Vector2 = world_to_screen.call(position)
+		var item := RenderItem.create("field_loot", RenderItem.Layer.UNIT_BUILDING, position, screen,
+			int(pile.id), pile, ExpeditionLoot.frame_for(pile.items, pile.get("coffer", false)), 0.0, Color.WHITE, 1.0, ExpeditionLoot.GROUND_SUB_ORDER)
+		item.screen_y += _unit_building_depth_offset(position, screen.y, cached_building_depth_index, world_to_screen)
+		_cache_resource_sprite(item)
+		drawables.append(item)
 	for objective in source_objectives:
 		if not bool(objective.get("active", true)) or bool(objective.get("logical_only", false)):
 			continue
@@ -563,7 +575,7 @@ func _cache_resource_sprite(item: Dictionary) -> void:
 		item["projection_sort_y"] = (float(item["screen_y"]) - current_projection_origin.y) / cached_sprite_scale
 	# Control records may share a body frame descriptor. They must still reach
 	# their outline/health renderer, including on retained and animated updates.
-	if String(item["kind"]) not in ["building", "building_part", "resource", "resource_shadow", "unit", "unit_part", "projectile", "effect", "marker", "environment", "rally_flag"]:
+	if String(item["kind"]) not in ["building", "building_part", "resource", "resource_shadow", "unit", "unit_part", "projectile", "effect", "marker", "environment", "rally_flag", "field_loot"]:
 		return
 	var info: Dictionary = item["frame_info"]
 	var texture: Texture2D = info.get("texture")
@@ -1198,7 +1210,9 @@ func refresh_world_drawables(drawables: Array, world_to_screen: Callable, interp
 				drawable["screen_position"] = static_screen
 				var sort_offset := Vector2(drawable.get("depth_world_offset", Vector2.ZERO))
 				drawable["screen_y"] = Vector2(world_to_screen.call(Vector2(drawable.get("world_anchor", Vector2.ZERO)) + sort_offset)).y
-				if String(drawable["kind"]) in ["resource", "resource_shadow", "building", "building_part", "environment"]: _cache_resource_sprite(drawable)
+				if kind == "field_loot":
+					drawable.screen_y = static_screen.y + _unit_building_depth_offset(drawable.world_anchor, static_screen.y, cached_building_depth_index, world_to_screen)
+				if kind in ["resource", "resource_shadow", "building", "building_part", "environment", "field_loot"]: _cache_resource_sprite(drawable)
 			continue
 		var resolved_position: Vector2 = position
 		if not resolved_position.is_equal_approx(Vector2(drawable.get("world_anchor", resolved_position))):

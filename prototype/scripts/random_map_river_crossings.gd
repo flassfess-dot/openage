@@ -16,10 +16,14 @@ static func build(size: Vector2i, terrain: Array[int], fields: Dictionary, river
 	var length := 0.0
 	for channel in rivers["channels"]:
 		var points: PackedVector2Array = channel["points"]
+		# Small tributaries already have a wadeable bed. Place the marked
+		# bank-to-bank crossings where a deep trunk would divide the land.
+		if channel.get("river_role", "") == "tributary": continue
+		var trunk: bool = channel.get("river_role", "") == "main"
 		for i in range(1, points.size()): length += points[i - 1].distance_to(points[i])
 		for i in range(3, points.size() - 3, 4):
 			var radius: float = channel["radii"][i]
-			if radius < 0.9 or channel["runoff"][i] < rivers["runoff_threshold"] * 1.2: continue
+			if radius < 0.9 or (not trunk and channel["runoff"][i] < rivers["runoff_threshold"] * 1.2): continue
 			# Reaches end at confluences, outlets or headwaters. Give the
 			# ribbon room to span only the channel it was chosen for.
 			var end_clearance := pow(radius + 1.5, 2.0)
@@ -33,7 +37,7 @@ static func build(size: Vector2i, terrain: Array[int], fields: Dictionary, river
 			var after := (points[i + 3] - points[i]).normalized()
 			var straightness := before.dot(after)
 			var rockiness: float = channel["rockiness"][i]
-			if straightness < 0.75 or rockiness > 0.55: continue
+			if straightness < 0.75 or (not trunk and rockiness > 0.55): continue
 			var normal := Vector2(-direction.y, direction.x)
 			var banks: Array[Vector2i] = []
 			for side in [-1, 1]:
@@ -46,11 +50,11 @@ static func build(size: Vector2i, terrain: Array[int], fields: Dictionary, river
 						break
 			if banks.size() != 2 or banks[0] == banks[1]: continue
 			var span := Vector2(banks[0]).distance_to(banks[1])
-			if span > 9.5: continue
+			if span > (13.0 if trunk else 9.5): continue
 			var a := _level(fields["vertex_levels"], size, banks[0])
 			var b := _level(fields["vertex_levels"], size, banks[1])
 			if absi(a - b) > 1: continue
-			var half_width := clampf(span * 0.16, 1.05, 1.5)
+			var half_width := clampf(span * 0.20, 1.55, 2.10) if trunk else clampf(span * 0.16, 1.05, 1.5)
 			var ribbon := _ribbon(size, terrain, rivers, excluded, banks[0], banks[1], half_width)
 			if ribbon.is_empty(): continue
 			seen[center] = true

@@ -7,8 +7,46 @@ var output_path := ""
 var save_path := ""
 var map_size_id := "compact"
 var map_type_id := "grasslands"
+var climate_id := "temperate"
+var climate_digest := ""
+var external_save := false
 var naval_fixture: Dictionary={}
 var report: Dictionary = {"passed": false, "stages": []}
+
+
+func check_climate(game, restored: bool) -> bool:
+	var recipe: Dictionary = game.match_definition.get("map", {}).get("generator", {})
+	if recipe.get("climate_id", "temperate") != climate_id:
+		fail("The match recipe did not retain the selected climate")
+		return false
+	if climate_id == "temperate": return true
+	var world = game.simulation_world
+	var surfaces: PackedInt32Array = world.terrain_elevation.climate_surfaces
+	if surfaces.size() != world.map_size.x * world.map_size.y or not game.resource_catalog.environment_pack.enabled:
+		fail("Regional terrain or packaged textures are missing")
+		return false
+	var hash_context := HashingContext.new()
+	hash_context.start(HashingContext.HASH_SHA256)
+	hash_context.update(surfaces.to_byte_array())
+	var digest := hash_context.finish().hex_encode()
+	var example := -1
+	for i in range(surfaces.size()):
+		if surfaces[i] >= 1100:
+			example = i
+			break
+	if example < 0 or (restored and digest != climate_digest):
+		fail("The generated regional surfaces did not survive the save round trip")
+		return false
+	if DisplayServer.get_name() != "headless":
+		var cell := Vector2i(example % world.map_size.x, example / world.map_size.x)
+		var provider: Callable = game.terrain_canvas.terrain_id_provider
+		var material := int(provider.call(cell)) if provider.is_valid() else -1
+		if material != surfaces[example]:
+			fail("Climate surface at %s should be %d, got %d (simulation %d)" % [cell, surfaces[example], material, world.terrain_id_at_cell(cell)])
+			return false
+	climate_digest = digest
+	report["loaded_climate" if restored else "generated_climate"] = {"id":climate_id, "surface_sha256":digest}
+	return true
 
 
 func _ready() -> void:
@@ -20,9 +58,12 @@ func run() -> void:
 	Engine.max_fps = 60
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--output="): output_path = argument.trim_prefix("--output=")
-		elif argument.begins_with("--save="): save_path = argument.trim_prefix("--save=")
+		elif argument.begins_with("--save="):
+			save_path = argument.trim_prefix("--save=")
+			external_save = not save_path.is_empty()
 		elif argument.begins_with("--map-size="): map_size_id = argument.trim_prefix("--map-size=")
 		elif argument.begins_with("--map-type="): map_type_id = argument.trim_prefix("--map-type=")
+		elif argument.begins_with("--climate="): climate_id = argument.trim_prefix("--climate=")
 	if output_path.is_empty():
 		fail("Pass --output=<report.json> in a writable diagnostic directory")
 		return
@@ -57,10 +98,12 @@ func run() -> void:
 		field_service.button_pressed = false
 	launcher._select_metadata(launcher.setting_controls["map_size_id"], map_size_id)
 	launcher._select_metadata(launcher.setting_controls["map_type_id"], map_type_id)
+	launcher._select_metadata(launcher.setting_controls["climate_id"], climate_id)
 	launcher.setting_controls["seed"].value = 41721
 	launcher.start_button.pressed.emit()
 	var game = await wait_for_match("random_map")
 	if game == null: return
+	if not check_climate(game, false): return
 	if game.simulation_world.field_service_enabled != (not classic_skirmish):
 		fail("The random map did not use the commander's checkbox setting")
 		return
@@ -96,6 +139,7 @@ func run() -> void:
 	if game == null: return
 	game.join_simulation_owner()
 	game.game_controller.set_paused(false)
+	if not external_save and not check_climate(game, true): return
 	if not naval_fixture.is_empty():
 		if not game.simulation_world.transport_system.embarked_units.has(int(naval_fixture["passenger"])): fail("Loaded naval passenger is missing"); return
 		var transport_ids: Array[int]=[int(naval_fixture["ship"])]

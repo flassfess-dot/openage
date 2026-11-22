@@ -8,7 +8,7 @@ const Rules := preload("res://scripts/terrain_rules.gd")
 
 # The profile selects geographic structure. Player count and settlements never
 # enter silhouette generation; shared ecology and hydrology follow this stage.
-static func build(size: Vector2i, profile: String, seed: int) -> Dictionary:
+static func build(size: Vector2i, profile: String, seed: int, varied_coast: bool = false) -> Dictionary:
 	var span := float(mini(size.x, size.y))
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed ^ 0x51A9E
@@ -32,6 +32,13 @@ static func build(size: Vector2i, profile: String, seed: int) -> Dictionary:
 	if profile == "narrows":
 		for i in range(rng.randi_range(1, 2)):
 			slots.append({"offset": (float(i) - 0.5) * span * 0.31, "phase": rng.randf() * TAU, "width": maxf(1.7, span * rng.randf_range(0.014, 0.022))})
+	var shoreline_rng := RandomNumberGenerator.new()
+	shoreline_rng.seed = seed ^ 0xBA790
+	var bay_phase := shoreline_rng.randf() * TAU
+	var cape_phase := shoreline_rng.randf() * TAU
+	var bay_depth := span * shoreline_rng.randf_range(0.06, 0.14)
+	var sea_radii := Vector2(span * shoreline_rng.randf_range(0.26, 0.37), span * shoreline_rng.randf_range(0.18, 0.27))
+	var sea_offset := Vector2(shoreline_rng.randf_range(-0.045, 0.045), shoreline_rng.randf_range(-0.045, 0.045)) * span
 	var terrain: Array[int] = []
 	terrain.resize(size.x * size.y)
 	for y in range(size.y):
@@ -57,15 +64,23 @@ static func build(size: Vector2i, profile: String, seed: int) -> Dictionary:
 				land = first + perturbation > 0.0
 				if second > -0.12 and first - second < 0.16: land = false
 			elif profile == "coastal":
-				land = local.x > -span * 0.16 + perturbation * span * 0.30
+				var shore := -span * 0.16 + perturbation * span * 0.30
+				if varied_coast:
+					shore += bay_depth * sin(local.y / span * TAU + bay_phase) + span * 0.035 * sin(local.y / span * 13.0 + cape_phase)
+				land = local.x > shore
 			elif profile == "mediterranean":
 				var bend := sin(local.x / span * PI * 2.0) * span * 0.025
-				land = Vector2(local.x / (span * 0.34), (local.y - bend) / (span * 0.235)).length() > 1.0 + perturbation * 0.55
+				if varied_coast:
+					bend = sin(local.x / span * 9.0 + bay_phase) * bay_depth * 0.55
+					land = ((local - sea_offset - Vector2(0.0, bend)) / sea_radii).length() > 1.0 + perturbation * 0.55
+				else:
+					land = Vector2(local.x / (span * 0.34), (local.y - bend) / (span * 0.235)).length() > 1.0 + perturbation * 0.55
 			elif profile == "narrows":
 				land = Vector2(local.x / (span * 0.48), local.y / (span * 0.49)).length() < 1.0 + perturbation * 0.35
 				for slot in slots:
 					var axis := float(slot["offset"]) + sin(local.y / span * 7.0 + float(slot["phase"])) * span * 0.045
 					var width := float(slot["width"]) * (1.0 + sin(local.y / span * 11.0 + float(slot["phase"])) * 0.22)
+					if varied_coast: width = maxf(2.8, width)
 					if absf(local.x - axis) < width: land = false
 			if profile in ["coastal", "mediterranean"]:
 				for form in forms:

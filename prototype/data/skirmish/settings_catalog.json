@@ -29,6 +29,12 @@
     {"id": "giant", "name": "Гигантская", "size": [200, 200], "max_players": 8},
     {"id": "supergiant", "name": "Сверхгигантская", "size": [400, 400], "max_players": 8}
   ],
+  "climates": [
+    {"id": "temperate", "name": "Умеренный"},
+    {"id": "nile", "name": "Нильская пойма"},
+    {"id": "anatolia", "name": "Весенняя Анатолия"},
+    {"id": "aegean", "name": "Эгейское побережье"}
+  ],
   "map_types": [
     {"id": "small_islands", "name": "Малые острова", "generator_profile": "small_islands_v2", "topology": "islands", "requires_shared_land": false, "requires_naval_starts": true, "island_radius_fraction": 0.13, "water_ratio": [0.55, 0.86]},
     {"id": "islands", "name": "Большие острова", "generator_profile": "large_islands_v2", "topology": "islands", "requires_shared_land": false, "requires_naval_starts": true, "island_radius_fraction": 0.18, "water_ratio": [0.35, 0.75]},

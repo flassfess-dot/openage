@@ -55,7 +55,7 @@ func configure(requested_player_count: int, options: Dictionary = {}) -> String:
 	player_count = requested_player_count
 	settings = SkirmishSettings.default_settings()
 	settings["networked"] = true
-	for key in ["map_size_id", "map_type_id", "seed", "resource_preset_id", "starting_age_id", "population_limit", "victory_mode_id", "allied_victory_enabled", "full_tech_tree", "field_service_enabled", "ai_difficulty_id"]:
+	for key in ["map_size_id", "map_type_id", "climate_id", "seed", "resource_preset_id", "starting_age_id", "population_limit", "victory_mode_id", "allied_victory_enabled", "full_tech_tree", "field_service_enabled", "ai_difficulty_id"]:
 		if options.has(key):
 			settings[key] = options[key]
 	var slots: Array = settings["players"]

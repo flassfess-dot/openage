@@ -28,9 +28,10 @@ static func build(size: Vector2i, terrain: Array[int], fields: Dictionary, seed:
 	var rivers := Rivers.carve(size, terrain, fields, river_options)
 	var lakes := _lakes(size, original, rivers, seed)
 	Rivers.apply(terrain, rivers)
-	rivers["waterfalls"] = RiverFalls.plan(size,terrain,rivers,lakes,seed) if options.get("waterfalls",false) else []
+	var fairway := _main_river_buffer(size, rivers) if options.get("playable_channels", false) else PackedByteArray()
+	rivers["waterfalls"] = RiverFalls.plan(size,terrain,rivers,lakes,seed,fairway) if options.get("waterfalls",false) else []
 	Rivers.apply(terrain,rivers)
-	rivers["rapids"] = RiverRapids.plan(size,terrain,rivers,lakes,seed)
+	rivers["rapids"] = RiverRapids.plan(size,terrain,rivers,lakes,seed,fairway)
 	Rivers.apply(terrain,rivers)
 	rivers["shoals"] = RiverBanks.build(size, terrain, fields, rivers, lakes, seed)
 	Rivers.apply(terrain, rivers)
@@ -43,6 +44,23 @@ static func build(size: Vector2i, terrain: Array[int], fields: Dictionary, seed:
 	rivers["ford_count"] = fords.size()
 	rivers["lake_count"] = lakes.size()
 	return {"rivers": rivers, "lakes": lakes, "fords": fords}
+
+# A waterfall on a tributary has rock shoulders on both banks. Keep their
+# whole footprint away from the main fairway, including at confluences.
+static func _main_river_buffer(size: Vector2i, rivers: Dictionary) -> PackedByteArray:
+	var buffer := PackedByteArray()
+	buffer.resize(size.x * size.y)
+	for channel in rivers["channels"]:
+		if channel.get("river_role", "") != "main": continue
+		var points: PackedVector2Array = channel["points"]
+		for i in range(0, points.size(), 4):
+			var cell := Vector2i(points[i].floor())
+			var reach := ceili(float(channel["radii"][i]) + 8.0)
+			for y in range(maxi(0, cell.y - reach), mini(size.y, cell.y + reach + 1)):
+				for x in range(maxi(0, cell.x - reach), mini(size.x, cell.x + reach + 1)):
+					if cell.distance_squared_to(Vector2i(x, y)) <= reach * reach:
+						buffer[y * size.x + x] = 1
+	return buffer
 
 static func _lakes(size: Vector2i, original: Array[int], rivers: Dictionary, seed: int) -> Array:
 	var drainage: Dictionary = rivers["drainage"]

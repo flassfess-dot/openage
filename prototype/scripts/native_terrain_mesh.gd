@@ -2,6 +2,7 @@ class_name RoRNativeTerrainMesh
 extends RefCounted
 
 const Terrain := preload("res://scripts/environment_terrain.gd")
+const MATERIAL_HALO := Terrain.MATERIAL_HALO
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const RiverSurface := preload("res://scripts/random_map_river_surface.gd")
 static var native_cached_samples_enabled := true
@@ -9,7 +10,7 @@ static var compact_planar_base_enabled := OS.get_environment("ROR_DIAGNOSTIC_PLA
 
 # Capture each terrain/height sample once, instead of crossing the script and
 # dictionary boundary for every vertex of every material layer. The native
-# kernel retains the reference's 8x8 blends and 16x16 coastline tessellation.
+# kernel uses the same material footprint and coastline as the script renderer.
 static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pack, regions: Dictionary, atlas_size: Vector2, timings: Dictionary = {}, sample_cache: Variant = null, capture_kernel: Variant = null) -> Dictionary:
 	if bounds.size.x <= 0 or bounds.size.y <= 0:
 		return {}
@@ -41,7 +42,7 @@ static func capture(bounds: Rect2i, seed: int, provider: Callable, elevation, pa
 	var frames: PackedInt32Array = captured["frames"]
 	var river := PackedFloat32Array()
 	if not elevation.river_shape.is_empty():
-		river.append_array(PackedFloat32Array([slots[0],slots[1004],slots[1],slots[4],slots[1005],slots[22]]))
+		river.append_array(PackedFloat32Array([slots[0],slots[elevation.bank_silt],slots[1],slots[4],slots[elevation.ford_gravel],slots[22]]))
 		var field_samples := PackedFloat32Array()
 		if capture_kernel != null and capture_kernel.has_method("capture_river_samples"):
 			field_samples = capture_kernel.capture_river_samples(bounds, elevation.river_shape)
@@ -128,6 +129,7 @@ static func _capture_samples(bounds: Rect2i, seed: int, provider: Callable, elev
 		var state: Dictionary = kernel.capture_cached_sample_arrays(bounds, samples)
 		if not state.is_empty():
 			var cells: PackedInt32Array = state["cells"]
+			var cell_bounds := bounds.grow(MATERIAL_HALO)
 			var heights: PackedFloat32Array = state["heights"]
 			var frames: PackedInt32Array = state["frames"]
 			# Sample only missing strips/invalidated cells in script. Native code
@@ -136,7 +138,8 @@ static func _capture_samples(bounds: Rect2i, seed: int, provider: Callable, elev
 				var cell := Vector2i(value)
 				var id := int(provider.call(cell))
 				var slot := -1 if id < 0 else int(slots[Terrain._material_id(id, pack)])
-				cells[(cell.y - bounds.position.y + 1) * (bounds.size.x + 2) + cell.x - bounds.position.x + 1] = slot
+				var local := cell - cell_bounds.position
+				cells[local.y * cell_bounds.size.x + local.x] = slot
 			for value in state["missing_heights"]:
 				var cell := Vector2i(value)
 				var height: float = elevation.vertex_elevation(cell)
@@ -162,10 +165,11 @@ static func _capture_samples_reference(bounds: Rect2i, seed: int, provider: Call
 	var next_heights: Dictionary = {}
 	var next_frames: Dictionary = {}
 	var cells := PackedInt32Array()
-	cells.resize((bounds.size.x + 2) * (bounds.size.y + 2))
+	var cell_bounds := bounds.grow(MATERIAL_HALO)
+	cells.resize(cell_bounds.get_area())
 	var index := 0
-	for y in range(bounds.position.y - 1, bounds.end.y + 1):
-		for x in range(bounds.position.x - 1, bounds.end.x + 1):
+	for y in range(cell_bounds.position.y, cell_bounds.end.y):
+		for x in range(cell_bounds.position.x, cell_bounds.end.x):
 			var cell := Vector2i(x, y)
 			var slot := int(prior_cells.get(cell, -2))
 			if slot == -2:

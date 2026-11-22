@@ -20,7 +20,7 @@ func capture() -> void:
 			if preview.profiles[i]["id"] == profile: preview.profile_choice.select(i)
 		preview.size_choice.select(2)
 		preview._refresh(false)
-		await process_frame
+		while preview.terrain.is_scene_preparing(): await process_frame
 		await process_frame
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png(DIRECTORY.path_join(profile + "-overview.png"))

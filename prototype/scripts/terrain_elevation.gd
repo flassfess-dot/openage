@@ -34,6 +34,10 @@ var change_history: Array = []
 var size: Vector2i
 var vertex_levels: Dictionary = {}
 var river_shape: Dictionary = {}
+var climate_surfaces := PackedInt32Array()
+var climate_base := PackedInt32Array()
+var bank_silt := 1004
+var ford_gravel := 1005
 var nonzero_vertex_count: int = 0
 var maximum_vertex_level: int = 0
 var maximum_vertex_level_dirty: bool = false
@@ -44,11 +48,28 @@ func _init(map_size: Vector2i = Vector2i.ONE, initialize_vertices: bool = true) 
 	if initialize_vertices: clear()
 
 
+func configure_climate(data: Dictionary) -> void:
+	climate_surfaces = data.get("climate_surfaces", PackedInt32Array())
+	climate_base = PackedInt32Array(data["terrain_ids"]) if not climate_surfaces.is_empty() else PackedInt32Array()
+	bank_silt = int(data.get("bank_silt", 1004))
+	ford_gravel = int(data.get("ford_gravel", 1005))
+
+
+func surface_material(cell: Vector2i, terrain_id: int) -> int:
+	if climate_surfaces.is_empty() or not Rect2i(Vector2i.ZERO, size).has_point(cell): return terrain_id
+	var index := cell.y * size.x + cell.x
+	# Terrain edits and harvested trees must still expose their current ground.
+	if terrain_id == climate_base[index] or (terrain_id == TerrainRules.TERRAIN_IDS["forest_floor"] and climate_base[index] == 0):
+		return climate_surfaces[index]
+	return terrain_id
+
+
 func clear(level: int = 0) -> void:
 	ChangeJournal.record_full(change_history, revision, revision + 1)
 	revision += 1
 	vertex_levels.clear()
 	river_shape = {}
+	configure_climate({})
 	var safe_level := maxi(0, level)
 	nonzero_vertex_count = (size.x + 1) * (size.y + 1) if safe_level > 0 else 0
 	maximum_vertex_level = safe_level

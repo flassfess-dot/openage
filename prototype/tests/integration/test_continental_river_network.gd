@@ -6,7 +6,7 @@ var failures: Array[String]=[]
 
 func _initialize() -> void:
 	for seed in [41721,7919,104729]:
-		var geo:=World.geography(Vector2i(400,400),"continental",seed)
+		var geo:=World.geography(Vector2i(400,400),"continental",seed,World.LEGACY_VERSION)
 		var rivers: Dictionary=geo["rivers"]
 		var plan: Dictionary=rivers["network_plan"]
 		check(Rivers.inspect(rivers)["valid"],"%d keeps every selected branch connected and draining downhill"%seed)
@@ -29,9 +29,9 @@ func _initialize() -> void:
 		var sources: int=rivers["nodes"].filter(func(node):return not incoming.has(node["cell"])).size()
 		check(sources==expected_sources,"%d publishes exactly the selected branches without tertiary noise"%seed)
 		if seed==41721:
-			check(rivers==World.geography(Vector2i(400,400),"continental",seed)["rivers"],"same seed reproduces the full selected terrain and water surface")
+			check(rivers==World.geography(Vector2i(400,400),"continental",seed,World.LEGACY_VERSION)["rivers"],"same seed reproduces the full selected terrain and water surface")
 		print("Continental river systems seed=%d rivers=%d tributaries=%s"%[seed,plan["mainland_rivers"],str(plan["systems"].map(func(system):return system["tributaries"].size()))])
-	var other:=World.geography(Vector2i(96,96),"coastal",41721)
+	var other:=World.geography(Vector2i(96,96),"coastal",41721,World.LEGACY_VERSION)
 	check(not other["rivers"].has("network_plan"),"other geographic profiles keep their own network composition")
 	for failure in failures:push_error(failure)
 	print("Continental river composition: %d failures"%failures.size())

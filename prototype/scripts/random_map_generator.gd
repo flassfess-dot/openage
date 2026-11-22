@@ -213,7 +213,7 @@ static func _landscape_skirmish_map(definition: Dictionary, size: Vector2i, seed
 			return V4.generate(definition, size, seed, generator, progress, diagnostics, prepared_geography)
 		5:
 			return V5.generate(definition, size, seed, generator, progress, diagnostics, prepared_geography)
-		6:
+		WatershedWorld.LEGACY_VERSION, WatershedWorld.VERSION:
 			return V6.generate(definition, size, seed, generator, progress, diagnostics, prepared_geography)
 	return {"generation_error": "random_map_generator_version_unsupported"}
 
@@ -228,7 +228,7 @@ static func _landscape_candidate_map(definition: Dictionary, size: Vector2i, see
 			return V4.candidate(definition, size, seed, generator, progress, diagnostics, candidate, prepared_geography)
 		5:
 			return V5.candidate(definition, size, seed, generator, progress, diagnostics, candidate, prepared_geography)
-		6:
+		WatershedWorld.LEGACY_VERSION, WatershedWorld.VERSION:
 			return V6.candidate(definition, size, seed, generator, progress, diagnostics, candidate, prepared_geography)
 	# Historical direct candidate queries use the connected v2 recipe as fallback.
 	# generate() still rejects unsupported versions before reaching this helper.

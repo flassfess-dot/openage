@@ -4,6 +4,7 @@ const Settings := preload("res://scripts/skirmish_settings.gd")
 var generated: Dictionary = {}
 var profile_choice: OptionButton
 var size_choice: OptionButton
+var climate_choice: OptionButton
 var seed_input: SpinBox
 var profiles: Array = []
 var geography_first := false
@@ -11,6 +12,15 @@ var wild_islands := false
 var river_islands := false
 var watershed_world := false
 var preview_fixture := ""
+var preparing_terrain := false
+
+func _process(delta: float) -> void:
+	super._process(delta)
+	if not preparing_terrain: return
+	if terrain.is_scene_preparing():
+		status.text = "Подготовка рельефа · %d%%" % roundi(terrain.scene_preparation_fraction() * 100.0)
+	else:
+		_refresh(false)
 
 func _ready() -> void:
 	get_window().title = "Rise of Rome — новые случайные карты"
@@ -29,6 +39,9 @@ func _ready() -> void:
 			for index in range(Settings.catalog()["map_sizes"].size()):
 				if Settings.catalog()["map_sizes"][index]["id"] == argument.trim_prefix("--map-size="): size_choice.select(index)
 		if argument.begins_with("--seed="): seed_input.value = int(argument.trim_prefix("--seed="))
+		if argument.begins_with("--climate="):
+			for index in range(climate_choice.item_count):
+				if climate_choice.get_item_metadata(index) == argument.trim_prefix("--climate="): climate_choice.select(index)
 		if argument.begins_with("--map-type="):
 			for index in range(profiles.size()):
 				if profiles[index]["id"] == argument.trim_prefix("--map-type="): profile_choice.select(index)
@@ -61,6 +74,13 @@ func _build_map_ui() -> void:
 	for profile in profiles: profile_choice.add_item(String(profile.get("name", profile["id"])))
 	profile_choice.select(0 if geography_first else 3)
 	row.add_child(profile_choice)
+	climate_choice = OptionButton.new()
+	climate_choice.tooltip_text = "Климат"
+	for entry in Settings.catalog()["climates"]:
+		climate_choice.add_item(entry["name"])
+		climate_choice.set_item_metadata(climate_choice.item_count - 1, entry["id"])
+	climate_choice.visible = watershed_world or not geography_first
+	row.add_child(climate_choice)
 	size_choice = OptionButton.new()
 	for entry in Settings.catalog()["map_sizes"]: size_choice.add_item(String(entry["name"]))
 	size_choice.select(1)
@@ -95,6 +115,7 @@ func _build_map_ui() -> void:
 	if wild_islands or watershed_world: geography_button.text = "Неравные условия"
 	if not geography_first: geography_button.text = "Реки, озёра и броды"
 	geography_button.position = Vector2(1060, 72)
+	geography_button.visible = geography_first
 	geography_button.toggled.connect(_set_geography_first)
 	panel.add_child(geography_button)
 	panel.add_child(subtitle)
@@ -112,6 +133,7 @@ func _set_geography_first(enabled: bool) -> void:
 func generate_map() -> void:
 	var settings := Settings.default_settings()
 	settings["map_type_id"] = profiles[profile_choice.selected]["id"]
+	if climate_choice.visible: settings["climate_id"] = climate_choice.get_item_metadata(climate_choice.selected)
 	settings["map_size_id"] = Settings.catalog()["map_sizes"][size_choice.selected]["id"]
 	settings["seed"] = int(seed_input.value)
 	if geography_first: settings["landscape_version"] = 4
@@ -142,6 +164,7 @@ func generate_map() -> void:
 	markers.clear()
 	elevation = Elevation.new(map_size)
 	elevation.river_shape = data.get("rivers", {}).get("surface", {})
+	elevation.configure_climate(data)
 	for y in range(map_size.y + 1):
 		for x in range(map_size.x + 1): elevation.set_vertex(Vector2i(x, y), int(data["vertex_levels"][y * (map_size.x + 1) + x]))
 	for y in range(map_size.y):
@@ -178,28 +201,28 @@ func generate_map() -> void:
 		for part in info.get("composite_parts", []):
 			if part.get("texture") != null: objects.append({"position": at, "reference": true, "frame_info": part})
 		markers.append({"position": at + Vector2(0, 3), "text": "ИГРОК %d" % int(player["team"])})
-	if int(data.get("generator_version", 0)) == Settings.WatershedWorld.VERSION:
+	if Settings.WatershedWorld.supports(int(data.get("generator_version", 0))):
 		for i in range(data.get("fords", []).size()):
 			markers.append({"position": Vector2(data["fords"][i]["center"]) + Vector2.ONE * 0.5, "text": "БРОД %d" % (i + 1)})
 		for i in range(data.get("lakes", []).size()):
 			markers.append({"position": Vector2(data["lakes"][i]["center"]), "text": "ОЗЕРО %d" % (i + 1)})
-	_fit_view()
+	_fit_view(true)
 	print("Generated landscape preview ready: %s seed %d" % [settings["map_type_id"], settings["seed"]])
 
 func terrain_id_at(cell: Vector2i) -> int:
 	return int(cells.get(cell, -1))
 
-func _fit_view() -> void:
+func _fit_view(reconfigure: bool = false) -> void:
 	if generated.is_empty() or not bool(generated.get("valid", false)): return
 	var viewport := get_viewport_rect().size
 	# Startup/minimised windows can be smaller than the controls. Retain the
 	# last valid camera instead of publishing a negative terrain/shore zoom.
 	if viewport.x<=60.0 or viewport.y<=180.0:
-		_refresh()
+		_refresh(reconfigure)
 		return
 	zoom = minf((viewport.x - 60.0) / ((map_size.x + map_size.y) * 32.0), (viewport.y - 180.0) / ((map_size.x + map_size.y) * 16.0))
 	view_offset = Vector2(viewport.x * 0.5, 134.0)
-	_refresh()
+	_refresh(reconfigure)
 
 func _refresh(reconfigure: bool = true) -> void:
 	if generated.is_empty() or not bool(generated.get("valid", false)): return
@@ -208,14 +231,19 @@ func _refresh(reconfigure: bool = true) -> void:
 		terrain.view_zoom = zoom
 		terrain.view_offset = view_offset
 		terrain.viewport_size = get_viewport_rect().size
-		terrain.terrain_revision = revision
 		terrain.configure(map_size, int(seed_input.value), catalog, {"terrain_elevation": elevation}, terrain_id_at, func(): return Rect2i(Vector2i.ZERO, map_size))
+		terrain.terrain_revision = revision
 	else:
 		terrain.set_view_state(zoom, view_offset, get_viewport_rect().size, revision)
+	preparing_terrain = terrain.is_scene_preparing()
+	object_layer.visible = not preparing_terrain
+	if preparing_terrain:
+		status.text = "Подготовка рельефа · %d%%" % roundi(terrain.scene_preparation_fraction() * 100.0)
+		return
 	object_layer.queue_redraw()
 	var sources: Dictionary = generated["map_data"]["ecology"]["tree_sources"]
 	var marine: Dictionary = generated["map_data"].get("marine_resources", {})
-	status.text = "%d × %d · Игроков: %d · Деревья RoR/AoE2: %d/%d · Рыба у берега/на глубине: %d/%d · Киты: %d · Декали %d · Масштаб %d%%" % [map_size.x, map_size.y, generated["definition"]["players"].size(), sources["ror"], sources["aoe2"], marine.get("shore_fish", 0), marine.get("deep_fish", 0), marine.get("whale", 0), data_decals(), roundi(zoom * 100)]
+	status.text = "%d × %d · Игроков: %d · Деревья: %d · Рыба у берега/на глубине: %d/%d · Киты: %d · Декали %d · Масштаб %d%%" % [map_size.x, map_size.y, generated["definition"]["players"].size(), int(sources["ror"]) + int(sources["aoe2"]) + int(sources.get("regional", 0)), marine.get("shore_fish", 0), marine.get("deep_fish", 0), marine.get("whale", 0), data_decals(), roundi(zoom * 100)]
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:

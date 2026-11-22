@@ -31,6 +31,7 @@ static func select(size: Vector2i, original: Array[int], nodes: Array, seed: int
 		if length<maxf(8.0,minimum_length):continue
 		var cell: Vector2i=node["cell"]
 		var component: int=labels[cell.y*size.x+cell.x]
+		if component < 0 or areas[component] < int(options.get("minimum_landmass_area", 0)): continue
 		if component!=mainland and (component<0 or areas[component]<maxf(900.0,mainland_area*0.12)):continue
 		var branch_target:=2+int(Topology.roll(cell,seed^0xB7A3)>0.5)
 		branch_target=int(options.get("tributaries_per_river",branch_target))

@@ -6,12 +6,13 @@ const Topology := preload("res://scripts/random_map_topology.gd")
 const Landscape := preload("res://scripts/random_map_landscape.gd")
 const Coordinates := preload("res://scripts/coordinates.gd")
 
-static func plan(size: Vector2i, terrain: Array[int], rivers: Dictionary, lakes: Array, seed: int) -> Array:
+static func plan(size: Vector2i, terrain: Array[int], rivers: Dictionary, lakes: Array, seed: int, fairway: PackedByteArray = PackedByteArray()) -> Array:
 	var lake_cells: Dictionary = {}
 	for lake in lakes:
 		for i in lake["cells"]: lake_cells[int(i)] = true
 	var candidates: Array = []
 	for channel in rivers["channels"]:
+		if channel.get("river_role", "") == "main": continue
 		var points: PackedVector2Array = channel["points"]
 		for i in range(12,points.size()-12,4):
 			var drop := int(channel["levels"][i-10])-int(channel["levels"][i+10])
@@ -21,6 +22,7 @@ static func plan(size: Vector2i, terrain: Array[int], rivers: Dictionary, lakes:
 			var center := Vector2i(points[i].floor())
 			if center.x < 9 or center.y < 9 or center.x >= size.x-9 or center.y >= size.y-9: continue
 			var at := center.y*size.x+center.x
+			if not fairway.is_empty() and fairway[at] != 0: continue
 			if rivers["mouth_mask"][at] != 0 or lake_cells.has(at): continue
 			var excluded := false
 			for offset in [-10,0,10]:

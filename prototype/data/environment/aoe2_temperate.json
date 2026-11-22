@@ -94,9 +94,24 @@
       "tags": ["river_bed", "wet_bank"],
       "neighbors": ["ror_grass", "earth", "river_silt", "river_gravel"],
       "movement_terrain_id": 0
-    }
+    },
+    {"key":"nile_silt","terrain_id":1100,"title":"Тёмный ил","slp":15000,"priority":45,"saturation":0.54,"gain":[0.59,0.62,0.62],"minimap":"61533f"},
+    {"key":"nile_meadow","terrain_id":1101,"title":"Заливной луг","slp":15001,"priority":12,"saturation":0.87,"gain":[0.92,1.09,0.80],"minimap":"668343"},
+    {"key":"nile_terrace","terrain_id":1102,"title":"Охристая терраса","slp":15010,"priority":24,"saturation":0.84,"gain":[1.12,1.01,0.90],"minimap":"bc975c"},
+    {"key":"ford_shingle","terrain_id":1103,"title":"Светлая галька брода","slp":15000,"de_sheet":"t_sand_pebbles_x1.slp","priority":48,"saturation":0.66,"gain":[1.03,1.02,0.98],"minimap":"b7a27d"},
+    {"key":"nile_steppe","terrain_id":1104,"title":"Сухой пойменный луг","slp":15007,"priority":20,"saturation":0.78,"gain":[1.09,1.06,0.87],"minimap":"a49c61"},
+    {"key":"thaw_grass","terrain_id":1110,"title":"Проталины в траве","slp":15028,"priority":24,"saturation":0.74,"gain":[0.97,0.99,0.98],"minimap":"a5ab93"},
+    {"key":"thaw_earth","terrain_id":1111,"title":"Снег на каменистой земле","slp":15027,"priority":34,"saturation":0.70,"gain":[0.99,0.98,0.97],"minimap":"aaa79e"},
+    {"key":"alpine_meadow","terrain_id":1112,"title":"Весенний горный луг","slp":15009,"priority":14,"saturation":0.85,"gain":[0.97,1.05,0.96],"minimap":"758a52"},
+    {"key":"snow_cap","terrain_id":1113,"title":"Снег на вершине","slp":15026,"priority":38,"saturation":0.65,"gain":[0.96,0.97,0.99],"minimap":"d9dce0"},
+    {"key":"limestone","terrain_id":1120,"title":"Светлая известняковая осыпь","de_sheet":"t_gravel_x1.slp","slp":15000,"priority":34,"saturation":0.53,"gain":[1.22,1.21,1.14],"minimap":"b6ac95"},
+    {"key":"red_earth","terrain_id":1121,"title":"Красноватая земля","de_sheet":"t_dirt_x1.slp","slp":15000,"priority":29,"saturation":0.65,"gain":[1.03,0.89,0.85],"minimap":"9a6f53"},
+    {"key":"coastal_scrub","terrain_id":1122,"title":"Прибрежное редколесье","de_sheet":"t_grass_sand_small_x1.slp","slp":15006,"priority":16,"saturation":0.78,"gain":[0.99,1.04,0.87],"minimap":"939454"},
+    {"key":"aegean_beach","terrain_id":1123,"title":"Светлый пляж","de_sheet":"t_beach_x1.slp","slp":15017,"priority":23,"saturation":0.65,"gain":[1.06,1.05,0.97],"minimap":"c6b38d"}
   ],
   "objects": [
+    {"key":"olive","title":"Олива","de_sheet":"n_all_treeOlive_x1.slp","slp":4652,"frames":[0],"saturation":0.82,"gain":[1.06,1.02,0.94],"role":"tree","resource_kind":"tree","depleted_key":"stump","footprint_radius":0.28},
+    {"key":"cypress","title":"Кипарис","de_sheet":"n_all_treeCypress_x1.slp","slp":4654,"frames":[1],"saturation":0.80,"gain":[1.02,1.00,0.94],"role":"tree","resource_kind":"tree","depleted_key":"stump","footprint_radius":0.28},
     {
       "key": "oak",
       "title": "Лиственные деревья",
@@ -628,6 +643,7 @@
     },
     {
       "key": "ror_dirt_trail",
+      "trail_opacity": 0.63,
       "title": "Грунтовые тропы RoR",
       "source_game": "ror",
       "slps": [361, 362, 363, 364, 365, 366],
@@ -730,6 +746,7 @@
     },
     {
       "key": "ror_grass_trail",
+      "trail_opacity": 0.70,
       "title": "Заросшие тропы RoR",
       "source_game": "ror",
       "slps": [483, 484, 485, 486, 487, 488],
@@ -840,6 +857,7 @@
     },
     {
       "key": "ror_stone_dirt_trail",
+      "trail_opacity": 0.82,
       "title": "Мощение на земле RoR",
       "source_game": "ror",
       "slps": [610, 611, 612, 613, 614, 615],
@@ -932,6 +950,7 @@
     },
     {
       "key": "ror_stone_grass_trail",
+      "trail_opacity": 0.82,
       "title": "Мощение на траве RoR",
       "source_game": "ror",
       "slps": [616, 617, 618, 619, 620, 621],

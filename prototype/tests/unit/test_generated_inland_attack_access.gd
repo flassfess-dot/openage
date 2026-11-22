@@ -32,7 +32,7 @@ func _initialize() -> void:
 	# V6 permits natural forest barriers between settlements (WORLD_V6).
 	# Test local attack-space geometry independently of an enemy's land link;
 	# crossing a closed forest requires legal chopping or a naval operation.
-	if int(settings.get("landscape_version",3))>=6:
+	if int(settings.get("landscape_version",3)) == SkirmishSettings.WatershedWorld.LEGACY_VERSION:
 		origin=world.get_units().filter(func(unit): return int(unit.get("team",0))==1 and String(unit.get("kind",""))=="villager")[0]
 	var center := Vector2(target["pos"])
 	var near_resources: Array = world.get_resources().filter(func(resource): return Vector2(resource.get("pos", Vector2.ZERO)).distance_to(center) <= 7.0)

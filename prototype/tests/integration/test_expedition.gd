@@ -95,17 +95,25 @@ func run() -> void:
 	var scout_body: Dictionary = game.expedition_actor_items.get(id, {})
 	check(is_equal_approx(float(scout_body.get("frame_info", {}).get("figure_scale", 1.0)), 1.10), "appointment immediately enlarges the scout on the field")
 	await capture("officer")
-	# Select the coffer through the same screen-position/context order as the mouse.
+	# Pick up the satchel through the same screen-space order as a right click.
 	var pile: Dictionary = world.expedition_field.piles[1]
+	world.advance_death(foe, float(foe.death_duration) + 0.1)
 	world.set_entity_field(archer, "pos", Vector2(pile.pos) + Vector2(-1, 0))
 	world.update_fog_of_war()
 	game.sync_world_state()
 	game.refresh_hud_model()
-	game.issue_order(game.world_to_screen(pile.pos))
+	var scene_items: Array = game.current_world_drawables()
+	var dropped := scene_items.filter(func(item): return item.kind == "field_loot")
+	check(dropped.size() == 1 and dropped[0].frame_info.texture == game.ExpeditionLoot.EQUIPMENT.point, "casualty produces a satchel showing its bronze point")
+	var corpse := scene_items.find_custom(func(item): return item.kind == "unit" and item.stable_id == foe.id)
+	check(corpse >= 0 and not dropped.is_empty() and scene_items.find(dropped[0]) > corpse, "the satchel remains visible on its fallen owner")
+	var pickup_click: Vector2 = Vector2(game.world_to_screen(pile.pos)).round() + Vector2(20, -6) * game.view_zoom
+	game.issue_order(pickup_click)
 	game.game_controller.tick_index += 1
 	game.game_controller.process_commands()
 	check(archer.get("service_weapon") == "point" and Service.Inventory.balm_slot(archer) == 3 and world.expedition_field.piles.is_empty(), "context pickup equips the blade and stows the balm")
 	game.sync_world_state()
+	check(not game.current_world_drawables().any(func(item): return item.kind == "field_loot"), "empty satchel disappears from the world queue")
 	game.refresh_hud_model()
 	var bag_key := InputEventKey.new()
 	bag_key.pressed = true
@@ -149,6 +157,8 @@ func run() -> void:
 	check(world.board_units([archer], tower) == "", "officer boards garrison")
 	check(Service.survivors(world, 1).any(func(row): return row.id == id), "embarked veterans selectable")
 	world.expedition_field.place(Vector2(11, 19), ["incense"])
+	world.expedition_field.place(Vector2(13, 19), ["fibula", "incense"], true)
+	var coffer_id := int(world.expedition_field.next_pile - 1)
 	var path := "user://qa/expedition-test-save.json"
 	check(game.save_game_to_path(path), "save expedition")
 	check(game.load_game_from_path(path), "load expedition")
@@ -156,7 +166,9 @@ func run() -> void:
 	world = game.simulation_world
 	var carried: Dictionary = world.transport_system.embarked_units[id]
 	check(Service.enabled(world) and carried.service_name == "Луций" and carried.service_item == "shield" and carried.get("service_weapon") == "point" and Service.Inventory.balm_slot(carried) == 3, "entire equipped and packed kit survives loading while embarked")
-	check(world.expedition_field.piles.size() == 1 and world.expedition_field.hero_ids.has(id), "save restores ground loot and embarked hero roster")
+	check(world.expedition_field.piles.size() == 2 and world.expedition_field.hero_ids.has(id), "save restores ground loot and embarked hero roster")
+	var saved_coffer: Dictionary = world.expedition_field.piles.get(coffer_id, {})
+	check(saved_coffer.get("coffer", false) and saved_coffer.items == ["fibula", "incense"] and not world.expedition_field.piles[coffer_id - 1].get("coffer", false), "checkpoint preserves both the coffer and an ordinary unmarked pile")
 	# Finish via the public surrender command; use the actual result UI to
 	# transfer the garrisoned survivor into a freshly bootstrapped chapter.
 	var resign := Commands.ResignCommand.new(game.game_controller.tick_index)

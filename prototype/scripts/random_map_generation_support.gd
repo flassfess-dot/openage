@@ -242,7 +242,7 @@ static func _clear_start_corridors(terrain_ids: Array[int], size: Vector2i, star
 	return reserved
 
 
-static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array[int], starts: Array[Vector2], source_profile: Dictionary, strategic_zones: Dictionary, seed: int) -> Array:
+static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array[int], starts: Array[Vector2], source_profile: Dictionary, strategic_zones: Dictionary, seed: int, mineral_geology := PackedFloat32Array()) -> Array:
 	var rules := {
 		1: {"kind": "alligator", "category": "unit", "group_scale": 0.35, "group_cap": 12},
 		48: {"kind": "elephant", "category": "unit", "group_scale": 0.45, "group_cap": 18},
@@ -279,6 +279,8 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 		var mineral := source_id in [66, 102]
 		if mineral:
 			var expansion_count := ceili(float(land_cells) / (1800.0 if source_id == 66 else 2400.0)) + starts.size() * (2 if source_id == 66 else 1)
+			if not mineral_geology.is_empty():
+				expansion_count = starts.size() + ceili(float(land_cells) / (1500.0 if source_id == 66 else 2000.0))
 			group_count = mini(int(rule["group_cap"]), maxi(group_count, expansion_count))
 		if group_count <= 0:
 			continue
@@ -300,6 +302,8 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 			coast_mode = "coastal"
 		var group_radius := maxf(1.0, float(group.get("group_radius", 2)))
 		var anchor_spacing := maxf(5.0, group_radius * 2.0 + (3.0 if source_id in [1, 126] else 1.0))
+		if mineral and not mineral_geology.is_empty():
+			anchor_spacing = clampf(sqrt(float(land_cells) / (2 * group_count)) * 0.45, 6.0, 13.0)
 		var raw_start_distance := maxf(0.0, float(group.get("min_distance_to_players", 0)))
 		var minimum_start_distance := maxi(sanctuary_radius + 1, roundi(raw_start_distance * minf(1.0, float(mini(size.x, size.y)) / 96.0)))
 		if mineral:
@@ -319,7 +323,8 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 			zone_weights,
 			coast_mode,
 			minimum_start_distance,
-			1 if mineral else 0
+			1 if mineral else 0,
+			mineral_geology if mineral else PackedFloat32Array()
 		)
 		for anchor_value in anchors:
 			var anchor := Vector2i(anchor_value)
@@ -344,7 +349,7 @@ static func _neutral_source_resource_clusters(size: Vector2i, terrain_ids: Array
 	return result
 
 
-static func _complete_mineral_expansions(map_data: Dictionary, starts: Array[Vector2], reserved: Dictionary, components: Dictionary, seed: int) -> void:
+static func _complete_mineral_expansions(map_data: Dictionary, starts: Array[Vector2], reserved: Dictionary, components: Dictionary, seed: int, minimum_per_territory: int = 4) -> void:
 	# A planned deposit can lose cells to prior resources on crowded maps.
 	# Reconcile actual placement, preserving existing access and start sanctuaries.
 	var size: Vector2i = map_data["size"]
@@ -355,20 +360,20 @@ static func _complete_mineral_expansions(map_data: Dictionary, starts: Array[Vec
 	var distances: PackedInt32Array = zones["nearest_start_distances"]
 	var resources: Array = map_data["resources"]
 	var counts: Dictionary = {"gold_mine": {}, "stone_mine": {}}
-	var occupied := reserved.duplicate()
 	for resource in resources:
-		var cell := Vector2i(Vector2(resource["position"]))
-		occupied[cell] = true
 		var kind := String(resource.get("kind", ""))
 		if counts.has(kind) and resource.get("owner_start", []).is_empty():
+			var cell := Vector2i(Vector2(resource["position"]))
 			var owner := int(owners[cell.y * size.x + cell.x])
 			counts[kind][owner] = int(counts[kind].get(owner, 0)) + 1
 	var missing := false
 	for kind in counts:
 		for owner in range(starts.size()):
-			missing = missing or int(counts[kind].get(owner, 0)) < 4
+			missing = missing or int(counts[kind].get(owner, 0)) < minimum_per_territory
 	if not missing:
 		return
+	var occupied := reserved.duplicate()
+	for resource in resources: occupied[Vector2i(Vector2(resource["position"]))] = true
 	for resource in resources:
 		if String(resource.get("placement_domain", "land")) == "land":
 			var approach: Variant = _free_land_approach_cell(Vector2i(Vector2(resource["position"])), size, terrain, occupied, components, -1)
@@ -394,10 +399,10 @@ static func _complete_mineral_expansions(map_data: Dictionary, starts: Array[Vec
 		# A coast can leave one territorial zone too small; use accessible inland surplus.
 		for phase in range(2):
 			for index in candidates:
-				if phase == 1 and total >= starts.size() * 4:
+				if phase == 1 and total >= starts.size() * minimum_per_territory:
 					break
 				var owner := int(owners[index])
-				if phase == 0 and int(counts[kind].get(owner, 0)) >= 4:
+				if phase == 0 and int(counts[kind].get(owner, 0)) >= minimum_per_territory:
 					continue
 				var cell := Vector2i(index % size.x, index / size.x)
 				if not _cell_matches_domain(cell, size, terrain, "land") or occupied.has(cell):

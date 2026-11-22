@@ -4,6 +4,7 @@ param(
     [string]$SavePath = "",
     [string]$MapSize = "compact",
     [string]$MapType = "grasslands",
+    [ValidateSet("temperate","nile","anatolia","aegean")][string]$Climate = "temperate",
     [string]$OutputRoot = "",
     [switch]$Rendered,
     [switch]$Competitive,
@@ -49,7 +50,7 @@ foreach ($taskArtifactName in $taskArtifactNames) {
 $taskArguments = @("--log-file", $taskLog)
 if ($Rendered) { $taskArguments += @("--audio-driver", "Dummy", "--resolution", "1280x720") }
 else { $taskArguments += "--headless" }
-$taskArguments += @("--", "--verify-packaged-startup", "--require-release", "--output=$taskReport", "--map-size=$MapSize", "--map-type=$MapType")
+$taskArguments += @("--", "--verify-packaged-startup", "--require-release", "--output=$taskReport", "--map-size=$MapSize", "--map-type=$MapType", "--climate=$Climate")
 if ($Rendered) { $taskArguments += "--capture-rendered-startup" }
 if ($Competitive) { $taskArguments += "--competitive-ai" }
 if ($ClassicSkirmish) { $taskArguments += "--classic-skirmish" }
@@ -107,6 +108,7 @@ $taskVerifiedArtifacts = [ordered]@{
     competitive = [bool]$Competitive
     classic_skirmish = [bool]$ClassicSkirmish
     map_type = $MapType
+    climate = $Climate
     rendered_load_fixture = [bool]$RenderedLoadFixture
     completed_utc = [DateTime]::UtcNow.ToString("o")
 }

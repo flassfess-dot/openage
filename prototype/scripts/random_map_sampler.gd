@@ -2,7 +2,7 @@ class_name RoRRandomMapSampler
 extends RefCounted
 
 
-static func sample_zone_cells(strategic_zones: Dictionary, size: Vector2i, allowed_zone_ids: Array, target_count: int, minimum_distance: float, seed: int, blocked_cells: Dictionary = {}, existing_anchors: Array[Vector2i] = [], zone_weights: Dictionary = {}, coast_mode: String = "", minimum_start_distance: int = 0, minimum_per_start: int = 0) -> Array[Vector2i]:
+static func sample_zone_cells(strategic_zones: Dictionary, size: Vector2i, allowed_zone_ids: Array, target_count: int, minimum_distance: float, seed: int, blocked_cells: Dictionary = {}, existing_anchors: Array[Vector2i] = [], zone_weights: Dictionary = {}, coast_mode: String = "", minimum_start_distance: int = 0, minimum_per_start: int = 0, mineral_geology := PackedFloat32Array()) -> Array[Vector2i]:
 	var zone_ids: PackedInt32Array = strategic_zones.get("zone_ids", PackedInt32Array())
 	var coastal_mask: PackedByteArray = strategic_zones.get("coastal_land_mask", PackedByteArray())
 	var start_owners: PackedInt32Array = strategic_zones.get("nearest_start_indices", PackedInt32Array())
@@ -50,6 +50,10 @@ static func sample_zone_cells(strategic_zones: Dictionary, size: Vector2i, allow
 				var cell := Vector2i(int(candidate_index) % size.x, int(candidate_index) / size.x)
 				var owner := int(start_owners[int(candidate_index)]) if start_owners.size() == zone_ids.size() else -1
 				if phase == 0 and (owner < 0 or int(accepted_by_start.get(owner, 0)) >= minimum_per_start):
+					continue
+				# Look on rocky ground first. Small territories can still use
+				# non-rocky cells on the final pass if their geology is poor.
+				if not mineral_geology.is_empty() and pass_index < 2 and mineral_geology[candidate_index] < (0.55 if pass_index == 0 else 0.43):
 					continue
 				var zone_id := int(zone_ids[int(candidate_index)])
 				var base_weight := clampf(float(zone_weights.get(zone_id, 1.0)), 0.0, 1.0)

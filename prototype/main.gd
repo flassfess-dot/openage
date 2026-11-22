@@ -307,6 +307,7 @@ var hud_controls: HUDControls
 const Expedition := preload("res://scripts/expedition.gd")
 const ExpeditionPanel := preload("res://scripts/expedition_panel.gd")
 const ExpeditionMarkers := preload("res://scripts/expedition_markers.gd")
+const ExpeditionLoot := preload("res://scripts/expedition_loot_view.gd")
 var expedition_panel: ExpeditionPanel
 var expedition_pulses: Array = []
 var expedition_actor_items: Dictionary = {}
@@ -2580,7 +2581,7 @@ func update_interaction_cursor(screen_position: Vector2) -> void:
 	var cursor := InteractionCursor.resolve(selected_units(), hovered, screen_to_world(screen_position), local_player_team)
 	interaction_highlight_id = int(cursor.get("entity_id", -1))
 	var semantic := String(cursor.get("semantic", "default"))
-	if expedition_panel != null and expedition_panel.visible and not expedition_panel.hero.is_empty() and not ExpeditionMarkers.pile_at(self, screen_position).is_empty():
+	if expedition_panel != null and expedition_panel.visible and not expedition_panel.hero.is_empty() and not ExpeditionLoot.pile_at(self, screen_position).is_empty():
 		semantic = "gather"
 	if not pending_build_kind.is_empty():
 		semantic = "build"
@@ -2642,7 +2643,7 @@ func unit_frame_info(unit: Dictionary) -> Dictionary:
 
 func issue_order(mouse: Vector2, direction_end: Variant = null, queue_order: bool = false) -> void:
 	if direction_end == null and expedition_panel != null and expedition_panel.visible and not expedition_panel.hero.is_empty():
-		var pile := ExpeditionMarkers.pile_at(self, mouse)
+		var pile := ExpeditionLoot.pile_at(self, mouse)
 		if not pile.is_empty():
 			_order_expedition_hero(expedition_panel.hero.id, "pickup", {"pile":pile.id})
 			return
@@ -3215,14 +3216,16 @@ func _draw() -> void:
 	if not expedition_pulses.is_empty(): ExpeditionMarkers.draw_pulses(self, expedition_pulses, int(presentation_snapshot.get("tick", 0)))
 	draw_world_objects()
 	var field_state: Dictionary = presentation_snapshot.get("player_state", {})
-	if field_state.get("field_service_enabled", false): ExpeditionMarkers.draw_field(self, field_state)
+	if field_state.get("field_service_enabled", false): ExpeditionMarkers.draw_hero_shields(self, field_state)
 	if probe != null:
 		probe.observe_microseconds("presentation.draw.world", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
 	draw_fog_overlay()
 	if field_state.get("field_service_enabled", false) and is_world_interaction_area(get_local_mouse_position()):
-		var hovered := ExpeditionMarkers.pile_at(self, get_local_mouse_position())
-		if not hovered.is_empty(): ExpeditionMarkers.draw_loot_label(self, world_to_screen(hovered.pos), hovered)
+		var hovered := ExpeditionLoot.pile_at(self, get_local_mouse_position())
+		if not hovered.is_empty():
+			var sprite_top := world_to_screen(hovered.pos) - Vector2(0, ExpeditionLoot.HOTSPOT.y * view_zoom)
+			ExpeditionMarkers.draw_loot_label(self, sprite_top, hovered)
 	if probe != null:
 		probe.observe_microseconds("presentation.draw.fog", Time.get_ticks_usec() - stage_started)
 		stage_started = Time.get_ticks_usec()
@@ -3453,7 +3456,7 @@ func draw_world_item(drawable: Dictionary, probe = null) -> void:
 		draw_texture_rect(command[0], command[1], false, command[2])
 		return
 	match drawable["kind"]:
-		"building", "building_part", "resource", "resource_shadow", "unit", "unit_part", "projectile", "effect", "marker", "environment": draw_render_body(drawable, probe)
+		"building", "building_part", "resource", "resource_shadow", "unit", "unit_part", "projectile", "effect", "marker", "environment", "field_loot": draw_render_body(drawable, probe)
 		"shadow": draw_unit_shadow(drawable)
 		"selection": draw_unit_selection(drawable)
 		"health_bar": draw_unit_health(drawable)

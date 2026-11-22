@@ -4,6 +4,8 @@ const Coordinates := preload("res://scripts/coordinates.gd")
 const TerrainRules := preload("res://scripts/terrain_rules.gd")
 const TerrainElevation := preload("res://scripts/terrain_elevation.gd")
 const SUBDIVISIONS := 8
+const BLEND_SUBDIVISIONS := 4
+const MATERIAL_HALO := 2
 const RiverSurface := preload("res://scripts/random_map_river_surface.gd")
 
 
@@ -27,48 +29,56 @@ static func _priority(id: int, pack) -> int:
 
 
 static func weights(point: Vector2, provider: Callable, pack, fallback: int) -> Dictionary:
-	# Continuous world-space perturbation: both cells evaluate identical edge
-	# weights, including at four-way junctions. No per-cell random seams.
-	var bend := Vector2(sin(point.y * 7.1 + sin(point.x * 3.7)), cos(point.x * 6.3 + sin(point.y * 4.1))) * 0.035
-	var sample := point + bend - Vector2(0.5, 0.5)
-	var origin := Vector2i(floori(sample.x), floori(sample.y))
-	var linear := sample - Vector2(origin)
-	var fraction := Vector2(smoothstep(0.30, 0.70, linear.x), smoothstep(0.30, 0.70, linear.y))
+	var sample := _coast_sample(point)
+	var coverage := _coast_coverage(sample, provider)
+	# Sample a continuous footprint around the point. The slow drift bends soil
+	# boundaries in world space while the shoreline keeps its own precise contour.
+	var drift := Vector2(sin(point.y * 1.37 + sin(point.x * 0.73)), cos(point.x * 1.19 + sin(point.y * 0.91))) * 0.22
+	var ground := sample + drift
+	var origin := Vector2i(ground.floor())
+	var local := ground - Vector2(origin)
+	var horizontal := _material_taps(local.x)
+	var vertical := _material_taps(local.y)
 	var result: Dictionary = {}
-	var linear_land := 0.0
-	var linear_total := 0.0
 	var land := 0.0
 	var water := 0.0
-	for y in range(2):
-		for x in range(2):
-			var id := int(provider.call(origin + Vector2i(x, y)))
-			# Renormalize map edges rather than extending each tile's own material.
-			if id < 0: continue
+	for y in range(4):
+		for x in range(4):
+			var id := int(provider.call(origin + Vector2i(x - 1, y - 1)))
+			if id < 0:
+				continue
 			id = _material_id(id, pack)
-			var weight := (fraction.x if x == 1 else 1.0 - fraction.x) * (fraction.y if y == 1 else 1.0 - fraction.y)
-			var linear_weight := (linear.x if x == 1 else 1.0 - linear.x) * (linear.y if y == 1 else 1.0 - linear.y)
-			linear_total += linear_weight
+			var weight := horizontal[x] * vertical[y]
 			if id in [1, 4, 15, 22]:
 				water += weight
 			else:
 				land += weight
-				linear_land += linear_weight
 			result[id] = float(result.get(id, 0.0)) + weight
 	if land + water < 0.000001: return {fallback: 1.0}
-	# A contour of the interpolated land field rounds capes and coves across
-	# cell boundaries. Separately smoothing each cell edge makes a staircase.
-	var coverage := smoothstep(0.495, 0.535, linear_land / maxf(linear_total, 0.000001)) if land > 0.0 and water > 0.0 else (1.0 if land > 0.0 else 0.0)
+	var land_scale := coverage / land if land > 0.0 else 0.0
+	var water_scale := (1.0 - coverage) / water if water > 0.0 else 0.0
 	for id in result:
-		result[id] *= ((1.0 - coverage) / water if water > 0.0 else 0.0) if id in [1, 4, 15, 22] else (coverage / land if land > 0.0 else 0.0)
+		result[id] *= water_scale if id in [1, 4, 15, 22] else land_scale
 	return result
 
-# Read the same visible contour without depending on a loaded art pack. Shore
-# ribbons use this after geography is final; they never alter navigation cells.
-static func surface_land_coverage(point: Vector2, provider: Callable, river: Dictionary = {}) -> float:
-	# Numeric counterpart of weights(): contour extraction needs no material
-	# dictionaries or temporary per-material partitions at its many samples.
+
+static func _material_taps(fraction: float) -> Vector4:
+	# Compact biweight kernel. Both the value and its slope reach zero at
+	# radius two, so dropping the far tap cannot introduce a grid seam.
+	var taps := Vector4.ZERO
+	for i in range(4):
+		var distance := (i - 1 - fraction) * 0.5
+		var base := 1.0 - distance * distance
+		taps[i] = base * base
+	return taps
+
+
+static func _coast_sample(point: Vector2) -> Vector2:
 	var bend := Vector2(sin(point.y*7.1+sin(point.x*3.7)),cos(point.x*6.3+sin(point.y*4.1)))*0.035
-	var sample := point+bend-Vector2.ONE*0.5
+	return point+bend-Vector2.ONE*0.5
+
+
+static func _coast_coverage(sample: Vector2, provider: Callable) -> float:
 	var origin := Vector2i(sample.floor())
 	var linear := sample-Vector2(origin)
 	var fraction := Vector2(smoothstep(0.30,0.70,linear.x),smoothstep(0.30,0.70,linear.y))
@@ -87,8 +97,13 @@ static func surface_land_coverage(point: Vector2, provider: Callable, river: Dic
 			else:
 				land += weight
 				linear_land += linear_weight
-	var coverage := smoothstep(0.495,0.535,linear_land/maxf(linear_total,0.000001)) if land>0.0 and water>0.0 else (1.0 if land>0.0 else 0.0)
-	if land+water<0.000001: coverage=1.0
+	if land+water<0.000001: return 1.0
+	return smoothstep(0.495,0.535,linear_land/maxf(linear_total,0.000001)) if land>0.0 and water>0.0 else (1.0 if land>0.0 else 0.0)
+
+
+# Shore ribbons and material blending evaluate the same land/water contour.
+static func surface_land_coverage(point: Vector2, provider: Callable, river: Dictionary = {}) -> float:
+	var coverage := _coast_coverage(_coast_sample(point), provider)
 	if not river.is_empty():
 		var field := RiverSurface.sample(river,point)
 		var wet := smoothstep(-0.08,0.10,field.x)*smoothstep(-0.035,0.10,field.z)
@@ -108,25 +123,26 @@ static func tile_drawable(cell: Vector2i, id: int, provider: Callable, catalog, 
 	var corners: Array = profile["corners"]
 	var uniform := bool(profile["is_flat"])
 	var coastal := false
-	for dy in range(-1, 2):
-		for dx in range(-1, 2):
+	for dy in range(-MATERIAL_HALO, MATERIAL_HALO + 1):
+		for dx in range(-MATERIAL_HALO, MATERIAL_HALO + 1):
 			var neighbor := int(provider.call(cell + Vector2i(dx, dy)))
 			if neighbor >= 0 and _material_id(neighbor, pack) != center_id:
 				uniform = false
-				if (neighbor in TerrainRules.WATER_TERRAIN_IDS) != (center_id in [1, 4, 15, 22]): coastal = true
+				if absi(dx) <= 1 and absi(dy) <= 1 and (neighbor in TerrainRules.WATER_TERRAIN_IDS) != (center_id in [1, 4, 15, 22]): coastal = true
 	if not elevation.river_shape.is_empty():
 		for y in range(3):
 			for x in range(3):
 				if RiverSurface.sample(elevation.river_shape, Vector2(cell) + Vector2(x, y) * 0.5).y > 0.0:
 					uniform = false
 					coastal = true
-	var subdivisions := 1 if uniform else 16 if coastal else SUBDIVISIONS
+	var planar: bool = corners[0] + corners[2] == corners[1] + corners[3]
+	var subdivisions := 1 if uniform else 16 if coastal else BLEND_SUBDIVISIONS if planar else SUBDIVISIONS
 	for y in range(subdivisions + 1):
 		for x in range(subdivisions + 1):
 			var uv := Vector2(float(x), float(y)) / subdivisions
 			var world := Vector2(cell) + uv
-			var weight := weights(world, provider, pack, center_id)
-			if not elevation.river_shape.is_empty(): weight = RiverSurface.blend(weight, RiverSurface.sample(elevation.river_shape, world))
+			var weight := {center_id: 1.0} if uniform else weights(world, provider, pack, center_id)
+			if not elevation.river_shape.is_empty(): weight = RiverSurface.blend(weight, RiverSurface.sample(elevation.river_shape, world), elevation.bank_silt, elevation.ford_gravel)
 			vertex_weights.append(weight)
 			for material_id in weight:
 				if float(weight[material_id]) > 0.00001 and material_id not in ids:

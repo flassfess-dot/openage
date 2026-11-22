@@ -50,7 +50,8 @@ func invalidate(cells: Variant, canvas) -> void:
 		for value in cells:
 			var cell := Vector2i(value)
 			# Material/height blends also depend on adjacent rows.
-			for y in range(maxi(0, cell.y-1), mini(size.y-1, cell.y+1)+1): keys[Vector2i(0,y)] = true
+			for y in range(maxi(0, cell.y - MeshJob.MATERIAL_HALO), mini(size.y, cell.y + MeshJob.MATERIAL_HALO + 1)):
+				keys[Vector2i(0, y)] = true
 	else:
 		for y in range(size.y): keys[Vector2i(0,y)] = true
 	queued.assign(keys.keys())
