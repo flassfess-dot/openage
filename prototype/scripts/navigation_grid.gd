@@ -213,6 +213,17 @@ func set_elevation(cell: Vector2i, level: int, slope: bool = false) -> void:
 	revision += 1
 
 
+static func building_navigation_cells(building: Dictionary) -> Array:
+	if float(building.get("hp", 1.0)) <= 0.0 or building.has("clearance_slots"):
+		return []
+	var kind := String(building.get("kind", ""))
+	if kind == "gate":
+		return GateSystem.navigation_cells(building)
+	if kind != "farm" and (bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", [])):
+		return []
+	return Footprint.foundation_solid_cells(kind, building.get("pos", Vector2.ZERO), building.get("occupied_cells", []))
+
+
 func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []) -> void:
 	# Full reconcile into a fresh map, then diff against the live one so an
 	# unchanged world neither allocates a deep copy nor bumps the revision.
@@ -223,14 +234,7 @@ func rebuild(resources: Array, buildings: Array, static_obstructions: Array = []
 		var cells: Array = resource.get("footprint", {}).get("occupied_cells", [Vector2i(floori(resource["pos"].x), floori(resource["pos"].y))])
 		_append_occupants(desired, cells, "resource", int(resource.get("id", -1)))
 	for building in buildings:
-		if float(building.get("hp", 1.0)) <= 0.0:
-			continue
-		if bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", []):
-			continue
-		var building_cells: Array = building.get("occupied_cells", [])
-		if building.get("kind") == "gate":
-			building_cells = GateSystem.navigation_cells(building)
-		_append_occupants(desired, building_cells, "building", int(building.get("id", -1)))
+		_append_occupants(desired, building_navigation_cells(building), "building", int(building.get("id", -1)))
 	for obstruction_value in static_obstructions:
 		var obstruction: Dictionary = obstruction_value
 		_append_occupants(desired, obstruction.get("occupied_cells", []), "static_obstruction", int(obstruction.get("id", -1)))

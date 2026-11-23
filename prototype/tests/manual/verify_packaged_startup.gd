@@ -385,6 +385,10 @@ func prepare_combat(game) -> bool:
 
 func prepare_naval(game) -> bool:
 	if not begin_authored_fixture(game):return false
+	# Training takes several hundred ordinary ticks. The verifier writes its
+	# own checkpoint; diagnostic actors should never enter player autosaves.
+	game.autosave.enabled = false
+	game.autosave.shutdown()
 	var world=game.simulation_world
 	var home:=Vector2(world.get_buildings().filter(func(b): return int(b.get("team",0))==1)[0]["pos"])
 	var best: Dictionary={}; var score:=INF
@@ -398,6 +402,13 @@ func prepare_naval(game) -> bool:
 				var value:=home.distance_squared_to(land)
 				if value<score: score=value; best={"water":water,"land":land}
 	if best.is_empty(): fail("Island fixture has no legal transport beach"); return false
+	var site: Variant = dock_fixture_site(world, game.map_definition, home, best["water"])
+	if site == null: fail("Generated map has no legal dock site clear of the transport landing"); return false
+	var dock_id := 950001
+	while world.find_building(dock_id) != null: dock_id += 1
+	world.add_building(dock_id, "dock", site, 1)
+	world.set_resource_amount(1, 1, maxi(world.get_resource_amount(1, 1), 100))
+	world.set_population_housing(1, maxi(world.economy_system.get_population_housing(1), 10))
 	var ship: Dictionary=world.add_unit(1,"transport",best["water"],false)
 	var passenger: Dictionary=world.add_unit(1,"clubman",best["land"],false)
 	world.update_fog_of_war()
@@ -410,7 +421,74 @@ func prepare_naval(game) -> bool:
 	if not await apply_public_command(game,command) or not game.simulation_world.transport_system.embarked_units.has(passenger_id): fail("Public boarding failed in packaged island fixture"); return false
 	naval_fixture={"ship":ship_id,"passenger":passenger_id,"landing":best["land"]}
 	report["naval_fixture"]={"setup":"public player commands; not a naval AI strength measurement","ship":ship_id,"passenger":passenger_id}
-	return true
+	return await verify_dock_production(game, dock_id, site)
+
+
+func dock_fixture_site(world, map_data: Dictionary, home: Vector2, beach: Vector2) -> Variant:
+	for zone in map_data.get("naval_start_zones", []):
+		var planned := Vector2(zone.dock_position)
+		if int(zone.team) == 1 and planned.distance_to(beach) >= 5 and world.map_supports_foundation("dock", planned):
+			return planned
+	# The diagnostic dock can start outside explored terrain. Apply the map's
+	# foundation contract and leave the boarding beach free for save/load.
+	var candidates: Array[Vector2] = []
+	for y in range(2, world.map_size.y - 2):
+		for x in range(2, world.map_size.x - 2):
+			var point := Vector2(x + 0.5, y + 0.5)
+			if point.distance_to(beach) >= 5: candidates.append(point)
+	candidates.sort_custom(func(a, b): return home.distance_squared_to(a) < home.distance_squared_to(b))
+	for point in candidates:
+		if world.map_supports_foundation("dock", point): return point
+	return null
+
+
+func verify_dock_production(game, dock_id: int, site: Vector2) -> bool:
+	var commands = load("res://scripts/commands.gd")
+	var producers: Array[int] = [dock_id]
+	var train = commands.TrainCommand.new(game.game_controller.tick_index, producers, "fishing_boat", 1)
+	if not await apply_public_command(game, train): fail("Public Dock training command was rejected"); return false
+	var world = game.simulation_world
+	var order: Dictionary = world.find_building(dock_id).production_queue.front()
+	var order_id := int(order.id)
+	var deadline := Time.get_ticks_msec() + 150000
+	var boat: Dictionary = {}
+	while Time.get_ticks_msec() < deadline and boat.is_empty():
+		await tree.process_frame
+		game.join_simulation_owner()
+		for unit in world.get_units():
+			if int(unit.get("production_order_id", -1)) == order_id and unit.kind == "fishing_boat" and int(unit.team) == 1:
+				boat = unit
+				break
+	if boat.is_empty(): fail("Paid fishing boat did not complete at the generated dock"); return false
+	var start := Vector2(boat.pos)
+	var radius := float(boat.footprint_radius)
+	var restriction := int(boat.terrain_restriction)
+	var planner = world.pathfinder
+	var region: int = planner.component_id(Vector2i(start.floor()), "water", restriction, radius)
+	var target: Variant = null
+	for y in range(-9, 10):
+		for x in range(-9, 10):
+			var cell := Vector2i(start.floor()) + Vector2i(x, y)
+			var point := Vector2(cell) + Vector2(0.5, 0.5)
+			if not world.navigation_grid.contains(cell) or point.distance_to(start) < 5 or point.distance_to(site) < 8: continue
+			if target != null and start.distance_squared_to(point) >= start.distance_squared_to(target): continue
+			if region >= 0 and planner.component_id(cell, "water", restriction, radius) == region:
+				target = point
+	if target == null: fail("Trained fishing boat is in an enclosed pocket at " + str(start)); return false
+	var ids: Array[int] = [int(boat.id)]
+	var move = commands.MoveCommand.new(game.game_controller.tick_index, ids, target)
+	if not await apply_public_command(game, move): fail("Trained fishing boat rejected its sailing order"); return false
+	deadline = Time.get_ticks_msec() + 60000
+	while Time.get_ticks_msec() < deadline:
+		await tree.process_frame
+		game.join_simulation_owner()
+		var end := Vector2(boat.pos)
+		if end.distance_to(target) < 1.0:
+			report["dock_egress"] = {"producer":dock_id, "order":order_id, "boat":boat.id, "spawn":[start.x,start.y], "target":[target.x,target.y], "distance_sailed":start.distance_to(end)}
+			print("PACKAGED_STARTUP trained boat left dock: ", start, " -> ", end)
+			return true
+	fail("Trained fishing boat failed to leave the dock: %s -> %s, target %s" % [start, boat.pos, target])
+	return false
 
 
 func apply_public_command(game, command) -> bool:

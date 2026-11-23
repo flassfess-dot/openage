@@ -174,13 +174,17 @@ static func _presentation_fog(fog, observer_team: int) -> Dictionary:
 static func _presentation_player_state(world, observer_team: int) -> Dictionary:
 	if observer_team <= 0:
 		return {}
+	var participants: Array = world.player_registry.public_states()
+	for player in participants:
+		var team := int(player["team"])
+		player["score"] = world.score_by_team.get(team, world.match_statistics.teams.get(team, {}).get("score", 0))
 	var state := {
 		"team": observer_team,
 		"allies": world.get_allied_teams(observer_team),
 		"mutual_allies": world.get_allied_teams(observer_team).filter(func(other_team): return world.are_teams_allied(int(other_team), observer_team)),
 		"relations": world.get_team_relations(observer_team),
 		"status": world.player_registry.status(observer_team),
-		"players": world.player_registry.public_states(),
+		"players": participants,
 		"food": int(world.get_resource_amount(observer_team, 0)),
 		"wood": int(world.get_resource_amount(observer_team, 1)),
 		"resource_ledger": world.economy_system.resource_ledger_by_team.get(observer_team, {}).duplicate(true),

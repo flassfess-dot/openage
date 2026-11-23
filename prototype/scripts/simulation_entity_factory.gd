@@ -382,6 +382,8 @@ func add_building(id: int, kind: String, position: Vector2, team: int = 1, compl
 		"rally_point_set": false,
 		"components": components,
 	}
+	if placement_options.has("clearance_slots"):
+		building["clearance_slots"] = placement_options["clearance_slots"]
 	world.apply_archetype_identity(building, kind)
 	world.configure_harvestable_building(building, completed)
 	building["components"]["production"]["queue"] = production_queue

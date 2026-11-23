@@ -153,7 +153,7 @@ func _resolve_frame_info(building: Dictionary, animation_time: float = 0.0) -> D
 			result.merge(field, true)
 			hut["presentation_layer"] = "upright"
 			# Front foot of the hut is (117, 51), relative to source pivot (94, 48).
-			hut["depth_world_offset"] = Vector2(0.453125, -0.265625)
+			hut["depth_world_offset"] = preload("res://scripts/footprint.gd").FARM_HUT_OFFSET
 			parts.append(hut)
 			for part in parts:
 				part["presentation_layer"] = "upright"
@@ -163,7 +163,7 @@ func _resolve_frame_info(building: Dictionary, animation_time: float = 0.0) -> D
 	if not damage_part.is_empty():
 		if base_graphic == 273 and String(result.get("asset_name", "")).contains("_field_"):
 			damage_part["presentation_layer"] = "upright"
-			damage_part["depth_world_offset"] = Vector2(0.453125, -0.265625)
+			damage_part["depth_world_offset"] = preload("res://scripts/footprint.gd").FARM_HUT_OFFSET
 		parts.append(damage_part)
 	result["composite_parts"] = parts
 	return result

@@ -56,8 +56,15 @@ func test_worker_actions() -> void:
 	var damaged := {"entity_type": "building", "id": 14, "team": 1, "hp": 75.0, "max_hp": 100.0}
 	assert_equal(ContextResolver.resolve(workers, damaged, ground, 1), {"type": "repair", "target_id": 14}, "damaged friendly building resolves to repair")
 	var carrying_workers := [{"id": 1, "kind": "villager", "carried_amount": 4.0}]
-	assert_equal(ContextResolver.resolve(carrying_workers, damaged, ground, 1), {"type": "return_resources", "target_id": 14}, "carried resources take contextual drop-off precedence")
+	assert_equal(ContextResolver.resolve(carrying_workers, damaged, ground, 1), {"type": "repair", "target_id": 14}, "a villager carrying resources repairs a damaged drop-off")
+	var mixed := [{"kind": "clubman", "behavior_tags": ["mobile", "combatant"]}, {"kind": "villager", "behavior_tags": ["mobile", "worker"]}]
+	for kind in ["tower", "farm"]:
+		var allied := damaged.duplicate()
+		allied.merge({"kind": kind, "team": 2, "harvestable": kind == "farm", "amount": 50}, true)
+		assert_equal(ContextResolver.resolve(mixed, allied, ground, 1, [1, 2])["type"], "repair", "repair takes priority at an allied " + kind)
+		assert_equal(ContextResolver.resolve(mixed, allied, ground, 1)["type"], "attack", "a hostile " + kind + " still resolves to attack")
 	var healthy := {"entity_type": "building", "id": 15, "team": 1, "hp": 100.0, "max_hp": 100.0}
+	assert_equal(ContextResolver.resolve(carrying_workers, healthy, ground, 1)["type"], "return_resources", "healthy drop-off accepts carried resources")
 	assert_equal(ContextResolver.resolve(workers, healthy, ground, 1), {"type": "unsupported", "reason": "no_context_action", "message": "Для этого здания нет доступной контекстной команды"}, "healthy building reports unavailable context action")
 
 

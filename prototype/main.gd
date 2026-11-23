@@ -289,7 +289,9 @@ var gamespec_data: Dictionary = {}
 var audio_player: AudioStreamPlayer
 var audio_muted := false
 var sfx_player: AudioStreamPlayer
+var sfx_volume_db := -5.0
 var sfx_players: Array[AudioStreamPlayer] = []
+var spatial_sfx_sources: Dictionary[AudioStreamPlayer, Vector2] = {}
 var sfx_round_robin: int = 0
 var presentation_audio_router := PresentationAudioRouter.new()
 var presentation_audio_event_router := PresentationAudioEventRouter.new()
@@ -908,7 +910,7 @@ func setup_sfx() -> void:
 	sfx_players.clear()
 	for _index in range(8):
 		var player := AudioStreamPlayer.new()
-		player.volume_db = -5.0
+		player.volume_db = sfx_volume_db
 		add_child(player)
 		sfx_players.append(player)
 	sfx_player = sfx_players[0]
@@ -925,7 +927,7 @@ func play_sfx(name: String) -> void:
 
 
 func play_audio_request(request: Dictionary) -> void:
-	if not bool(request.get("accepted", false)) or sfx_players.is_empty():
+	if audio_muted or not bool(request.get("accepted", false)) or sfx_players.is_empty():
 		return
 	var player: AudioStreamPlayer
 	for candidate in sfx_players:
@@ -935,8 +937,38 @@ func play_audio_request(request: Dictionary) -> void:
 	if player == null:
 		player = sfx_players[sfx_round_robin % sfx_players.size()]
 		sfx_round_robin += 1
+	if request.has("world_position"):
+		spatial_sfx_sources[player] = request["world_position"]
+		player.volume_db = sfx_volume_db + linear_to_db(float(request["gain"]))
+	else:
+		spatial_sfx_sources.erase(player)
+		player.volume_db = sfx_volume_db
 	player.stream = request["stream"]
 	player.play()
+
+func battle_sound_gain(world_position: Vector2) -> float:
+	var size := get_viewport_rect().size
+	var half := Vector2(size.x, size.y - hud_top_height() - hud_bottom_height()) * 0.5
+	var center := Vector2(half.x, hud_top_height() + half.y)
+	# Relative to the visible battlefield, so zoom and viewport changes follow the camera.
+	var distance := ((world_to_screen(world_position) - center) / half.max(Vector2.ONE)).length()
+	return 1.0 - smoothstep(0.2, 1.5, distance)
+
+func _update_battle_sound_volumes() -> void:
+	if spatial_sfx_sources.is_empty():
+		return
+	for player in sfx_players:
+		if not spatial_sfx_sources.has(player):
+			continue
+		if not player.playing:
+			spatial_sfx_sources.erase(player)
+			continue
+		var gain := battle_sound_gain(spatial_sfx_sources[player])
+		if gain <= 0.0:
+			player.stop()
+			spatial_sfx_sources.erase(player)
+		else:
+			player.volume_db = sfx_volume_db + linear_to_db(gain)
 
 func center_initial_view(recenter: bool = true) -> void:
 	var size := get_viewport_rect().size
@@ -1097,6 +1129,7 @@ func add_resource(kind: String, position: Vector2, amount: int) -> void:
 		return
 	simulation_world.add_resource(kind, position, amount)
 func _process(delta: float) -> void:
+	_update_battle_sound_volumes()
 	if save_progress_indicator != null:
 		save_progress_indicator.set_save_progress(save_progress_state())
 	if not simulation_owner.pending and game_controller != null and game_controller.paused:
@@ -1673,7 +1706,7 @@ func _present_expedition_events(new_events: Array) -> void:
 
 
 func process_world_audio_events(events: Array) -> void:
-	for request in presentation_audio_event_router.consume(events, Callable(self, "presentation_entity_by_id"), Callable(self, "presentation_audio_state"), Callable(self, "presentation_event_visible")):
+	for request in presentation_audio_event_router.consume(events, presentation_entity_by_id, presentation_audio_state, presentation_event_visible, battle_sound_gain):
 		play_audio_request(request)
 
 
@@ -1936,8 +1969,10 @@ func _request_return_to_launcher() -> void:
 
 func _apply_audio_preferences() -> void:
 	if audio_player != null: audio_player.volume_db = linear_to_db(maxf(0.00001, float(match_preferences.values["music"]))) - 14.0
+	sfx_volume_db = linear_to_db(maxf(0.00001, float(match_preferences.values["sound"]))) - 3.0
 	for player in sfx_players:
-		if is_instance_valid(player): player.volume_db = linear_to_db(maxf(0.00001, float(match_preferences.values["sound"]))) - 3.0
+		if is_instance_valid(player): player.volume_db = sfx_volume_db
+	_update_battle_sound_volumes()
 
 func _apply_menu_preferences(values: Dictionary) -> void:
 	join_simulation_owner()
@@ -2578,7 +2613,7 @@ func update_interaction_cursor(screen_position: Vector2) -> void:
 	var hits := pick_stack_at(screen_position)
 	if not hits.is_empty():
 		hovered = picking_service.context_entity(hits[0])
-	var cursor := InteractionCursor.resolve(selected_units(), hovered, screen_to_world(screen_position), local_player_team)
+	var cursor := InteractionCursor.resolve(selected_units(), hovered, screen_to_world(screen_position), local_player_team, command_context_allies())
 	interaction_highlight_id = int(cursor.get("entity_id", -1))
 	var semantic := String(cursor.get("semantic", "default"))
 	if expedition_panel != null and expedition_panel.visible and not expedition_panel.hero.is_empty() and not ExpeditionLoot.pile_at(self, screen_position).is_empty():

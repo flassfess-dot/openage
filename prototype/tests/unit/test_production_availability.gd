@@ -10,6 +10,7 @@ func _initialize() -> void:
 	var catalog := ResourceCatalog.new()
 	catalog.load_generated_data()
 	test_data_driven_production_locations(catalog)
+	test_exit_for_each_producer(catalog)
 	test_age_filtered_build_palette(catalog)
 	test_foundation_completion_unlocks_unit(catalog)
 	test_unknown_runtime_type_is_rejected(catalog)
@@ -38,6 +39,46 @@ func test_data_driven_production_locations(catalog) -> void:
 	var archery_range: Dictionary = world.add_building(702, "archery_range", Vector2(18.0, 12.0), 1)
 	assert_true(world.is_object_available(1, 4), "Archery Range completion applies hidden source technology 55")
 	assert_true(world.enqueue_unit_production(int(archery_range["id"]), 1, "archer") != null, "Archery Range accepts Bowman")
+
+
+func test_exit_for_each_producer(catalog) -> void:
+	var kinds := {
+		"town_center": "villager", "barracks": "clubman", "archery_range": "archer",
+		"stable": "war_elephant", "academy": "hoplite", "temple": "priest",
+		"siege_workshop": "stone_thrower", "dock": "scout_ship",
+	}
+	for producer in kinds:
+		var world = configured_world(catalog)
+		world.set_team_civilization(1, 6) # Hittites train the large elephant chassis.
+		world.set_population_cap(1, 50)
+		world.set_population_housing(1, 50)
+		world.set_resource_amount(1, 3, 1000)
+		if producer in ["stable", "academy", "temple", "siege_workshop", "dock"]:
+			world.set_starting_age(1, 103, true)
+		if producer == "dock":
+			world.navigation_grid.configure_terrain(func(cell): return "water" if cell.x >= 10 else "grass")
+		# Keep both sides in play while the simulation follows the rally order.
+		var opponent: Dictionary = world.add_unit(2, "clubman", Vector2(2.5, 2.5), false)
+		opponent.stance = "passive"
+		var building: Dictionary = world.add_building(700, producer, Vector2(10.5, 12.5), 1)
+		var rally := Vector2(20.5, 12.5)
+		world.set_rally_point(700, rally)
+		var order: Variant = world.enqueue_unit_production(700, 1, kinds[producer])
+		assert_true(order != null, "%s accepts %s (%s)" % [producer, kinds[producer], world.last_production_failure])
+		if order == null: continue
+		world.update_production(float(order.duration) + 0.05)
+		var units: Array = world.get_units().filter(func(unit): return int(unit.get("production_order_id", -1)) == int(order.id))
+		assert_equal(units.size(), 1, "%s completes exactly one unit" % producer)
+		if units.size() != 1: continue
+		var unit: Dictionary = units[0]
+		assert_equal(unit.kind, kinds[producer], "%s produces the requested kind" % producer)
+		assert_true(building.production_queue.is_empty(), "%s consumes the completed order" % producer)
+		assert_true(world.navigation_grid.is_position_walkable_for(unit.pos, unit.footprint_radius, unit.movement_domain, unit.terrain_restriction), "%s exit fits the entire unit" % producer)
+		assert_true(Vector2(unit.pos).distance_to(rally) > 2.0, "%s unit must travel to reach the rally point" % producer)
+		for _tick in range(500):
+			if Vector2(unit.pos).distance_to(rally) < 1.0: break
+			world.advance(0.05, 1, 2)
+		assert_true(Vector2(unit.pos).distance_to(rally) < 1.0, "%s unit reaches rally %s (actual %s, %s)" % [producer, rally, unit.pos, unit.get("diagnostic_reason", "")])
 
 
 func test_age_filtered_build_palette(catalog) -> void:
@@ -74,11 +115,10 @@ func test_local_ai_build_sites(catalog) -> void:
 	var world = configured_world(catalog)
 	var worker: Dictionary = world.add_unit(1, "villager", Vector2(12.5, 12.5), false)
 	world.update_fog_of_war()
-	assert_true(not world.can_place_foundation(1, "house", Vector2(worker["pos"])), "a foundation cannot trap a living unit inside its occupied cells")
-	assert_equal(world.last_build_failure, "occupied_by_unit", "unit overlap has a stable placement rejection")
+	assert_true(world.can_place_foundation(1, "house", Vector2(worker["pos"])), "an allied worker can clear the house footprint")
+	assert_equal(worker["task"], "idle", "preview leaves the worker in place")
 	worker["pos"] = Vector2(14.1, 12.5)
-	assert_true(not world.can_place_foundation(1, "house", Vector2(12.5, 12.5)), "foundation placement accounts for the mobile radius outside the occupied center cells")
-	assert_equal(world.last_build_failure, "occupied_by_unit", "mobile-radius overlap uses the same stable rejection")
+	assert_true(world.can_place_foundation(1, "house", Vector2(12.5, 12.5)), "a worker whose radius clips the footprint can clear it")
 	worker["pos"] = Vector2(16.0, 12.5)
 	var sites: Array = world.get_local_build_sites(1, ["house"], 2).get("house", [])
 	assert_equal(sites.size(), 2, "local AI placement returns the requested bounded number of House sites")

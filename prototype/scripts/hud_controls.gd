@@ -6,6 +6,7 @@ const InterfaceLayout := preload("res://scripts/interface_layout.gd")
 const StatusPanel := preload("res://scripts/hud_status_panel.gd")
 const Typography := preload("res://scripts/hud_typography.gd")
 const CommandButton := preload("res://scripts/hud_command_button.gd")
+const MinimapScores := preload("res://scripts/hud_minimap_scores.gd")
 
 signal building_selected(building_id: int)
 signal formation_requested(formation_name: String)
@@ -72,6 +73,8 @@ var command_page_size := 1
 var command_page_count := 1
 var command_signature := 0
 var idle_worker_button: Button
+var score_button: Button
+var score_panel := MinimapScores.new()
 
 
 func _init() -> void:
@@ -82,6 +85,8 @@ func _init() -> void:
 	status_panel.cancel_requested.connect(func(building_id: int, queue_index: int): cancel_production_requested.emit(building_id, queue_index))
 	status_panel.building_selected.connect(func(building_id: int): building_selected.emit(building_id))
 	status_panel.ungarrison_requested.connect(func(building_id: int, passenger_id: int): ungarrison_requested.emit(building_id, passenger_id))
+	# The status panel draws the opaque artwork around the minimap aperture.
+	build_minimap_controls()
 
 
 func _notification(what: int) -> void:
@@ -123,15 +128,33 @@ func build_controls() -> void:
 	train_button = train_buttons[0]
 	previous_commands_button = _make_command_page_button("‹", "Предыдущие команды", -1)
 	next_commands_button = _make_command_page_button("›", "Следующие команды", 1)
-	idle_worker_button = Button.new()
+
+
+func build_minimap_controls() -> void:
+	idle_worker_button = CommandButton.new()
 	idle_worker_button.text = "Zz"
-	idle_worker_button.tooltip_text = "Выбрать следующего незанятого крестьянина (I)"
+	idle_worker_button.tooltip_text = "Следующий свободный крестьянин или рыбацкая лодка (I)"
 	idle_worker_button.focus_mode = Control.FOCUS_NONE
 	idle_worker_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	idle_worker_button.expand_icon = true
 	apply_button_theme(idle_worker_button)
 	idle_worker_button.pressed.connect(func(): idle_worker_requested.emit())
 	add_child(idle_worker_button)
+	score_button = CommandButton.new()
+	score_button.text = "123"
+	score_button.tooltip_text = "Показать очки игроков"
+	score_button.toggle_mode = true
+	score_button.focus_mode = Control.FOCUS_NONE
+	score_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	apply_button_theme(score_button)
+	score_button.add_theme_font_override("font", Typography.title_font())
+	score_button.toggled.connect(func(open: bool):
+		score_panel.visible = open
+		score_button.tooltip_text = "Скрыть очки игроков" if open else "Показать очки игроков"
+		update_scores(current_model)
+	)
+	add_child(score_button)
+	add_child(score_panel)
 
 
 func _make_command_page_button(label: String, tooltip: String, step: int) -> Button:
@@ -218,9 +241,11 @@ func configure_interface_skin(skin, style_index: int = 0) -> void:
 			"pressed": Color(0.78, 0.78, 0.78),
 			"disabled": Color(0.48, 0.48, 0.48),
 		}
-		for state in idle_modulations:
-			idle_worker_button.add_theme_stylebox_override(state, texture_style(backplate, idle_modulations[state], 7))
-		idle_worker_button.add_theme_stylebox_override("focus", command_styles["focus"])
+		for button in [idle_worker_button, score_button]:
+			for state in idle_modulations:
+				button.add_theme_stylebox_override(state, texture_style(backplate, idle_modulations[state], 3))
+			button.add_theme_stylebox_override("focus", command_styles["focus"])
+			button.add_theme_stylebox_override("hover_pressed", command_styles["pressed"])
 
 
 func set_layout(layout: Dictionary) -> void:
@@ -241,6 +266,7 @@ func set_state(formation_name: String, can_train: bool) -> void:
 
 func set_view_model(model: Dictionary) -> void:
 	current_model = model
+	update_scores(model)
 	idle_worker_button.disabled = bool(model.get("battle_over", false)) or bool(model.get("spectator", false))
 	if icon_registry != null:
 		idle_worker_button.icon = icon_registry.texture("unit", int(model.get("idle_worker_icon_id", -1)), int(model.get("icon_team", 1)))
@@ -363,9 +389,16 @@ func layout_controls() -> void:
 		status_panel.set_layout(current_layout if current_layout.has("production") else {})
 	var minimap_plane: Rect2 = current_layout.get("minimap_plane", current_layout.get("minimap", Rect2(size.x - 232, size.y - HUD_HEIGHT, 232, HUD_HEIGHT)))
 	var minimap_scale := float(current_layout.get("minimap_scale", 1.0))
-	idle_worker_button.position = Vector2(minimap_plane.position.x + 3 * minimap_scale, minimap_plane.end.y - 42 * minimap_scale)
-	idle_worker_button.size = Vector2.ONE * 40 * minimap_scale
-	idle_worker_button.add_theme_constant_override("icon_max_width", maxi(12, int(40 * minimap_scale) - 14))
+	var edge := floorf(36 * minimap_scale)
+	var inset := ceilf(3 * minimap_scale)
+	idle_worker_button.add_theme_constant_override("icon_max_width", maxi(12, int(edge) - 6))
+	score_button.add_theme_font_size_override("font_size", maxi(9, roundi(14 * minimap_scale)))
+	idle_worker_button.size = Vector2.ONE * edge
+	score_button.size = Vector2.ONE * edge
+	idle_worker_button.position = Vector2(minimap_plane.position.x + inset, minimap_plane.end.y - edge - inset)
+	score_button.position = minimap_plane.end - score_button.size - Vector2.ONE * inset
+	if score_panel.visible:
+		score_panel.fit_above(current_layout.get("bottom", Rect2(0, size.y - HUD_HEIGHT, size.x, HUD_HEIGHT)))
 	var commands: Array[Button] = []
 	for index in range(train_buttons.size()):
 		var button := train_buttons[index]
@@ -614,7 +647,14 @@ static func reason_text(reason: String) -> String:
 
 func update_dynamic_model(model: Dictionary) -> void:
 	current_model = model
+	update_scores(model)
 	status_panel.update_dynamic_model(model)
+
+
+func update_scores(model: Dictionary) -> void:
+	if score_panel.visible:
+		score_panel.set_players(model.get("score_players", []))
+		score_panel.fit_above(current_layout.get("bottom", Rect2(0, size.y - HUD_HEIGHT, size.x, HUD_HEIGHT)))
 
 
 func training_batch_size(command: Dictionary, multiple: bool) -> int:

@@ -46,6 +46,11 @@ func _initialize() -> void:
 	for _i in range(100): restored_controller._run_fixed_tick(1,2)
 	check(restored.match_statistics.samples.size() > saved["samples"].size(), "history continues after restore")
 	var legacy := checkpoint.duplicate(true)
+	for row in legacy["match_statistics"]["teams"].values():
+		row.erase("score")
+		row.erase("score_leads")
+	check(Checkpoint.restore(legacy, restored, restored_controller), "scoreboard accepts existing checkpoints with match history")
+	check(int(restored.match_statistics.teams[1].get("score", 0)) > 0, "restored standings are available immediately while paused")
 	legacy.erase("match_statistics")
 	check(Checkpoint.restore(legacy, restored, restored_controller), "existing current-format checkpoints remain loadable")
 	check(restored.match_statistics.partial and restored.match_statistics.start_tick == controller.tick_index, "legacy history is explicitly marked as partial")

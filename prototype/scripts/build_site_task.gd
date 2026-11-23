@@ -91,7 +91,9 @@ static func capture(world, team: int, kinds: Array) -> Dictionary:
 		if float(unit.get("hp", 0.0)) <= 0.0 or bool(unit.get("removed", false)): continue
 		var position := Vector2(unit["pos"])
 		var radius := float(unit.get("footprint_radius", 0.3))
-		for point in [position, position + Vector2(radius, 0), position - Vector2(radius, 0), position + Vector2(0, radius), position - Vector2(0, radius)]: mobile_cells[Vector2i(point.floor())] = true
+		if not world.are_teams_allied(team, int(unit.get("team", 0))):
+			for cell in preload("res://scripts/footprint.gd").mobile_occupied_cells(position, radius):
+				mobile_cells[cell] = true
 		if int(unit.get("team", 0)) != team or not world.entity_is_worker(unit) or String(unit.get("movement_domain", "land")) != "land": continue
 		var id := int(unit["id"])
 		seen_units[id] = true

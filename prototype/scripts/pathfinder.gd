@@ -980,6 +980,27 @@ func component_id(cell: Vector2i, domain: String = "land", restriction: int = -1
 	return int(fallback_components[key][cell.y * grid.size.x + cell.x])
 
 
+# Distinct outlets of a wharf can belong to separate bodies of water. Only
+# inspect map-wide areas if the hull's connectivity labels actually differ.
+func component_sizes_at(cells: Array[Vector2i], domain: String, restriction: int, radius: float) -> Dictionary:
+	var labels_by_cell := {}
+	var sizes := {}
+	for cell in cells:
+		var label := component_id(cell, domain, restriction, radius)
+		labels_by_cell[cell] = label
+		if label >= 0: sizes[label] = 0
+	if sizes.size() < 2: return {}
+	var labels: PackedInt32Array
+	if uses_native_kernel():
+		labels = _native_kernel_for(domain, restriction).connectivity_labels(radius)
+	else:
+		labels = fallback_components["%s:%d:%.8f" % [domain, restriction, radius]]
+	for label in sizes: sizes[label] = labels.count(label)
+	var result := {}
+	for cell in cells: result[cell] = int(sizes.get(labels_by_cell[cell], 0))
+	return result
+
+
 func can_reach(start_world: Vector2, goal_world: Vector2, domain: String = "land", restriction: int = -1, radius: float = 0.0) -> bool:
 	if grid == null:
 		return false

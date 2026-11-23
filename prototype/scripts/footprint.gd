@@ -2,6 +2,27 @@ class_name RoRFootprint
 
 const DEFAULT_MOBILE_RADIUS: float = 0.3
 const DEFAULT_CLEARANCE: float = 0.06
+# Front foot of the hut in graphic 273, relative to the field pivot.
+const FARM_HUT_OFFSET := Vector2(0.453125, -0.265625)
+
+
+static func foundation_solid_cells(kind: String, position: Vector2, occupied: Array) -> Array:
+	if kind == "farm":
+		return [Vector2i((position + FARM_HUT_OFFSET).floor())]
+	return occupied
+
+
+static func mobile_occupied_cells(position: Vector2, radius: float) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	if radius <= 0.0:
+		result.append(Vector2i(position.floor()))
+		return result
+	for y in range(floori(position.y - radius), floori(position.y + radius) + 1):
+		for x in range(floori(position.x - radius), floori(position.x + radius) + 1):
+			var cell := Vector2i(x, y)
+			if circle_cell_distance_squared(position, cell) < radius * radius:
+				result.append(cell)
+	return result
 
 
 static func mobile(kind: String, stats: Dictionary) -> Dictionary:

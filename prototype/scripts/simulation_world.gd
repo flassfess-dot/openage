@@ -620,6 +620,7 @@ func reset_game(include_legacy_default: bool = true, preserve_bulk_load: bool = 
 	cache_epoch += 1
 	if not preserve_bulk_load:
 		bulk_load_depth = 0
+	foundation_system.pending_clearance.clear()
 	entity_store.clear_units()
 	entity_store.clear_resources()
 	observer_memory.reset()
@@ -1295,13 +1296,7 @@ func rebuild_navigation_grid() -> void:
 
 
 func _building_navigation_cells(building: Dictionary) -> Array:
-	if float(building.get("hp", 1.0)) <= 0.0:
-		return []
-	if bool(building.get("passable", false)) or "passable" in building.get("behavior_tags", []):
-		return []
-	if String(building.get("kind", "")) == "gate":
-		return GateSystem.navigation_cells(building)
-	return building.get("occupied_cells", [])
+	return NavigationGrid.building_navigation_cells(building)
 
 
 func sync_building_navigation_occupancy(building: Dictionary) -> void:
@@ -1525,6 +1520,8 @@ func query_combat_entities_near(position: Vector2, radius: float) -> Array:
 
 
 func update_units(delta: float, player_team: int, enemy_team: int) -> void:
+	if not foundation_system.pending_clearance.is_empty():
+		foundation_system.advance_clearance()
 	var probe: Variant = tick_pipeline.performance_probe
 	# Boundary timings preserve the native actor span; only the explicit fine
 	# probe enters per-actor script instrumentation. Never pass this observer

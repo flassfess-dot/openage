@@ -81,6 +81,8 @@ func _marker(tick: int, team: int, kind: String, value: int = 0) -> void:
 func sample(world, tick: int, force: bool = false) -> void:
 	if not initialized: begin(world, tick); return
 	if finished_tick >= 0 and tick > finished_tick: return
+	if tick % SAMPLE_TICKS == 0 or force:
+		update_scores(world)
 	if last_tick == tick or (not force and tick - last_tick < interval_ticks): return
 	var values := {}
 	for team_value in world.player_registry.all_teams():
@@ -99,6 +101,69 @@ func sample(world, tick: int, force: bool = false) -> void:
 		for i in range(0, samples.size(), 2): reduced.append(samples[i])
 		samples = reduced
 		interval_ticks *= 2
+
+# The categories and weights are recorded in doc/reverse_engineering/scoring.md.
+# Count the roster once per sample, independently of viewport size and HUD refresh.
+func update_scores(world) -> void:
+	var metrics := {}
+	for team in world.player_registry.all_teams():
+		var row := _team(team)
+		metrics[team] = {"workers": 0, "military": 0, "temples": 0,
+			"explored": world.get_fog_of_war().personally_explored_by_player.get(team, {}).size(),
+			"converted": row["converted"], "research": row["research"]}
+	for unit in world.get_all_units_including_embarked():
+		var counts: Dictionary = metrics.get(int(unit.get("team", 0)), {})
+		if counts.is_empty() or float(unit.get("hp", 0)) <= 0: continue
+		if world.entity_is_worker(unit) or unit["kind"] in ["trade_boat", "transport"]:
+			counts["workers"] += 1
+		elif unit.get("combat_enabled", false):
+			counts["military"] += 1
+	for building in world.get_buildings():
+		var counts: Dictionary = metrics.get(int(building.get("team", 0)), {})
+		if counts.is_empty() or float(building.get("hp", 0)) <= 0 or building.get("state") != "complete": continue
+		if building["kind"] == "tower": counts["military"] += 1
+		if building["kind"] == "temple": counts["temples"] += 1
+	var age_leaders := {}
+	for marker in markers:
+		if marker["kind"] == "age" and marker["value"] in [102, 103] and not age_leaders.has(marker["value"]):
+			age_leaders[marker["value"]] = marker["team"]
+	for team in metrics:
+		var row: Dictionary = teams[team]
+		var counts: Dictionary = metrics[team]
+		var kills := int(row["kills"])
+		var ledger: Dictionary = world.economy_system.resource_ledger_by_team.get(team, {})
+		var points := floori(kills * 0.5) + int(row["razed"]) + maxi(0, kills - int(row["lost"]))
+		var gold := int(ledger.get("income", [0, 0, 0, 0])[3])
+		gold += int(ledger.get("categories", {}).get("trade_in", [0, 0, 0, 0])[3])
+		points += floori(gold / 100.0)
+		points += floori(maxi(0, int(row["tribute_sent"]) - int(row["tribute_received"])) / 60.0)
+		points += int(counts["workers"]) + floori(int(counts["explored"]) * 100.0 / maxi(1, world.map_size.x * world.map_size.y) / 3.0)
+		points += 2 * int(row["converted"]) + 3 * int(counts["temples"]) + 2 * int(row["research"])
+		for category in ["ruin", "artifact", "wonder"]:
+			var summary: Dictionary = world.victory_system.objective_summary.get(category, {})
+			var owned := int(summary.get("completed_by_team", {}).get(team, 0))
+			points += owned * (100 if category == "wonder" else 10)
+			if category != "wonder" and owned > 0 and owned == int(summary.get("total", 0)): points += 50
+		for first in age_leaders.values():
+			if first == team: points += 25
+		if world.player_registry.status(team) in ["active", "victorious"]: points += 100
+		row["score"] = points
+	var bonuses := {"military": 25, "workers": 25, "explored": 25, "converted": 25, "research": 50}
+	for category in bonuses:
+		var leader := -1
+		var highest := 0
+		for team in metrics:
+			var value := int(metrics[team][category])
+			var previous: bool = teams[team].get("score_leads", {}).has(category)
+			if value > highest or (value > 0 and value == highest and previous):
+				highest = value
+				leader = team
+		for team in metrics:
+			var bonuses_held: Dictionary = teams[team].get_or_add("score_leads", {})
+			if team == leader:
+				teams[team]["score"] += int(bonuses[category])
+				bonuses_held[category] = true
+			else: bonuses_held.erase(category)
 
 func state() -> Dictionary:
 	return {"teams": teams.duplicate(true), "samples": samples.duplicate(true), "markers": markers.duplicate(true), "interval_ticks": interval_ticks, "start_tick": start_tick, "last_tick": last_tick, "finished_tick": finished_tick, "initialized": initialized, "partial": partial}

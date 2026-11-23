@@ -3,9 +3,11 @@ extends RefCounted
 
 const Coordinates := preload("res://scripts/coordinates.gd")
 const EntityComponents := preload("res://scripts/entity_components.gd")
+const Footprint := preload("res://scripts/footprint.gd")
 const FogOfWar := preload("res://scripts/fog_of_war.gd")
 const OrderPipeline := preload("res://scripts/order_pipeline.gd")
 
+var pending_clearance: Dictionary = {}
 var world_ref: WeakRef
 var world:
 	get:
@@ -18,6 +20,8 @@ func _init(simulation_world) -> void:
 
 func place_foundation(team: int, kind: String, position: Vector2, workers: Array = [], placement_options: Dictionary = {}) -> Variant:
 	position = Coordinates.clamp_world(position, world.map_size)
+	placement_options = placement_options.duplicate()
+	placement_options["_planned_exits"] = {}
 	if not world.can_place_foundation(team, kind, position, placement_options):
 		return null
 	return _commit_foundation(team, kind, position, workers, placement_options)
@@ -25,8 +29,12 @@ func place_foundation(team: int, kind: String, position: Vector2, workers: Array
 
 # The wall command has just validated the whole ordered plan on this thread.
 # Its virtual footprints and resource budget already include preceding cells.
-func reserve_planned_wall(team: int, position: Vector2) -> Dictionary:
-	return _commit_foundation(team, "wall", position, [], {})
+func reserve_planned_wall(team: int, position: Vector2) -> Variant:
+	var cells: Array = Footprint.building(world.building_placement_stats("wall"), position)["occupied_cells"]
+	var slots: Variant = plan_clearance(team, cells, _units_near(position, 3.0), position)
+	if slots == null:
+		return null
+	return _commit_foundation(team, "wall", position, [], {"_planned_exits": slots})
 
 
 func _commit_foundation(team: int, kind: String, position: Vector2, workers: Array, placement_options: Dictionary) -> Dictionary:
@@ -35,10 +43,20 @@ func _commit_foundation(team: int, kind: String, position: Vector2, workers: Arr
 	if kind == "gate":
 		var replaced_walls: Dictionary = world.gate_system.replacement_wall_ids(team, position, int(placement_options.get("gate_axis", 0)))
 		world.gate_system.replace_wall_segments(replaced_walls)
+	var slots: Dictionary = placement_options.get("_planned_exits", {})
+	if not slots.is_empty():
+		placement_options["clearance_slots"] = slots
 	var building: Dictionary = world.add_building(world.entity_id_sequence.next(), kind, position, team, false, placement_options)
 	if world.is_bulk_loading():
 		world.sync_building_navigation_occupancy(building)
 	world.set_entity_field(building, "reserved_cost", cost.duplicate(true))
+	if not slots.is_empty():
+		pending_clearance[int(building["id"])] = building
+		_sync_shared_slots(slots)
+		for unit_id in slots:
+			var unit: Variant = world.find_unit(unit_id)
+			if unit != null and unit not in workers and unit.get("task") not in ["build", "repair"]:
+				world.assign_command_move([unit], slots[unit_id])
 	world.assign_workers_to_building(workers, building, "build")
 	world.emit_domain_event("foundation_placed", {
 		"building_id": int(building.get("id", -1)),
@@ -50,10 +68,217 @@ func _commit_foundation(team: int, kind: String, position: Vector2, workers: Arr
 	return building
 
 
+func _units_near(position: Vector2, radius: float) -> Array:
+	if world.spatial_sync_system.roster_dirty:
+		return world.get_units()
+	return world.query_units_near(position, radius)
+
+
+func _overlaps(unit: Dictionary, cells: Array) -> bool:
+	return float(unit.get("hp", 0)) > 0 and not bool(unit.get("removed", false)) and world.building_placement_system.mobile_footprint_overlaps_cells(unit, cells)
+
+
+# Preview and commit use the same geometry. A preview only computes endpoints.
+func plan_clearance(team: int, cells: Array, nearby: Array, center: Vector2) -> Variant:
+	var blockers: Array = []
+	for unit in nearby:
+		if _overlaps(unit, cells):
+			if not world.are_teams_allied(team, int(unit.get("team", 0))) or float(unit.get("speed", 0.0)) <= 0.0:
+				return null
+			blockers.append(unit)
+	# An adjacent site may close the only exit of an earlier accepted site
+	# even when its own tiles are empty. Reserve passage for those bodies too.
+	if not pending_clearance.is_empty():
+		var vicinity := Rect2i(cells[0], Vector2i.ONE)
+		for cell in cells:
+			vicinity = vicinity.merge(Rect2i(cell, Vector2i.ONE))
+		vicinity = vicinity.grow(1)
+		for pending in pending_clearance.values():
+			var adjacent: Array = Footprint.foundation_solid_cells(pending["kind"], pending["pos"], pending["occupied_cells"])
+			if not adjacent.any(func(cell): return vicinity.has_point(cell)):
+				continue
+			for id in pending.get("clearance_slots", {}):
+				var unit: Variant = world.find_unit(id)
+				if unit == null or unit in blockers or not world.are_teams_allied(team, int(unit.get("team", 0))):
+					continue
+				var nearby_limit := Vector2(vicinity.size).length() + 2.0
+				if Vector2(unit["pos"]).distance_squared_to(center) <= nearby_limit * nearby_limit and exit_for_worker(unit) != null:
+					blockers.append(unit)
+	if blockers.is_empty():
+		return {}
+	blockers.sort_custom(func(a, b): return int(a["id"]) < int(b["id"]))
+	var unavailable := cells.duplicate()
+	var reserved: Array = []
+	var existing_slots := {}
+	var blocker_ids := {}
+	for unit in blockers:
+		blocker_ids[int(unit["id"])] = true
+	for building in pending_clearance.values():
+		if center.distance_squared_to(building["pos"]) > 225.0:
+			continue
+		for cell in Footprint.foundation_solid_cells(building["kind"], building["pos"], building["occupied_cells"]):
+			if cell not in unavailable:
+				unavailable.append(cell)
+		for id in building.get("clearance_slots", {}):
+			var slot: Vector2 = building["clearance_slots"][id]
+			if blocker_ids.has(id):
+				existing_slots[id] = slot
+			else:
+				var other: Variant = world.find_unit(id)
+				if other != null:
+					reserved.append({"pos":slot, "footprint_radius": other.get("footprint_radius", 0.3)})
+	var bounds := Rect2i(cells[0], Vector2i.ONE)
+	for cell in cells:
+		bounds = bounds.merge(Rect2i(cell, Vector2i.ONE))
+	# Include space for the group when the first ring is already occupied.
+	var search := bounds.grow(3 + ceili(sqrt(blockers.size())))
+	var neighbors := _units_near(center, Vector2(search.size).length() + 2.0)
+	var slots := {}
+	for unit in blockers:
+		var origin := Vector2(unit["pos"])
+		var candidates: Array[Vector2] = []
+		for y in range(search.position.y, search.end.y):
+			for x in range(search.position.x, search.end.x):
+				var cell := Vector2i(x, y)
+				if world.navigation_grid.contains(cell) and cell not in unavailable:
+					candidates.append(Vector2(cell) + Vector2(0.5, 0.5))
+		candidates.sort_custom(func(a, b): return origin.distance_squared_to(a) < origin.distance_squared_to(b))
+		var previous: Variant = existing_slots.get(int(unit["id"]))
+		if previous != null and previous in candidates:
+			candidates.erase(previous)
+			candidates.push_front(previous)
+		var slot: Variant = _find_exit(unit, candidates, unavailable, neighbors, reserved)
+		if slot == null:
+			return null
+		slots[int(unit["id"])] = slot
+		reserved.append({"pos": slot, "footprint_radius":unit.get("footprint_radius", 0.3)})
+	return slots
+
+
+func _find_exit(unit: Dictionary, candidates: Array[Vector2], cells: Array, neighbors: Array, reserved: Array) -> Variant:
+	var origin := Vector2(unit["pos"])
+	var radius := float(unit.get("footprint_radius", 0.3))
+	var domain := String(unit.get("movement_domain", "land"))
+	var restriction := int(unit.get("terrain_restriction", -1))
+	var possible_detours: Array[Vector2] = []
+	for candidate in candidates:
+		# Leave additional clearance for the movement controller's arrival tolerance.
+		var body := {"pos":candidate, "footprint_radius":radius + 0.2}
+		if world.building_placement_system.mobile_footprint_overlaps_cells(body, cells) or not world.pathfinder.is_position_walkable(candidate, radius, domain, restriction):
+			continue
+		if not _exit_has_space(unit, candidate, neighbors) or not _exit_has_space(unit, candidate, reserved):
+			continue
+		var has_outlet := false
+		for direction in [Vector2.LEFT, Vector2.UP, Vector2.RIGHT, Vector2.DOWN]:
+			var next: Vector2 = candidate + direction
+			body["pos"] = next
+			if not world.building_placement_system.mobile_footprint_overlaps_cells(body, cells) and world.pathfinder.is_segment_walkable(candidate, next, radius, domain, restriction):
+				has_outlet = true
+				break
+		if not has_outlet:
+			continue
+		if world.pathfinder.is_segment_walkable(origin, candidate, radius, domain, restriction):
+			return candidate
+		possible_detours.append(candidate)
+	for candidate in possible_detours:
+		var path: Array = world.pathfinder.find_path(origin, candidate, domain, restriction, radius)
+		if not path.is_empty() and Vector2(path.back()).distance_squared_to(candidate) < 0.01:
+			return candidate
+	return null
+
+
+func _exit_has_space(unit: Dictionary, slot: Vector2, others: Array) -> bool:
+	for other in others:
+		if int(other.get("id", -1)) == int(unit["id"]) or float(other.get("hp", 1.0)) <= 0.0 or bool(other.get("removed", false)):
+			continue
+		var separation := Footprint.separation_distance(unit, other)
+		if slot.distance_squared_to(other["pos"]) < separation * separation:
+			return false
+	return true
+
+
+func exit_for_worker(worker: Dictionary) -> Variant:
+	for building in pending_clearance.values():
+		var slot: Variant = building.get("clearance_slots", {}).get(int(worker["id"]))
+		if slot != null:
+			var cells := Footprint.foundation_solid_cells(building["kind"], building["pos"], building["occupied_cells"])
+			if _overlaps(worker, cells):
+				return slot
+	return null
+
+
+func _exit_reserved_by_foundation(unit: Dictionary, slot: Vector2) -> bool:
+	var body := {"pos":slot, "footprint_radius":float(unit.get("footprint_radius", 0.3)) + 0.2}
+	for other in pending_clearance.values():
+		var cells := Footprint.foundation_solid_cells(other["kind"], other["pos"], other["occupied_cells"])
+		if world.building_placement_system.mobile_footprint_overlaps_cells(body, cells):
+			return true
+	return false
+
+
+func _sync_shared_slots(slots: Dictionary) -> void:
+	for building in pending_clearance.values():
+		var other_slots: Dictionary = building.get("clearance_slots", {})
+		for id in slots:
+			if other_slots.has(id):
+				other_slots[id] = slots[id]
+
+
+func advance_clearance() -> void:
+	for id in pending_clearance.keys():
+		var building: Dictionary = pending_clearance[id]
+		if float(building.get("hp", 0)) <= 0 or not building.has("clearance_slots"):
+			pending_clearance.erase(id)
+			continue
+		var center := Vector2(building["pos"])
+		var cells := Footprint.foundation_solid_cells(building["kind"], center, building["occupied_cells"])
+		var nearby := _units_near(center, Vector2(building["footprint"]["half_size"]).length() + 2.0)
+		var blockers := nearby.filter(func(unit): return _overlaps(unit, cells))
+		if blockers.is_empty():
+			# Linked sites close after their shared evacuees are outside the
+			# whole obstruction, including a neighboring segment used as an exit.
+			var still_leaving := false
+			for unit_id in building["clearance_slots"]:
+				var unit: Variant = world.find_unit(unit_id)
+				if unit != null and exit_for_worker(unit) != null:
+					still_leaving = true
+					break
+			if still_leaving:
+				continue
+			world.erase_entity_field(building, "clearance_slots")
+			pending_clearance.erase(id)
+			world.sync_building_navigation_occupancy(building)
+			continue
+		# Hostiles can enter while allies are leaving. They keep the site open,
+		# but must never receive an order or prevent allies from escaping.
+		blockers = blockers.filter(func(unit): return world.are_teams_allied(int(building["team"]), int(unit["team"])))
+		var slots: Dictionary = building["clearance_slots"]
+		var needs_plan := false
+		for unit in blockers:
+			var slot: Variant = slots.get(int(unit["id"]))
+			if slot == null or _exit_reserved_by_foundation(unit, slot) or not world.pathfinder.is_position_walkable(slot, float(unit.get("footprint_radius", 0.3)), String(unit.get("movement_domain", "land")), int(unit.get("terrain_restriction", -1))):
+				needs_plan = true
+				break
+		if needs_plan:
+			var replacement: Variant = plan_clearance(int(building["team"]), cells, blockers, center)
+			if replacement == null:
+				continue
+			slots = replacement
+			world.set_entity_field(building, "clearance_slots", slots)
+			_sync_shared_slots(slots)
+		for unit in blockers:
+			if unit.get("task") in ["build", "repair"]:
+				continue
+			var goal := Vector2(slots[int(unit["id"])])
+			if unit.get("task") != "move" or Vector2(unit.get("destination", unit["pos"])).distance_squared_to(goal) > 0.25:
+				world.assign_command_move([unit], goal)
+
+
 func cancel_foundation(building_id: int) -> bool:
 	var building: Variant = world.find_building(building_id)
 	if building == null or String(building.get("state", "complete")) != "foundation":
 		return false
+	pending_clearance.erase(building_id)
 	var cost: Dictionary = building.get("reserved_cost", {})
 	world.refund_resource_cost(int(building.get("team", 0)), cost)
 	for unit_value in world.get_units():
@@ -114,7 +339,7 @@ func assign_command_build(selected: Array, kind: String, position: Vector2, plac
 		if bool(building.get("harvestable", false)) and String(building.get("resource_state", "")) == "depleted":
 			return reseed_harvestable_building(building, selected)
 	if foundation == null:
-		foundation = place_foundation(team, kind, position, [], placement_options)
+		return place_foundation(team, kind, position, selected, placement_options)
 	if foundation != null:
 		world.assign_workers_to_building(selected, foundation, "build")
 	return foundation

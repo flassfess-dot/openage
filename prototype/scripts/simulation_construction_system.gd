@@ -85,6 +85,15 @@ func advance_unit_order(worker: Dictionary, delta: float, result: Dictionary) ->
 	if worker["task"] == "repair" and not can_worker_repair(worker, building):
 		finish_building_order(worker, "repair_no_longer_allowed")
 		return
+	if not world.foundation_system.pending_clearance.is_empty():
+		var slot: Variant = world.foundation_system.exit_for_worker(worker)
+		if slot != null:
+			world.ensure_navigation_destination(worker, slot)
+			result["moving"] = world.move_unit(worker, delta)
+			result["animation_state"] = AnimationController.MOVE
+			return
+		if building.has("clearance_slots"):
+			return
 	var in_work_range := _worker_in_building_range(worker, building)
 	if not in_work_range and not worker.get("building_approach_slot") is Vector2:
 		if not prepare_building_approach(worker, building):

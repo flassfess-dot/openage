@@ -81,6 +81,7 @@ func build_update(snapshot: Dictionary, selected_ids: Array[int], formation_name
 
 func refresh_dynamic_model(model: Dictionary, snapshot: Dictionary, selected_ids: Array[int]) -> void:
 	model["tick"] = int(snapshot.get("tick", 0))
+	model["score_players"] = snapshot.get("player_state", {}).get("players", [])
 	model["status_indicators"] = status_indicators(snapshot, model)
 	refresh_global_progress(model, snapshot)
 	var selected := _selected_entities(snapshot, selected_ids)
@@ -108,6 +109,7 @@ func _build_from_selected(snapshot: Dictionary, selected: Array, formation_name:
 	var model := {
 		"tick": int(snapshot.get("tick", 0)),
 		"icon_team": observer_team,
+		"score_players": player_state.get("players", []),
 		"idle_worker_icon_id": _icon_id_for_kind("villager", {"team": observer_team}),
 		"resources": {
 			"wood": int(player_state.get("wood", 0)),

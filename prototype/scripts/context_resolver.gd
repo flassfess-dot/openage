@@ -1,14 +1,13 @@
 class_name RoRContextResolver
 
 const Garrison := preload("res://scripts/tower_garrison.gd")
+const EntityComponents := preload("res://scripts/entity_components.gd")
 
 
 static func resolve(selected_units: Array, clicked_entity: Variant, ground_target: Vector2, player_team: int, allied_teams: Array = []) -> Dictionary:
 	if allied_teams.is_empty():
 		allied_teams = [player_team]
-	var has_worker := selected_units.any(func(unit):
-		return bool(unit.get("components", {}).get("worker", {}).get("enabled", false)) or "worker" in unit.get("behavior_tags", []) or (unit.get("behavior_tags", []).is_empty() and String(unit.get("kind", "")) == "villager")
-	)
+	var has_worker := selected_units.any(is_worker)
 	var has_carrier := selected_units.any(func(unit): return float(unit.get("carried_amount", 0.0)) > 0.0)
 	var only_converters := not selected_units.is_empty() and selected_units.all(func(unit):
 		return bool(unit.get("components", {}).get("conversion", {}).get("enabled", false)) or "converter" in unit.get("behavior_tags", [])
@@ -42,7 +41,7 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 				var cargo: Dictionary = clicked_entity.get("components", {}).get("cargo", {})
 				if unit_team in allied_teams and bool(cargo.get("enabled", false)) and selected_units.any(func(unit): return String(unit.get("movement_domain", "land")) in cargo.get("allowed_domains", ["land"])):
 					return {"type": "board", "target_id": int(clicked_entity["id"])}
-				if has_worker and unit_team in allied_teams and String(clicked_entity.get("movement_domain", "land")) == "water" and float(clicked_entity.get("hp", 0.0)) > 0.0 and float(clicked_entity.get("hp", 0.0)) < float(clicked_entity.get("max_hp", 0.0)):
+				if unit_team in allied_teams and String(clicked_entity.get("movement_domain", "land")) == "water" and _is_damaged(clicked_entity) and selected_units.any(is_repair_worker):
 					return {"type": "repair", "target_id": int(clicked_entity["id"])}
 				if unit_team not in allied_teams:
 					if only_converters:
@@ -73,6 +72,8 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 					if only_converters:
 						return {"type": "convert", "target_id": int(clicked_entity["id"])}
 					return {"type": "attack", "target_id": int(clicked_entity["id"])}
+				if String(clicked_entity.get("state", "complete")) == "complete" and _is_damaged(clicked_entity) and selected_units.any(is_repair_worker):
+					return {"type": "repair", "target_id": int(clicked_entity["id"])}
 				if Garrison.is_tower(clicked_entity) and String(clicked_entity.get("state", "complete")) == "complete" and not selected_units.is_empty() and selected_units.all(func(unit): return Garrison.accepts(unit)):
 					return {"type": "board", "target_id": int(clicked_entity["id"]), "garrison": true}
 				if has_worker and bool(clicked_entity.get("harvestable", false)):
@@ -86,10 +87,21 @@ static func resolve(selected_units: Array, clicked_entity: Variant, ground_targe
 						}
 				if has_worker and has_carrier and building_team == player_team:
 					return {"type": "return_resources", "target_id": int(clicked_entity["id"])}
-				if has_worker and building_team in allied_teams and float(clicked_entity.get("hp", 0.0)) > 0.0 and float(clicked_entity.get("hp", 0.0)) < float(clicked_entity.get("max_hp", 0.0)) and String(clicked_entity.get("state", "complete")) == "complete":
-					return {"type": "repair", "target_id": int(clicked_entity["id"])}
 				return {"type": "unsupported", "reason": "no_context_action", "message": "Для этого здания нет доступной контекстной команды"}
 	return {"type": "move", "target": ground_target}
+
+
+static func is_worker(unit: Dictionary) -> bool:
+	return EntityComponents.is_worker(unit) or "worker" in unit.get("behavior_tags", [])
+
+
+static func is_repair_worker(unit: Dictionary) -> bool:
+	return String(unit.get("movement_domain", "land")) == "land" and is_worker(unit)
+
+
+static func _is_damaged(target: Dictionary) -> bool:
+	var hp := float(target.get("hp", 0.0))
+	return hp > 0.0 and hp < float(target.get("max_hp", 0.0)) - 0.0001
 
 
 static func _is_trade_dock_for(trader: Dictionary, building: Dictionary) -> bool:

@@ -327,6 +327,7 @@ static func restore(data: Dictionary, world, controller) -> bool:
 		if preload("res://scripts/tower_garrison.gd").is_tower(building):
 			preload("res://scripts/tower_garrison.gd").configure(building["components"])
 	world.building_navigation_cells_by_id.clear()
+	world.foundation_system.pending_clearance.clear()
 	for building in world.buildings:
 		world.building_navigation_cells_by_id[int(building["id"])] = world._building_navigation_cells(building)
 	world.open_movement_envelopes_by_id.clear()
@@ -356,6 +357,21 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	_restore_fields(world.navigation_grid, data["grid"], GRID_FIELDS)
 	world.navigation_grid.surface_component_cache.clear()
 	world.rebuild_spatial_index(false)
+	for building in world.buildings:
+		var id := int(building["id"])
+		if building.has("clearance_slots"):
+			world.foundation_system.pending_clearance[id] = building
+		elif building.get("kind") == "farm" and float(building.get("hp", 0.0)) > 0:
+			# Old checkpoints saved a completely traversable field, including the hut.
+			var hut: Array = world._building_navigation_cells(building)
+			if not world.navigation_grid.occupants(hut[0]).has({"category": "building", "id": id}):
+				var nearby: Array = world.query_units_near(Vector2(hut[0]) + Vector2(0.5, 0.5), 3.0)
+				if nearby.any(func(unit): return world.foundation_system._overlaps(unit, hut)):
+					building["clearance_slots"] = {}
+					world.foundation_system.pending_clearance[id] = building
+					world.building_navigation_cells_by_id.erase(id)
+				else:
+					world.navigation_grid.occupy(hut, "building", id)
 	world.pathfinder.clear_cache()
 	world.movement_system.knowledge.clear()
 	var fog = world.fog_of_war
@@ -423,4 +439,6 @@ static func restore(data: Dictionary, world, controller) -> bool:
 	world.match_statistics.restore(data.get("match_statistics", {}))
 	if not world.match_statistics.initialized:
 		world.match_statistics.begin(world, controller.tick_index, controller.tick_index > 0)
+	elif world.player_registry.all_teams().any(func(team): return not world.match_statistics.teams.get(team, {}).has("score")):
+		world.match_statistics.update_scores(world)
 	return true

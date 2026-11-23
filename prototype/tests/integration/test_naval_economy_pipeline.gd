@@ -14,6 +14,10 @@ func _initialize() -> void:
 	verify_source_and_placement_contract(catalog)
 	verify_fishing_boat_economy(catalog)
 	verify_shore_fisherman_economy(catalog)
+	for kind in ["fishing_boat", "scout_ship", "villager"]:
+		verify_producer_egress(catalog, kind, false)
+	for kind in ["fishing_boat", "scout_ship"]:
+		verify_producer_egress(catalog, kind, true)
 	if failures.is_empty():
 		print("I12-019 naval economy vertical pipeline tests passed")
 		quit(0)
@@ -169,6 +173,66 @@ func advance_until(world, condition: Callable, maximum_ticks: int) -> void:
 		world.advance(0.05, 1, 2)
 		if condition.call():
 			return
+
+
+func verify_producer_egress(catalog, kind: String, narrow_mouth: bool) -> void:
+	var world = configured_world(catalog)
+	var naval := kind != "villager"
+	# Open water to the west, a hull-sized blind inlet to the east. For the
+	# town center invert the terrain so a worker has the analogous land exit.
+	var ids: Array[int] = []
+	for y in range(28):
+		for x in range(28):
+			var western_basin := x <= 8
+			var western_berth := x <= 12 and y >= 11 and y <= 15
+			var eastern_pocket := x >= 13 and x <= 17 and y >= 12 and y <= 14
+			var on_route := western_basin or western_berth or eastern_pocket
+			ids.append(1 if on_route == naval else 0)
+	world.configure_map_data({"terrain_ids": ids})
+	var east_rock := {"id": -81, "occupied_cells": [Vector2i(17,12), Vector2i(17,13), Vector2i(17,14)]}
+	var west_rock := {"id": -82, "occupied_cells": []}
+	for y in [11, 12, 14, 15]: west_rock.occupied_cells.append(Vector2i(9, y))
+	world.configure_static_obstructions([east_rock, west_rock] if narrow_mouth else [east_rock])
+	var producer: Dictionary = world.add_building(1501, "dock" if naval else "town_center", Vector2(12.5, 13.5), 1)
+	world.set_population_cap(1, 50)
+	world.set_population_housing(1, 50)
+	if kind == "scout_ship": world.grant_technology(1, 101)
+	for resource_type in range(4): world.set_resource_amount(1, resource_type, 1000)
+	var controller := GameController.new(world)
+	var train := Commands.TrainCommand.new(0, [1501], kind, 1)
+	controller.enqueue_command(train, true, 1)
+	controller.process_commands()
+	assert_true(controller.get_command_result(train.sequence_id).get("accepted", false), kind + " can be ordered at the producer")
+	if producer.production_queue.is_empty(): return
+	var order: Dictionary = producer.production_queue[0]
+	var order_id := int(order.id)
+	var wood_after_payment: int = world.get_resource_amount(1, 1)
+	world.update_production(float(order.duration) + 0.05)
+	var from_order := func(unit): return int(unit.get("production_order_id", -1)) == order_id
+	# A half-tile fishing hull can cross the single free cell in the rock
+	# wall. The full-tile scout hull needs the opening widened first.
+	if narrow_mouth and kind == "scout_ship":
+		world.update_production(0.05)
+		assert_true(world.get_units().filter(from_order).is_empty(), "a wide hull cannot launch through a one-cell slit in a cliff")
+		assert_true(not producer.production_queue.is_empty() and producer.production_queue[0].status == "blocked_spawn", "the completed ship waits for an exit")
+		if not producer.production_queue.is_empty():
+			assert_equal(producer.production_queue[0].id, order_id, "a blocked retry preserves the paid order")
+		world.configure_static_obstructions([east_rock])
+		world.update_production(0.05)
+		world.update_production(0.05)
+		assert_equal(world.get_resource_amount(1, 1), wood_after_payment, "opening the berth does not charge for the waiting hull again")
+	var produced: Array = world.get_units().filter(from_order)
+	assert_equal(produced.size(), 1, kind + " is released exactly once when there is an exit")
+	if produced.size() != 1: return
+	var unit: Dictionary = produced[0]
+	var start := Vector2(unit.pos)
+	var target := Vector2(3.5, 13.5)
+	var move := Commands.MoveCommand.new(0, [int(unit.id)], target)
+	controller.enqueue_command(move, true, 1)
+	controller.process_commands()
+	assert_true(controller.get_command_result(move.sequence_id).get("accepted", false), kind + " accepts a move away from the producer")
+	advance_until(world, func(): return Vector2(unit.pos).distance_to(target) < 1.0, 500)
+	assert_true(Vector2(unit.pos).distance_to(target) < 1.0, "%s leaves the berth and reaches open terrain (spawn %s, final %s)" % [kind, start, unit.pos])
 
 
 func assert_true(value: bool, context: String) -> void:

@@ -2,7 +2,7 @@ class_name RoRSimulationProductionSystem
 extends RefCounted
 
 const Coordinates := preload("res://scripts/coordinates.gd")
-const Footprint := preload("res://scripts/footprint.gd")
+const ExitArea := preload("res://scripts/production_exit_area.gd")
 
 var world_ref: WeakRef
 var world:
@@ -471,53 +471,19 @@ func free_spawn_position(building: Dictionary, kind: String) -> Variant:
 		return _free_spawn_position_uncached(building, kind)
 	var grid = world.get_navigation_grid()
 	var team := int(building.get("team", 0))
-	var half_size: Vector2 = building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))
-	var signature := [world.cache_epoch, world.data_repository.revision, world.technology_system.revision(team), world.civilization_by_team.get(team, 13), grid.get_instance_id(), grid.cache_epoch, grid.revision, grid.surface_revision, world.get_map_size(), building["pos"], half_size, kind]
+	var signature := [world.cache_epoch, world.data_repository.revision, world.technology_system.revision(team), world.civilization_by_team.get(team, 13), grid.get_instance_id(), grid.cache_epoch, grid.revision, grid.surface_revision, world.get_map_size(), building["pos"], building.get("occupied_cells", []), kind]
 	var id := int(building.get("id", -1))
-	var entry: Dictionary = spawn_geometry_cache.get(id, {})
-	if entry.get("signature") != signature:
-		var unit_footprint := Footprint.mobile(kind, world.unit_stats(kind))
-		var radius := float(unit_footprint.get("movement_radius", 0.3))
-		var source: Dictionary = world.object_record_for(kind, team)
-		var restriction := int(source.get("links", {}).get("terrain_restriction", world.unit_stats(kind).get("terrain_restriction", -1)))
-		var domain := "water" if restriction == 3 else "land"
-		var points: Array[Vector2] = []
-		for slot_index in range(24):
-			var angle := TAU * float(slot_index) / 24.0
-			var candidate := Coordinates.clamp_world(Vector2(building["pos"]) + Vector2(cos(angle) * (half_size.x + radius + 0.35), sin(angle) * (half_size.y + radius + 0.35)), world.get_map_size())
-			if grid.is_position_walkable_for(candidate, radius, domain, restriction): points.append(candidate)
-		entry = {"signature": signature, "radius": radius, "points": points}
+	var area: Variant = spawn_geometry_cache.get(id)
+	if area == null or area.signature != signature:
+		area = ExitArea.new(world, building, kind, signature)
 		if not spawn_geometry_cache.has(id) and spawn_geometry_cache.size() >= MAX_SPAWN_GEOMETRY_ENTRIES:
 			spawn_geometry_cache.erase(spawn_geometry_cache.keys()[0])
-		spawn_geometry_cache[id] = entry
-	# Cache only terrain/obstruction geometry. Mobile occupancy must be queried
-	# on every attempt so an exit opens on the very tick its occupant moves.
-	var unit_radius := float(entry["radius"])
-	for candidate in entry["points"]:
-		var neighbors: Array = world.query_units_near(candidate, unit_radius + 0.7)
-		if neighbors.any(func(unit): return float(unit.get("hp", 0.0)) > 0.0 and Vector2(unit["pos"]).distance_to(candidate) < float(unit.get("footprint_radius", 0.3)) + unit_radius + 0.06):
-			continue
-		return candidate
-	return null
+		spawn_geometry_cache[id] = area
+	return area.choose(world, building)
 
 
 func _free_spawn_position_uncached(building: Dictionary, kind: String) -> Variant:
-	var unit_footprint := Footprint.mobile(kind, world.unit_stats(kind))
-	var unit_radius := float(unit_footprint.get("movement_radius", 0.3))
-	var source: Dictionary = world.object_record_for(kind, int(building.get("team", 0)))
-	var terrain_restriction := int(source.get("links", {}).get("terrain_restriction", world.unit_stats(kind).get("terrain_restriction", -1)))
-	var movement_domain := "water" if terrain_restriction == 3 else "land"
-	var half_size: Vector2 = building.get("footprint", {}).get("half_size", Vector2(0.5, 0.5))
-	for slot_index in range(24):
-		var angle := TAU * float(slot_index) / 24.0
-		var candidate := Coordinates.clamp_world(Vector2(building["pos"]) + Vector2(cos(angle) * (half_size.x + unit_radius + 0.35), sin(angle) * (half_size.y + unit_radius + 0.35)), world.get_map_size())
-		if not world.get_navigation_grid().is_position_walkable_for(candidate, unit_radius, movement_domain, terrain_restriction):
-			continue
-		var neighbors: Array = world.query_units_near(candidate, unit_radius + 0.7)
-		if neighbors.any(func(unit): return float(unit.get("hp", 0.0)) > 0.0 and Vector2(unit["pos"]).distance_to(candidate) < float(unit.get("footprint_radius", 0.3)) + unit_radius + 0.06):
-			continue
-		return candidate
-	return null
+	return ExitArea.new(world, building, kind, []).choose(world, building)
 
 
 func _sync_queue(building: Dictionary, queue: Array) -> void:

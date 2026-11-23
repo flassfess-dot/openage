@@ -34,5 +34,5 @@ func draw_foundation_preview_at(_kind: String, center: Vector2, wall_entry: Dict
 	fixture_preview_outlines.append({"position": center, "entry": wall_entry})
 
 
-func draw_render_body(item: Dictionary) -> void:
+func draw_render_body(item: Dictionary, _probe = null) -> void:
 	fixture_preview_items.append(item)

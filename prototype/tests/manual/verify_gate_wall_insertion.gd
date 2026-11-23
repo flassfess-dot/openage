@@ -107,7 +107,7 @@ func check_matrix() -> void:
 				report["matrix_cases"] += 1
 
 func check_rejections() -> void:
-	for reason in ["enemy", "ally", "foundation", "house", "unit", "resources"]:
+	for reason in ["enemy", "ally", "foundation", "house", "enemy_unit", "resources"]:
 		var world = make_world()
 		var walls := line(world, 0)
 		var victim: Dictionary = world.find_building(walls[3])
@@ -117,7 +117,7 @@ func check_rejections() -> void:
 				if reason == "ally": world.player_registry.set_relation(1, 2, "ally")
 			"foundation": victim["state"] = "foundation"
 			"house": world.add_building(2001, "house", Vector2(20, 20))
-			"unit": world.add_unit(1, "villager", Vector2(19.5, 20.5), false)
+			"enemy_unit": world.add_unit(2, "villager", Vector2(19.5, 20.5), false)
 			"resources": world.set_resource_amount(1, 1, 0)
 		var wood: int = world.get_resource_amount(1, 1)
 		var revision: int = world.navigation_grid.revision

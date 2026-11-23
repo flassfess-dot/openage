@@ -4,15 +4,10 @@ extends RefCounted
 const ContextResolver := preload("res://scripts/context_resolver.gd")
 
 
-static func resolve(selected_units: Array, hovered_entity: Variant, ground_target: Vector2, player_team: int) -> Dictionary:
-	if not selected_units.is_empty():
-		var contextual := ContextResolver.resolve(selected_units, hovered_entity, ground_target, player_team)
-		if String(contextual.get("type", "")) in ["board", "trade"]:
-			return {
-				"semantic": String(contextual.get("type", "")),
-				"entity_id": int(hovered_entity.get("id", -1)),
-				"reason": "",
-			}
+static func resolve(selected_units: Array, hovered_entity: Variant, ground_target: Vector2, player_team: int, allied_teams: Array = []) -> Dictionary:
+	var resolution := ContextResolver.resolve(selected_units, hovered_entity, ground_target, player_team, allied_teams)
+	if String(resolution.get("type", "")) in ["board", "trade", "repair"]:
+		return {"semantic": String(resolution["type"]), "entity_id": int(hovered_entity["id"]), "reason": ""}
 	if hovered_entity is Dictionary:
 		var entity_type := String(hovered_entity.get("entity_type", ""))
 		var team := int(hovered_entity.get("team", 0))
@@ -21,10 +16,8 @@ static func resolve(selected_units: Array, hovered_entity: Variant, ground_targe
 	if selected_units.is_empty():
 		return {"semantic": "default", "entity_id": int(hovered_entity.get("id", -1)) if hovered_entity is Dictionary else -1}
 	if hovered_entity is Dictionary and String(hovered_entity.get("entity_type", "")) == "resource":
-		var workers := selected_units.any(func(unit): return "worker" in unit.get("behavior_tags", []) or String(unit.get("kind", "")) == "villager")
-		if not workers:
+		if not selected_units.any(ContextResolver.is_worker):
 			return {"semantic": "default", "entity_id": -1, "reason": ""}
-	var resolution := ContextResolver.resolve(selected_units, hovered_entity, ground_target, player_team)
 	return {
 		"semantic": String(resolution.get("type", "default")),
 		"entity_id": int(hovered_entity.get("id", -1)) if hovered_entity is Dictionary else -1,

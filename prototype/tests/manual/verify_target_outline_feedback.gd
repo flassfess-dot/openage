@@ -59,20 +59,44 @@ func observe(target_id: int, phase: float, expected: bool, color: Color, label: 
 		await get_tree().process_frame
 		await RenderingServer.frame_post_draw
 	var matches: Array = game.observed_outlines.filter(func(outline): return int(outline["id"]) == target_id and outline["color"] == color)
-	check((not matches.is_empty()) == expected, label + ": visible outline matches blink phase")
+	var visible := not matches.is_empty()
+	if DisplayServer.get_name() != "headless" and not selections.is_empty():
+		var selection: Dictionary = selections[0]
+		var entity: Dictionary = selection["data"]
+		if String(entity.get("entity_type", "")) not in ["building", "foundation"] and String(entity.get("footprint", {}).get("shape", "")) != "polygon":
+			# Native batched ellipses go straight to the canvas, bypassing the draw callbacks.
+			var frame := get_tree().root.get_texture().get_image()
+			var center: Vector2 = game.unit_selection_center(selection)
+			var radius: Vector2 = game.unit_selection_radius(entity) * game.view_zoom + Vector2(3, 3)
+			var bounds := Rect2i(Rect2(center - radius, radius * 2)).intersection(Rect2i(Vector2i.ZERO, frame.get_size()))
+			visible = _contains_color(frame, bounds, color)
+	check(visible == expected, label + ": visible outline matches blink phase")
 	if capture and DisplayServer.get_name() != "headless":
 		var path := output_path.get_base_dir().path_join(label + ".png")
 		check(get_tree().root.get_texture().get_image().save_png(path) == OK, label + ": screenshot")
 		report["screenshots"].append(ProjectSettings.globalize_path(path))
 
-func order_case(actor: Dictionary, target: Dictionary, command_type: String, label: String, capture := false) -> void:
-	select([int(actor["id"])])
+func _contains_color(frame: Image, bounds: Rect2i, color: Color) -> bool:
+	var target_rgba := color.to_rgba32()
+	for y in range(bounds.position.y, bounds.end.y):
+		for x in range(bounds.position.x, bounds.end.x):
+			if frame.get_pixel(x, y).to_rgba32() == target_rgba:
+				return true
+	return false
+
+func order_case(actor: Dictionary, target: Dictionary, command_type: String, label: String, capture := false, repair_button := false, escort_id := -1) -> void:
+	var actor_ids: Array[int] = [int(actor["id"])]
+	if escort_id >= 0:
+		actor_ids.push_front(escort_id)
+	select(actor_ids)
 	game.center_view_on_world(target["pos"])
 	game.sync_world_state()
 	var sequence_before: int = game.game_controller.replay_recorder.command_records.size()
-	click(MOUSE_BUTTON_RIGHT, pointer_for(target))
+	if repair_button:
+		game.issue_unit_action("repair")
+	click(MOUSE_BUTTON_LEFT if repair_button else MOUSE_BUTTON_RIGHT, pointer_for(target))
 	var records: Array = game.game_controller.replay_recorder.command_records
-	check(records.size() == sequence_before + 1, label + ": real right click creates a command")
+	check(records.size() == sequence_before + 1, label + ": click creates a command")
 	if records.size() != sequence_before + 1: return
 	var command: Dictionary = records[-1]
 	check(command["type"] == command_type, label + ": expected context command")
@@ -82,6 +106,11 @@ func order_case(actor: Dictionary, target: Dictionary, command_type: String, lab
 	game.process_presentation_events()
 	check(bool(game.game_controller.get_command_result(int(command["sequence_id"])).get("accepted", false)), label + ": command accepted")
 	check(game.resource_feedback_id == int(target["id"]) and game.resource_feedback_time > 0, label + ": accepted feedback targets clicked entity")
+	if command_type == "repair":
+		check(not game.command_marker_presentation.active, label + ": repair does not display a ground marker")
+		check(String(actor["task"]) == "repair" and int(actor["target_building_id"]) == int(target["id"]), label + ": villager starts repairing the selected building")
+		if escort_id >= 0:
+			check(command["unit_ids"] == [int(actor["id"])], label + ": escort keeps its orders")
 	for phase in [0.64, 0.54, 0.44, 0.34]:
 		await observe(int(target["id"]), phase, int(phase * 10) % 2 == 0, Color("ffe56c"), label + ("-on" if phase == 0.64 else "-off" if phase == 0.54 else "-phase%d" % int(phase * 100)), capture and phase > 0.5)
 	# The same publication is retained while moving/zooming the camera.
@@ -134,6 +163,9 @@ func run() -> void:
 	world.set_entity_field(worker, "carried_resource_type_id", 1)
 	world.set_entity_field(worker, "carried_amount", 5.0)
 	await order_case(worker, center, "return_resources", "dropoff-building")
+	world.set_entity_field(center, "hp", float(center["max_hp"]) * 0.7)
+	await order_case(worker, center, "repair", "repair-damaged-dropoff", false, false, int(soldier["id"]))
+	await order_case(worker, center, "repair", "repair-button", true, true)
 	world.set_entity_field(worker, "carried_amount", 0.0)
 	await order_case(worker, tree, "gather", "gather-tree", true)
 	var foundation: Dictionary = world.add_building(99001, "house", Vector2(19, 10), 1, false)

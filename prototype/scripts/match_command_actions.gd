@@ -217,8 +217,9 @@ func issue_order(game, mouse: Vector2, direction_end: Variant = null, queue_orde
 			command = RoRCommands.BuildCommand.new(game.next_local_command_tick(), selected_ids, resolution["building_type"], resolution["target"])
 			accepted_message = "Продолжить строительство"
 		"repair":
-			command = RoRCommands.RepairCommand.new(game.next_local_command_tick(), selected_ids, resolution["target_id"])
-			accepted_message = "Ремонтировать здание"
+			selected = selected.filter(ContextResolver.is_repair_worker)
+			command = RoRCommands.RepairCommand.new(game.next_local_command_tick(), game._selection_ids(selected), resolution["target_id"])
+			accepted_message = "Ремонтировать цель"
 		"move":
 			command = RoRCommands.MoveCommand.new(game.next_local_command_tick(), selected_ids, resolution["target"]) if queue_order else RoRCommands.FormationMoveCommand.new(game.next_local_command_tick(), selected_ids, resolution["target"], game.formation, formation_forward)
 			command.params["preserve_formations"] = true
@@ -390,7 +391,7 @@ func repair_workers(game) -> Array:
 	game.join_simulation_owner()
 	if game.simulation_world == null:
 		return []
-	return game.selected_units().filter(func(unit): return game.simulation_world.entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land")
+	return game.selected_units().filter(ContextResolver.is_repair_worker)
 
 
 func begin_repair(game) -> void:
@@ -448,7 +449,7 @@ func commit_repair_target(game, screen_position: Vector2) -> void:
 	var command = RoRCommands.RepairCommand.new(game.next_local_command_tick(), game._selection_ids(workers), int(target["id"]))
 	pending_target_command = ""
 	game.update_interaction_cursor(game.input_adapter.pointer_position)
-	game.enqueue_with_feedback(command, "Ремонтировать цель", "command:%s" % String(workers[0].get("kind", "villager")), Vector2(target.get("pos", Vector2.ZERO)))
+	game.enqueue_with_feedback(command, "Ремонтировать цель", "command:%s" % String(workers[0].get("kind", "villager")), {"entity_id": int(target["id"])})
 
 
 func begin_attack_move(game) -> void:
@@ -710,11 +711,11 @@ func select_idle_worker(game) -> void:
 	game.join_simulation_owner()
 	if game.simulation_world == null or game.battle_over or game.local_spectator: return
 	var workers: Array = game.simulation_world.get_units().filter(func(unit):
-		return int(unit.get("team", 0)) == game.local_player_team and float(unit.get("hp", 0.0)) > 0.0 and game.simulation_world.entity_is_worker(unit) and String(unit.get("movement_domain", "land")) == "land" and String(unit.get("task", "idle")) == "idle" and unit.get("components", {}).get("order", {}).get("queued", []).is_empty()
+		return int(unit.get("team", 0)) == game.local_player_team and float(unit.get("hp", 0.0)) > 0.0 and game.simulation_world.entity_is_worker(unit) and String(unit.get("task", "idle")) == "idle" and unit.get("components", {}).get("order", {}).get("queued", []).is_empty()
 	)
 	workers.sort_custom(func(left, right): return int(left["id"]) < int(right["id"]))
 	if workers.is_empty():
-		game.game_message = "Незанятых крестьян нет"
+		game.game_message = "Свободных крестьян и рыбацких лодок нет"
 		game.message_time = 1.5
 		return
 	var worker: Dictionary = workers[0]
